@@ -7,9 +7,7 @@ goals: rich loot spots to clear, PvP hotspots to hunt, quest triggers to
 visit, and a real reason to head for extract. They coordinate, loot
 together, and leave when they're done - just like players.
 
-Inspired by [Phobos](https://discord.com/channels/875684761291599922/1337131427803955200), [LootingBots](https://forge.sp-tarkov.com/mod/812/looting-bots), and [QuestingBot](https://forge.sp-tarkov.com/mod/1109/questing-bots) - rebuilt from
-scratch as a single coherent system instead of three layers fighting for
-control.
+Built on [Phobos](https://discord.com/channels/875684761291599922/1337131427803955200)'s foundations  (advection field, cell dispatch, squad movement), with looting ported from [LootingBots](https://forge.sp-tarkov.com/mod/812/looting-bots) and quest routing inspired by [QuestingBot](https://forge.sp-tarkov.com/mod/1109/questing-bots), integrated into a single coherent system (with extra features) instead of three layers fighting for control.
 
 It started as my own personal "best of the three" - picking the parts I
 liked from each and gluing them together. Along the way it grew well
@@ -44,8 +42,8 @@ they've finished all their goals, or the raid is getting late.
 ### Installation
 
 1. Install dependencies first:
-   - [BigBrain](https://hub.sp-tarkov.com/files/file/663-drakiaxyz-big-brain/)
-   - [SAIN](https://hub.sp-tarkov.com/files/file/1659-sain/)
+   - [BigBrain](https://forge.sp-tarkov.com/mod/902/bigbrain) by [DrakiaXYZ](https://forge.sp-tarkov.com/user/27605/drakiaxyz)
+   - [SAIN](https://forge.sp-tarkov.com/mod/791/sain-solarints-ai-modifications-full-ai-combat-system-replacement)
 2. Extract the zip in your SPT root folder.
 3. Launch the game. You'll see `ORBIT 1.0.0` in the bottom-left version
    label when it's loaded.
@@ -83,6 +81,36 @@ This gives roughly a third of your PMCs interesting personalities - the
 distribution ORBIT was built around.
 
 **Note for [Twitch Player](https://forge.sp-tarkov.com/mod/1895/sain-twitch-players) users**: **Twitch Player** sets several personalities chance to **0** by default, so it's important to apply the SAIN settings as above.
+
+### Unsupported Mods
+
+**ORBIT supports only one other AI mod: [SAIN](https://forge.sp-tarkov.com/mod/791/sain-solarints-ai-modifications-full-ai-combat-system-replacement)**
+
+Any other AI / bot-behavior mod will either fight ORBIT for control or
+duplicate work it already does. Don't install them alongside ORBIT.
+
+**[QuestingBot](https://forge.sp-tarkov.com/mod/1109/questing-bots)**
+- QuestingBots actually *simulates* quests - bots plant items, hold zones
+  for the required time, etc.
+- ORBIT is simpler: bots just route to the quest trigger location, no
+  real quest mechanics.
+- Both want to assign the same bot a quest at the same time → conflict.
+  Pick one.
+
+**[Phobos](https://discord.com/channels/875684761291599922/1337131427803955200)**
+- ORBIT is built on Phobos's foundations, same advection field, same
+  cell dispatch logic, same squad movement model. Running both means
+  two systems trying to move the same bots.
+
+**[LootingBots](https://forge.sp-tarkov.com/mod/812/looting-bots)**
+- ORBIT has its own loot pipeline with per-personality thresholds.
+- Running both means bots loot inconsistently and ORBIT's extract
+  triggers can't track the loot correctly.
+
+**Any other "AI overhaul" mod**
+- If a mod replaces bot brain logic, dispatches bots somewhere, or
+  controls looting / extracting / questing, assume it conflicts unless
+  proven otherwise.
 
 ### Roadmap
 
@@ -135,9 +163,9 @@ A huge thank you to the authors listed below - their MIT-licensed code formed th
 
 -  [Phobos](https://discord.com/channels/875684761291599922/1337131427803955200) by [janky](https://forge.sp-tarkov.com/user/72916/jankytheclown) - the original advection-field
   cell dispatch
-- [LootingBots](https://forge.sp-tarkov.com/mod/812/looting-bots) by [Skwizzy](https://forge.sp-tarkov.com/user/28069/skwizzy)
+- [LootingBots](https://forge.sp-tarkov.com/mod/812/looting-bots) by [Skwizzy](https://forge.sp-tarkov.com/user/28069/skwizzy) and [ArchangelWTF](https://forge.sp-tarkov.com/user/52282/archangelwtf)
 - [QuestingBot](https://forge.sp-tarkov.com/mod/1109/questing-bots) by [danW](https://forge.sp-tarkov.com/user/27632/danw)
-- [SAIN](https://forge.sp-tarkov.com/mod/791/sain-solarints-ai-modifications-full-ai-combat-system-replacement) by [Solarint](https://forge.sp-tarkov.com/user/27463/solarint) - without it, no personality system to plug into
+- [SAIN](https://forge.sp-tarkov.com/mod/791/sain-solarints-ai-modifications-full-ai-combat-system-replacement) by [Solarint](https://forge.sp-tarkov.com/user/27463/solarint), [ArchangelWTF](https://forge.sp-tarkov.com/user/52282/archangelwtf) and [DrakiaXYZ](https://forge.sp-tarkov.com/user/27605/drakiaxyz) - without it, no personality system to plug into
 - [BigBrain](https://forge.sp-tarkov.com/mod/902/bigbrain) by [DrakiaXYZ](https://forge.sp-tarkov.com/user/27605/drakiaxyz)
 - The **SPT team** for an amazing modding framework
 - The **SPT Discord** 
