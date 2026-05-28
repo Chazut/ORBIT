@@ -1,3 +1,7 @@
+> ⚠️ **Heads up:** ORBIT is built on **Phobos**'s foundation and reuses
+> a big part of **LootingBots**' looting code (both MIT-licensed). Full
+> credits at the bottom. ORBIT wouldn't exist without their work 🙏
+
 > **ORBIT** - Objective-driven Raid Bot Intelligence Tactics
 > 
 > Smarter bots. Real objectives. Raids that feel alive.
@@ -38,6 +42,55 @@ containers, and credit the right teammate when the corpse needs looting.
 
 They extract when one of three things happens: they've looted enough money,
 they've finished all their goals, or the raid is getting late.
+
+### The Little Details
+
+The stuff that makes bots feel deliberate instead of scripted:
+
+**Movement & squads**
+- Bots roam **freely** between their objectives (Phobos advection field),
+  but a pull draws them toward their main goals - so they wander like
+  players, not on rails, while still trending somewhere meaningful.
+- Squads spread out: the leader takes the main target, the others fan
+  out to nearby loot or cover instead of all stacking on one spot.
+- A drifting bot won't drag its whole squad off-mission - there's a
+  leash that keeps the group loosely together.
+- No teleport rescues. If a bot can't reach something, it gives up and
+  picks a new target like a real player would, instead of magically
+  warping around.
+- Scavs stay around their spawn area by default; PMCs roam the whole
+  map. Both tunable.
+
+**Doors**
+- Bots only open the doors they actually need to pass through - they
+  don't fiddle with every door they walk past.
+- Want loot behind a locked door? They can roll to force it open, with
+  a **configurable success rate** (and aggressive personalities has a better success than cautious ones).
+
+**Looting**
+- Each bot loots based on its **personality**: a Rat grabs almost
+  anything, a GigaChad ignores cheap clutter and only takes the good
+  stuff.
+- They don't vacuum a room 100% - there's a coverage roll, so some loot
+  gets left behind like a real player who missed it.
+- After looting one spot, they'll chain to nearby loose items or bodies
+  within a short radius.
+- In a squad, the bot that **got the kill** is the one sent to loot the
+  body - not a random teammate.
+- Bots only know about corpses they actually saw drop or that their
+  squad killed - no magically pathing across the map to a body they
+  couldn't possibly know about.
+
+**Objectives & extract**
+- Three objective types: roam a PvP hotspot for kills, clean out a
+  high-value loot zone, or visit a real EFT quest trigger.
+- Squads extract for real reasons: they've looted enough, finished
+  their goals, or the raid's running late - and they'll coordinate on
+  shared-timer exfils (like the car) instead of leaving each other
+  behind.
+
+Almost everything above is tunable in the F12 menu, and most of it
+shifts automatically based on each bot's SAIN personality.
 
 ### Installation
 
