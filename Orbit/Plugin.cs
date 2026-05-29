@@ -267,9 +267,12 @@ public class Plugin : BaseUnityPlugin
         // WildSpawnType-name substring to OrbitBrainLayer's exclusion list,
         // and the layer stays inert for matching bots so their own custom
         // layers (GoToCheckpoint / HuntTarget / …) win instead.
-        ApplyFactionTakeoverToggle(UntarPluginGuid,    "UNTAR",         "untar",    HijackUntar);
-        ApplyFactionTakeoverToggle(RuafPluginGuid,     "RUAF",          "ruaf",     HijackRuaf);
-        ApplyFactionTakeoverToggle(BlackDivPluginGuid, "BlackDivision", "blackDiv", HijackBlackDivision);
+        ApplyFactionTakeoverToggle(UntarPluginGuid,    "UNTAR",         HijackUntar,        "untar");
+        // RUAF Come Home ships two factions: the base RUAF roles (ruaf*) and
+        // the RUAF Hardcore "Remnant" roles (remnant*). Both belong to the
+        // same mod, so the toggle must exclude both substrings.
+        ApplyFactionTakeoverToggle(RuafPluginGuid,     "RUAF",          HijackRuaf,         "ruaf", "remnant");
+        ApplyFactionTakeoverToggle(BlackDivPluginGuid, "BlackDivision", HijackBlackDivision, "blackDiv");
 
         OrbitBrainLayer.SetVanillaScavExclusion(VanillaScavs.Value);
         OrbitBrainLayer.SetVanillaGoonExclusion(VanillaGoons.Value);
@@ -331,7 +334,7 @@ public class Plugin : BaseUnityPlugin
     /// present, the role-name substring is registered with OrbitBrainLayer's
     /// exclusion list so matching bots stay on their mod's behaviour layers.
     /// </summary>
-    private static void ApplyFactionTakeoverToggle(string pluginGuid, string label, string roleSubstring, ConfigEntry<bool> toggle)
+    private static void ApplyFactionTakeoverToggle(string pluginGuid, string label, ConfigEntry<bool> toggle, params string[] roleSubstrings)
     {
         var detected = Chainloader.PluginInfos.ContainsKey(pluginGuid);
         if (!detected)
@@ -345,8 +348,9 @@ public class Plugin : BaseUnityPlugin
         }
         else
         {
-            OrbitBrainLayer.AddExcludedRoleSubstring(roleSubstring);
-            LogSource.LogInfo($"{label}: detected and takeover OFF — bots with role containing '{roleSubstring}' will skip ORBIT");
+            foreach (var sub in roleSubstrings)
+                OrbitBrainLayer.AddExcludedRoleSubstring(sub);
+            LogSource.LogInfo($"{label}: detected and takeover OFF — bots with role containing [{string.Join(", ", roleSubstrings)}] will skip ORBIT");
         }
     }
 
