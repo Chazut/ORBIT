@@ -512,9 +512,9 @@ public class Plugin : BaseUnityPlugin
         SyntheticVisitCooldownSeconds = Config.Bind(mainTune, "Synthetic POI cooldown (s)", 180f, new ConfigDescription(
             "How long after finishing a Synthetic POI it's invisible to the same squad. 0 disables.",
             new AcceptableValueRange<float>(0f, 1800f), new ConfigurationManagerAttributes { Order = 49 }));
-        OpportunisticCorpseScanIntervalSeconds = Config.Bind(mainTune, "Opportunistic corpse scan (s)", 0.5f, new ConfigDescription(
-            "How often each squad re-runs the 'do I see a fresh corpse nearby?' raycast scan.",
-            new AcceptableValueRange<float>(0.1f, 5f), new ConfigurationManagerAttributes { Order = 48 }));
+        OpportunisticCorpseScanIntervalSeconds = Config.Bind(mainTune, "Opportunistic corpse scan (s)", 2.5f, new ConfigDescription(
+            "How often each squad re-runs the 'do I see a fresh corpse nearby?' raycast scan. Per-squad raycasts add up under heavy bot counts; default raised from 0.5s to 2.5s to lower the CPU baseline. Drop it back down if you want hyper-reactive corpse pickup.",
+            new AcceptableValueRange<float>(0.5f, 10f), new ConfigurationManagerAttributes { Order = 48 }));
 
         // ── 06. Faction-mod takeover ────────────────────────────────
         HijackUntar = Config.Bind(takeover, "Take over UNTAR bots", false, new ConfigDescription(

@@ -19,6 +19,11 @@ public struct Cell()
 {
     public readonly List<Waypoint> Waypoints = [];
     public int Congestion = 0;
+    // Number of Corpse-category waypoints currently in this cell. Lets
+    // the opportunistic-corpse scan skip cells with zero corpses without
+    // iterating Waypoints, which otherwise costs O(N) per cell per
+    // member per scan even when there's nothing relevant.
+    public int CorpseCount = 0;
 
     public bool HasWaypoints
     {
@@ -110,12 +115,18 @@ public class WaypointSystem
         _zoneConfig = waypointConfig.MapZones[mapId];
         _botsController = botsController;
 
+        // Geometry config + cell size must be set BEFORE the gatherer is
+        // constructed — the gatherer scales synthetic/exfil radii from
+        // _cellSize, and passing zero here (the field's default) makes
+        // those radii degenerate on every map.
+        Log.Info("Calculating world geometry");
+        var geometryConfig = waypointConfig.MapGeometries.Value[mapId];
+        _cellSize = geometryConfig.CellSize;
+        _cellSubSize = _cellSize / 2f;
+
         Log.Info("Gathering built in waypoints");
         _waypointGatherer = new WaypointGatherer(_cellSize, botsController);
         var builtinWaypoints = _waypointGatherer.CollectBuiltinWaypoints();
-
-        Log.Info("Calculating world geometry");
-        var geometryConfig = waypointConfig.MapGeometries.Value[mapId];
 
         // Calculate bounds from positions
         _worldMin = geometryConfig.Min;
@@ -132,9 +143,6 @@ public class WaypointSystem
 
         var worldWidth = worldMax.x - _worldMin.x;
         var worldHeight = worldMax.y - _worldMin.y;
-
-        _cellSize = geometryConfig.CellSize;
-        _cellSubSize = _cellSize / 2f;
 
         var cols = Mathf.CeilToInt(worldWidth / _cellSize);
         var rows = Mathf.CeilToInt(worldHeight / _cellSize);
@@ -726,6 +734,24 @@ public class WaypointSystem
             var memberCell = WorldToCell(memberPos);
             if (!IsValidCell(memberCell)) continue;
 
+            // Per-member fast-path: peek the 3×3 cell window's
+            // CorpseCount BEFORE doing the full iteration. If zero
+            // corpses are present in any of the 9 cells around this
+            // member, skip the member entirely — no point checking
+            // claims, distances or raycasting when there's nothing
+            // corpse-shaped within range.
+            var hasCorpseNearby = false;
+            for (var dx = -1; dx <= 1 && !hasCorpseNearby; dx++)
+            {
+                for (var dy = -1; dy <= 1 && !hasCorpseNearby; dy++)
+                {
+                    var coords = new Vector2Int(memberCell.x + dx, memberCell.y + dy);
+                    if (!IsValidCell(coords)) continue;
+                    if (_cells[coords.x, coords.y].CorpseCount > 0) hasCorpseNearby = true;
+                }
+            }
+            if (!hasCorpseNearby) continue;
+
             // Walk the 3×3 cell window around the member.
             for (var dx = -1; dx <= 1; dx++)
             {
@@ -734,7 +760,7 @@ public class WaypointSystem
                     var coords = new Vector2Int(memberCell.x + dx, memberCell.y + dy);
                     if (!IsValidCell(coords)) continue;
                     var cell = _cells[coords.x, coords.y];
-                    if (!cell.HasWaypoints) continue;
+                    if (cell.CorpseCount == 0) continue; // skip cells with no Corpse waypoints
 
                     var locs = cell.Waypoints;
                     for (var i = 0; i < locs.Count; i++)
@@ -1143,6 +1169,7 @@ public class WaypointSystem
                 {
                     _lootItemIdToWaypointId.Remove(li.Item.Id);
                 }
+                if (removed.Category == WaypointCategory.Corpse) _cells[coords.x, coords.y].CorpseCount--;
                 waypoints.RemoveAt(i);
                 return true;
             }
@@ -1200,6 +1227,7 @@ public class WaypointSystem
         {
             _lootItemIdToWaypointId[li.Item.Id] = loc.Id;
         }
+        if (loc.Category == WaypointCategory.Corpse) _cells[coords.x, coords.y].CorpseCount++;
         // Subscribe to ExfiltrationPoint status changes so V-Ex (and other
         // one-shot exits) are pruned from the grid the moment they become
         // unusable. Also useful for logging the "real" exfil settings once

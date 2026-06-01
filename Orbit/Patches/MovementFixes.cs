@@ -82,10 +82,15 @@ public class HardTeleportTracePatch : ModulePatch
 }
 
 /// <summary>
-/// Forces MovementContext.IsAI to return false so the movement system runs
-/// the human-control code path even for our bots. Without this BSG's AI
-/// short-circuits much of the smoothing pipeline. Borrowed approach from
-/// Solarint's SAIN.
+/// Forces MovementContext.IsAI to return false so the movement system
+/// runs the human-control code path for ORBIT-managed bots. Without
+/// this BSG's AI short-circuits much of the smoothing pipeline.
+/// Borrowed from Solarint's SAIN; gated on <see cref="BotRoster.IsOrbitActive"/>
+/// so non-ORBIT bots (vanilla scavs / goons / faction-mod bots running
+/// their own behaviour) keep their native IsAI value. The private
+/// <c>MovementContext._player</c> field is grabbed via Harmony field
+/// injection (the <c>____player</c> parameter — three underscores for
+/// the Harmony prefix + one for the leading underscore in the field name).
 /// </summary>
 public class MovementContextHumanizePatch : ModulePatch
 {
@@ -95,8 +100,11 @@ public class MovementContextHumanizePatch : ModulePatch
     }
 
     [PatchPrefix]
-    public static bool Patch(ref bool __result)
+    public static bool Patch(Player ____player, ref bool __result)
     {
+        var bot = ____player?.AIData?.BotOwner;
+        var roster = Singleton<BotRoster>.Instance;
+        if (bot == null || roster == null || !roster.IsOrbitActive(bot)) return true;
         __result = false;
         return false;
     }
