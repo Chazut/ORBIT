@@ -174,6 +174,15 @@ public static class BotTypeUtils
             or WildSpawnType.followerBigPipe
             or WildSpawnType.followerBirdEye;
 
+    /// <summary>
+    /// Cultists: the night-only sectant trio (Priest + Warriors) plus the
+    /// "cursed" scav variant that follows their behaviour.
+    /// </summary>
+    public static bool IsCultist(this WildSpawnType wildSpawnType)
+        => wildSpawnType is WildSpawnType.sectantPriest
+            or WildSpawnType.sectantWarrior
+            or WildSpawnType.cursedAssault;
+
     public static bool IsBoss(WildSpawnType wildSpawnType)
     {
         switch (wildSpawnType)

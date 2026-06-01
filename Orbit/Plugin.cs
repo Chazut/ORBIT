@@ -51,6 +51,7 @@ public class Plugin : BaseUnityPlugin
     public static ConfigEntry<bool> RoamingGoons;
     public static ConfigEntry<bool> VanillaScavs;
     public static ConfigEntry<bool> VanillaGoons;
+    public static ConfigEntry<bool> VanillaCultists;
 
     // 02. POI guard duration
     public static ConfigEntry<Vector2> ObjectiveGuardDuration;
@@ -276,8 +277,10 @@ public class Plugin : BaseUnityPlugin
 
         OrbitBrainLayer.SetVanillaScavExclusion(VanillaScavs.Value);
         OrbitBrainLayer.SetVanillaGoonExclusion(VanillaGoons.Value);
+        OrbitBrainLayer.SetVanillaCultistExclusion(VanillaCultists.Value);
         if (VanillaScavs.Value) Logger.LogInfo("Vanilla scavs ON — ORBIT will not attach to bot scavs (PlayerScavs unaffected).");
         if (VanillaGoons.Value) Logger.LogInfo("Vanilla goons ON — ORBIT will not attach to Goons (Knight / Big Pipe / Bird Eye).");
+        if (VanillaCultists.Value) Logger.LogInfo("Vanilla cultists ON — ORBIT will not attach to Cultists (Priest / Warriors / cursed scavs).");
 
         var brains = new List<string>
         {
@@ -378,9 +381,12 @@ public class Plugin : BaseUnityPlugin
         // ── 01. General ─────────────────────────────────────────────
         VanillaScavs = Config.Bind(general, "Vanilla scavs (RESTART)", false, new ConfigDescription(
             "OFF (default): bot scavs are controlled by ORBIT (cell dispatch, home pull, loot routing). ON: bot scavs run on BSG's vanilla brain — ORBIT doesn't attach to them, so 'Roaming Scavs' below has no effect. PlayerScavs always stay on ORBIT regardless of this toggle.",
-            null, new ConfigurationManagerAttributes { Order = 4 }));
+            null, new ConfigurationManagerAttributes { Order = 5 }));
         VanillaGoons = Config.Bind(general, "Vanilla goons (RESTART)", false, new ConfigDescription(
             "OFF (default): Goons (Knight + Big Pipe + Bird Eye) are controlled by ORBIT. ON: Goons run on BSG's vanilla brain.",
+            null, new ConfigurationManagerAttributes { Order = 4 }));
+        VanillaCultists = Config.Bind(general, "Vanilla cultists (RESTART)", false, new ConfigDescription(
+            "OFF (default): Cultists (Priest + Warriors + cursed scavs) are controlled by ORBIT. ON: Cultists run on BSG's vanilla brain.",
             null, new ConfigurationManagerAttributes { Order = 3 }));
         RoamingScavs = Config.Bind(general, "Roaming Scavs", false, new ConfigDescription(
             "OFF (default): scavs stay near their spawn quartier (current cell + 8 neighbours). ON: scavs roam the whole map like PMCs. Ignored when Vanilla scavs is ON.",

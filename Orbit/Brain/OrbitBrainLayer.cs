@@ -50,6 +50,7 @@ public class OrbitBrainLayer : CustomLayer
     // Profile.WillBeAPlayerScav check inside IsExcludedRole).
     private static bool _vanillaScavs;
     private static bool _vanillaGoons;
+    private static bool _vanillaCultists;
 
     public static void AddExcludedRoleSubstring(string sub)
     {
@@ -58,6 +59,7 @@ public class OrbitBrainLayer : CustomLayer
 
     public static void SetVanillaScavExclusion(bool excluded) => _vanillaScavs = excluded;
     public static void SetVanillaGoonExclusion(bool excluded) => _vanillaGoons = excluded;
+    public static void SetVanillaCultistExclusion(bool excluded) => _vanillaCultists = excluded;
 
     private static bool IsExcludedRole(BotOwner botOwner)
     {
@@ -80,6 +82,11 @@ public class OrbitBrainLayer : CustomLayer
         }
 
         if (_vanillaGoons && role.Value.IsGoon())
+        {
+            return true;
+        }
+
+        if (_vanillaCultists && role.Value.IsCultist())
         {
             return true;
         }
