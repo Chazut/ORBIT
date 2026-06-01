@@ -19,10 +19,6 @@ public struct Cell()
 {
     public readonly List<Waypoint> Waypoints = [];
     public int Congestion = 0;
-    // Number of Corpse-category waypoints currently in this cell. Lets
-    // the opportunistic-corpse scan skip cells with zero corpses without
-    // iterating Waypoints, which otherwise costs O(N) per cell per
-    // member per scan even when there's nothing relevant.
     public int CorpseCount = 0;
 
     public bool HasWaypoints
@@ -115,10 +111,8 @@ public class WaypointSystem
         _zoneConfig = waypointConfig.MapZones[mapId];
         _botsController = botsController;
 
-        // Geometry config + cell size must be set BEFORE the gatherer is
-        // constructed — the gatherer scales synthetic/exfil radii from
-        // _cellSize, and passing zero here (the field's default) makes
-        // those radii degenerate on every map.
+        // _cellSize must be set before WaypointGatherer is constructed
+        // — the gatherer scales synthetic/exfil radii from it.
         Log.Info("Calculating world geometry");
         var geometryConfig = waypointConfig.MapGeometries.Value[mapId];
         _cellSize = geometryConfig.CellSize;
@@ -734,12 +728,7 @@ public class WaypointSystem
             var memberCell = WorldToCell(memberPos);
             if (!IsValidCell(memberCell)) continue;
 
-            // Per-member fast-path: peek the 3×3 cell window's
-            // CorpseCount BEFORE doing the full iteration. If zero
-            // corpses are present in any of the 9 cells around this
-            // member, skip the member entirely — no point checking
-            // claims, distances or raycasting when there's nothing
-            // corpse-shaped within range.
+            // Fast-path: skip the member if no corpses in the 3×3 window.
             var hasCorpseNearby = false;
             for (var dx = -1; dx <= 1 && !hasCorpseNearby; dx++)
             {
@@ -760,7 +749,7 @@ public class WaypointSystem
                     var coords = new Vector2Int(memberCell.x + dx, memberCell.y + dy);
                     if (!IsValidCell(coords)) continue;
                     var cell = _cells[coords.x, coords.y];
-                    if (cell.CorpseCount == 0) continue; // skip cells with no Corpse waypoints
+                    if (cell.CorpseCount == 0) continue;
 
                     var locs = cell.Waypoints;
                     for (var i = 0; i < locs.Count; i++)
@@ -1109,8 +1098,16 @@ public class WaypointSystem
     {
         var center = WorldToCell(botPos);
         var radSqr = radius * radius;
-        Waypoint best = null;
-        var bestDist = float.MaxValue;
+        // Same-floor preference: track nearest same-floor and nearest
+        // overall in parallel, return same-floor when present. Without
+        // this, Resort sweeps yo-yo across floors because a basement
+        // candidate at low XZ but high Y delta wins on 3D distance.
+        var yTolerance = Plugin.SameFloorLootYTolerance?.Value ?? 0f;
+        var preferSameFloor = yTolerance > 0f;
+        Waypoint bestSame = null;
+        var bestSameDist = float.MaxValue;
+        Waypoint bestAny = null;
+        var bestAnyDist = float.MaxValue;
         for (var dx = -1; dx <= 1; dx++)
         {
             for (var dy = -1; dy <= 1; dy++)
@@ -1121,21 +1118,30 @@ public class WaypointSystem
                 for (var i = 0; i < locs.Count; i++)
                 {
                     var loc = locs[i];
-                    if (loc.Category != WaypointCategory.LooseLoot && loc.Category != WaypointCategory.Corpse) continue;
+                    // All loot categories chain through sweep — excluding
+                    // containers broke the chain and zigzagged the bot to
+                    // a cell-wide random pick after each container loot.
+                    if (!IsLootCategory(loc.Category)) continue;
                     if (squad != null && squad.CompletedPoiIds.Contains(loc.Id)) continue;
                     if (_claims.ContainsKey(loc.Id)) continue;
                     if (IsSquadKnownUnreachable(squad, loc.Id)) continue;
                     var distSqr = (loc.Position - botPos).sqrMagnitude;
                     if (distSqr > radSqr) continue;
-                    if (distSqr < bestDist)
+                    if (distSqr < bestAnyDist)
                     {
-                        bestDist = distSqr;
-                        best = loc;
+                        bestAnyDist = distSqr;
+                        bestAny = loc;
+                    }
+                    if (preferSameFloor && Mathf.Abs(loc.Position.y - botPos.y) <= yTolerance
+                        && distSqr < bestSameDist)
+                    {
+                        bestSameDist = distSqr;
+                        bestSame = loc;
                     }
                 }
             }
         }
-        return best;
+        return bestSame ?? bestAny;
     }
 
     /// <summary>
@@ -1714,7 +1720,11 @@ public class WaypointSystem
             for (var i = 0; i < waypoints.Count; i++)
             {
                 var loc = waypoints[i];
-                // Quest waypoints are reserved for main objectives.
+                if (loc.Category == WaypointCategory.Exfil && !squad.ExtractRequested)
+                {
+                    skippedExfil++;
+                    continue;
+                }
                 if (loc.Category == WaypointCategory.Quest
                     && !SquadOwnsQuest(squad, loc))
                 {
@@ -1798,6 +1808,7 @@ public class WaypointSystem
             for (var i = 0; i < waypoints.Count; i++)
             {
                 var loc = waypoints[i];
+                if (loc.Category == WaypointCategory.Exfil && !squad.ExtractRequested) continue;
                 if (loc.Category == WaypointCategory.Quest
                     && !SquadOwnsQuest(squad, loc)) continue;
                 if (hasBlacklist && squad.CompletedPoiIds.Contains(loc.Id)) continue;
@@ -2097,6 +2108,9 @@ public class WaypointSystem
                 case ERequirementState.Train:
                 case ERequirementState.SkillLevel:
                 case ERequirementState.Timer:
+                case ERequirementState.Empty:
+                case ERequirementState.EmptyOrSize:
+                case ERequirementState.NotEmpty:
                     return true;
             }
         }

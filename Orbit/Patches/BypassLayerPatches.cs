@@ -6,12 +6,6 @@ using SPT.Reflection.Patching;
 
 namespace Orbit.Patches;
 
-/// <summary>
-/// Returns true when the given BSG layer instance belongs to a bot that
-/// ORBIT currently manages, so the bypass should fire. For every other
-/// bot (vanilla scavs / goons running BSG behaviour, faction-mod bots
-/// not taken over, etc.) the original BSG layer is left alone.
-/// </summary>
 internal static class BypassGate
 {
     public static bool ShouldBypassForOrbitBot(BaseLogicLayerAbstractClass layer)
@@ -21,11 +15,7 @@ internal static class BypassGate
     }
 }
 
-/// <summary>
-/// Disables BSG's "AssaultEnemyFar" layer for ORBIT-managed bots — it
-/// kicks in at long range and hijacks scavs away from our cell dispatch.
-/// Non-ORBIT bots keep the original behaviour.
-/// </summary>
+/// <summary>Disables BSG's AssaultEnemyFar for ORBIT bots — it overrides our cell dispatch at long range.</summary>
 public class AssaultEnemyFarBypassPatch : ModulePatch
 {
     protected override MethodBase GetTargetMethod()
@@ -42,12 +32,7 @@ public class AssaultEnemyFarBypassPatch : ModulePatch
     }
 }
 
-/// <summary>
-/// Disables BSG's "Exfiltration" layer for ORBIT-managed bots — it runs
-/// at priority 79, hijacks the brain mid-tick, and frequently leaves
-/// bots stuck around exfil triggers. ExtractAction handles exfil routing
-/// instead. Non-ORBIT bots keep the original behaviour.
-/// </summary>
+/// <summary>Disables BSG's Exfiltration layer for ORBIT bots — ExtractAction handles exfil routing.</summary>
 public class ExfilLayerBypassPatch : ModulePatch
 {
     protected override MethodBase GetTargetMethod()
@@ -64,11 +49,7 @@ public class ExfilLayerBypassPatch : ModulePatch
     }
 }
 
-/// <summary>
-/// Disables BSG's "PtrlBirdEye" layer for ORBIT-managed bots — it splits
-/// Bird Eye away from the rest of the Goons during long-range scanning,
-/// breaking squad cohesion. Non-ORBIT bots keep the original behaviour.
-/// </summary>
+/// <summary>Disables BSG's PtrlBirdEye for ORBIT bots — it breaks Goons squad cohesion.</summary>
 public class PtrlBirdEyeBypassPatch : ModulePatch
 {
     protected override MethodBase GetTargetMethod()

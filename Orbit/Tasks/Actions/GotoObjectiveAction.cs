@@ -362,25 +362,8 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
         }
     }
 
-    // Categories whose arrival must be gated on a 3D LoS check to
-    // prevent through-wall validation. Loot + Quest sit in confined
-    // rooms where a thin wall between bot and POI is a real risk;
-    // Synthetic / Exfil are wide-radius volumes where the LoS check
-    // would mostly produce false negatives.
-    //
-    // **Corpse is intentionally excluded** even though it's a lootable:
-    // corpses are runtime-spawned at the kill position, which is often
-    // tucked behind cover the killer used. The bot path-finds AROUND
-    // that cover and stops on the other side of a wall from the body —
-    // perfectly valid for looting (BSG's InteractContainer doesn't
-    // require LoS), but our per-frame raycast would refuse arrival and
-    // ping-pong the bot until the POI gets blacklisted. The
-    // selection-time gate (Corpse requires squad-leader LoS OR squad-
-    // kill, in PickFromCell) already prevents bots from magically
-    // pathing to corpses they shouldn't know about, which makes the
-    // arrival-time check redundant for this category. Bonus: kills a
-    // per-frame Physics.Raycast for every bot inside a corpse arrival
-    // radius.
+    // Corpse excluded: bodies spawn behind cover the killer used; the
+    // selection-time gate already prevents picking unseen bodies.
     private static bool RequiresArrivalLoSCheck(WaypointCategory category)
         => category == WaypointCategory.ContainerLoot
             || category == WaypointCategory.LooseLoot

@@ -81,17 +81,7 @@ public class HardTeleportTracePatch : ModulePatch
     }
 }
 
-/// <summary>
-/// Forces MovementContext.IsAI to return false so the movement system
-/// runs the human-control code path for ORBIT-managed bots. Without
-/// this BSG's AI short-circuits much of the smoothing pipeline.
-/// Borrowed from Solarint's SAIN; gated on <see cref="BotRoster.IsOrbitActive"/>
-/// so non-ORBIT bots (vanilla scavs / goons / faction-mod bots running
-/// their own behaviour) keep their native IsAI value. The private
-/// <c>MovementContext._player</c> field is grabbed via Harmony field
-/// injection (the <c>____player</c> parameter — three underscores for
-/// the Harmony prefix + one for the leading underscore in the field name).
-/// </summary>
+/// <summary>Forces MovementContext.IsAI to false for ORBIT bots so the human-control smoothing pipeline runs.</summary>
 public class MovementContextHumanizePatch : ModulePatch
 {
     protected override MethodBase GetTargetMethod()
@@ -111,10 +101,8 @@ public class MovementContextHumanizePatch : ModulePatch
 }
 
 /// <summary>
-/// Skips BSG's BotMover.ManualFixedUpdate for bots we control. Without this
-/// the vanilla mover keeps issuing path corrections that fight our own
-/// movement system, producing the characteristic AI jitter when bots are
-/// also in SAIN combat.
+/// Skips BSG's BotMover.ManualFixedUpdate for ORBIT bots — the vanilla
+/// mover would fight our own movement system and cause jitter.
 /// </summary>
 public class ManualFixedUpdateSkipPatch : ModulePatch
 {

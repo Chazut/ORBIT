@@ -168,12 +168,8 @@ public class LootContainerAction(AgentData dataset, WaypointSystem waypointSyste
                 Log.Debug($"{agent} blacklisted {location} for {agent.Squad} after FAILED loot (squad memory size={agent.Squad.CompletedPoiIds.Count})");
             }
 
-            // Force-expire the squad's wait timer so the strategy can
-            // immediately re-pick a fresh objective. Without this the
-            // squad falls back to its long base guard wait (60-180 s)
-            // even though the failed POI we were about to "wait at" no
-            // longer makes sense, leaving the squad parked in Guard for
-            // minutes on a useless target.
+            // Expire the wait timer so the next tick re-picks instead of
+            // guarding the now-blacklisted POI for 60-180s.
             if (agent.Squad != null)
             {
                 agent.Squad.Objective.Duration = 0;
