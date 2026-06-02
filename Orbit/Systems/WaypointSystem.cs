@@ -2100,14 +2100,12 @@ public class WaypointSystem
             {
                 case ERequirementState.ScavCooperation:
                 case ERequirementState.WorldEvent:
-                case ERequirementState.TransferItem:
                 case ERequirementState.SecretTransferItem:
                 case ERequirementState.HasItem:
                 case ERequirementState.WearsItem:
                 case ERequirementState.Reference:
                 case ERequirementState.Train:
                 case ERequirementState.SkillLevel:
-                case ERequirementState.Timer:
                 case ERequirementState.Empty:
                 case ERequirementState.EmptyOrSize:
                 case ERequirementState.NotEmpty:

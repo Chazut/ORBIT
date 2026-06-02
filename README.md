@@ -169,30 +169,49 @@ duplicate work it already does. Don't install them alongside ORBIT.
 
 No ETA, no promises, but on the list:
 
-- Bots prefer loot on the same floor (no more elevator yo-yo on Resort)
+**Behaviour**
 - Members can extract alone if they personally hit their loot threshold
 - Squads can decide to camp + ambush instead of always roaming
-- "Marked-key loot rush" objective for high-tier squads
-- "Spawn rush" objective for the most aggressive personalities
-- "Boss hunting" objectives
-- Smarter movement - checking corners, scanning the rear, less straight-line
-  dashing
-- Reserve exfils (currently disabled - they all need switches/levers)
+- Smarter movement - checking corners, scanning the rear, less straight-line dashing
+- Less static regrouping (bots are easy 1-taps while waiting for squadmates)
+- Post-combat self-heal if meds are in inventory
 - Squad splitting with radio comms
 - New personalities
+
+**Objectives**
+- "Marked-key loot rush" for high-tier squads
+- "Spawn rush" for the most aggressive personalities
+- "Boss hunting"
 - Airdrop / helicopter crash / BTR objectives
+- Multi-step objectives (activate → loot/extract):
+  - Interchange Kiba (disable alarm → loot)
+  - Interchange ULTRA (power on → loot)
+  - Interchange Object #21WS keycard container (power on → loot)
+  - Interchange Object #11SR room (power on → toilet switch → loot → extract inside)
+  - Customs scav-base exfil (power on → extract)
+  - Reserve bunker exfil (switch → extract)
+  - Reserve D-2 (switch 1 → door switch → extract)
+
+**Extracts**
+- Time-extract threshold expressed as % of remaining raid time (vs current fixed minute range)
+- WorldEvent exfils (Reserve / Customs switch-gated)
+- Train exfil (Armored Train availability window)
+- "Drop backpack" exfils (Empty / EmptyOrSize) - usable when bot has no backpack, OR wounded bots drop the bag and use them anyway
+- HasItem (RedRebel-style - bot must own a Red Rebel in inventory, but don't consume it; ignore the paracord and WearsItem gear constraints entirely)
+- Transitions - bots currently try them and get stuck; figure out the right behaviour
+- Fallback to next-closest exfil if the chosen one is unreachable
+- Investigate Reference / SkillLevel requirement states
+
+**Tuning**
+- Faction takeover split: patrols → ORBIT, checkpoints → vanilla (RUAF / UNTAR / BlackDivision)
+- Weapon swap: also loot matching mags + ammo together (LB-inherited gap)
 
 ### Known Issues
 
-- **Reserve exfils disabled for bots** - every Reserve exfil needs
-  switches/levers ORBIT can't handle yet. Bots on Reserve stay until killed
-  or the raid ends.
-- **Rare stuck bots** - usually unstick themselves within a minute. Still
-  iterating.
-- **Mod conflicts** - tested with my own config. Yours may differ. Report
-  anything obviously broken on [GitHub](https://github.com/Chazut/ORBIT/issues).
-- **Initial release** - expect a few rough edges. Please report what you
-  find.
+- **Most Reserve exfils require switches ORBIT doesn't operate yet** - bots there mostly stay until killed or raid end.
+- **Bots can get stuck on transition points** - they walk to them, can't transition, and stand there. Treat as an exfil-side bug until fixed.
+- **Rare stuck bots** - usually unstick themselves within a minute. Still iterating.
+- **Mod conflicts** - tested with my own config. Yours may differ. Report anything obviously broken on [GitHub](https://github.com/Chazut/ORBIT/issues).
 
 ### About AI
 
