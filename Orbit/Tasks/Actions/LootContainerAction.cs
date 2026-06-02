@@ -3,10 +3,12 @@ using EFT.Interactive;
 using Orbit.Entities;
 using Orbit.Helpers;
 using Orbit.Inventory;
+using Orbit.Looting;
 using Orbit.Navigation;
 using Orbit.Sain;
 using Orbit.Systems;
 using UnityEngine;
+using LootKind = Orbit.Looting.LootKind;
 
 namespace Orbit.Tasks.Actions;
 
@@ -247,8 +249,8 @@ public class LootContainerAction(AgentData dataset, WaypointSystem waypointSyste
             if (m == null) continue;
             var go = m.Player?.gameObject;
             if (go == null) continue;
-            var brain = go.GetComponent<LootBrain>();
-            var looted = brain?.Stats?.Looted ?? 0f;
+            var handler = go.GetComponent<OrbitLootHandler>();
+            var looted = handler?.Stats?.Looted ?? 0f;
             total += looted;
             aliveCount++;
         }
@@ -482,7 +484,7 @@ internal class BotLootState
 
     private readonly Agent _agent;
     private readonly Waypoint _location;
-    private readonly LootBrain _brain;
+    private readonly ILootHandler _brain;
     private float _lootedAtStart;
     private float _beganAt;
     private bool _started;
@@ -505,12 +507,13 @@ internal class BotLootState
         _location = location;
 
         var go = agent.Player.gameObject;
-        _brain = go.GetComponent<LootBrain>();
-        if (_brain == null)
+        var handler = go.GetComponent<OrbitLootHandler>();
+        if (handler == null)
         {
-            _brain = go.AddComponent<LootBrain>();
-            _brain.Init(agent.Bot);
+            handler = go.AddComponent<OrbitLootHandler>();
+            handler.Init(agent.Bot);
         }
+        _brain = handler;
     }
 
     public void Begin()
