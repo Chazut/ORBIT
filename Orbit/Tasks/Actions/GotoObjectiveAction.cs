@@ -36,6 +36,14 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
     private const float NavSnapArrivalRadius = 4f;
     private const float NavSnapArrivalRadiusSqr = NavSnapArrivalRadius * NavSnapArrivalRadius;
 
+    // Per-agent stuck watchdog on Exfil objectives: if the bot's position
+    // barely moves for this duration while targeting an exfil, blacklist
+    // the exfil and re-pick. Walking from across the map is fine — only
+    // genuinely stationary bots trip the watchdog.
+    private const float ExfilStuckThresholdSeconds = 30f;
+    private const float ExfilStuckMoveDistSqr = 2f * 2f;
+    private readonly System.Collections.Generic.Dictionary<int, (int locId, Vector3 lastPos, float lastMoveTime)> _exfilStuckTracker = new();
+
     public override void UpdateScore(int ordinal)
     {
         var agents = dataset.Entities.Values;
@@ -98,6 +106,36 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                         objective.ArrivalPath = agent.Movement.Path;
 
                     var distanceSqr = (objective.Location.Position - agent.Position).sqrMagnitude;
+
+                    // Exfil stuck watchdog: blacklist + re-pick when the
+                    // bot has stopped moving while targeting an exfil.
+                    if (objective.Location.Category == WaypointCategory.Exfil)
+                    {
+                        if (!_exfilStuckTracker.TryGetValue(agent.Id, out var t)
+                            || t.locId != objective.Location.Id)
+                        {
+                            _exfilStuckTracker[agent.Id] = (objective.Location.Id, agent.Position, Time.time);
+                        }
+                        else if ((agent.Position - t.lastPos).sqrMagnitude > ExfilStuckMoveDistSqr)
+                        {
+                            _exfilStuckTracker[agent.Id] = (t.locId, agent.Position, Time.time);
+                        }
+                        else if (Time.time - t.lastMoveTime > ExfilStuckThresholdSeconds)
+                        {
+                            if (agent.Squad != null && !agent.Squad.CompletedPoiIds.Contains(objective.Location.Id))
+                            {
+                                agent.Squad.CompletedPoiIds.Add(objective.Location.Id);
+                            }
+                            objective.Status = ObjectiveStatus.Failed;
+                            _exfilStuckTracker.Remove(agent.Id);
+                            Log.Info($"{agent} stuck en-route to {objective.Location} for {ExfilStuckThresholdSeconds:F0}s — blacklisted for {agent.Squad}, rerouting");
+                            break;
+                        }
+                    }
+                    else if (_exfilStuckTracker.ContainsKey(agent.Id))
+                    {
+                        _exfilStuckTracker.Remove(agent.Id);
+                    }
 
                     // Stop sprinting once inside the 50m "scan" radius so
                     // the bot has time to spot enemies on the final

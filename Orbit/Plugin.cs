@@ -90,9 +90,7 @@ public class Plugin : BaseUnityPlugin
     public static ConfigEntry<float> LootCoveragePct;
     public static ConfigEntry<bool> MainObjectivesExtractOnAllCompleted;
     public static ConfigEntry<Vector2> TimeExtractWindowPmc;
-    public static ConfigEntry<Vector2> TimeExtractWindowPmcFactory;
     public static ConfigEntry<Vector2> TimeExtractWindowPlayerScav;
-    public static ConfigEntry<Vector2> TimeExtractWindowPlayerScavFactory;
     public static ConfigEntry<float> PmcLootCellCooldownSeconds;
     public static ConfigEntry<float> SyntheticVisitCooldownSeconds;
     public static ConfigEntry<float> OpportunisticCorpseScanIntervalSeconds;
@@ -504,18 +502,12 @@ public class Plugin : BaseUnityPlugin
         SameFloorLootYTolerance = Config.Bind(mainTune, "Same-floor sweep tolerance (m)", 3f, new ConfigDescription(
             "During chain-loot sweeps, candidates within this vertical Y delta of the bot are treated as 'same floor' and preferred over cross-floor candidates. Two-pass: same-floor first, cross-floor only if nothing same-floor is in range. 0 disables the bias (chain-loot ignores floors). Stops the elevator yo-yo on Resort.",
             new AcceptableValueRange<float>(0f, 10f), new ConfigurationManagerAttributes { Order = 65 }));
-        TimeExtractWindowPmc = Config.Bind(mainTune, "Time extract window — PMC (s, non-Factory)", new Vector2(300f, 900f), new ConfigDescription(
-            "Per-squad random window (seconds-remaining-in-raid) at which ExtractRequested flips. Rolled once per squad.",
+        TimeExtractWindowPmc = Config.Bind(mainTune, "Time extract window — PMC (%)", new Vector2(5f, 30f), new ConfigDescription(
+            "Per-squad random window (% of total raid duration remaining) at which ExtractRequested flips. Rolled once per squad. Matches SAIN's default range.",
             null, new ConfigurationManagerAttributes { Order = 60 }));
-        TimeExtractWindowPmcFactory = Config.Bind(mainTune, "Time extract window — PMC (s, Factory)", new Vector2(180f, 600f), new ConfigDescription(
-            "Same as PMC non-Factory but for Factory raids (shorter total raid time).",
+        TimeExtractWindowPlayerScav = Config.Bind(mainTune, "Time extract window — PlayerScav (%)", new Vector2(5f, 30f), new ConfigDescription(
+            "Same as PMC but applied to PlayerScavs.",
             null, new ConfigurationManagerAttributes { Order = 59 }));
-        TimeExtractWindowPlayerScav = Config.Bind(mainTune, "Time extract window — PlayerScav (s, non-Factory)", new Vector2(180f, 600f), new ConfigDescription(
-            "PlayerScav time-extract window — tighter than PMC because they spawn later.",
-            null, new ConfigurationManagerAttributes { Order = 58 }));
-        TimeExtractWindowPlayerScavFactory = Config.Bind(mainTune, "Time extract window — PlayerScav (s, Factory)", new Vector2(120f, 420f), new ConfigDescription(
-            "PlayerScav time-extract window for Factory raids.",
-            null, new ConfigurationManagerAttributes { Order = 57 }));
         PmcLootCellCooldownSeconds = Config.Bind(mainTune, "PMC loot cell cooldown (s)", 600f, new ConfigDescription(
             "How long after looting a cell that cell is invisible to the same PMC squad. Stops boomeranging back. 0 disables.",
             new AcceptableValueRange<float>(0f, 3600f), new ConfigurationManagerAttributes { Order = 50 }));

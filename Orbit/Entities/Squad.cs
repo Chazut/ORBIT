@@ -188,6 +188,7 @@ public class Squad(int id, float[] taskScores, int targetMembersCount) : Entity(
     /// empty string = resolved but no marker found.
     /// </summary>
     public string DerivedEntryPoint;
+    public bool ExfilEligibilityLogged;
 
     /// <summary>
     /// SAIN-resolved personality archetype for this squad's leader,

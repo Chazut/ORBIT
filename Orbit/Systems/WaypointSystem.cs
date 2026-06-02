@@ -952,6 +952,13 @@ public class WaypointSystem
         var role = squad.Leader.Bot.Profile?.Info?.Settings?.Role;
         if (role.HasValue) squadIsPmc = role.Value.IsPMC();
         var leaderPos = squad.Leader.Bot.Position;
+        var blacklist = squad.CompletedPoiIds;
+
+        if (!squad.ExfilEligibilityLogged)
+        {
+            squad.ExfilEligibilityLogged = true;
+            LogEligibleExfilsForSquad(squad, squadIsPmc);
+        }
 
         Waypoint best = null;
         var bestDist = float.MaxValue;
@@ -964,6 +971,7 @@ public class WaypointSystem
                 {
                     var loc = locs[i];
                     if (loc.Category != WaypointCategory.Exfil) continue;
+                    if (blacklist.Contains(loc.Id)) continue;
                     if (!SquadCanUseWaypoint(squad, squadIsPmc, loc)) continue;
                     var distSqr = (loc.Position - leaderPos).sqrMagnitude;
                     if (distSqr < bestDist)
@@ -987,6 +995,7 @@ public class WaypointSystem
                 {
                     var loc = locs[i];
                     if (loc.Category != WaypointCategory.Exfil) continue;
+                    if (blacklist.Contains(loc.Id)) continue;
                     if (!SquadCanUseWaypointIgnoringEntry(squad, squadIsPmc, loc)) continue;
                     var distSqr = (loc.Position - leaderPos).sqrMagnitude;
                     if (distSqr < bestDist)
@@ -1002,6 +1011,40 @@ public class WaypointSystem
             Log.Warning($"{squad} no spawn-side eligible exfil — falling back to nearest faction-allowed exfil {best} (entry derivation may have failed)");
         }
         return best;
+    }
+
+    private void LogEligibleExfilsForSquad(Squad squad, bool? squadIsPmc)
+    {
+        var leaderPos = squad.Leader?.Bot?.Position ?? Vector3.zero;
+        var entry = squad.Leader?.Bot?.Profile?.Info?.EntryPoint;
+        if (string.IsNullOrEmpty(entry))
+            entry = ResolveDerivedEntryPoint(squad);
+        if (string.IsNullOrEmpty(entry)) entry = "(none)";
+        Log.Info($"{squad} eligible exfils (leader entry='{entry}', isPmc={squadIsPmc}):");
+        for (var cx = 0; cx < _gridSize.x; cx++)
+        {
+            for (var cy = 0; cy < _gridSize.y; cy++)
+            {
+                var locs = _cells[cx, cy].Waypoints;
+                for (var i = 0; i < locs.Count; i++)
+                {
+                    var loc = locs[i];
+                    if (loc.Category != WaypointCategory.Exfil) continue;
+                    if (loc.Target is not ExfiltrationPoint exfil) continue;
+                    var dist = Mathf.Sqrt((loc.Position - leaderPos).sqrMagnitude);
+                    var pass1 = SquadCanUseWaypoint(squad, squadIsPmc, loc);
+                    var pass2 = !pass1 && SquadCanUseWaypointIgnoringEntry(squad, squadIsPmc, loc);
+                    string verdict;
+                    if (pass1) verdict = "OK";
+                    else if (pass2) verdict = "PASS-2-FALLBACK";
+                    else verdict = "REJECTED";
+                    var entries = exfil.EligibleEntryPoints != null && exfil.EligibleEntryPoints.Length > 0
+                        ? string.Join("/", exfil.EligibleEntryPoints)
+                        : "<any>";
+                    Log.Info($"  - {exfil.name} dist={dist:F0}m status={exfil.Status} entries={entries} → {verdict}");
+                }
+            }
+        }
     }
 
     /// <summary>

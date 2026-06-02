@@ -113,10 +113,10 @@ public class WaypointGatherer(float cellSize, BotsController botsController)
                     ? "scav-only"
                     : "pmc-only";
             var coop = HasScavCoopRequirement(exfil.Point) ? " co-op" : "";
-            var entries = exfil.Point.EligibleEntryPoints != null && exfil.Point.EligibleEntryPoints.Length > 0
-                ? string.Join("/", exfil.Point.EligibleEntryPoints)
-                : "<any>";
-            Log.Debug($"Trying to add exfil {exfil.Point.name} [{access}{coop}] status={exfil.Point.Status} entries={entries}");
+            // EligibleEntryPoints is empty here because BSG hasn't finished
+            // LoadSettings yet (we run before it). Real entries surface at
+            // runtime via the OnStatusChanged log.
+            Log.Info($"Exfil {exfil.Point.name} [{access}{coop}] status={exfil.Point.Status}");
             ValidateAndAddWaypoint(collection, WaypointCategory.Exfil, exfil.Point.name, exfil.Point.transform.position, 5f, target: exfil.Point);
         }
 

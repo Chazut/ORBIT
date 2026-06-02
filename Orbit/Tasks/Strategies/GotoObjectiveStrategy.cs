@@ -950,18 +950,11 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
 
     private static float RollExtractThreshold(BotOwner leaderBot)
     {
-        var isFactory = false;
-        var locationId = Singleton<GameWorld>.Instance?.LocationId;
-        if (!string.IsNullOrEmpty(locationId))
-            isFactory = locationId.StartsWith("factory", StringComparison.OrdinalIgnoreCase);
         var isPlayerScav = leaderBot?.Profile != null && leaderBot.Profile.WillBeAPlayerScav();
-
-        Vector2 window;
-        if (isPlayerScav)
-            window = isFactory ? Plugin.TimeExtractWindowPlayerScavFactory.Value : Plugin.TimeExtractWindowPlayerScav.Value;
-        else
-            window = isFactory ? Plugin.TimeExtractWindowPmcFactory.Value : Plugin.TimeExtractWindowPmc.Value;
-        return Random.Range(window.x, window.y);
+        var windowPct = isPlayerScav ? Plugin.TimeExtractWindowPlayerScav.Value : Plugin.TimeExtractWindowPmc.Value;
+        var totalRaidSeconds = (float)(Singleton<AbstractGame>.Instance?.GameTimer?.SessionTime?.TotalSeconds ?? 0d);
+        if (totalRaidSeconds <= 0f) return 0f;
+        return totalRaidSeconds * Random.Range(windowPct.x, windowPct.y) / 100f;
     }
 
     // After this many consecutive "all members failed en-route" branches
