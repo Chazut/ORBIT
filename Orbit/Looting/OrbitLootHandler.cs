@@ -1,9 +1,11 @@
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Comfort.Common;
 using EFT;
 using EFT.Interactive;
 using EFT.InventoryLogic;
+using Orbit.Core;
 using Orbit.Helpers;
 using UnityEngine;
 
@@ -11,6 +13,9 @@ namespace Orbit.Looting;
 
 public class OrbitLootHandler : MonoBehaviour, ILootHandler
 {
+    // Fallback when no squad personality is resolved yet.
+    private const float DefaultMinPickupPrice = 2000f;
+
     private BotOwner _bot;
     private CancellationTokenSource _cts;
 
@@ -26,6 +31,9 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
     public void Init(BotOwner bot)
     {
         _bot = bot;
+        Stats.InitialNetWorth = ItemPriceLookup.SumInventoryWorth(bot);
+        Stats.NetWorth = Stats.InitialNetWorth;
+        Stats.Looted = 0f;
     }
 
     public void StartLooting()
@@ -91,6 +99,13 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
         LootTaskRunning = false;
     }
 
+    private float GetMinPickupPrice()
+    {
+        var personality = Singleton<BotRoster>.Instance?.GetAgent(_bot)?.Squad?.Personality;
+        if (personality == null) return DefaultMinPickupPrice;
+        return personality.MiniLootValueThreshold;
+    }
+
     private async Task LootContainerAsync(LootableContainer container, CancellationToken ct)
     {
         if (container.DoorState != EDoorState.Open)
@@ -147,6 +162,9 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
         var inventoryController = _bot.GetPlayer?.InventoryController;
         if (inventoryController == null || item == null) return false;
 
+        var price = ItemPriceLookup.GetPrice(item);
+        if (price < GetMinPickupPrice()) return false;
+
         try
         {
             var targets = inventoryController.Inventory.Equipment.ToEnumerable<InventoryEquipment>();
@@ -158,6 +176,8 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
             var result = await inventoryController.TryRunNetworkTransaction(place, null);
             if (result.Succeed)
             {
+                Stats.NetWorth += price;
+                Stats.Looted = Stats.NetWorth - Stats.InitialNetWorth;
                 Stats.LastItemsTaken = true;
                 return true;
             }
