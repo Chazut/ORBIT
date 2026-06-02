@@ -1,6 +1,5 @@
-> ⚠️ **Heads up:** ORBIT is built on **Phobos**'s foundation and reuses
-> a big part of **LootingBots**' looting code (both MIT-licensed). Full
-> credits at the bottom. ORBIT wouldn't exist without their work 🙏
+> ⚠️ **Heads up:** ORBIT is built on **Phobos**'s foundation (MIT-licensed).
+> Full credits at the bottom. ORBIT wouldn't exist without their work 🙏
 
 > **ORBIT** - Objective-driven Raid Bot Intelligence Tactics
 > 
@@ -11,7 +10,7 @@ goals: rich loot spots to clear, PvP hotspots to hunt, quest triggers to
 visit, and a real reason to head for extract. They coordinate, loot
 together, and leave when they're done - just like players.
 
-Built on [Phobos](https://discord.com/channels/875684761291599922/1337131427803955200)'s foundations  (advection field, cell dispatch, squad movement), with looting ported from [LootingBots](https://forge.sp-tarkov.com/mod/812/looting-bots) and quest routing inspired by [QuestingBot](https://forge.sp-tarkov.com/mod/1109/questing-bots), integrated into a single coherent system (with extra features) instead of three layers fighting for control.
+Built on [Phobos](https://discord.com/channels/875684761291599922/1337131427803955200)'s foundations (advection field, cell dispatch, squad movement), with a custom looting layer on top of BSG vanilla APIs and quest routing inspired by [QuestingBot](https://forge.sp-tarkov.com/mod/1109/questing-bots), integrated into a single coherent system (with extra features) instead of three layers fighting for control.
 
 It started as my own personal "best of the three" - picking the parts I
 liked from each and gluing them together. Along the way it grew well
@@ -156,9 +155,9 @@ duplicate work it already does. Don't install them alongside ORBIT.
   two systems trying to move the same bots.
 
 **[LootingBots](https://forge.sp-tarkov.com/mod/812/looting-bots)**
-- ORBIT has its own loot pipeline with per-personality thresholds.
-- Running both means bots loot inconsistently and ORBIT's extract
-  triggers can't track the loot correctly.
+- ORBIT has its own loot pipeline driving BSG vanilla pickup APIs,
+  with per-personality value thresholds. Running both means two
+  systems racing to loot the same containers.
 
 **Any other "AI overhaul" mod**
 - If a mod replaces bot brain logic, dispatches bots somewhere, or
@@ -218,10 +217,10 @@ No ETA, no promises, but on the list:
 I want to be upfront: I used **Claude** as a coding assistant on this mod.
 
 That doesn't mean it's vibe-coded slop. I spent days reading the source
-of Phobos, LootingBots, and QuestingBot, and built custom debug overlays
-in Raid Review so I could *see* what every mod was doing per-frame before
-writing a single line of ORBIT. I'm the architect; the LLM is a productivity
-tool - same as a senior dev using Stack Overflow doesn't make them a fraud.
+of Phobos, and built custom debug overlays in Raid Review
+so I could *see* what every mod was doing per-frame before writing a
+single line of ORBIT. I'm the architect; the LLM is a productivity tool -
+same as a senior dev using Stack Overflow doesn't make them a fraud.
 
 I have 10+ years of professional dev experience. I know what I'm shipping.
 
@@ -231,13 +230,10 @@ was written, give it a try.
 
 ### Credits
 
-A huge thank you to the authors listed below - their MIT-licensed code formed the foundation I built ORBIT on top of.
-> ORBIT reuses code from **Phobos** and **LootingBots**, under the MIT license. Permission requests to both authors are in progress.
-> ORBIT will return to the Hub once cleared.
+A huge thank you to the authors listed below.
 
 -  [Phobos](https://discord.com/channels/875684761291599922/1337131427803955200) by [janky](https://forge.sp-tarkov.com/user/72916/jankytheclown) - the original advection-field
-  cell dispatch that ORBIT is build around.
-- [LootingBots](https://forge.sp-tarkov.com/mod/812/looting-bots) by [Skwizzy](https://forge.sp-tarkov.com/user/28069/skwizzy) and [ArchangelWTF](https://forge.sp-tarkov.com/user/52282/archangelwtf) - what lets ORBIT's bots open containers and grab gear.
+  cell dispatch that ORBIT is build around (MIT, used with permission).
 - [QuestingBot](https://forge.sp-tarkov.com/mod/1109/questing-bots) by [danW](https://forge.sp-tarkov.com/user/27632/danw) - inspired the quest-routing concept, no code reused.
 - [SAIN](https://forge.sp-tarkov.com/mod/791/sain-solarints-ai-modifications-full-ai-combat-system-replacement) by [Solarint](https://forge.sp-tarkov.com/user/27463/solarint), [ArchangelWTF](https://forge.sp-tarkov.com/user/52282/archangelwtf) and [DrakiaXYZ](https://forge.sp-tarkov.com/user/27605/drakiaxyz) - without it, no personality system to plug into
 - [BigBrain](https://forge.sp-tarkov.com/mod/902/bigbrain) by [DrakiaXYZ](https://forge.sp-tarkov.com/user/27605/drakiaxyz)

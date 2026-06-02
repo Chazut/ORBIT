@@ -1,7 +1,7 @@
 using EFT.Interactive;
 using Orbit.Entities;
 using Orbit.Helpers;
-using Orbit.Inventory;
+using Orbit.Looting;
 using Orbit.Navigation;
 using Orbit.Systems;
 using UnityEngine;

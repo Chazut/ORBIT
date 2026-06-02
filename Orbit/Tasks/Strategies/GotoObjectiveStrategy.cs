@@ -6,7 +6,7 @@ using EFT;
 using Orbit.Core;
 using Orbit.Entities;
 using Orbit.Helpers;
-using Orbit.Inventory;
+using Orbit.Looting;
 using Orbit.Navigation;
 using Orbit.Systems;
 using Orbit.Tasks.Actions;

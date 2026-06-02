@@ -13,8 +13,7 @@ using Orbit.Brain;
 using Orbit.Config;
 using Orbit.Core;
 using Orbit.Interop;
-using Orbit.Inventory;
-using Orbit.Inventory.Patches;
+using Orbit.Looting;
 using Orbit.Patches;
 using Orbit.UI;
 using SPT.Reflection.Patching;
@@ -224,11 +223,9 @@ public class Plugin : BaseUnityPlugin
             Log.Error($"ORBIT config bind failed (sub-systems will degrade to defaults): {ex}");
         }
 
-        // Prices need to be loaded before any bot looks at a loot value
-        // (GetItemPrice returns 0 until then, so min-loot-value filters
-        // reject everything). HandbookClass isn't always ready at this
-        // point, so a coroutine polls for it.
-        StartCoroutine(LoadValuatorPricesWhenReady());
+        // HandbookClass becomes available once GameWorld is up. ItemPriceLookup
+        // reads it lazily per query — no upfront preload needed.
+        StartCoroutine(WaitForHandbook());
 
         Log.Info($"ORBIT {OrbitVersion} initialised");
 
@@ -306,29 +303,20 @@ public class Plugin : BaseUnityPlugin
         Log.Info($"ORBIT {OrbitVersion} fully loaded — BrainManager wired");
     }
 
-    private IEnumerator LoadValuatorPricesWhenReady()
+    private IEnumerator WaitForHandbook()
     {
         var attempts = 0;
         while (Singleton<HandbookClass>.Instance == null)
         {
             attempts++;
-            if (attempts > 60) // 60 × 1s = 1 min — give up rather than spin forever
+            if (attempts > 60)
             {
-                Log.Error("HandbookClass never became available; ItemValuator stays empty (bots will treat all loot as worthless)");
+                Log.Error("HandbookClass never became available; ItemPriceLookup will return 0 (bots treat all loot as worthless)");
                 yield break;
             }
             yield return new WaitForSeconds(1f);
         }
-
-        if (LootConfig.ItemValuator == null)
-        {
-            yield break; // LootConfig.Init must have failed earlier — nothing to populate.
-        }
-
-        Log.Info($"HandbookClass ready after {attempts}s — triggering ItemValuator price load");
-        // Fire-and-forget — UpdatePricesAsync handles its own errors and
-        // clears the in-flight flag inside a finally block.
-        _ = LootConfig.ItemValuator.UpdatePricesAsync();
+        Log.Info($"HandbookClass ready after {attempts}s — ItemPriceLookup is live");
     }
 
     /// <summary>

@@ -2,13 +2,11 @@ using System.Collections.Generic;
 using EFT.Interactive;
 using Orbit.Entities;
 using Orbit.Helpers;
-using Orbit.Inventory;
 using Orbit.Looting;
 using Orbit.Navigation;
 using Orbit.Sain;
 using Orbit.Systems;
 using UnityEngine;
-using LootKind = Orbit.Looting.LootKind;
 
 namespace Orbit.Tasks.Actions;
 
@@ -466,13 +464,13 @@ public class LootContainerAction(AgentData dataset, WaypointSystem waypointSyste
 
 // ── Per-bot loot state ──────────────────────────────────────────────
 //
-// Wraps the MonoBehaviour LootBrain attached to the bot's GameObject,
+// Wraps the MonoBehaviour loot handler attached to the bot's GameObject,
 // sets up the target, kicks off the async loot, and reports completion
 // back to the dispatch-layer action.
 
 internal class BotLootState
 {
-    // Hard cap on how long we'll wait for LootBrain.LootTaskRunning to
+    // Hard cap on how long we'll wait for loot handler.LootTaskRunning to
     // clear. The brain has its own internal timeout (LootConfig.LootTimeout
     // default 180s) backed by a CancellationTokenSource — but if
     // something inside doesn't honour the cancel (a hung NavMesh
@@ -526,7 +524,7 @@ internal class BotLootState
             _ => LootKind.None
         };
 
-        // LootBrain expects an InteractableObject — Exfil targets share
+        // loot handler expects an InteractableObject — Exfil targets share
         // a common MonoBehaviour base with lootables but aren't
         // InteractableObject, so cast explicitly and bail if it fails.
         var loot = _location.Target as InteractableObject;
@@ -540,7 +538,7 @@ internal class BotLootState
 
         // Locked containers (key/keycard required, e.g. weapon cases
         // inside locked resort rooms) can't be opened by a bot. The
-        // LootBrain would sit on the open animation forever. Skip
+        // loot handler would sit on the open animation forever. Skip
         // cleanly — POI gets squad-blacklisted upstream so we don't
         // keep returning to it.
         if (loot is LootableContainer container
@@ -601,7 +599,7 @@ internal class BotLootState
             return;
         }
 
-        // Brain-watchdog: LootBrain's own CancellationTokenSource caps
+        // Brain-watchdog: loot handler's own CancellationTokenSource caps
         // the async task at LootConfig.LootTimeout, but if a coroutine
         // inside doesn't honour cancel (hung handbook lookup, vanished
         // interaction hook), LootTaskRunning stays true and the bot is
@@ -629,7 +627,7 @@ internal class BotLootState
             return;
         }
 
-        // LootBrain clears LootTaskRunning when the async loot finishes
+        // loot handler clears LootTaskRunning when the async loot finishes
         // (success OR timeout/cancellation). Compare Stats.Looted before
         // and after to determine whether anything was actually taken.
         if (!_brain.LootTaskRunning)
@@ -654,8 +652,7 @@ internal class BotLootState
         {
             try
             {
-                var log = new BotLog(_agent.Bot);
-                LootHelpers.InteractContainer(container, _agent.Bot, EFT.EInteractionType.Close, log);
+                _agent.Bot?.LootOpener?.Interact(container, EFT.EInteractionType.Close);
             }
             catch (System.Exception e)
             {

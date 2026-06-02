@@ -6,7 +6,7 @@ using EFT.Interactive;
 using Orbit.Config;
 using Orbit.Entities;
 using Orbit.Helpers;
-using Orbit.Inventory;
+using Orbit.Looting;
 using Orbit.Navigation;
 using Orbit.Sain;
 using UnityEngine;
@@ -2347,7 +2347,7 @@ public class WaypointSystem
     }
 
     /// <summary>
-    /// Sum of <see cref="ItemValuator"/> handbook prices for every item
+    /// Sum of handbook prices for every item
     /// in every Container + LooseLoot waypoint of the cell. Returns 0 if
     /// the valuator isn't initialised yet (raid still loading) or the
     /// cell has no loot waypoints.
@@ -2355,7 +2355,6 @@ public class WaypointSystem
     public float SumCellLootValue(Vector2Int cell)
     {
         if (!IsValidCell(cell)) return 0f;
-        if (LootConfig.ItemValuator == null) return 0f;
         ref var cellRef = ref _cells[cell.x, cell.y];
         if (!cellRef.HasWaypoints) return 0f;
         var sum = 0f;
@@ -2376,7 +2375,7 @@ public class WaypointSystem
         {
             if (loc.Target is LootItem li && li.Item != null)
             {
-                return LootConfig.ItemValuator.GetItemPrice(li.Item, null);
+                return ItemPriceLookup.GetPrice(li.Item);
             }
             if (loc.Target is LootableContainer container
                 && container.ItemOwner?.RootItem is SearchableItemItemClass searchable)
@@ -2392,7 +2391,7 @@ public class WaypointSystem
                         foreach (var item in grid.Items)
                         {
                             if (item == null) continue;
-                            sum += LootConfig.ItemValuator.GetItemPrice(item, null);
+                            sum += ItemPriceLookup.GetPrice(item);
                         }
                     }
                 }

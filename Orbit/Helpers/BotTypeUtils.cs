@@ -1,6 +1,5 @@
 using System;
 using EFT;
-using Orbit.Inventory;
 
 namespace Orbit.Helpers;
 
@@ -88,24 +87,6 @@ public static class BotTypeUtils
 
     public static bool IsBotEnabled(this ExtractFaction enabledTypes, WildSpawnType botType)
         => ((BotType)enabledTypes).IsBotEnabled(botType);
-
-    /// <summary>
-    /// Convenience overload for the loot-brain context: PlayerScavs
-    /// resolve via <see cref="LootBrain.IsPlayerScav"/> (so the
-    /// PlayerScav flag wins over the assault WildSpawnType the brain's
-    /// bot was originally spawned as), everything else falls through to
-    /// the WildSpawnType resolver.
-    /// </summary>
-    public static bool IsBotEnabledForBrain(this LootingFaction enabledTypes, LootBrain brain)
-        => ((BotType)enabledTypes).IsBotEnabledForBrain(brain);
-
-    public static bool IsBotEnabledForBrain(this BotType enabledTypes, LootBrain brain)
-    {
-        if (brain.IsPlayerScav)
-            return enabledTypes.HasPlayerScav();
-        var role = brain.BotOwner.Profile.Info.Settings.Role;
-        return enabledTypes.IsBotEnabled(role);
-    }
 
     public static bool IsBotEnabled(this BotType enabledTypes, WildSpawnType botType)
     {
