@@ -23,7 +23,7 @@ namespace Orbit;
 
 /// <summary>
 /// BepInEx entry point. Owns the F12 configuration surface for every
-/// tunable knob the dispatcher / inventory / SAIN integration reads at
+/// tunable knob the dispatcher / looting / SAIN integration reads at
 /// runtime. <see cref="LogSource"/> exposes the BepInEx ManualLogSource
 /// consumed by <see cref="Log"/> — named <c>LogSource</c> rather than
 /// <c>Log</c> so the static <see cref="Orbit.Log"/> helper class doesn't

@@ -707,7 +707,7 @@ public class WaypointSystem
 
     /// <summary>
     /// Looks for an unlooted Corpse waypoint any squad member can see
-    /// within <see cref="LootConfig.DetectCorpseDistance"/>. Returns the
+    /// within <see cref="LootConfig.DetectDistance"/>. Returns the
     /// first match or null if no opportunistic loot target exists.
     /// </summary>
     public Waypoint TryFindOpportunisticCorpse(Squad squad)
@@ -715,9 +715,9 @@ public class WaypointSystem
         if (squad == null || squad.Members.Count == 0) return null;
         var leaderRole = squad.Leader?.Bot?.Profile?.Info?.Settings?.Role;
         if (!leaderRole.HasValue) return null;
-        if (!(LootConfig.CorpseLootingEnabled?.Value ?? LootingFaction.None).IsBotEnabled(leaderRole.Value)) return null;
+        if (!(LootConfig.LootingEnabled?.Value ?? LootingFaction.None).IsBotEnabled(leaderRole.Value)) return null;
 
-        var maxDist = LootConfig.DetectCorpseDistance?.Value ?? 0f;
+        var maxDist = LootConfig.DetectDistance?.Value ?? 0f;
         var maxDistSqr = maxDist * maxDist;
 
         for (var m = 0; m < squad.Members.Count; m++)
@@ -2042,13 +2042,9 @@ public class WaypointSystem
         switch (loc.Category)
         {
             case WaypointCategory.ContainerLoot:
-                maxDist = LootConfig.DetectContainerDistance?.Value ?? float.MaxValue;
-                break;
             case WaypointCategory.LooseLoot:
-                maxDist = LootConfig.DetectItemDistance?.Value ?? float.MaxValue;
-                break;
             case WaypointCategory.Corpse:
-                maxDist = LootConfig.DetectCorpseDistance?.Value ?? float.MaxValue;
+                maxDist = LootConfig.DetectDistance?.Value ?? float.MaxValue;
                 break;
             default:
                 return true; // Quest/Synthetic/Exfil aren't loot — no detour cap

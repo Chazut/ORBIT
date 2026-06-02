@@ -429,9 +429,9 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
         var role = agent.Bot.Profile.Info.Settings.Role;
         return location.Category switch
         {
-            WaypointCategory.ContainerLoot => (LootConfig.ContainerLootingEnabled?.Value ?? LootingFaction.None).IsBotEnabled(role),
-            WaypointCategory.LooseLoot => (LootConfig.LooseItemLootingEnabled?.Value ?? LootingFaction.None).IsBotEnabled(role),
-            WaypointCategory.Corpse => (LootConfig.CorpseLootingEnabled?.Value ?? LootingFaction.None).IsBotEnabled(role),
+            WaypointCategory.ContainerLoot
+            or WaypointCategory.LooseLoot
+            or WaypointCategory.Corpse => (LootConfig.LootingEnabled?.Value ?? LootingFaction.None).IsBotEnabled(role),
             _ => false
         };
     }
