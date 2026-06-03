@@ -304,10 +304,8 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
     // the pre-personality behaviour.
     private static bool ShouldSprintToObjective(Agent agent, float startDistSqr)
     {
-        var role = agent.Bot?.Profile?.Info?.Settings?.Role;
-        if (role.HasValue && role.Value.IsScav()) return false;
+        if (!SprintGate.IsAllowedByFaction(agent)) return false;
         var propensity = agent.Squad?.Personality?.SprintPropensity ?? 0.5f;
-        if (propensity <= 0.001f) return false; // never sprint
         if (propensity >= 0.999f) return true;  // always sprint, even close
         // Higher propensity shrinks the walk-only window so the bot
         // starts sprinting from closer distances.
