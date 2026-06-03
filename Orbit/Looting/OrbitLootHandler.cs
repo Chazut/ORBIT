@@ -32,7 +32,7 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
         EquipmentSlot.FirstPrimaryWeapon, EquipmentSlot.SecondPrimaryWeapon, EquipmentSlot.Holster,
         EquipmentSlot.Headwear, EquipmentSlot.Earpiece, EquipmentSlot.FaceCover, EquipmentSlot.Eyewear,
         EquipmentSlot.ArmorVest, EquipmentSlot.TacticalVest, EquipmentSlot.Backpack,
-        EquipmentSlot.Pockets,
+        EquipmentSlot.Pockets, EquipmentSlot.Dogtag,
     };
 
     // Scavs + other bot factions: Scabbard (melee) is lootable. PMC corpses
@@ -43,7 +43,7 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
         EquipmentSlot.FirstPrimaryWeapon, EquipmentSlot.SecondPrimaryWeapon, EquipmentSlot.Holster,
         EquipmentSlot.Headwear, EquipmentSlot.Earpiece, EquipmentSlot.FaceCover, EquipmentSlot.Eyewear,
         EquipmentSlot.ArmorVest, EquipmentSlot.TacticalVest, EquipmentSlot.Backpack,
-        EquipmentSlot.Pockets, EquipmentSlot.Scabbard,
+        EquipmentSlot.Pockets, EquipmentSlot.Scabbard, EquipmentSlot.Dogtag,
     };
 
     // Slots whose contents are hidden until the bot searches them. Other
@@ -604,6 +604,14 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
         if (item is ThrowWeapItemClass throwable && throwable.ThrowType == ThrowWeapType.frag_grenade)
         {
             reason = "frag grenade";
+            return true;
+        }
+        // Dogtags: always picked up, regardless of perSlot value or scav
+        // random roll. Quest hand-ins ("Tarkov Shooter Part X" etc.) and
+        // PMC trophies — a real player never walks past one.
+        if (item.GetItemComponent<DogtagComponent>() != null)
+        {
+            reason = "dogtag";
             return true;
         }
         reason = null;
