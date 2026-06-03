@@ -292,24 +292,16 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
         entity.Objective.Status = ObjectiveStatus.None;
     }
 
-    // Regular scavs (assault/assaultGroup) never sprint to an objective —
-    // they wander, they don't hustle. Everyone else (PMCs, Goons, raiders,
-    // bosses) sprints when far and walks on the final approach. Combat
-    // sprint is decided by SAIN, not us.
-    //
-    // SAIN personality layer (PMC only): squad.Personality.SprintPropensity
-    // is a 0..1 value rolled from the archetype table that further gates
-    // when this agent sprints. 0 = never sprint (Timmy walks); 1 = always
-    // sprint, even within the final 50m approach. Default 0.5 matches
-    // the pre-personality behaviour.
+    // Sprint-to-objective decision. Non-sprinting factions (scavs, Timmy)
+    // are filtered by SprintGate; PMCs sprint when far and walk on the final
+    // approach, with the walk window shrinking as SprintPropensity rises.
+    // Combat sprint is decided by SAIN.
     private static bool ShouldSprintToObjective(Agent agent, float startDistSqr)
     {
         if (!SprintGate.IsAllowedByFaction(agent)) return false;
         var propensity = agent.Squad?.Personality?.SprintPropensity ?? 0.5f;
-        if (propensity >= 0.999f) return true;  // always sprint, even close
-        // Higher propensity shrinks the walk-only window so the bot
-        // starts sprinting from closer distances.
-        var walkApproachScale = 1.5f - propensity; // 0.2→1.3, 0.5→1.0, 0.8→0.7
+        if (propensity >= 0.999f) return true;
+        var walkApproachScale = 1.5f - propensity;
         var effectiveWalkSqr = WalkApproachDistanceSqr * walkApproachScale * walkApproachScale;
         return startDistSqr > effectiveWalkSqr;
     }

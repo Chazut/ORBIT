@@ -9,11 +9,11 @@ public interface ILootHandler
     LootStats Stats { get; }
     bool LootTaskRunning { get; }
 
-    InteractableObject ActiveLoot { get; set; }
-    LootKind ActiveLootType { get; set; }
-    Vector3 Destination { get; set; }
-    Vector3 LootObjectPosition { get; set; }
-    bool ForceBrainEnabled { get; set; }
+    InteractableObject CurrentTarget { get; set; }
+    LootKind CurrentTargetKind { get; set; }
+    Vector3 ApproachPosition { get; set; }
+    Vector3 TargetWorldPosition { get; set; }
+    bool ForceEnabled { get; set; }
 
     void Init(BotOwner bot);
     void StartLooting();

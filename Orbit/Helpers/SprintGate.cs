@@ -3,11 +3,9 @@ using Orbit.Entities;
 namespace Orbit.Helpers;
 
 /// <summary>
-/// Faction- and personality-level gate that decides whether a bot is
-/// ever allowed to sprint. Scavs (assault / assaultGroup) never sprint —
-/// they wander, they don't hustle. PMCs with SprintPropensity rolled to
-/// (near-)zero (Timmy) also never sprint. Distance-based ramp-up is
-/// handled at the call site.
+/// Faction- and personality-level sprint eligibility. Scavs never sprint;
+/// PMCs with near-zero SprintPropensity (Timmy) never sprint. Distance-based
+/// ramp-up is handled at the call site.
 /// </summary>
 public static class SprintGate
 {

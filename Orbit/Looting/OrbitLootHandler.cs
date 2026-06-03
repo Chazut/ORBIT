@@ -15,11 +15,8 @@ namespace Orbit.Looting;
 
 public class OrbitLootHandler : MonoBehaviour, ILootHandler
 {
-    // Fallback gate when the bot has no archetype-resolved threshold. Used
-    // by PlayerScavs (no SAIN brain, but PMC-like loot behaviour) and as a
-    // safety net for any PMC where SAIN async-attach is still pending.
-    // 5,000₽ matches the LB-era ScavLootThreshold so PlayerScavs keep a
-    // similar feel to pre-rewrite ORBIT.
+    // Fallback per-slot threshold for bots without an archetype-resolved value
+    // (PlayerScavs, or PMCs while SAIN attach is still pending).
     internal const float DefaultMinPickupPrice = 5000f;
     private const int ContainerOpenAnimMs = 2500;
     private const int InitialSearchMs = 1500;
@@ -35,9 +32,8 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
         EquipmentSlot.Pockets, EquipmentSlot.Dogtag,
     };
 
-    // Scavs + other bot factions: Scabbard (melee) is lootable. PMC corpses
-    // drop the slot — matches EFT live behaviour where PMC melee is bound to
-    // the body and stays with it.
+    // Non-PMC corpses keep Scabbard (melee) lootable. PMC melee is body-bound
+    // in live and excluded above.
     private static readonly EquipmentSlot[] CorpseLootableSlotsNonPmc =
     {
         EquipmentSlot.FirstPrimaryWeapon, EquipmentSlot.SecondPrimaryWeapon, EquipmentSlot.Holster,
@@ -46,9 +42,8 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
         EquipmentSlot.Pockets, EquipmentSlot.Scabbard, EquipmentSlot.Dogtag,
     };
 
-    // Slots whose contents are hidden until the bot searches them. Other
-    // slots (helmet, weapons, scabbard, etc.) are visible on the body and
-    // can be grabbed without a reveal cycle.
+    // Slots that require a search animation (contents hidden until inspected).
+    // Other slots are visible on the body and grabbed without a reveal cycle.
     private static readonly HashSet<EquipmentSlot> SearchableCorpseSlots = new()
     {
         EquipmentSlot.TacticalVest, EquipmentSlot.ArmorVest,
@@ -61,21 +56,21 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
     public LootStats Stats { get; } = new();
     public bool LootTaskRunning { get; private set; }
 
-    public InteractableObject ActiveLoot { get; set; }
-    public LootKind ActiveLootType { get; set; } = LootKind.None;
-    public Vector3 Destination { get; set; }
-    public Vector3 LootObjectPosition { get; set; }
-    public bool ForceBrainEnabled { get; set; }
+    public InteractableObject CurrentTarget { get; set; }
+    public LootKind CurrentTargetKind { get; set; } = LootKind.None;
+    public Vector3 ApproachPosition { get; set; }
+    public Vector3 TargetWorldPosition { get; set; }
+    public bool ForceEnabled { get; set; }
 
     private string Nick => _bot?.GetPlayer?.Profile?.Nickname ?? "(no-bot)";
 
     public void Init(BotOwner bot)
     {
         _bot = bot;
-        Stats.InitialNetWorth = ItemPriceLookup.SumInventoryWorth(bot);
-        Stats.NetWorth = Stats.InitialNetWorth;
-        Stats.Looted = 0f;
-        Log.Debug($"OrbitLootHandler.Init({Nick}): initialNetWorth={Stats.InitialNetWorth:N0}₽, minPickupFallback={DefaultMinPickupPrice:N0}₽");
+        Stats.SpawnValue = ItemPriceLookup.SumInventoryWorth(bot);
+        Stats.InventoryValue = Stats.SpawnValue;
+        Stats.TotalGained = 0f;
+        Log.Debug($"OrbitLootHandler.Init({Nick}): spawnValue={Stats.SpawnValue:N0}₽, minPickupFallback={DefaultMinPickupPrice:N0}₽");
     }
 
     public void StartLooting()
@@ -85,9 +80,9 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
             Log.Debug($"OrbitLootHandler.StartLooting({Nick}): IGNORED — already running");
             return;
         }
-        if (_bot == null || ActiveLoot == null || ActiveLootType == LootKind.None)
+        if (_bot == null || CurrentTarget == null || CurrentTargetKind == LootKind.None)
         {
-            Log.Warning($"OrbitLootHandler.StartLooting({Nick}): IGNORED — bot={_bot != null}, ActiveLoot={ActiveLoot?.name}, kind={ActiveLootType}");
+            Log.Warning($"OrbitLootHandler.StartLooting({Nick}): IGNORED — bot={_bot != null}, target={CurrentTarget?.name}, kind={CurrentTargetKind}");
             return;
         }
 
@@ -98,10 +93,10 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
         Stats.LastMaxPerSlotSeen = 0f;
         Stats.LastHadBypassItem = false;
 
-        Log.Info($"OrbitLootHandler.StartLooting({Nick}): kind={ActiveLootType}, target={ActiveLoot.name}, minPrice={GetMinPickupPrice():N0}₽");
+        Log.Info($"OrbitLootHandler.StartLooting({Nick}): kind={CurrentTargetKind}, target={CurrentTarget.name}, minPrice={GetMinPickupPrice():N0}₽");
 
-        var loot = ActiveLoot;
-        var kind = ActiveLootType;
+        var loot = CurrentTarget;
+        var kind = CurrentTargetKind;
         var ct = _cts.Token;
 
         _ = RunAsync(loot, kind, ct);
@@ -192,11 +187,8 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
         }
         else
         {
-            // Walk each top-level child of the container's RootItem (the
-            // container itself is a world fixture — never picked). Tree-walk
-            // emits grid-content leaves before their wrapper so wallets,
-            // pouches etc. get drained inside-out, avoiding double-pick on
-            // already-moved sub-items.
+            // RootItem is the container fixture itself (not pickable); walk its
+            // immediate children only.
             var drain = new List<DrainEntry>();
             foreach (var child in CollectImmediateChildren(rootItem))
                 EnumerateItemsForDrain(child, "", drain);
@@ -217,11 +209,6 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
 
     private async Task LootCorpseAsync(Corpse corpse, CancellationToken ct)
     {
-        // corpse.Item is the player's equipment composite. We enumerate
-        // slots explicitly (skip SecuredContainer) and apply a per-slot
-        // search delay scaled by the number of items in that slot —
-        // mimics the player who inspects the rig, then the backpack,
-        // then the pockets, etc.
         var equip = corpse.Item;
         if (equip == null)
         {
@@ -239,19 +226,10 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
         var isPmc = corpse.Side == EPlayerSide.Bear || corpse.Side == EPlayerSide.Usec;
         var lootableSlots = isPmc ? CorpseLootableSlotsPmc : CorpseLootableSlotsNonPmc;
 
-        // Build a single chronological queue. Two parallel tracks share
-        // the timeline but neither overlaps with itself:
-        //   - Visible track: helmet → headset → weapons, each grab spaced
-        //     by InstantGrabDelayMs (sequential thinking).
-        //   - Search track: backpack, then vest, then pockets — one slot
-        //     at a time. Within a slot, items are revealed progressively.
-        //     A slot's search starts after the previous slot's last item
-        //     reveal.
-        // Both tracks run in parallel timeline-wise, but the bot drains
-        // items in revealMs order so we get the natural interleave.
-        // Randomize slot order so the bot doesn't always search backpack
-        // first, vest second, etc. The two tracks (visible / searchable)
-        // are shuffled independently.
+        // Two interleaved timelines merged into one chronological queue:
+        // visible-track grabs are spaced by InstantGrabDelayMs, search-track
+        // slots are sequential with progressive per-item reveal. Slot order
+        // is randomised per track for natural variation.
         var visibleOrder = lootableSlots.Where(s => !SearchableCorpseSlots.Contains(s)).OrderBy(_ => Random.value).ToList();
         var searchOrder = lootableSlots.Where(s => SearchableCorpseSlots.Contains(s)).OrderBy(_ => Random.value).ToList();
         Log.Debug($"OrbitLootHandler.Corpse({Nick}, {corpse.name}): side={corpse.Side} pmc={isPmc} visibleOrder=[{string.Join(",", visibleOrder)}] searchOrder=[{string.Join(",", searchOrder)}]");
@@ -319,12 +297,10 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
         }
     }
 
-    // Items become "discoverable" progressively as the bot searches. The
-    // first item appears after InitialSearchMs, then every PerItemRevealMs
-    // a new one is revealed. The pickup grabs each item as soon as its
-    // reveal time has passed — so if a grab takes longer than the reveal
-    // cadence, the next item is already visible and the bot moves straight
-    // to it. If a grab is fast, the bot waits for the next reveal.
+    // Progressive reveal: each item becomes discoverable at
+    // InitialSearchMs + i × PerItemRevealMs (capped). Grabs fire as soon as
+    // the reveal time has elapsed, so a fast grab waits for the next reveal
+    // and a slow grab transitions straight to an already-visible item.
     private async Task DrainProgressiveAsync(List<DrainEntry> items, CancellationToken ct)
     {
         if (items.Count == 0) return;
@@ -366,9 +342,8 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
         await PickupLooseAsync(lootItem.Item, ct);
     }
 
-    // Inventory→inventory transfer (container & corpse path). The open /
-    // inspect animation already played once before this loop, so no
-    // per-item Pickup state — items are dragged across silently.
+    // Silent inventory→inventory transfer (container/corpse path). No per-item
+    // Pickup state — the open/inspect animation already played once.
     private Task<bool> TransferItemAsync(Item item, CancellationToken ct)
         => TransferItemAsync(new DrainEntry(item, ""), ct);
 
@@ -384,8 +359,8 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
         return success;
     }
 
-    // Loose world item path — bot kneels via CurrentManagedState.Pickup
-    // (one-shot animation per loose item).
+    // Loose world item path: kneel animation per pickup via the player's
+    // managed Pickup state.
     private async Task<bool> PickupLooseAsync(Item item, CancellationToken ct)
     {
         var entry = new DrainEntry(item, "");
@@ -437,20 +412,17 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
         name = item.LocalizedName();
         price = ItemPriceLookup.GetPrice(item);
         pricePerSlot = ItemPriceLookup.GetPricePerSlot(item);
-        // Value-gate bypass: cash and frag grenades are always worth taking
-        // regardless of per-slot price OR scav random roll. Cash stacks
-        // dwarf the gate, frags are kept for tactical use, and a vanilla
-        // scav grabs visible cash and grenades off a body too.
+        // Currency / frag grenades / dogtags bypass the value gate and the
+        // scav random roll.
         if (IsValueGateBypass(item, out var bypassReason))
         {
             Stats.LastHadBypassItem = true;
             Log.Debug($"OrbitLootHandler.Pickup({Nick}): {name} at {entry.Path} bypasses value gate ({bypassReason}, perSlot={pricePerSlot:N0}₽)");
             return true;
         }
-        // Bot scavs (not PlayerScavs) roll random per item instead of using
-        // a deterministic threshold. Mirrors vanilla: opportunistic pickups,
-        // not a structured search. PlayerScavs and PMCs fall through to the
-        // per-archetype threshold gate below.
+        // Bot scavs use a per-item random roll instead of a value threshold —
+        // mirrors vanilla opportunistic looting. PlayerScavs and PMCs continue
+        // to the per-archetype gate below.
         if (IsBotScav(_bot))
         {
             var chance = (LootConfig.ScavLootChancePct?.Value ?? 30) / 100f;
@@ -463,10 +435,9 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
             Log.Debug($"OrbitLootHandler.Pickup({Nick}): scav SKIP {name} at {entry.Path} (roll {roll:F2} ≥ {chance:F2}, perSlot={pricePerSlot:N0}₽)");
             return false;
         }
-        // PMC / PlayerScav: per-archetype threshold gate. Track the highest
-        // non-bypass perSlot encountered so the post-loot blacklist can
-        // decide which squadmates would also have rejected this POI (their
-        // threshold > this max → they'd skip too).
+        // PMC / PlayerScav: per-archetype threshold gate. Tracks the highest
+        // non-bypass perSlot so the post-loot blacklist can identify which
+        // squadmates would also reject this POI.
         var minPrice = GetMinPickupPrice();
         if (pricePerSlot > Stats.LastMaxPerSlotSeen)
             Stats.LastMaxPerSlotSeen = pricePerSlot;
@@ -478,13 +449,8 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
         return true;
     }
 
-    /// <summary>
-    /// True if this bot is a bot-controlled scav (WildSpawnType.assault +
-    /// not a PlayerScav). Used to route the loot gate through the random-
-    /// roll branch instead of the per-archetype threshold. PlayerScavs
-    /// share Side=Savage but behave PMC-style in ORBIT and use the normal
-    /// threshold path.
-    /// </summary>
+    // True for AI scavs (Savage side, excluding PlayerScavs which are
+    // routed through the PMC-style threshold path).
     private static bool IsBotScav(BotOwner bot)
     {
         var profile = bot?.Profile;
@@ -524,26 +490,18 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
 
     private void RecordPickup(string name, float price, string path)
     {
-        Stats.NetWorth += price;
-        Stats.Looted = Stats.NetWorth - Stats.InitialNetWorth;
+        Stats.InventoryValue += price;
+        Stats.TotalGained = Stats.InventoryValue - Stats.SpawnValue;
         Stats.LastItemsTaken = true;
         var pathSuffix = string.IsNullOrEmpty(path) ? "" : $" at {path}";
-        Log.Info($"OrbitLootHandler.Pickup({Nick}): ✓ PICKED {name}{pathSuffix} ({price:N0}₽), netWorth={Stats.NetWorth:N0}₽, looted={Stats.Looted:N0}₽");
+        Log.Info($"OrbitLootHandler.Pickup({Nick}): ✓ PICKED {name}{pathSuffix} ({price:N0}₽), invValue={Stats.InventoryValue:N0}₽, gained={Stats.TotalGained:N0}₽");
     }
 
-    // Tree-walk for drain ordering.
-    //   - Items with grid contents (Wallet, Rig, Backpack, Pockets): emit
-    //     children FIRST so loose grid contents are picked before their
-    //     wrapper. Otherwise picking the wrapper also moves all sub-items
-    //     and the subsequent transaction on each sub-item fails (no longer
-    //     in the corpse/container).
-    //   - Items with only slot children (Weapon + mods, helmet + face-shield,
-    //     armor + plates): emit SELF first, then children — natural mod
-    //     chain order. Plates / mods are still pickable individually while
-    //     the host is still on the corpse.
-    //   - Non-RaidModdable weapon mods (barrel, stock, handguard, etc.)
-    //     are physically not removable in raid by a player and are dropped
-    //     from the queue entirely.
+    // Recursive drain enumeration. Containers with grid contents (wallets,
+    // rigs, backpacks, pockets) emit children before the wrapper so loose
+    // contents are extracted before the wrapper itself is moved. Slot chains
+    // (weapon + mods, armor + plates) emit root-first. Non-RaidModdable
+    // weapon mods are skipped — they can't be detached in raid.
     private static void EnumerateItemsForDrain(Item item, string parentPath, List<DrainEntry> output)
     {
         if (item == null) return;
@@ -591,13 +549,9 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
         return list;
     }
 
-    // Items that always get picked regardless of per-slot value. Cash is
-    // dense by definition (a single 1x1 stack is hundreds of thousands ₽
-    // but a small fraction of that per slot at low stack counts — and the
-    // bot's value lookup doesn't always multiply by stack). Frag grenades
-    // are kept for tactical use, not resale value. Smokes / flashes / gas
-    // stay on the normal gate — they're low-value and not interesting
-    // enough for a Chad to bother carrying.
+    // Items that always get picked regardless of per-slot value or scav roll:
+    // currency stacks, frag grenades (tactical), and dogtags (quest hand-ins).
+    // Smokes / flashes / gas grenades stay on the normal gate.
     private static bool IsValueGateBypass(Item item, out string reason)
     {
         if (item is MoneyItemClass) { reason = "currency"; return true; }
@@ -606,9 +560,6 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
             reason = "frag grenade";
             return true;
         }
-        // Dogtags: always picked up, regardless of perSlot value or scav
-        // random roll. Quest hand-ins ("Tarkov Shooter Part X" etc.) and
-        // PMC trophies — a real player never walks past one.
         if (item.GetItemComponent<DogtagComponent>() != null)
         {
             reason = "dogtag";
@@ -618,9 +569,7 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
         return false;
     }
 
-    // One-line summary of the bot's remaining grid capacity. Logged on
-    // "no slot found" so we can tell at-a-glance whether the bot was
-    // actually full vs the item just didn't fit any shape-wise.
+    // Compact "bp=X/Y free, vest=…, pockets=…" summary used in no-slot logs.
     private static string DescribeFreeSpace(InventoryController inventoryController)
     {
         var equipment = inventoryController?.Inventory?.Equipment;
@@ -657,11 +606,7 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
         sb.Append($"{label}={free}/{totalCells} free");
     }
 
-    /// <summary>
-    /// One unit of drain work — an item to (try to) pick and the breadcrumb
-    /// path to where it lives inside the corpse / container. Path is used
-    /// for logs only; pickup logic reads <see cref="Item"/>.
-    /// </summary>
+    /// <summary>One drain unit: the item to pick and its breadcrumb path for logs.</summary>
     public readonly struct DrainEntry
     {
         public readonly Item Item;

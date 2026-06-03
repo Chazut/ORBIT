@@ -1137,8 +1137,10 @@ public class WaypointSystem
         }
     }
 
-    public Waypoint FindNearbySweepTarget(Vector3 botPos, Squad squad, float radius)
+    public Waypoint FindNearbySweepTarget(Vector3 botPos, Agent agent, float radius)
     {
+        var squad = agent?.Squad;
+        var agentSkips = agent?.ValueSkippedPoiIds;
         var center = WorldToCell(botPos);
         var radSqr = radius * radius;
         // Same-floor preference: track nearest same-floor and nearest
@@ -1166,6 +1168,7 @@ public class WaypointSystem
                     // a cell-wide random pick after each container loot.
                     if (!IsLootCategory(loc.Category)) continue;
                     if (squad != null && squad.CompletedPoiIds.Contains(loc.Id)) continue;
+                    if (agentSkips != null && agentSkips.Contains(loc.Id)) continue;
                     if (_claims.ContainsKey(loc.Id)) continue;
                     if (IsSquadKnownUnreachable(squad, loc.Id)) continue;
                     var distSqr = (loc.Position - botPos).sqrMagnitude;

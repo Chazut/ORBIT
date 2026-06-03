@@ -306,15 +306,12 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
     private readonly HashSet<int> _splinterScratch = new(8);
 
     // Reusable union buffer for splinter-dispatch agent-skip filtering.
-    // Avoids per-call HashSet allocation in the inner UpdateAgents loop.
     private readonly HashSet<int> _agentSkipScratch = new(16);
 
     /// <summary>
-    /// Build a transient exclude set combining the squad-shared splinter
-    /// scratch (POIs already claimed this tick) with the agent's personal
-    /// <c>ValueSkippedPoiIds</c> (POIs this specific agent rejected by their
-    /// own loot threshold). Returns the shared scratch as-is when the
-    /// agent has nothing to add, avoiding allocation on the hot path.
+    /// Combines the shared splinter scratch with the agent's personal
+    /// value-skip set. Returns the base set unchanged when the agent has no
+    /// skips to add.
     /// </summary>
     private HashSet<int> UnionWithAgentSkips(HashSet<int> baseSet, Agent agent)
     {
@@ -379,14 +376,10 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
             var splinterAlreadyDone = agentObjective.SplinterParent != null
                                       && (agentObjective.Status == ObjectiveStatus.Finished
                                           || agentObjective.Status == ObjectiveStatus.Failed);
-            // Cross-anchor sticky splinter: when the squad's anchor flips
-            // mid-flight (leader chain-looting another container in the
-            // same cell), agents already holding a valid splinter shouldn't
-            // be re-rolled — they'd oscillate between random POIs and never
-            // arrive. We keep their splinter if it's still in range of the
-            // new anchor (within the splinter radius); the SplinterParent
-            // reference is rebased below so subsequent ticks see them as
-            // aligned again on the normal path.
+            // Cross-anchor sticky: if the squad anchor flips while the agent
+            // is en route to a still-valid splinter (in range of the new
+            // anchor), keep the current target and rebase SplinterParent
+            // below to avoid an oscillating re-roll.
             var splinterRadius = squad.Personality != null
                 ? squad.Personality.SplinterSearchRadius
                 : Plugin.SplinterSearchRadius.Value;
@@ -410,9 +403,8 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                 // to another follower below.
                 if (agentObjective.SplinterParent != null)
                     _splinterScratch.Add(agentObjective.Location.Id);
-                // Rebase the splinter parent to the squad's CURRENT anchor
-                // so the next tick recognizes alignment on the normal path
-                // without falling through the sticky check again.
+                // Rebase SplinterParent to the squad's current anchor so the
+                // next tick aligns via the standard path.
                 if (splinterStickyAcrossAnchor)
                 {
                     Log.Debug($"{agent} splinter sticky across anchor flip: kept {agentObjective.Location}, rebased parent {agentObjective.SplinterParent} → {squadObjective.Location}");
@@ -467,16 +459,9 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                          && !squad.CompletedPoiIds.Contains(squadObjective.Location.Id)
                          && !agent.ValueSkippedPoiIds.Contains(squadObjective.Location.Id))
                 {
-                    // Leader → anchor itself. For solo squads this is the
-                    // only member, so they always tackle the anchor before
-                    // any splinter; once the anchor is done it ends up in
-                    // CompletedPoiIds and the next pass falls through to
-                    // the splinter branches.
-                    //
-                    // Per-agent value-skip filter: a Chad-leader who already
-                    // rejected this anchor by his own threshold falls through
-                    // to splinter-pick so softer-gated members (or the
-                    // squad's next anchor) can be picked instead.
+                    // Leader takes the anchor itself. Falls through to the
+                    // splinter branches when the anchor is squad-blacklisted
+                    // or in the leader's personal value-skip set.
                     targetLoc = squadObjective.Location;
                     splinterParent = null;
                 }
@@ -500,11 +485,6 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                         // the vertical mismatch with the agent's real Y.
                         searchCenter = activeMain.Position;
                     }
-                    // Per-agent value-skip filter: pre-populate the splinter
-                    // scratch with POIs this specific agent has already
-                    // value-rejected. Softer-gated squadmates can still get
-                    // them next dispatch — this only stops the rejecting
-                    // agent from being sent back.
                     var excludeForRoam = UnionWithAgentSkips(_splinterScratch, agent);
                     var roamSplinter = waypointSystem.FindRoamSplinterForMember(
                         agent.Position, searchCenter, squad, excludeForRoam, roamRadius,

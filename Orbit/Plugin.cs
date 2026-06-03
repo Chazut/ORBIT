@@ -487,7 +487,7 @@ public class Plugin : BaseUnityPlugin
         ScavengeSweepRadius = Config.Bind(mainTune, "Scavenge sweep radius (m)", 10f, new ConfigDescription(
             "After finishing a loot, the bot chains to the nearest LooseLoot/Corpse within this radius. Each candidate is still gated by Loot Coverage %.",
             new AcceptableValueRange<float>(0f, 50f), new ConfigurationManagerAttributes { Order = 66 }));
-        SameFloorLootYTolerance = Config.Bind(mainTune, "Same-floor sweep tolerance (m)", 3f, new ConfigDescription(
+        SameFloorLootYTolerance = Config.Bind(mainTune, "Same-floor sweep tolerance (m)", 2.5f, new ConfigDescription(
             "During chain-loot sweeps, candidates within this vertical Y delta of the bot are treated as 'same floor' and preferred over cross-floor candidates. Two-pass: same-floor first, cross-floor only if nothing same-floor is in range. 0 disables the bias (chain-loot ignores floors). Stops the elevator yo-yo on Resort.",
             new AcceptableValueRange<float>(0f, 10f), new ConfigurationManagerAttributes { Order = 65 }));
         TimeExtractWindowPmc = Config.Bind(mainTune, "Time extract window — PMC (%)", new Vector2(5f, 30f), new ConfigDescription(

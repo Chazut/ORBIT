@@ -143,10 +143,8 @@ public class OrbitBrainLayer : CustomLayer
         _agent.IsActive = false;
         var squad = _agent.Squad;
         _orbit.RemoveAgent(_agent);
-        // Re-evaluate the cumulative extract threshold: the dead member no
-        // longer counts toward squad-total Stats.Looted, and if survivors
-        // already sum above the threshold ExtractRequested must flip
-        // immediately rather than wait for the next loot completion.
+        // Re-evaluate the cumulative extract threshold without the dead
+        // member's contribution, in case survivors already sum above it.
         if (squad != null && squad.Members.Count > 0)
         {
             Orbit.Tasks.Actions.LootContainerAction.ReevaluateExtractForSquad(squad);

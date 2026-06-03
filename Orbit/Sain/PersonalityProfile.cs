@@ -78,10 +78,8 @@ public sealed class PersonalityProfile
     }
 
     /// <summary>
-    /// Per-archetype mini-loot value threshold (scalar — no roll). Read by
-    /// per-agent loot-gate resolution so a Chad and a Rat in the same
-    /// squad reject loot at different price points instead of sharing the
-    /// leader's single threshold.
+    /// Returns the configured per-archetype mini-loot value threshold.
+    /// Scalar — no per-roll sampling.
     /// </summary>
     public static int GetMiniLootThresholdFor(PersonalityArchetype archetype)
     {
