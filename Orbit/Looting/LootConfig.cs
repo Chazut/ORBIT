@@ -18,6 +18,7 @@ public static class LootConfig
     public static ConfigEntry<bool> CorpseRequiresSightOrSquadKill;
     public static ConfigEntry<ExtractFaction> ExtractAllowedFor;
     public static ConfigEntry<float> ExtractAtLootValuePlayerScav;
+    public static ConfigEntry<int> ScavLootChancePct;
 
     private static bool _initialized;
 
@@ -38,6 +39,10 @@ public static class LootConfig
             "Which factions are allowed to be routed to an exfil. Only PMC and PlayerScav have extract dispatch logic in ORBIT.");
         ExtractAtLootValuePlayerScav = config.Bind(section, "PlayerScav: extract at loot value (₽)", 200000f,
             "Once a PlayerScav squad's living members have collectively looted this many roubles, the whole squad bee-lines to the nearest exfil. 0 disables.");
+        ScavLootChancePct = config.Bind(section, "Scav: per-item loot chance (%)", 30,
+            new ConfigDescription(
+                "Bot scavs (NOT PlayerScavs) skip the per-archetype loot-value gate entirely and instead roll this chance per item on corpses, containers, and loose loot. Mirrors vanilla scav behaviour — opportunistic pickups, not deliberate searches. PlayerScavs and PMCs are unaffected.",
+                new AcceptableValueRange<int>(0, 100)));
 
         Log.Info($"LootConfig.Init: DONE — looting={LootingEnabled.Value}, detectDist={DetectDistance.Value}m");
     }

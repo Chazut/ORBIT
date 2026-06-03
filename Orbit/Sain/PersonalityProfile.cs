@@ -78,6 +78,17 @@ public sealed class PersonalityProfile
     }
 
     /// <summary>
+    /// Per-archetype mini-loot value threshold (scalar — no roll). Read by
+    /// per-agent loot-gate resolution so a Chad and a Rat in the same
+    /// squad reject loot at different price points instead of sharing the
+    /// leader's single threshold.
+    /// </summary>
+    public static int GetMiniLootThresholdFor(PersonalityArchetype archetype)
+    {
+        return ResolveTable(archetype).MiniLootValueThreshold;
+    }
+
+    /// <summary>
     /// Roll a profile for the given archetype using the F12 tables. Each
     /// Vector2 range is sampled once; scalars are passed through. Called
     /// at squad registration when the leader is PMC and SAIN personality

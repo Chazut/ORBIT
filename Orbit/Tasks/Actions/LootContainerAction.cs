@@ -110,6 +110,7 @@ public class LootContainerAction(AgentData dataset, WaypointSystem waypointSyste
 
         if (state.Success)
         {
+            var stats = agent.Player?.gameObject?.GetComponent<OrbitLootHandler>()?.Stats;
             switch (location.Category)
             {
                 case WaypointCategory.LooseLoot:
@@ -128,22 +129,22 @@ public class LootContainerAction(AgentData dataset, WaypointSystem waypointSyste
                     }
                     else
                     {
-                        // Bot inspected the item but skipped it (below
-                        // value threshold, inventory full, gear-pickup
-                        // filter). The item is still in the world — another
-                        // squad with a lower threshold might want it. Just
-                        // blacklist for this squad so we don't loop on it.
-                        agent.Squad?.CompletedPoiIds.Add(location.Id);
-                        Log.Debug($"{agent} skipped LooseLoot {location} (no items taken), squad-blacklisted only");
+                        ApplyValueSkipBlacklist(agent, location, stats);
                     }
                     break;
                 case WaypointCategory.ContainerLoot:
                 case WaypointCategory.Corpse:
-                    // Squad has checked this container/corpse; whether
-                    // something was taken or not, the squad knows what's
-                    // in it now and shouldn't revisit.
-                    agent.Squad?.CompletedPoiIds.Add(location.Id);
-                    Log.Debug($"{agent} blacklisted {location} for {agent.Squad} (itemsTaken={state.ItemsTaken}, squad memory size={agent.Squad?.CompletedPoiIds.Count})");
+                    if (state.ItemsTaken)
+                    {
+                        // At least one item taken — squad has consumed
+                        // what they came for. Squad-wide blacklist.
+                        agent.Squad?.CompletedPoiIds.Add(location.Id);
+                        Log.Debug($"{agent} blacklisted {location} for {agent.Squad} (items taken, squad memory size={agent.Squad?.CompletedPoiIds.Count})");
+                    }
+                    else
+                    {
+                        ApplyValueSkipBlacklist(agent, location, stats);
+                    }
                     break;
             }
 
@@ -317,6 +318,127 @@ public class LootContainerAction(AgentData dataset, WaypointSystem waypointSyste
         squad.ExtractRequested = true;
         squad.ExtractRequestedReason = $"loot ≥ {sumThreshold / 1000f:F0}k₽";
         Log.Info($"{squad}: {agent} hit extract threshold ({totalLooted:N0}₽ >= {sumThreshold:N0}₽ = {perMemberSummary} from {resolvedCount} resolved + {unresolvedCount} pending members) — squad will bee-line to nearest eligible exfil");
+    }
+
+    /// <summary>
+    /// Decide who in the squad should personally-blacklist this POI after
+    /// a no-take loot session. Three buckets:
+    ///  - Stats present, no bypass items, items were seen: smart filter —
+    ///    iterate squad members, blacklist for those whose own threshold
+    ///    EXCEEDS the highest perSlot the bot saw (they'd skip too).
+    ///    Members with lower threshold are left alone so they can be
+    ///    dispatched here next tick and pick up what the looter rejected.
+    ///  - Bypass item present (currency / frag) but nothing taken: the
+    ///    no-take is transient (inventory full / TX failure). Per-agent
+    ///    blacklist for the current looter only — squad's other members
+    ///    can still try.
+    ///  - Stats unavailable, no items seen, transaction-level failure:
+    ///    squad-blacklist (current behaviour, avoids loop on a broken POI).
+    /// </summary>
+    private static void ApplyValueSkipBlacklist(Agent agent, Waypoint location, LootStats stats)
+    {
+        if (agent?.Squad == null) return;
+        // Bot scavs use a random per-item roll, not a threshold — the smart
+        // "would other members reject this" calculation doesn't apply.
+        // Squad-blacklist direct: vanilla-style one-shot "checked, moving
+        // on". Mirrors how scavs in vanilla EFT don't deliberately re-loot
+        // bodies they've already passed.
+        if (IsBotScavProfile(agent))
+        {
+            agent.Squad.CompletedPoiIds.Add(location.Id);
+            Log.Debug($"{agent} scav no-take on {location} — direct squad blacklist (random-roll model, no threshold)");
+            return;
+        }
+        if (stats == null || (stats.LastMaxPerSlotSeen <= 0f && !stats.LastHadBypassItem))
+        {
+            agent.Squad.CompletedPoiIds.Add(location.Id);
+            Log.Debug($"{agent} blacklisted {location} for {agent.Squad} after empty / errored no-take (stats={(stats == null ? "null" : "no-items-seen")}, squad memory size={agent.Squad.CompletedPoiIds.Count})");
+            return;
+        }
+        if (stats.LastHadBypassItem)
+        {
+            agent.ValueSkippedPoiIds.Add(location.Id);
+            Log.Debug($"{agent} bypass-item present but no-take (likely inventory-full / TX error) — per-agent blacklist only on {location}");
+            return;
+        }
+        // Smart per-member filter: anyone whose threshold > maxPerSlot would
+        // also skip → add to their personal blacklist. Softer members are
+        // left out so they can clean up next tick.
+        var maxPerSlot = stats.LastMaxPerSlotSeen;
+        var blacklistedNames = new System.Collections.Generic.List<string>();
+        var spareNames = new System.Collections.Generic.List<string>();
+        for (var i = 0; i < agent.Squad.Members.Count; i++)
+        {
+            var m = agent.Squad.Members[i];
+            if (m == null) continue;
+            var memberThreshold = GetOrResolveAgentMiniLootThreshold(m);
+            if (memberThreshold > maxPerSlot)
+            {
+                m.ValueSkippedPoiIds.Add(location.Id);
+                blacklistedNames.Add($"{m.Bot.Profile.Nickname}({memberThreshold:N0}₽)");
+            }
+            else
+            {
+                spareNames.Add($"{m.Bot.Profile.Nickname}({memberThreshold:N0}₽)");
+            }
+        }
+        Log.Debug($"{agent} value-skip on {location} (maxPerSlot={maxPerSlot:N0}₽) — blacklisted for [{string.Join(",", blacklistedNames)}], left for [{string.Join(",", spareNames)}]");
+    }
+
+    /// <summary>
+    /// Lazily resolve the per-agent mini-loot value threshold (the "is
+    /// this single item worth picking" gate). Mirrors
+    /// <see cref="GetOrResolveAgentExtractThreshold"/>: SAIN brain →
+    /// archetype → scalar from F12. Squad personality (rolled from leader)
+    /// is the fallback when SAIN hasn't attached yet. Caches on the
+    /// agent so it's a one-shot lookup per raid. Never returns 0: scavs
+    /// and non-PMC bots without a squad personality fall back to the
+    /// global default so the smart-blacklist filter sees the same value
+    /// the loot gate actually used.
+    /// </summary>
+    internal static float GetOrResolveAgentMiniLootThreshold(Agent agent)
+    {
+        if (agent.OwnMiniLootValueThreshold > 0f) return agent.OwnMiniLootValueThreshold;
+        var role = agent.Bot?.Profile?.Info?.Settings?.Role;
+        if (!role.HasValue) return ResolveFallbackThreshold(agent);
+
+        var isPmc = role.Value.IsPMC();
+        if (isPmc && (Plugin.SainPersonalityEnabled?.Value ?? false))
+        {
+            var brainName = SainPersonality.GetBrainName(agent.Bot);
+            if (string.IsNullOrEmpty(brainName))
+            {
+                // SAIN async-attach still pending — return the squad
+                // fallback for now, retry resolution next call.
+                return ResolveFallbackThreshold(agent);
+            }
+            var archetype = SainPersonality.MapBrainToArchetype(brainName);
+            agent.OwnMiniLootValueThreshold = PersonalityProfile.GetMiniLootThresholdFor(archetype);
+            Log.Info($"{agent} resolved own mini-loot threshold: brain='{brainName}' → {archetype} → {agent.OwnMiniLootValueThreshold:N0}₽");
+            return agent.OwnMiniLootValueThreshold;
+        }
+        // Non-PMC / SAIN-disabled: inherit the squad-rolled value, falling
+        // back to the global default if no squad personality exists (scavs
+        // / Goons that don't get a profile rolled). Without the default
+        // fallback the smart blacklist treats every scav as threshold=0
+        // and never blacklists them while the loot gate is silently using
+        // OrbitLootHandler.DefaultMinPickupPrice (2000₽).
+        return ResolveFallbackThreshold(agent);
+    }
+
+    private static float ResolveFallbackThreshold(Agent agent)
+    {
+        var squadThreshold = agent.Squad?.Personality?.MiniLootValueThreshold ?? 0f;
+        if (squadThreshold > 0f) return squadThreshold;
+        return OrbitLootHandler.DefaultMinPickupPrice;
+    }
+
+    private static bool IsBotScavProfile(Agent agent)
+    {
+        var profile = agent?.Bot?.Profile;
+        if (profile == null) return false;
+        if (profile.Side != EFT.EPlayerSide.Savage) return false;
+        return !profile.WillBeAPlayerScav();
     }
 
     /// <summary>

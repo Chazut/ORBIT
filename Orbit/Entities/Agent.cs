@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using EFT;
 using UnityEngine;
@@ -65,6 +66,29 @@ public class Agent(int id, BotOwner bot, float[] taskScores) : Entity(id, taskSc
     /// becomes the new bar.
     /// </summary>
     public float OwnExtractLootThreshold;
+
+    /// <summary>
+    /// This agent's own MiniLootValueThreshold, rolled from their OWN SAIN
+    /// brain archetype. 0 = not yet resolved (lazy first-time setup,
+    /// retried if SAIN async-attach was still pending). Read by
+    /// OrbitLootHandler's value gate — a Chad with threshold 15k will skip
+    /// items where a Rat with threshold 5k would not, even if they're in
+    /// the same squad. The squad's PersonalityProfile (rolled at squad
+    /// creation from the leader's archetype) is the fallback when SAIN
+    /// can't resolve the bot's individual brain.
+    /// </summary>
+    public float OwnMiniLootValueThreshold;
+
+    /// <summary>
+    /// POIs this agent has personally value-rejected (item perSlot below
+    /// their own threshold and squadmates' bypass items absent). Filtered
+    /// against in splinter dispatch + main-anchor pick so the agent doesn't
+    /// keep being sent back to a POI they've already decided isn't worth
+    /// their time. Squad-level <c>CompletedPoiIds</c> is NOT touched in
+    /// this case — softer-gated squad members (Rat / Normal) can still be
+    /// dispatched to clean up.
+    /// </summary>
+    public readonly HashSet<int> ValueSkippedPoiIds = new();
 
     private readonly BifacialTransform _bodyTransform = bot.Mover.Player.PlayerBones.BodyTransform;
 

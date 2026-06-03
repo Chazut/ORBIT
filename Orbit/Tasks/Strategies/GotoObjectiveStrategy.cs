@@ -305,6 +305,28 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
     // pass so two followers in the same squad don't get handed the same POI.
     private readonly HashSet<int> _splinterScratch = new(8);
 
+    // Reusable union buffer for splinter-dispatch agent-skip filtering.
+    // Avoids per-call HashSet allocation in the inner UpdateAgents loop.
+    private readonly HashSet<int> _agentSkipScratch = new(16);
+
+    /// <summary>
+    /// Build a transient exclude set combining the squad-shared splinter
+    /// scratch (POIs already claimed this tick) with the agent's personal
+    /// <c>ValueSkippedPoiIds</c> (POIs this specific agent rejected by their
+    /// own loot threshold). Returns the shared scratch as-is when the
+    /// agent has nothing to add, avoiding allocation on the hot path.
+    /// </summary>
+    private HashSet<int> UnionWithAgentSkips(HashSet<int> baseSet, Agent agent)
+    {
+        var skips = agent?.ValueSkippedPoiIds;
+        if (skips == null || skips.Count == 0) return baseSet;
+        _agentSkipScratch.Clear();
+        foreach (var id in baseSet) _agentSkipScratch.Add(id);
+        foreach (var id in skips) _agentSkipScratch.Add(id);
+        Log.Debug($"{agent} splinter dispatch: filtering +{skips.Count} agent value-skipped POIs (total exclude={_agentSkipScratch.Count})");
+        return _agentSkipScratch;
+    }
+
     private int UpdateAgents(Squad squad)
     {
         var squadObjective = squad.Objective;
@@ -357,10 +379,30 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
             var splinterAlreadyDone = agentObjective.SplinterParent != null
                                       && (agentObjective.Status == ObjectiveStatus.Finished
                                           || agentObjective.Status == ObjectiveStatus.Failed);
+            // Cross-anchor sticky splinter: when the squad's anchor flips
+            // mid-flight (leader chain-looting another container in the
+            // same cell), agents already holding a valid splinter shouldn't
+            // be re-rolled — they'd oscillate between random POIs and never
+            // arrive. We keep their splinter if it's still in range of the
+            // new anchor (within the splinter radius); the SplinterParent
+            // reference is rebased below so subsequent ticks see them as
+            // aligned again on the normal path.
+            var splinterRadius = squad.Personality != null
+                ? squad.Personality.SplinterSearchRadius
+                : Plugin.SplinterSearchRadius.Value;
+            var splinterStickyAcrossAnchor = !splinterAlreadyDone
+                                             && agentObjective.SplinterParent != null
+                                             && agentObjective.Location != null
+                                             && squadObjective.Location != null
+                                             && agentObjective.SplinterParent != squadObjective.Location
+                                             && !squad.CompletedPoiIds.Contains(agentObjective.Location.Id)
+                                             && WaypointSystem.XzDistanceSqr(agentObjective.Location.Position, squadObjective.Location.Position)
+                                                <= splinterRadius * splinterRadius;
             var aligned = !splinterAlreadyDone
                           && (agentObjective.Location == squadObjective.Location
                               || (agentObjective.SplinterParent != null
-                                  && agentObjective.SplinterParent == squadObjective.Location));
+                                  && agentObjective.SplinterParent == squadObjective.Location)
+                              || splinterStickyAcrossAnchor);
 
             if (aligned && agentObjective.Location != null)
             {
@@ -368,6 +410,14 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                 // to another follower below.
                 if (agentObjective.SplinterParent != null)
                     _splinterScratch.Add(agentObjective.Location.Id);
+                // Rebase the splinter parent to the squad's CURRENT anchor
+                // so the next tick recognizes alignment on the normal path
+                // without falling through the sticky check again.
+                if (splinterStickyAcrossAnchor)
+                {
+                    Log.Debug($"{agent} splinter sticky across anchor flip: kept {agentObjective.Location}, rebased parent {agentObjective.SplinterParent} → {squadObjective.Location}");
+                    agentObjective.SplinterParent = squadObjective.Location;
+                }
                 // Reset Failed back to None so Goto picks the agent back
                 // up and re-submits a move order. Without this, an Exfil
                 // dispatch that stops short (partial nav-path 400m+ off
@@ -414,13 +464,19 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                 else if (i == 0
                          && !anchorReservedForOwnKill
                          && squadObjective.Location != null
-                         && !squad.CompletedPoiIds.Contains(squadObjective.Location.Id))
+                         && !squad.CompletedPoiIds.Contains(squadObjective.Location.Id)
+                         && !agent.ValueSkippedPoiIds.Contains(squadObjective.Location.Id))
                 {
                     // Leader → anchor itself. For solo squads this is the
                     // only member, so they always tackle the anchor before
                     // any splinter; once the anchor is done it ends up in
                     // CompletedPoiIds and the next pass falls through to
                     // the splinter branches.
+                    //
+                    // Per-agent value-skip filter: a Chad-leader who already
+                    // rejected this anchor by his own threshold falls through
+                    // to splinter-pick so softer-gated members (or the
+                    // squad's next anchor) can be picked instead.
                     targetLoc = squadObjective.Location;
                     splinterParent = null;
                 }
@@ -444,8 +500,14 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                         // the vertical mismatch with the agent's real Y.
                         searchCenter = activeMain.Position;
                     }
+                    // Per-agent value-skip filter: pre-populate the splinter
+                    // scratch with POIs this specific agent has already
+                    // value-rejected. Softer-gated squadmates can still get
+                    // them next dispatch — this only stops the rejecting
+                    // agent from being sent back.
+                    var excludeForRoam = UnionWithAgentSkips(_splinterScratch, agent);
                     var roamSplinter = waypointSystem.FindRoamSplinterForMember(
-                        agent.Position, searchCenter, squad, _splinterScratch, roamRadius,
+                        agent.Position, searchCenter, squad, excludeForRoam, roamRadius,
                         roamLooseLoot, roamContainerLoot, roamCorpse, roamSynthetic);
                     if (roamSplinter != null)
                     {
@@ -466,8 +528,9 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                 }
                 else
                 {
+                    var excludeForLoot = UnionWithAgentSkips(_splinterScratch, agent);
                     var splinter = waypointSystem.FindLootSplinterForFollower(
-                        squadObjective.Location, squad, _splinterScratch,
+                        squadObjective.Location, squad, excludeForLoot,
                         squad.Personality != null
                             ? squad.Personality.SplinterSearchRadius
                             : Plugin.SplinterSearchRadius.Value);

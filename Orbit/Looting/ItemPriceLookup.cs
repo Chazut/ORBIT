@@ -21,6 +21,15 @@ public static class ItemPriceLookup
         }
     }
 
+    public static float GetPricePerSlot(Item item)
+    {
+        var price = GetPrice(item);
+        if (price <= 0f || item == null) return 0f;
+        var slots = item.Width * item.Height;
+        if (slots <= 0) slots = 1;
+        return price / slots;
+    }
+
     public static float SumInventoryWorth(BotOwner bot)
     {
         var equipment = bot?.GetPlayer?.Profile?.Inventory?.Equipment;
