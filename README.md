@@ -330,7 +330,6 @@ No ETA, no promises, but on the list:
 ### Known Issues
 
 - **Most Reserve exfils require switches ORBIT doesn't operate yet** - bots there mostly stay until killed or raid end.
-- **Bots can get stuck on transition points** - they walk to them, can't transition, and stand there. Treat as an exfil-side bug until fixed.
 - **Bots stuck at spawn on isolated navmesh** - vanilla SPT quirk where a spawn point lands a bot on a tiny chunk of navmesh disconnected from the rest of the map (Streets near transits, Factory inside the silo, etc.). Shows up more often with ORBIT than pure vanilla because vanilla's built-in TP rescue is disabled (it was teleporting bots constantly on every unreachable pick). Fix planned: targeted TP rescue that fires only when a bot is genuinely stuck for X seconds.
 - **Rare stuck bots** - usually unstick themselves within a minute. Still iterating.
 - **Mod conflicts** - tested with my own config. Yours may differ. Report anything obviously broken on [GitHub](https://github.com/Chazut/ORBIT/issues).
