@@ -329,6 +329,7 @@ No ETA, no promises, but on the list:
 
 ### Known Issues
 
+- **1.0.0 is the first public release** - a few rough edges are expected. Bug reports and feedback on the [Discord thread](https://discord.com/channels/875684761291599922/1509314495019745451) are very welcome.
 - **Most Reserve exfils require switches ORBIT doesn't operate yet** - bots there mostly stay until killed or raid end.
 - **Bots stuck at spawn on isolated navmesh** - vanilla SPT quirk where a spawn point lands a bot on a tiny chunk of navmesh disconnected from the rest of the map (Streets near transits, Factory inside the silo, etc.). Shows up more often with ORBIT than pure vanilla because vanilla's built-in TP rescue is disabled (it was teleporting bots constantly on every unreachable pick). Fix planned: targeted TP rescue that fires only when a bot is genuinely stuck for X seconds.
 - **Rare stuck bots** - usually unstick themselves within a minute. Still iterating.
