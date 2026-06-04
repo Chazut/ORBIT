@@ -18,6 +18,8 @@ beyond that, into something I'm proud enough of to share.
 
 Pair it with the latest [Raid Review](https://forge.sp-tarkov.com/mod/1479/raid-review) to see what every bot was doing on the post-raid map replay.
 
+Questions, bug reports, feedback: **[ORBIT Discord thread](https://discord.com/channels/875684761291599922/1509314495019745451)**.
+
 ## ORBIT
 
 ### What It Does
@@ -42,6 +44,114 @@ containers, and credit the right teammate when the corpse needs looting.
 They extract when one of three things happens: they've looted enough money,
 they've finished all their goals, or the raid is getting late.
 
+### How Squads Pick Targets
+
+Each squad's main objectives live in **cells** on the map (a coarse grid).
+Once the squad's leader picks an anchor, the rest of the system works in
+two layers:
+
+**Main anchor** - the squad's current focus. One member (the leader by
+default) walks straight to it. For a Kills main this is a PvP hotspot;
+for a LootValue main it's a specific high-value POI in the target cell;
+for a Quest main it's the trigger point of a real EFT quest.
+
+**Splinter targets** - while the leader handles the anchor, the other
+members fan out to nearby POIs inside the same cell (loose loot, corpses,
+containers, synthetic patrol points). Each splinter is picked around the
+member's own position with a random reservoir sample, so a 4-PMC squad
+naturally ends up working a small area without all stacking on one spot.
+A splinter is kept across anchor flips if it's still in range of the new
+anchor - bots don't yo-yo between random POIs when the leader chain-loots
+the next container two metres away.
+
+**Own-kill credit** - when a squad scores a kill, the specific member
+that landed it is the one routed straight to the corpse on the next
+dispatch, not a random teammate. The killer loots the body they dropped.
+
+**Coverage roll** - on entering a high-value loot cell, each POI inside
+the cell rolls against the squad's coverage value (per-personality:
+Cautious 85-95%, Average 65-75%, Aggressive 50-60%, GigaChad 30-45%). POIs
+that lose the roll are quietly skipped so the squad never vacuums the
+room 100%, like a real player who missed a few items.
+
+### Looting In Detail
+
+The looting layer is custom, built straight on top of BSG's vanilla bot
+pickup APIs. It handles containers, corpses and loose world items, with a
+focus on making the bots feel like real players rather than vacuum
+cleaners.
+
+**Per-bot value gate (PMCs and PlayerScavs)**
+- Each PMC has its own loot threshold rolled from its SAIN personality:
+  Chad ~15k/slot, Average ~10k/slot, Cautious (Rat/Coward) ~5k/slot,
+  GigaChad ~20k/slot, Timmy 0 (everything goes). PlayerScavs fall back to
+  a 5k default.
+- Value is judged **per inventory slot** (handbook price ÷ item size), so
+  a tiny key worth 50k beats a 60k backpack that takes 15 slots.
+- A Chad walking past a 5k mag won't bother; a Rat in the same squad will
+  happily grab it.
+
+**Bot scavs: opportunistic random pickups**
+- AI scavs don't use a value threshold. They roll a per-item dice (default
+  30% chance to grab) - matches the vanilla feel where scavs pick up the
+  odd item but don't deliberately empty a corpse.
+- PlayerScavs are excluded from this and use the PMC-style threshold path.
+
+**Smart squad memory**
+- When a Chad opens a container and rejects everything, the same POI is
+  added to his personal skip list - he won't be sent back. His Chad
+  teammates also skip it (same threshold). But the squad's Rat can still
+  be dispatched there and clean up what the Chad refused.
+- The squad's own blacklist (a hard "we're done here") only triggers when
+  items were actually taken, when the POI was empty, or on transaction
+  failures - never on a pure value rejection.
+
+**Always-pick items**
+- Currency stacks, frag grenades, and dogtags bypass both the value gate
+  and the scav random roll. A real player never walks past a dogtag.
+
+**Realistic search timing**
+- Containers play an open/close animation (~2.5s) with the bot kneeling
+  in front of the lid.
+- Corpses are drained on two interleaved tracks: a **visible track**
+  (helmet, weapons, scabbard, etc., grabbed sequentially with ~0.8s
+  between each) and a **search track** (vest, armour, backpack, pockets,
+  one slot at a time with progressive per-item reveal: 1.5s initial + 0.4s
+  per extra item, capped at 8s).
+- Slot order is randomised so the bot doesn't always go backpack-first,
+  vest-second, pockets-third.
+- Loose items trigger the kneel-and-grab animation per pickup.
+
+**Drain order**
+- Items inside grid containers (wallets, money cases, rigs, backpacks,
+  pockets) are emptied **inside-out**: cash and contents first, then the
+  empty wrapper. Avoids the bug where picking the wrapper consumes the
+  contents and the bot then fumbles around trying to grab items that have
+  already moved.
+- Weapon + mods chains drain root-first (the weapon itself, then any
+  detachable mods), same for armour + plates.
+
+**Mod filtering on weapons**
+- Only attachments flagged as "removable in raid" (scopes, mags, grips,
+  silencers, foregrips, mounts, charging handles, dust covers, sights,
+  lasers, lamps) are considered. Barrels, buttstocks, handguards and
+  receivers are dropped from the queue - nobody disassembles a rifle
+  mid-firefight.
+
+**Corpse exclusions**
+- PMC corpses keep their melee weapon (Scabbard slot) on the body, same
+  as live EFT. Scav corpses are fully lootable.
+- Secured containers are never touched, on any corpse.
+
+**Chain-loot sweep**
+- After successfully looting a POI, the bot looks for nearby loose items
+  or corpses within a short radius and chains to them directly - mirrors
+  the way a player picks up adjacent items before walking away.
+- Same-floor preference: a candidate two metres away on the floor above
+  loses to one ten metres away on the same floor, so the bot doesn't
+  yo-yo between basement and lobby on Resort.
+- Each sweep candidate gets its own coverage roll.
+
 ### The Little Details
 
 The stuff that makes bots feel deliberate instead of scripted:
@@ -64,21 +174,15 @@ The stuff that makes bots feel deliberate instead of scripted:
 - Bots only open the doors they actually need to pass through - they
   don't fiddle with every door they walk past.
 - Want loot behind a locked door? They can roll to force it open, with
-  a **configurable success rate** (and aggressive personalities has a better success than cautious ones).
+  a **configurable success rate** (aggressive personalities roll higher than cautious ones).
 
-**Looting**
-- Each bot loots based on its **personality**: a Rat grabs almost
-  anything, a GigaChad ignores cheap clutter and only takes the good
-  stuff.
-- They don't vacuum a room 100% - there's a coverage roll, so some loot
-  gets left behind like a real player who missed it.
-- After looting one spot, they'll chain to nearby loose items or bodies
-  within a short radius.
-- In a squad, the bot that **got the kill** is the one sent to loot the
-  body - not a random teammate.
+**Loot awareness**
 - Bots only know about corpses they actually saw drop or that their
   squad killed - no magically pathing across the map to a body they
   couldn't possibly know about.
+- See the dedicated **Looting In Detail** section above for the full
+  picture (per-personality thresholds, scav random roll, smart squad
+  memory, search timing, drain order, etc.).
 
 **Objectives & extract**
 - Three objective types: roam a PvP hotspot for kills, clean out a
@@ -102,9 +206,9 @@ shifts automatically based on each bot's SAIN personality.
 
 All tuning lives in the F12 menu - open it in-game and tweak live.
 
-**Two recommended SAIN tweak**: 
-- Tweak SAIN Personalities chance (see the next tab).
-- disable SAIN's extract layer so it doesn't fight ORBIT's extract logic. Open `BepInEx/plugins/SAIN/Presets/<your_preset>/GlobalSettings.json` and set:
+**Two recommended SAIN tweaks**:
+- Tweak SAIN personality chances (see the next section).
+- Disable SAIN's extract layer so it doesn't fight ORBIT's extract logic. Open `BepInEx/plugins/SAIN/Presets/<your_preset>/GlobalSettings.json` and set:
 ```json
 "Extract": {
   "SAIN_EXTRACT_TOGGLE": false
@@ -138,7 +242,7 @@ distribution ORBIT was built around.
 
 **ORBIT supports only one other AI mod: [SAIN](https://forge.sp-tarkov.com/mod/791/sain-solarints-ai-modifications-full-ai-combat-system-replacement)**
 
-Any other AI / bot-behavior mod will either fight ORBIT for control or
+Any other AI / bot-behaviour mod will either fight ORBIT for control or
 duplicate work it already does. Don't install them alongside ORBIT.
 
 **[QuestingBot](https://forge.sp-tarkov.com/mod/1109/questing-bots)**
@@ -202,9 +306,26 @@ No ETA, no promises, but on the list:
 - Fallback to next-closest exfil if the chosen one is unreachable
 - Investigate Reference / SkillLevel requirement states
 
+**Looting (post-MVP)**
+- In-raid weapon swap when bots find something strictly better (gun +
+  mods + matching mags + ammo carried together)
+- In-raid armour / helmet / rig / headwear swap, with item transfer from
+  the old rig into the new one
+- Magazine compatibility check (caliber vs the bot's current weapon)
+  before considering a mag worth taking
+- Spare ammo preload to the secure container instead of crowding the
+  main inventory
+- Strip-then-throw on a weapon the bot is about to discard - keep the
+  scope / silencer / grip / laser, drop the rest
+- Post-loot inventory sort so the grid stays usable as the bot fills up
+- Teammates can grab a dead squadmate's spawn gear and stash it
+  somewhere quiet - simulates a real squad taking care of their
+  fallen friends' stuff
+- Stack-aware pricing (currency / ammo stacks evaluated as bulk value,
+  not single-unit)
+
 **Tuning**
 - Faction takeover split: patrols → ORBIT, checkpoints → vanilla (RUAF / UNTAR / BlackDivision)
-- Weapon swap: also loot matching mags + ammo together (LB-inherited gap)
 
 ### Known Issues
 
@@ -234,15 +355,18 @@ was written, give it a try.
 
 A huge thank you to the authors listed below.
 
--  [Phobos](https://discord.com/channels/875684761291599922/1337131427803955200) by [janky](https://forge.sp-tarkov.com/user/72916/jankytheclown) - the original advection-field
-  cell dispatch that ORBIT is build around (MIT, used with permission).
+- [Phobos](https://discord.com/channels/875684761291599922/1337131427803955200) by [janky](https://forge.sp-tarkov.com/user/72916/jankytheclown) - the original advection-field cell dispatch that ORBIT is built around (MIT, used with explicit permission - see screenshot below).
 - [QuestingBot](https://forge.sp-tarkov.com/mod/1109/questing-bots) by [danW](https://forge.sp-tarkov.com/user/27632/danw) - inspired the quest-routing concept, no code reused.
-- [LootingBots](https://forge.sp-tarkov.com/mod/812/looting-bots) by [Skwizzy](https://forge.sp-tarkov.com/user/28069/skwizzy) and [ArchangelWTF](https://forge.sp-tarkov.com/user/52282/archangelwtf) - inspired ORBIT's looting design, no code reused.
+- [LootingBots](https://forge.sp-tarkov.com/mod/812/looting-bots) by [Skwizzy](https://forge.sp-tarkov.com/user/28069/skwizzy) and [ArchangelWTF](https://forge.sp-tarkov.com/user/52282/archangelwtf) - ORBIT started out as a Phobos + LB merge; over time many features were added and the looting layer was rewritten from scratch on top of BSG vanilla APIs to fit ORBIT's design better. No LB code left in the current release.
 - [SAIN](https://forge.sp-tarkov.com/mod/791/sain-solarints-ai-modifications-full-ai-combat-system-replacement) by [Solarint](https://forge.sp-tarkov.com/user/27463/solarint), [ArchangelWTF](https://forge.sp-tarkov.com/user/52282/archangelwtf) and [DrakiaXYZ](https://forge.sp-tarkov.com/user/27605/drakiaxyz) - without it, no personality system to plug into
 - [BigBrain](https://forge.sp-tarkov.com/mod/902/bigbrain) by [DrakiaXYZ](https://forge.sp-tarkov.com/user/27605/drakiaxyz)
 - The **SPT team** for an amazing modding framework
 - The **SPT Discord** 
 - **You**, for trying the mod
+
+**Phobos authorization from Janky:**
+
+![Phobos authorization from Janky](https://i.imgur.com/ifGx54S.png)
 
 ### Support
 
