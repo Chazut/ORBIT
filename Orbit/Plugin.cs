@@ -31,6 +31,7 @@ namespace Orbit;
 /// </summary>
 [BepInPlugin(PluginGuid, PluginName, OrbitVersion)]
 [BepInDependency("xyz.drakia.bigbrain")]
+[BepInDependency("xyz.drakia.waypoints")]
 [BepInDependency("me.sol.sain")]
 [SuppressMessage("ReSharper", "MemberCanBePrivate.Global")]
 public class Plugin : BaseUnityPlugin
