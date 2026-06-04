@@ -10,7 +10,7 @@ goals: rich loot spots to clear, PvP hotspots to hunt, quest triggers to
 visit, and a real reason to head for extract. They coordinate, loot
 together, and leave when they're done - just like players.
 
-Built on [Phobos](https://discord.com/channels/875684761291599922/1337131427803955200)'s foundations (advection field, cell dispatch, squad movement), with a custom looting layer on top of BSG vanilla APIs and quest routing inspired by [QuestingBot](https://forge.sp-tarkov.com/mod/1109/questing-bots), integrated into a single coherent system (with extra features) instead of three layers fighting for control.
+Built on [Phobos](https://discord.com/channels/875684761291599922/1337131427803955200)'s foundations (advection field, cell dispatch, squad movement), with a custom looting layer on top of BSG vanilla APIs (originally inspired by [LootingBots](https://forge.sp-tarkov.com/mod/812/looting-bots), now fully rewritten) and quest routing inspired by [QuestingBot](https://forge.sp-tarkov.com/mod/1109/questing-bots) - all integrated into a single coherent system (with extra features) instead of three layers fighting for control.
 
 It started as my own personal "best of the three" - picking the parts I
 liked from each and gluing them together. Along the way it grew well
