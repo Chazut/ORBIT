@@ -283,6 +283,7 @@ No ETA, no promises, but on the list:
 - Squad splitting with radio comms
 - New personalities
 - Detect bots spawned on isolated navmesh islands (e.g. near Streets transits, Factory silo) and teleport them once to a valid spot nearby so they stay in the raid instead of standing still until raid end. TP destination must respect a safety radius from the player (and other bots) so the rescue can't drop a bot right in front of someone
+- Optional **player-attraction toggle** (Phobos style) - pulls bots toward the player for more action, off by default. Useful for "kill X scavs in an area" quests, viewership runs, etc.
 
 **Objectives**
 - "Marked-key loot rush" for high-tier squads
