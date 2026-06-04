@@ -7,7 +7,7 @@ using Orbit.Navigation;
 using SPT.Reflection.Patching;
 using UnityEngine;
 
-namespace Orbit.Inventory.Patches;
+namespace Orbit.Patches;
 
 /// <summary>
 /// BSG has two BotMover teleport methods. We intercept the "hard" rescue —

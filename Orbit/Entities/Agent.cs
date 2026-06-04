@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using EFT;
 using UnityEngine;
@@ -65,6 +66,22 @@ public class Agent(int id, BotOwner bot, float[] taskScores) : Entity(id, taskSc
     /// becomes the new bar.
     /// </summary>
     public float OwnExtractLootThreshold;
+
+    /// <summary>
+    /// Per-archetype mini-loot value threshold, lazily resolved from the
+    /// agent's own SAIN brain. 0 until resolved; falls back to the squad
+    /// personality (or <see cref="OrbitLootHandler.DefaultMinPickupPrice"/>)
+    /// when SAIN attach is pending.
+    /// </summary>
+    public float OwnMiniLootValueThreshold;
+
+    /// <summary>
+    /// POIs this agent has personally value-rejected. Filtered against in
+    /// dispatch and sweep so the agent isn't sent back, while softer-gated
+    /// squad members can still be dispatched (squad-level
+    /// <see cref="Squad.CompletedPoiIds"/> is untouched).
+    /// </summary>
+    public readonly HashSet<int> ValueSkippedPoiIds = new();
 
     private readonly BifacialTransform _bodyTransform = bot.Mover.Player.PlayerBones.BodyTransform;
 

@@ -6,7 +6,7 @@ using EFT;
 using Orbit.Core;
 using Orbit.Entities;
 using Orbit.Helpers;
-using Orbit.Inventory;
+using Orbit.Looting;
 using Orbit.Navigation;
 using Orbit.Systems;
 using Orbit.Tasks.Actions;
@@ -305,6 +305,25 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
     // pass so two followers in the same squad don't get handed the same POI.
     private readonly HashSet<int> _splinterScratch = new(8);
 
+    // Reusable union buffer for splinter-dispatch agent-skip filtering.
+    private readonly HashSet<int> _agentSkipScratch = new(16);
+
+    /// <summary>
+    /// Combines the shared splinter scratch with the agent's personal
+    /// value-skip set. Returns the base set unchanged when the agent has no
+    /// skips to add.
+    /// </summary>
+    private HashSet<int> UnionWithAgentSkips(HashSet<int> baseSet, Agent agent)
+    {
+        var skips = agent?.ValueSkippedPoiIds;
+        if (skips == null || skips.Count == 0) return baseSet;
+        _agentSkipScratch.Clear();
+        foreach (var id in baseSet) _agentSkipScratch.Add(id);
+        foreach (var id in skips) _agentSkipScratch.Add(id);
+        Log.Debug($"{agent} splinter dispatch: filtering +{skips.Count} agent value-skipped POIs (total exclude={_agentSkipScratch.Count})");
+        return _agentSkipScratch;
+    }
+
     private int UpdateAgents(Squad squad)
     {
         var squadObjective = squad.Objective;
@@ -357,10 +376,26 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
             var splinterAlreadyDone = agentObjective.SplinterParent != null
                                       && (agentObjective.Status == ObjectiveStatus.Finished
                                           || agentObjective.Status == ObjectiveStatus.Failed);
+            // Cross-anchor sticky: if the squad anchor flips while the agent
+            // is en route to a still-valid splinter (in range of the new
+            // anchor), keep the current target and rebase SplinterParent
+            // below to avoid an oscillating re-roll.
+            var splinterRadius = squad.Personality != null
+                ? squad.Personality.SplinterSearchRadius
+                : Plugin.SplinterSearchRadius.Value;
+            var splinterStickyAcrossAnchor = !splinterAlreadyDone
+                                             && agentObjective.SplinterParent != null
+                                             && agentObjective.Location != null
+                                             && squadObjective.Location != null
+                                             && agentObjective.SplinterParent != squadObjective.Location
+                                             && !squad.CompletedPoiIds.Contains(agentObjective.Location.Id)
+                                             && WaypointSystem.XzDistanceSqr(agentObjective.Location.Position, squadObjective.Location.Position)
+                                                <= splinterRadius * splinterRadius;
             var aligned = !splinterAlreadyDone
                           && (agentObjective.Location == squadObjective.Location
                               || (agentObjective.SplinterParent != null
-                                  && agentObjective.SplinterParent == squadObjective.Location));
+                                  && agentObjective.SplinterParent == squadObjective.Location)
+                              || splinterStickyAcrossAnchor);
 
             if (aligned && agentObjective.Location != null)
             {
@@ -368,6 +403,13 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                 // to another follower below.
                 if (agentObjective.SplinterParent != null)
                     _splinterScratch.Add(agentObjective.Location.Id);
+                // Rebase SplinterParent to the squad's current anchor so the
+                // next tick aligns via the standard path.
+                if (splinterStickyAcrossAnchor)
+                {
+                    Log.Debug($"{agent} splinter sticky across anchor flip: kept {agentObjective.Location}, rebased parent {agentObjective.SplinterParent} → {squadObjective.Location}");
+                    agentObjective.SplinterParent = squadObjective.Location;
+                }
                 // Reset Failed back to None so Goto picks the agent back
                 // up and re-submits a move order. Without this, an Exfil
                 // dispatch that stops short (partial nav-path 400m+ off
@@ -414,13 +456,12 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                 else if (i == 0
                          && !anchorReservedForOwnKill
                          && squadObjective.Location != null
-                         && !squad.CompletedPoiIds.Contains(squadObjective.Location.Id))
+                         && !squad.CompletedPoiIds.Contains(squadObjective.Location.Id)
+                         && !agent.ValueSkippedPoiIds.Contains(squadObjective.Location.Id))
                 {
-                    // Leader → anchor itself. For solo squads this is the
-                    // only member, so they always tackle the anchor before
-                    // any splinter; once the anchor is done it ends up in
-                    // CompletedPoiIds and the next pass falls through to
-                    // the splinter branches.
+                    // Leader takes the anchor itself. Falls through to the
+                    // splinter branches when the anchor is squad-blacklisted
+                    // or in the leader's personal value-skip set.
                     targetLoc = squadObjective.Location;
                     splinterParent = null;
                 }
@@ -444,8 +485,9 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                         // the vertical mismatch with the agent's real Y.
                         searchCenter = activeMain.Position;
                     }
+                    var excludeForRoam = UnionWithAgentSkips(_splinterScratch, agent);
                     var roamSplinter = waypointSystem.FindRoamSplinterForMember(
-                        agent.Position, searchCenter, squad, _splinterScratch, roamRadius,
+                        agent.Position, searchCenter, squad, excludeForRoam, roamRadius,
                         roamLooseLoot, roamContainerLoot, roamCorpse, roamSynthetic);
                     if (roamSplinter != null)
                     {
@@ -466,8 +508,9 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                 }
                 else
                 {
+                    var excludeForLoot = UnionWithAgentSkips(_splinterScratch, agent);
                     var splinter = waypointSystem.FindLootSplinterForFollower(
-                        squadObjective.Location, squad, _splinterScratch,
+                        squadObjective.Location, squad, excludeForLoot,
                         squad.Personality != null
                             ? squad.Personality.SplinterSearchRadius
                             : Plugin.SplinterSearchRadius.Value);
@@ -950,18 +993,11 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
 
     private static float RollExtractThreshold(BotOwner leaderBot)
     {
-        var isFactory = false;
-        var locationId = Singleton<GameWorld>.Instance?.LocationId;
-        if (!string.IsNullOrEmpty(locationId))
-            isFactory = locationId.StartsWith("factory", StringComparison.OrdinalIgnoreCase);
         var isPlayerScav = leaderBot?.Profile != null && leaderBot.Profile.WillBeAPlayerScav();
-
-        Vector2 window;
-        if (isPlayerScav)
-            window = isFactory ? Plugin.TimeExtractWindowPlayerScavFactory.Value : Plugin.TimeExtractWindowPlayerScav.Value;
-        else
-            window = isFactory ? Plugin.TimeExtractWindowPmcFactory.Value : Plugin.TimeExtractWindowPmc.Value;
-        return Random.Range(window.x, window.y);
+        var windowPct = isPlayerScav ? Plugin.TimeExtractWindowPlayerScav.Value : Plugin.TimeExtractWindowPmc.Value;
+        var totalRaidSeconds = (float)(Singleton<AbstractGame>.Instance?.GameTimer?.SessionTime?.TotalSeconds ?? 0d);
+        if (totalRaidSeconds <= 0f) return 0f;
+        return totalRaidSeconds * Random.Range(windowPct.x, windowPct.y) / 100f;
     }
 
     // After this many consecutive "all members failed en-route" branches

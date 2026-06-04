@@ -40,6 +40,17 @@ public class OrbitBrainLayer : CustomLayer
     private readonly Agent _agent;
     private readonly bool _excluded;
 
+    // Tracks SAIN combat layer state from OnLayerChanged. Replaces
+    // BotOwner.Memory.LastEnemyTimeSeen which SAIN keeps fresh long
+    // past actual combat (sticky enemy memory), trapping ORBIT off.
+    private const string SainCombatLayerName = "SAIN : Combat Layer";
+    private bool _sainCombatActive;
+    private float _sainCombatEndedAt = float.NegativeInfinity;
+
+    // Diag throttling — log gate state on transition and every 5s if off.
+    private bool _lastIsActive = true;
+    private float _lastIsActiveDiagAt;
+
     // Substrings (case-insensitive) of WildSpawnType names whose bots
     // should NOT be hijacked. Populated at boot by Plugin when the user
     // toggles OFF a faction-mod takeover (UNTAR / RUAF / BlackDiv).
@@ -50,6 +61,7 @@ public class OrbitBrainLayer : CustomLayer
     // Profile.WillBeAPlayerScav check inside IsExcludedRole).
     private static bool _vanillaScavs;
     private static bool _vanillaGoons;
+    private static bool _vanillaCultists;
 
     public static void AddExcludedRoleSubstring(string sub)
     {
@@ -58,6 +70,7 @@ public class OrbitBrainLayer : CustomLayer
 
     public static void SetVanillaScavExclusion(bool excluded) => _vanillaScavs = excluded;
     public static void SetVanillaGoonExclusion(bool excluded) => _vanillaGoons = excluded;
+    public static void SetVanillaCultistExclusion(bool excluded) => _vanillaCultists = excluded;
 
     private static bool IsExcludedRole(BotOwner botOwner)
     {
@@ -80,6 +93,11 @@ public class OrbitBrainLayer : CustomLayer
         }
 
         if (_vanillaGoons && role.Value.IsGoon())
+        {
+            return true;
+        }
+
+        if (_vanillaCultists && role.Value.IsCultist())
         {
             return true;
         }
@@ -125,10 +143,8 @@ public class OrbitBrainLayer : CustomLayer
         _agent.IsActive = false;
         var squad = _agent.Squad;
         _orbit.RemoveAgent(_agent);
-        // Re-evaluate the cumulative extract threshold: the dead member no
-        // longer counts toward squad-total Stats.Looted, and if survivors
-        // already sum above the threshold ExtractRequested must flip
-        // immediately rather than wait for the next loot completion.
+        // Re-evaluate the cumulative extract threshold without the dead
+        // member's contribution, in case survivors already sum above it.
         if (squad != null && squad.Members.Count > 0)
         {
             Orbit.Tasks.Actions.LootContainerAction.ReevaluateExtractForSquad(squad);
@@ -138,8 +154,9 @@ public class OrbitBrainLayer : CustomLayer
     private void OnLayerChanged(AICoreLayerClass<BotLogicDecision> layer)
     {
         var mover = _agent.Bot.Mover;
+        var layerName = layer.Name();
 
-        if (layer.Name() == LayerName)
+        if (layerName == LayerName)
         {
             Log.Debug($"{_agent} stopping builtin bot mover");
             mover.Stop();
@@ -161,7 +178,12 @@ public class OrbitBrainLayer : CustomLayer
             }
         }
 
-        Log.Debug($"{_agent} layer changed to: {layer.Name()} priority: {layer.Priority}");
+        var sainCombatNow = layerName == SainCombatLayerName;
+        if (_sainCombatActive && !sainCombatNow)
+            _sainCombatEndedAt = Time.time;
+        _sainCombatActive = sainCombatNow;
+
+        Log.Debug($"{_agent} layer changed to: {layerName} priority: {layer.Priority}");
     }
 
     public override string GetName() => LayerName;
@@ -171,17 +193,24 @@ public class OrbitBrainLayer : CustomLayer
     public override bool IsActive()
     {
         if (_excluded) return false;
-        var lastEnemyTimeSeen = Time.time - BotOwner.Memory.LastEnemyTimeSeen;
-        // Force isHealing off when no enemy seen recently — otherwise SAIN's
-        // medical loops trap the bot indefinitely.
-        var isHealing = (BotOwner.Medecine.Using || BotOwner.Medecine.SurgicalKit.HaveWork || BotOwner.Medecine.FirstAid.Have2Do) && lastEnemyTimeSeen < 60f;
-        // Reading BotOwner.Memory.HaveEnemy directly is unreliable — SAIN keeps
-        // GoalEnemy alive long past actual combat, so once HaveEnemy flipped
-        // true this layer would never reactivate. Gate on actively-shot-at OR
-        // saw-enemy-within-15s; after that window we reclaim the bot and
-        // SAIN's combat layer (priority 20) preempts on the next real contact.
-        var isInCombat = BotOwner.Memory.IsUnderFire || lastEnemyTimeSeen < 15f;
-        return !isHealing && !isInCombat;
+        var timeSinceSainCombatEnded = _sainCombatActive ? 0f : Time.time - _sainCombatEndedAt;
+        var inCombatWindow = _sainCombatActive || timeSinceSainCombatEnded < 15f;
+        var medsWorking = BotOwner.Medecine.Using || BotOwner.Medecine.SurgicalKit.HaveWork || BotOwner.Medecine.FirstAid.Have2Do;
+        var isHealing = medsWorking && (_sainCombatActive || timeSinceSainCombatEnded < 60f);
+        var isInCombat = BotOwner.Memory.IsUnderFire || inCombatWindow;
+        var active = !isHealing && !isInCombat;
+
+        if (!active && (active != _lastIsActive || Time.time - _lastIsActiveDiagAt > 5f))
+        {
+            Log.Debug($"{_agent} IsActive=false: sainCombatActive={_sainCombatActive}, timeSinceSainEnd={timeSinceSainCombatEnded:F1}s, IsUnderFire={BotOwner.Memory.IsUnderFire}, medsWorking={medsWorking} (Using={BotOwner.Medecine.Using}, Surgical={BotOwner.Medecine.SurgicalKit.HaveWork}, FirstAid={BotOwner.Medecine.FirstAid.Have2Do})");
+            _lastIsActiveDiagAt = Time.time;
+        }
+        if (active != _lastIsActive)
+        {
+            Log.Debug($"{_agent} IsActive transition: {_lastIsActive} → {active}");
+            _lastIsActive = active;
+        }
+        return active;
     }
 
     public override bool IsCurrentActionEnding() => false;

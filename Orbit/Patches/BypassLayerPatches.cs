@@ -1,13 +1,21 @@
 using System.Reflection;
+using Comfort.Common;
 using HarmonyLib;
+using Orbit.Core;
 using SPT.Reflection.Patching;
 
 namespace Orbit.Patches;
 
-/// <summary>
-/// Disables BSG's "AssaultEnemyFar" layer — it kicks in at long range and
-/// hijacks scavs away from our cell dispatch.
-/// </summary>
+internal static class BypassGate
+{
+    public static bool ShouldBypassForOrbitBot(BaseLogicLayerAbstractClass layer)
+    {
+        var roster = Singleton<BotRoster>.Instance;
+        return roster != null && roster.IsOrbitActive(layer.BotOwner_0);
+    }
+}
+
+/// <summary>Disables BSG's AssaultEnemyFar for ORBIT bots — it overrides our cell dispatch at long range.</summary>
 public class AssaultEnemyFarBypassPatch : ModulePatch
 {
     protected override MethodBase GetTargetMethod()
@@ -16,18 +24,15 @@ public class AssaultEnemyFarBypassPatch : ModulePatch
     }
 
     [PatchPrefix]
-    public static bool Patch(ref bool __result)
+    public static bool Patch(GClass45 __instance, ref bool __result)
     {
+        if (!BypassGate.ShouldBypassForOrbitBot(__instance)) return true;
         __result = false;
         return false;
     }
 }
 
-/// <summary>
-/// Disables BSG's "Exfiltration" layer — it runs at priority 79, hijacks
-/// the brain mid-tick, and frequently leaves bots stuck around exfil
-/// triggers. ExtractAction handles exfil routing instead.
-/// </summary>
+/// <summary>Disables BSG's Exfiltration layer for ORBIT bots — ExtractAction handles exfil routing.</summary>
 public class ExfilLayerBypassPatch : ModulePatch
 {
     protected override MethodBase GetTargetMethod()
@@ -36,17 +41,15 @@ public class ExfilLayerBypassPatch : ModulePatch
     }
 
     [PatchPrefix]
-    public static bool Patch(ref bool __result)
+    public static bool Patch(GClass75 __instance, ref bool __result)
     {
+        if (!BypassGate.ShouldBypassForOrbitBot(__instance)) return true;
         __result = false;
         return false;
     }
 }
 
-/// <summary>
-/// Disables BSG's "PtrlBirdEye" layer — it splits Bird Eye away from the
-/// rest of the Goons during long-range scanning, breaking squad cohesion.
-/// </summary>
+/// <summary>Disables BSG's PtrlBirdEye for ORBIT bots — it breaks Goons squad cohesion.</summary>
 public class PtrlBirdEyeBypassPatch : ModulePatch
 {
     protected override MethodBase GetTargetMethod()
@@ -55,8 +58,9 @@ public class PtrlBirdEyeBypassPatch : ModulePatch
     }
 
     [PatchPrefix]
-    public static bool Patch(ref bool __result)
+    public static bool Patch(GClass79 __instance, ref bool __result)
     {
+        if (!BypassGate.ShouldBypassForOrbitBot(__instance)) return true;
         __result = false;
         return false;
     }

@@ -13,8 +13,7 @@ using Orbit.Brain;
 using Orbit.Config;
 using Orbit.Core;
 using Orbit.Interop;
-using Orbit.Inventory;
-using Orbit.Inventory.Patches;
+using Orbit.Looting;
 using Orbit.Patches;
 using Orbit.UI;
 using SPT.Reflection.Patching;
@@ -24,7 +23,7 @@ namespace Orbit;
 
 /// <summary>
 /// BepInEx entry point. Owns the F12 configuration surface for every
-/// tunable knob the dispatcher / inventory / SAIN integration reads at
+/// tunable knob the dispatcher / looting / SAIN integration reads at
 /// runtime. <see cref="LogSource"/> exposes the BepInEx ManualLogSource
 /// consumed by <see cref="Log"/> — named <c>LogSource</c> rather than
 /// <c>Log</c> so the static <see cref="Orbit.Log"/> helper class doesn't
@@ -51,6 +50,7 @@ public class Plugin : BaseUnityPlugin
     public static ConfigEntry<bool> RoamingGoons;
     public static ConfigEntry<bool> VanillaScavs;
     public static ConfigEntry<bool> VanillaGoons;
+    public static ConfigEntry<bool> VanillaCultists;
 
     // 02. POI guard duration
     public static ConfigEntry<Vector2> ObjectiveGuardDuration;
@@ -89,14 +89,13 @@ public class Plugin : BaseUnityPlugin
     public static ConfigEntry<float> LootCoveragePct;
     public static ConfigEntry<bool> MainObjectivesExtractOnAllCompleted;
     public static ConfigEntry<Vector2> TimeExtractWindowPmc;
-    public static ConfigEntry<Vector2> TimeExtractWindowPmcFactory;
     public static ConfigEntry<Vector2> TimeExtractWindowPlayerScav;
-    public static ConfigEntry<Vector2> TimeExtractWindowPlayerScavFactory;
     public static ConfigEntry<float> PmcLootCellCooldownSeconds;
     public static ConfigEntry<float> SyntheticVisitCooldownSeconds;
     public static ConfigEntry<float> OpportunisticCorpseScanIntervalSeconds;
     public static ConfigEntry<float> SplinterSearchRadius;
     public static ConfigEntry<float> ScavengeSweepRadius;
+    public static ConfigEntry<float> SameFloorLootYTolerance;
 
     // 06. Faction-mod takeover (consumers wired in Phase 7)
     public static ConfigEntry<bool> HijackUntar;
@@ -224,11 +223,9 @@ public class Plugin : BaseUnityPlugin
             Log.Error($"ORBIT config bind failed (sub-systems will degrade to defaults): {ex}");
         }
 
-        // Prices need to be loaded before any bot looks at a loot value
-        // (GetItemPrice returns 0 until then, so min-loot-value filters
-        // reject everything). HandbookClass isn't always ready at this
-        // point, so a coroutine polls for it.
-        StartCoroutine(LoadValuatorPricesWhenReady());
+        // HandbookClass becomes available once GameWorld is up. ItemPriceLookup
+        // reads it lazily per query — no upfront preload needed.
+        StartCoroutine(WaitForHandbook());
 
         Log.Info($"ORBIT {OrbitVersion} initialised");
 
@@ -276,8 +273,10 @@ public class Plugin : BaseUnityPlugin
 
         OrbitBrainLayer.SetVanillaScavExclusion(VanillaScavs.Value);
         OrbitBrainLayer.SetVanillaGoonExclusion(VanillaGoons.Value);
+        OrbitBrainLayer.SetVanillaCultistExclusion(VanillaCultists.Value);
         if (VanillaScavs.Value) Logger.LogInfo("Vanilla scavs ON — ORBIT will not attach to bot scavs (PlayerScavs unaffected).");
         if (VanillaGoons.Value) Logger.LogInfo("Vanilla goons ON — ORBIT will not attach to Goons (Knight / Big Pipe / Bird Eye).");
+        if (VanillaCultists.Value) Logger.LogInfo("Vanilla cultists ON — ORBIT will not attach to Cultists (Priest / Warriors / cursed scavs).");
 
         var brains = new List<string>
         {
@@ -304,29 +303,20 @@ public class Plugin : BaseUnityPlugin
         Log.Info($"ORBIT {OrbitVersion} fully loaded — BrainManager wired");
     }
 
-    private IEnumerator LoadValuatorPricesWhenReady()
+    private IEnumerator WaitForHandbook()
     {
         var attempts = 0;
         while (Singleton<HandbookClass>.Instance == null)
         {
             attempts++;
-            if (attempts > 60) // 60 × 1s = 1 min — give up rather than spin forever
+            if (attempts > 60)
             {
-                Log.Error("HandbookClass never became available; ItemValuator stays empty (bots will treat all loot as worthless)");
+                Log.Error("HandbookClass never became available; ItemPriceLookup will return 0 (bots treat all loot as worthless)");
                 yield break;
             }
             yield return new WaitForSeconds(1f);
         }
-
-        if (LootConfig.ItemValuator == null)
-        {
-            yield break; // LootConfig.Init must have failed earlier — nothing to populate.
-        }
-
-        Log.Info($"HandbookClass ready after {attempts}s — triggering ItemValuator price load");
-        // Fire-and-forget — UpdatePricesAsync handles its own errors and
-        // clears the in-flight flag inside a finally block.
-        _ = LootConfig.ItemValuator.UpdatePricesAsync();
+        Log.Info($"HandbookClass ready after {attempts}s — ItemPriceLookup is live");
     }
 
     /// <summary>
@@ -378,9 +368,12 @@ public class Plugin : BaseUnityPlugin
         // ── 01. General ─────────────────────────────────────────────
         VanillaScavs = Config.Bind(general, "Vanilla scavs (RESTART)", false, new ConfigDescription(
             "OFF (default): bot scavs are controlled by ORBIT (cell dispatch, home pull, loot routing). ON: bot scavs run on BSG's vanilla brain — ORBIT doesn't attach to them, so 'Roaming Scavs' below has no effect. PlayerScavs always stay on ORBIT regardless of this toggle.",
-            null, new ConfigurationManagerAttributes { Order = 4 }));
+            null, new ConfigurationManagerAttributes { Order = 5 }));
         VanillaGoons = Config.Bind(general, "Vanilla goons (RESTART)", false, new ConfigDescription(
             "OFF (default): Goons (Knight + Big Pipe + Bird Eye) are controlled by ORBIT. ON: Goons run on BSG's vanilla brain.",
+            null, new ConfigurationManagerAttributes { Order = 4 }));
+        VanillaCultists = Config.Bind(general, "Vanilla cultists (RESTART)", false, new ConfigDescription(
+            "OFF (default): Cultists (Priest + Warriors + cursed scavs) are controlled by ORBIT. ON: Cultists run on BSG's vanilla brain.",
             null, new ConfigurationManagerAttributes { Order = 3 }));
         RoamingScavs = Config.Bind(general, "Roaming Scavs", false, new ConfigDescription(
             "OFF (default): scavs stay near their spawn quartier (current cell + 8 neighbours). ON: scavs roam the whole map like PMCs. Ignored when Vanilla scavs is ON.",
@@ -494,27 +487,24 @@ public class Plugin : BaseUnityPlugin
         ScavengeSweepRadius = Config.Bind(mainTune, "Scavenge sweep radius (m)", 10f, new ConfigDescription(
             "After finishing a loot, the bot chains to the nearest LooseLoot/Corpse within this radius. Each candidate is still gated by Loot Coverage %.",
             new AcceptableValueRange<float>(0f, 50f), new ConfigurationManagerAttributes { Order = 66 }));
-        TimeExtractWindowPmc = Config.Bind(mainTune, "Time extract window — PMC (s, non-Factory)", new Vector2(300f, 900f), new ConfigDescription(
-            "Per-squad random window (seconds-remaining-in-raid) at which ExtractRequested flips. Rolled once per squad.",
+        SameFloorLootYTolerance = Config.Bind(mainTune, "Same-floor sweep tolerance (m)", 2.5f, new ConfigDescription(
+            "During chain-loot sweeps, candidates within this vertical Y delta of the bot are treated as 'same floor' and preferred over cross-floor candidates. Two-pass: same-floor first, cross-floor only if nothing same-floor is in range. 0 disables the bias (chain-loot ignores floors). Stops the elevator yo-yo on Resort.",
+            new AcceptableValueRange<float>(0f, 10f), new ConfigurationManagerAttributes { Order = 65 }));
+        TimeExtractWindowPmc = Config.Bind(mainTune, "Time extract window — PMC (%)", new Vector2(5f, 30f), new ConfigDescription(
+            "Per-squad random window (% of total raid duration remaining) at which ExtractRequested flips. Rolled once per squad. Matches SAIN's default range.",
             null, new ConfigurationManagerAttributes { Order = 60 }));
-        TimeExtractWindowPmcFactory = Config.Bind(mainTune, "Time extract window — PMC (s, Factory)", new Vector2(180f, 600f), new ConfigDescription(
-            "Same as PMC non-Factory but for Factory raids (shorter total raid time).",
+        TimeExtractWindowPlayerScav = Config.Bind(mainTune, "Time extract window — PlayerScav (%)", new Vector2(5f, 30f), new ConfigDescription(
+            "Same as PMC but applied to PlayerScavs.",
             null, new ConfigurationManagerAttributes { Order = 59 }));
-        TimeExtractWindowPlayerScav = Config.Bind(mainTune, "Time extract window — PlayerScav (s, non-Factory)", new Vector2(180f, 600f), new ConfigDescription(
-            "PlayerScav time-extract window — tighter than PMC because they spawn later.",
-            null, new ConfigurationManagerAttributes { Order = 58 }));
-        TimeExtractWindowPlayerScavFactory = Config.Bind(mainTune, "Time extract window — PlayerScav (s, Factory)", new Vector2(120f, 420f), new ConfigDescription(
-            "PlayerScav time-extract window for Factory raids.",
-            null, new ConfigurationManagerAttributes { Order = 57 }));
         PmcLootCellCooldownSeconds = Config.Bind(mainTune, "PMC loot cell cooldown (s)", 600f, new ConfigDescription(
             "How long after looting a cell that cell is invisible to the same PMC squad. Stops boomeranging back. 0 disables.",
             new AcceptableValueRange<float>(0f, 3600f), new ConfigurationManagerAttributes { Order = 50 }));
         SyntheticVisitCooldownSeconds = Config.Bind(mainTune, "Synthetic POI cooldown (s)", 180f, new ConfigDescription(
             "How long after finishing a Synthetic POI it's invisible to the same squad. 0 disables.",
             new AcceptableValueRange<float>(0f, 1800f), new ConfigurationManagerAttributes { Order = 49 }));
-        OpportunisticCorpseScanIntervalSeconds = Config.Bind(mainTune, "Opportunistic corpse scan (s)", 0.5f, new ConfigDescription(
-            "How often each squad re-runs the 'do I see a fresh corpse nearby?' raycast scan.",
-            new AcceptableValueRange<float>(0.1f, 5f), new ConfigurationManagerAttributes { Order = 48 }));
+        OpportunisticCorpseScanIntervalSeconds = Config.Bind(mainTune, "Opportunistic corpse scan (s)", 2.5f, new ConfigDescription(
+            "How often each squad re-runs the 'do I see a fresh corpse nearby?' raycast scan. Per-squad raycasts add up under heavy bot counts; default raised from 0.5s to 2.5s to lower the CPU baseline. Drop it back down if you want hyper-reactive corpse pickup.",
+            new AcceptableValueRange<float>(0.5f, 10f), new ConfigurationManagerAttributes { Order = 48 }));
 
         // ── 06. Faction-mod takeover ────────────────────────────────
         HijackUntar = Config.Bind(takeover, "Take over UNTAR bots", false, new ConfigDescription(

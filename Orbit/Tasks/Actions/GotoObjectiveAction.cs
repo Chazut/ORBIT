@@ -1,7 +1,7 @@
 using EFT.Interactive;
 using Orbit.Entities;
 using Orbit.Helpers;
-using Orbit.Inventory;
+using Orbit.Looting;
 using Orbit.Navigation;
 using Orbit.Systems;
 using UnityEngine;
@@ -35,6 +35,14 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
     // where the LoS check still makes sense.
     private const float NavSnapArrivalRadius = 4f;
     private const float NavSnapArrivalRadiusSqr = NavSnapArrivalRadius * NavSnapArrivalRadius;
+
+    // Per-agent stuck watchdog on Exfil objectives: if the bot's position
+    // barely moves for this duration while targeting an exfil, blacklist
+    // the exfil and re-pick. Walking from across the map is fine — only
+    // genuinely stationary bots trip the watchdog.
+    private const float ExfilStuckThresholdSeconds = 30f;
+    private const float ExfilStuckMoveDistSqr = 2f * 2f;
+    private readonly System.Collections.Generic.Dictionary<int, (int locId, Vector3 lastPos, float lastMoveTime)> _exfilStuckTracker = new();
 
     public override void UpdateScore(int ordinal)
     {
@@ -98,6 +106,36 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                         objective.ArrivalPath = agent.Movement.Path;
 
                     var distanceSqr = (objective.Location.Position - agent.Position).sqrMagnitude;
+
+                    // Exfil stuck watchdog: blacklist + re-pick when the
+                    // bot has stopped moving while targeting an exfil.
+                    if (objective.Location.Category == WaypointCategory.Exfil)
+                    {
+                        if (!_exfilStuckTracker.TryGetValue(agent.Id, out var t)
+                            || t.locId != objective.Location.Id)
+                        {
+                            _exfilStuckTracker[agent.Id] = (objective.Location.Id, agent.Position, Time.time);
+                        }
+                        else if ((agent.Position - t.lastPos).sqrMagnitude > ExfilStuckMoveDistSqr)
+                        {
+                            _exfilStuckTracker[agent.Id] = (t.locId, agent.Position, Time.time);
+                        }
+                        else if (Time.time - t.lastMoveTime > ExfilStuckThresholdSeconds)
+                        {
+                            if (agent.Squad != null && !agent.Squad.CompletedPoiIds.Contains(objective.Location.Id))
+                            {
+                                agent.Squad.CompletedPoiIds.Add(objective.Location.Id);
+                            }
+                            objective.Status = ObjectiveStatus.Failed;
+                            _exfilStuckTracker.Remove(agent.Id);
+                            Log.Info($"{agent} stuck en-route to {objective.Location} for {ExfilStuckThresholdSeconds:F0}s — blacklisted for {agent.Squad}, rerouting");
+                            break;
+                        }
+                    }
+                    else if (_exfilStuckTracker.ContainsKey(agent.Id))
+                    {
+                        _exfilStuckTracker.Remove(agent.Id);
+                    }
 
                     // Stop sprinting once inside the 50m "scan" radius so
                     // the bot has time to spot enemies on the final
@@ -254,26 +292,16 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
         entity.Objective.Status = ObjectiveStatus.None;
     }
 
-    // Regular scavs (assault/assaultGroup) never sprint to an objective —
-    // they wander, they don't hustle. Everyone else (PMCs, Goons, raiders,
-    // bosses) sprints when far and walks on the final approach. Combat
-    // sprint is decided by SAIN, not us.
-    //
-    // SAIN personality layer (PMC only): squad.Personality.SprintPropensity
-    // is a 0..1 value rolled from the archetype table that further gates
-    // when this agent sprints. 0 = never sprint (Timmy walks); 1 = always
-    // sprint, even within the final 50m approach. Default 0.5 matches
-    // the pre-personality behaviour.
+    // Sprint-to-objective decision. Non-sprinting factions (scavs, Timmy)
+    // are filtered by SprintGate; PMCs sprint when far and walk on the final
+    // approach, with the walk window shrinking as SprintPropensity rises.
+    // Combat sprint is decided by SAIN.
     private static bool ShouldSprintToObjective(Agent agent, float startDistSqr)
     {
-        var role = agent.Bot?.Profile?.Info?.Settings?.Role;
-        if (role.HasValue && role.Value.IsScav()) return false;
+        if (!SprintGate.IsAllowedByFaction(agent)) return false;
         var propensity = agent.Squad?.Personality?.SprintPropensity ?? 0.5f;
-        if (propensity <= 0.001f) return false; // never sprint
-        if (propensity >= 0.999f) return true;  // always sprint, even close
-        // Higher propensity shrinks the walk-only window so the bot
-        // starts sprinting from closer distances.
-        var walkApproachScale = 1.5f - propensity; // 0.2→1.3, 0.5→1.0, 0.8→0.7
+        if (propensity >= 0.999f) return true;
+        var walkApproachScale = 1.5f - propensity;
         var effectiveWalkSqr = WalkApproachDistanceSqr * walkApproachScale * walkApproachScale;
         return startDistSqr > effectiveWalkSqr;
     }
@@ -362,15 +390,11 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
         }
     }
 
-    // Categories whose arrival must be gated on a 3D LoS check to
-    // prevent through-wall validation. Loot + Quest sit in confined
-    // rooms where a thin wall between bot and POI is a real risk;
-    // Synthetic / Exfil are wide-radius volumes where the LoS check
-    // would mostly produce false negatives.
+    // Corpse excluded: bodies spawn behind cover the killer used; the
+    // selection-time gate already prevents picking unseen bodies.
     private static bool RequiresArrivalLoSCheck(WaypointCategory category)
         => category == WaypointCategory.ContainerLoot
             || category == WaypointCategory.LooseLoot
-            || category == WaypointCategory.Corpse
             || category == WaypointCategory.Quest;
 
     // 3D world-space line-of-sight check between the bot's head and the
@@ -395,9 +419,9 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
         var role = agent.Bot.Profile.Info.Settings.Role;
         return location.Category switch
         {
-            WaypointCategory.ContainerLoot => (LootConfig.ContainerLootingEnabled?.Value ?? LootingFaction.None).IsBotEnabled(role),
-            WaypointCategory.LooseLoot => (LootConfig.LooseItemLootingEnabled?.Value ?? LootingFaction.None).IsBotEnabled(role),
-            WaypointCategory.Corpse => (LootConfig.CorpseLootingEnabled?.Value ?? LootingFaction.None).IsBotEnabled(role),
+            WaypointCategory.ContainerLoot
+            or WaypointCategory.LooseLoot
+            or WaypointCategory.Corpse => (LootConfig.LootingEnabled?.Value ?? LootingFaction.None).IsBotEnabled(role),
             _ => false
         };
     }

@@ -9,7 +9,7 @@ using Orbit.Core;
 using Orbit.Navigation;
 using SPT.Reflection.Patching;
 
-namespace Orbit.Inventory.Patches;
+namespace Orbit.Patches;
 
 /// <summary>
 /// When any Player (human / PMC bot / scav bot) dies, BSG instantiates a

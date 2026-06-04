@@ -2,7 +2,7 @@ using System.Collections.Generic;
 using EFT.Interactive;
 using Orbit.Entities;
 using Orbit.Helpers;
-using Orbit.Inventory;
+using Orbit.Looting;
 using Orbit.Navigation;
 using Orbit.Sain;
 using Orbit.Systems;
@@ -110,6 +110,7 @@ public class LootContainerAction(AgentData dataset, WaypointSystem waypointSyste
 
         if (state.Success)
         {
+            var stats = agent.Player?.gameObject?.GetComponent<OrbitLootHandler>()?.Stats;
             switch (location.Category)
             {
                 case WaypointCategory.LooseLoot:
@@ -128,22 +129,22 @@ public class LootContainerAction(AgentData dataset, WaypointSystem waypointSyste
                     }
                     else
                     {
-                        // Bot inspected the item but skipped it (below
-                        // value threshold, inventory full, gear-pickup
-                        // filter). The item is still in the world — another
-                        // squad with a lower threshold might want it. Just
-                        // blacklist for this squad so we don't loop on it.
-                        agent.Squad?.CompletedPoiIds.Add(location.Id);
-                        Log.Debug($"{agent} skipped LooseLoot {location} (no items taken), squad-blacklisted only");
+                        ApplyValueSkipBlacklist(agent, location, stats);
                     }
                     break;
                 case WaypointCategory.ContainerLoot:
                 case WaypointCategory.Corpse:
-                    // Squad has checked this container/corpse; whether
-                    // something was taken or not, the squad knows what's
-                    // in it now and shouldn't revisit.
-                    agent.Squad?.CompletedPoiIds.Add(location.Id);
-                    Log.Debug($"{agent} blacklisted {location} for {agent.Squad} (itemsTaken={state.ItemsTaken}, squad memory size={agent.Squad?.CompletedPoiIds.Count})");
+                    if (state.ItemsTaken)
+                    {
+                        // At least one item taken — squad has consumed
+                        // what they came for. Squad-wide blacklist.
+                        agent.Squad?.CompletedPoiIds.Add(location.Id);
+                        Log.Debug($"{agent} blacklisted {location} for {agent.Squad} (items taken, squad memory size={agent.Squad?.CompletedPoiIds.Count})");
+                    }
+                    else
+                    {
+                        ApplyValueSkipBlacklist(agent, location, stats);
+                    }
                     break;
             }
 
@@ -166,6 +167,14 @@ public class LootContainerAction(AgentData dataset, WaypointSystem waypointSyste
             {
                 agent.Squad.CompletedPoiIds.Add(location.Id);
                 Log.Debug($"{agent} blacklisted {location} for {agent.Squad} after FAILED loot (squad memory size={agent.Squad.CompletedPoiIds.Count})");
+            }
+
+            // Expire the wait timer so the next tick re-picks instead of
+            // guarding the now-blacklisted POI for 60-180s.
+            if (agent.Squad != null)
+            {
+                agent.Squad.Objective.Duration = 0;
+                Log.Debug($"{agent.Squad} wait timer forced to expire after FAILED loot — immediate re-pick");
             }
         }
 
@@ -239,8 +248,8 @@ public class LootContainerAction(AgentData dataset, WaypointSystem waypointSyste
             if (m == null) continue;
             var go = m.Player?.gameObject;
             if (go == null) continue;
-            var brain = go.GetComponent<LootBrain>();
-            var looted = brain?.Stats?.Looted ?? 0f;
+            var handler = go.GetComponent<OrbitLootHandler>();
+            var looted = handler?.Stats?.TotalGained ?? 0f;
             total += looted;
             aliveCount++;
         }
@@ -267,7 +276,7 @@ public class LootContainerAction(AgentData dataset, WaypointSystem waypointSyste
 
         var totalLooted = SumSquadLootedAlive(squad, out var aliveCount);
 
-        Log.Debug($"CheckExtractTrigger: {agent} squad-total Stats.Looted={totalLooted:N0}₽ across {aliveCount} alive members");
+        Log.Debug($"CheckExtractTrigger: {agent} squad-total TotalGained={totalLooted:N0}₽ across {aliveCount} alive members");
 
         var role = agent.Bot?.Profile?.Info?.Settings?.Role;
         if (!role.HasValue) return;
@@ -309,6 +318,97 @@ public class LootContainerAction(AgentData dataset, WaypointSystem waypointSyste
         squad.ExtractRequested = true;
         squad.ExtractRequestedReason = $"loot ≥ {sumThreshold / 1000f:F0}k₽";
         Log.Info($"{squad}: {agent} hit extract threshold ({totalLooted:N0}₽ >= {sumThreshold:N0}₽ = {perMemberSummary} from {resolvedCount} resolved + {unresolvedCount} pending members) — squad will bee-line to nearest eligible exfil");
+    }
+
+    /// <summary>
+    /// Apply the appropriate blacklist after a no-take loot session.
+    /// Bot scavs use squad-wide blacklist (random-roll model, no threshold).
+    /// Empty/errored sessions also squad-blacklist. Bypass-item-present sessions
+    /// blacklist only for the looter. Otherwise, smart per-member: squad members
+    /// whose own threshold exceeds the highest per-slot seen are added to their
+    /// personal value-skip list; softer-gated members remain dispatchable.
+    /// </summary>
+    private static void ApplyValueSkipBlacklist(Agent agent, Waypoint location, LootStats stats)
+    {
+        if (agent?.Squad == null) return;
+        if (IsBotScavProfile(agent))
+        {
+            agent.Squad.CompletedPoiIds.Add(location.Id);
+            Log.Debug($"{agent} scav no-take on {location} — direct squad blacklist (random-roll model, no threshold)");
+            return;
+        }
+        if (stats == null || (stats.LastMaxPerSlotSeen <= 0f && !stats.LastHadBypassItem))
+        {
+            agent.Squad.CompletedPoiIds.Add(location.Id);
+            Log.Debug($"{agent} blacklisted {location} for {agent.Squad} after empty / errored no-take (stats={(stats == null ? "null" : "no-items-seen")}, squad memory size={agent.Squad.CompletedPoiIds.Count})");
+            return;
+        }
+        if (stats.LastHadBypassItem)
+        {
+            agent.ValueSkippedPoiIds.Add(location.Id);
+            Log.Debug($"{agent} bypass-item present but no-take (likely inventory-full / TX error) — per-agent blacklist only on {location}");
+            return;
+        }
+        var maxPerSlot = stats.LastMaxPerSlotSeen;
+        var blacklistedNames = new System.Collections.Generic.List<string>();
+        var spareNames = new System.Collections.Generic.List<string>();
+        for (var i = 0; i < agent.Squad.Members.Count; i++)
+        {
+            var m = agent.Squad.Members[i];
+            if (m == null) continue;
+            var memberThreshold = GetOrResolveAgentMiniLootThreshold(m);
+            if (memberThreshold > maxPerSlot)
+            {
+                m.ValueSkippedPoiIds.Add(location.Id);
+                blacklistedNames.Add($"{m.Bot.Profile.Nickname}({memberThreshold:N0}₽)");
+            }
+            else
+            {
+                spareNames.Add($"{m.Bot.Profile.Nickname}({memberThreshold:N0}₽)");
+            }
+        }
+        Log.Debug($"{agent} value-skip on {location} (maxPerSlot={maxPerSlot:N0}₽) — blacklisted for [{string.Join(",", blacklistedNames)}], left for [{string.Join(",", spareNames)}]");
+    }
+
+    /// <summary>
+    /// Lazily resolve the per-agent mini-loot threshold from SAIN brain →
+    /// archetype. PMC + SAIN-enabled bots get the archetype scalar; other
+    /// cases fall through to <see cref="ResolveFallbackThreshold"/>.
+    /// Result is cached on the agent. Never returns 0.
+    /// </summary>
+    internal static float GetOrResolveAgentMiniLootThreshold(Agent agent)
+    {
+        if (agent.OwnMiniLootValueThreshold > 0f) return agent.OwnMiniLootValueThreshold;
+        var role = agent.Bot?.Profile?.Info?.Settings?.Role;
+        if (!role.HasValue) return ResolveFallbackThreshold(agent);
+
+        var isPmc = role.Value.IsPMC();
+        if (isPmc && (Plugin.SainPersonalityEnabled?.Value ?? false))
+        {
+            var brainName = SainPersonality.GetBrainName(agent.Bot);
+            if (string.IsNullOrEmpty(brainName)) return ResolveFallbackThreshold(agent);
+
+            var archetype = SainPersonality.MapBrainToArchetype(brainName);
+            agent.OwnMiniLootValueThreshold = PersonalityProfile.GetMiniLootThresholdFor(archetype);
+            Log.Info($"{agent} resolved own mini-loot threshold: brain='{brainName}' → {archetype} → {agent.OwnMiniLootValueThreshold:N0}₽");
+            return agent.OwnMiniLootValueThreshold;
+        }
+        return ResolveFallbackThreshold(agent);
+    }
+
+    private static float ResolveFallbackThreshold(Agent agent)
+    {
+        var squadThreshold = agent.Squad?.Personality?.MiniLootValueThreshold ?? 0f;
+        if (squadThreshold > 0f) return squadThreshold;
+        return OrbitLootHandler.DefaultMinPickupPrice;
+    }
+
+    private static bool IsBotScavProfile(Agent agent)
+    {
+        var profile = agent?.Bot?.Profile;
+        if (profile == null) return false;
+        if (profile.Side != EFT.EPlayerSide.Savage) return false;
+        return !profile.WillBeAPlayerScav();
     }
 
     /// <summary>
@@ -378,7 +478,7 @@ public class LootContainerAction(AgentData dataset, WaypointSystem waypointSyste
             var sweepRadius = agent.Squad?.Personality != null
                 ? agent.Squad.Personality.ScavengeSweepRadius
                 : Plugin.ScavengeSweepRadius.Value;
-            var candidate = waypointSystem.FindNearbySweepTarget(agent.Position, agent.Squad, sweepRadius);
+            var candidate = waypointSystem.FindNearbySweepTarget(agent.Position, agent, sweepRadius);
             if (candidate == null) return false;
             if (coverageDisabled || Random.value < coverage)
             {
@@ -456,13 +556,13 @@ public class LootContainerAction(AgentData dataset, WaypointSystem waypointSyste
 
 // ── Per-bot loot state ──────────────────────────────────────────────
 //
-// Wraps the MonoBehaviour LootBrain attached to the bot's GameObject,
+// Wraps the MonoBehaviour loot handler attached to the bot's GameObject,
 // sets up the target, kicks off the async loot, and reports completion
 // back to the dispatch-layer action.
 
 internal class BotLootState
 {
-    // Hard cap on how long we'll wait for LootBrain.LootTaskRunning to
+    // Hard cap on how long we'll wait for loot handler.LootTaskRunning to
     // clear. The brain has its own internal timeout (LootConfig.LootTimeout
     // default 180s) backed by a CancellationTokenSource — but if
     // something inside doesn't honour the cancel (a hung NavMesh
@@ -474,7 +574,7 @@ internal class BotLootState
 
     private readonly Agent _agent;
     private readonly Waypoint _location;
-    private readonly LootBrain _brain;
+    private readonly ILootHandler _brain;
     private float _lootedAtStart;
     private float _beganAt;
     private bool _started;
@@ -497,12 +597,13 @@ internal class BotLootState
         _location = location;
 
         var go = agent.Player.gameObject;
-        _brain = go.GetComponent<LootBrain>();
-        if (_brain == null)
+        var handler = go.GetComponent<OrbitLootHandler>();
+        if (handler == null)
         {
-            _brain = go.AddComponent<LootBrain>();
-            _brain.Init(agent.Bot);
+            handler = go.AddComponent<OrbitLootHandler>();
+            handler.Init(agent.Bot);
         }
+        _brain = handler;
     }
 
     public void Begin()
@@ -515,7 +616,7 @@ internal class BotLootState
             _ => LootKind.None
         };
 
-        // LootBrain expects an InteractableObject — Exfil targets share
+        // loot handler expects an InteractableObject — Exfil targets share
         // a common MonoBehaviour base with lootables but aren't
         // InteractableObject, so cast explicitly and bail if it fails.
         var loot = _location.Target as InteractableObject;
@@ -529,7 +630,7 @@ internal class BotLootState
 
         // Locked containers (key/keycard required, e.g. weapon cases
         // inside locked resort rooms) can't be opened by a bot. The
-        // LootBrain would sit on the open animation forever. Skip
+        // loot handler would sit on the open animation forever. Skip
         // cleanly — POI gets squad-blacklisted upstream so we don't
         // keep returning to it.
         if (loot is LootableContainer container
@@ -541,17 +642,17 @@ internal class BotLootState
             return;
         }
 
-        _brain.ActiveLoot = loot;
-        _brain.ActiveLootType = lootKind;
-        _brain.Destination = _location.Position;
-        _brain.LootObjectPosition = loot.transform.position;
-        _brain.ForceBrainEnabled = true;
+        _brain.CurrentTarget = loot;
+        _brain.CurrentTargetKind = lootKind;
+        _brain.ApproachPosition = _location.Position;
+        _brain.TargetWorldPosition = loot.transform.position;
+        _brain.ForceEnabled = true;
 
         // Snapshot cumulative looted value so we can tell at the end
         // whether the bot actually pocketed anything (vs. opening the
         // container and skipping everything because items were below
         // the value threshold).
-        _lootedAtStart = _brain.Stats != null ? _brain.Stats.Looted : 0f;
+        _lootedAtStart = _brain.Stats != null ? _brain.Stats.TotalGained : 0f;
 
         // Immersion: crouch and face the loot before kicking off the
         // transaction. Wrapped defensively because some BotOwner
@@ -590,7 +691,7 @@ internal class BotLootState
             return;
         }
 
-        // Brain-watchdog: LootBrain's own CancellationTokenSource caps
+        // Brain-watchdog: loot handler's own CancellationTokenSource caps
         // the async task at LootConfig.LootTimeout, but if a coroutine
         // inside doesn't honour cancel (hung handbook lookup, vanished
         // interaction hook), LootTaskRunning stays true and the bot is
@@ -618,12 +719,12 @@ internal class BotLootState
             return;
         }
 
-        // LootBrain clears LootTaskRunning when the async loot finishes
-        // (success OR timeout/cancellation). Compare Stats.Looted before
+        // loot handler clears LootTaskRunning when the async loot finishes
+        // (success OR timeout/cancellation). Compare Stats.TotalGained before
         // and after to determine whether anything was actually taken.
         if (!_brain.LootTaskRunning)
         {
-            var lootedNow = _brain.Stats != null ? _brain.Stats.Looted : 0f;
+            var lootedNow = _brain.Stats != null ? _brain.Stats.TotalGained : 0f;
             ItemsTaken = lootedNow > _lootedAtStart;
             Log.Debug($"{_agent} BotLootState.Tick: brain.LootTaskRunning=false → done, lootedDelta={(lootedNow - _lootedAtStart):N0}₽, ItemsTaken={ItemsTaken}");
             IsDone = true;
@@ -639,12 +740,11 @@ internal class BotLootState
         // weird and confuses both players and the squad blacklist
         // heuristic (a passing teammate would see "already opened, must
         // be empty"). Close it explicitly before bailing.
-        if (_brain.ActiveLoot is LootableContainer container)
+        if (_brain.CurrentTarget is LootableContainer container)
         {
             try
             {
-                var log = new BotLog(_agent.Bot);
-                LootHelpers.InteractContainer(container, _agent.Bot, EFT.EInteractionType.Close, log);
+                _agent.Bot?.LootOpener?.Interact(container, EFT.EInteractionType.Close);
             }
             catch (System.Exception e)
             {
@@ -659,8 +759,8 @@ internal class BotLootState
 
     private void CleanupBrainTarget()
     {
-        _brain.ActiveLoot = null;
-        _brain.ActiveLootType = LootKind.None;
-        _brain.ForceBrainEnabled = false;
+        _brain.CurrentTarget = null;
+        _brain.CurrentTargetKind = LootKind.None;
+        _brain.ForceEnabled = false;
     }
 }

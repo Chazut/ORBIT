@@ -6,7 +6,7 @@ using EFT.Interactive;
 using Orbit.Config;
 using Orbit.Entities;
 using Orbit.Helpers;
-using Orbit.Inventory;
+using Orbit.Looting;
 using Orbit.Navigation;
 using Orbit.Sain;
 using UnityEngine;
@@ -19,6 +19,7 @@ public struct Cell()
 {
     public readonly List<Waypoint> Waypoints = [];
     public int Congestion = 0;
+    public int CorpseCount = 0;
 
     public bool HasWaypoints
     {
@@ -110,12 +111,16 @@ public class WaypointSystem
         _zoneConfig = waypointConfig.MapZones[mapId];
         _botsController = botsController;
 
+        // _cellSize must be set before WaypointGatherer is constructed
+        // — the gatherer scales synthetic/exfil radii from it.
+        Log.Info("Calculating world geometry");
+        var geometryConfig = waypointConfig.MapGeometries.Value[mapId];
+        _cellSize = geometryConfig.CellSize;
+        _cellSubSize = _cellSize / 2f;
+
         Log.Info("Gathering built in waypoints");
         _waypointGatherer = new WaypointGatherer(_cellSize, botsController);
         var builtinWaypoints = _waypointGatherer.CollectBuiltinWaypoints();
-
-        Log.Info("Calculating world geometry");
-        var geometryConfig = waypointConfig.MapGeometries.Value[mapId];
 
         // Calculate bounds from positions
         _worldMin = geometryConfig.Min;
@@ -132,9 +137,6 @@ public class WaypointSystem
 
         var worldWidth = worldMax.x - _worldMin.x;
         var worldHeight = worldMax.y - _worldMin.y;
-
-        _cellSize = geometryConfig.CellSize;
-        _cellSubSize = _cellSize / 2f;
 
         var cols = Mathf.CeilToInt(worldWidth / _cellSize);
         var rows = Mathf.CeilToInt(worldHeight / _cellSize);
@@ -705,7 +707,7 @@ public class WaypointSystem
 
     /// <summary>
     /// Looks for an unlooted Corpse waypoint any squad member can see
-    /// within <see cref="LootConfig.DetectCorpseDistance"/>. Returns the
+    /// within <see cref="LootConfig.DetectDistance"/>. Returns the
     /// first match or null if no opportunistic loot target exists.
     /// </summary>
     public Waypoint TryFindOpportunisticCorpse(Squad squad)
@@ -713,9 +715,9 @@ public class WaypointSystem
         if (squad == null || squad.Members.Count == 0) return null;
         var leaderRole = squad.Leader?.Bot?.Profile?.Info?.Settings?.Role;
         if (!leaderRole.HasValue) return null;
-        if (!(LootConfig.CorpseLootingEnabled?.Value ?? LootingFaction.None).IsBotEnabled(leaderRole.Value)) return null;
+        if (!(LootConfig.LootingEnabled?.Value ?? LootingFaction.None).IsBotEnabled(leaderRole.Value)) return null;
 
-        var maxDist = LootConfig.DetectCorpseDistance?.Value ?? 0f;
+        var maxDist = LootConfig.DetectDistance?.Value ?? 0f;
         var maxDistSqr = maxDist * maxDist;
 
         for (var m = 0; m < squad.Members.Count; m++)
@@ -726,6 +728,19 @@ public class WaypointSystem
             var memberCell = WorldToCell(memberPos);
             if (!IsValidCell(memberCell)) continue;
 
+            // Fast-path: skip the member if no corpses in the 3×3 window.
+            var hasCorpseNearby = false;
+            for (var dx = -1; dx <= 1 && !hasCorpseNearby; dx++)
+            {
+                for (var dy = -1; dy <= 1 && !hasCorpseNearby; dy++)
+                {
+                    var coords = new Vector2Int(memberCell.x + dx, memberCell.y + dy);
+                    if (!IsValidCell(coords)) continue;
+                    if (_cells[coords.x, coords.y].CorpseCount > 0) hasCorpseNearby = true;
+                }
+            }
+            if (!hasCorpseNearby) continue;
+
             // Walk the 3×3 cell window around the member.
             for (var dx = -1; dx <= 1; dx++)
             {
@@ -734,7 +749,7 @@ public class WaypointSystem
                     var coords = new Vector2Int(memberCell.x + dx, memberCell.y + dy);
                     if (!IsValidCell(coords)) continue;
                     var cell = _cells[coords.x, coords.y];
-                    if (!cell.HasWaypoints) continue;
+                    if (cell.CorpseCount == 0) continue;
 
                     var locs = cell.Waypoints;
                     for (var i = 0; i < locs.Count; i++)
@@ -937,6 +952,13 @@ public class WaypointSystem
         var role = squad.Leader.Bot.Profile?.Info?.Settings?.Role;
         if (role.HasValue) squadIsPmc = role.Value.IsPMC();
         var leaderPos = squad.Leader.Bot.Position;
+        var blacklist = squad.CompletedPoiIds;
+
+        if (!squad.ExfilEligibilityLogged)
+        {
+            squad.ExfilEligibilityLogged = true;
+            LogEligibleExfilsForSquad(squad, squadIsPmc);
+        }
 
         Waypoint best = null;
         var bestDist = float.MaxValue;
@@ -949,6 +971,7 @@ public class WaypointSystem
                 {
                     var loc = locs[i];
                     if (loc.Category != WaypointCategory.Exfil) continue;
+                    if (blacklist.Contains(loc.Id)) continue;
                     if (!SquadCanUseWaypoint(squad, squadIsPmc, loc)) continue;
                     var distSqr = (loc.Position - leaderPos).sqrMagnitude;
                     if (distSqr < bestDist)
@@ -972,6 +995,7 @@ public class WaypointSystem
                 {
                     var loc = locs[i];
                     if (loc.Category != WaypointCategory.Exfil) continue;
+                    if (blacklist.Contains(loc.Id)) continue;
                     if (!SquadCanUseWaypointIgnoringEntry(squad, squadIsPmc, loc)) continue;
                     var distSqr = (loc.Position - leaderPos).sqrMagnitude;
                     if (distSqr < bestDist)
@@ -987,6 +1011,40 @@ public class WaypointSystem
             Log.Warning($"{squad} no spawn-side eligible exfil — falling back to nearest faction-allowed exfil {best} (entry derivation may have failed)");
         }
         return best;
+    }
+
+    private void LogEligibleExfilsForSquad(Squad squad, bool? squadIsPmc)
+    {
+        var leaderPos = squad.Leader?.Bot?.Position ?? Vector3.zero;
+        var entry = squad.Leader?.Bot?.Profile?.Info?.EntryPoint;
+        if (string.IsNullOrEmpty(entry))
+            entry = ResolveDerivedEntryPoint(squad);
+        if (string.IsNullOrEmpty(entry)) entry = "(none)";
+        Log.Info($"{squad} eligible exfils (leader entry='{entry}', isPmc={squadIsPmc}):");
+        for (var cx = 0; cx < _gridSize.x; cx++)
+        {
+            for (var cy = 0; cy < _gridSize.y; cy++)
+            {
+                var locs = _cells[cx, cy].Waypoints;
+                for (var i = 0; i < locs.Count; i++)
+                {
+                    var loc = locs[i];
+                    if (loc.Category != WaypointCategory.Exfil) continue;
+                    if (loc.Target is not ExfiltrationPoint exfil) continue;
+                    var dist = Mathf.Sqrt((loc.Position - leaderPos).sqrMagnitude);
+                    var pass1 = SquadCanUseWaypoint(squad, squadIsPmc, loc);
+                    var pass2 = !pass1 && SquadCanUseWaypointIgnoringEntry(squad, squadIsPmc, loc);
+                    string verdict;
+                    if (pass1) verdict = "OK";
+                    else if (pass2) verdict = "PASS-2-FALLBACK";
+                    else verdict = "REJECTED";
+                    var entries = exfil.EligibleEntryPoints != null && exfil.EligibleEntryPoints.Length > 0
+                        ? string.Join("/", exfil.EligibleEntryPoints)
+                        : "<any>";
+                    Log.Info($"  - {exfil.name} dist={dist:F0}m status={exfil.Status} entries={entries} → {verdict}");
+                }
+            }
+        }
     }
 
     /// <summary>
@@ -1079,12 +1137,22 @@ public class WaypointSystem
         }
     }
 
-    public Waypoint FindNearbySweepTarget(Vector3 botPos, Squad squad, float radius)
+    public Waypoint FindNearbySweepTarget(Vector3 botPos, Agent agent, float radius)
     {
+        var squad = agent?.Squad;
+        var agentSkips = agent?.ValueSkippedPoiIds;
         var center = WorldToCell(botPos);
         var radSqr = radius * radius;
-        Waypoint best = null;
-        var bestDist = float.MaxValue;
+        // Same-floor preference: track nearest same-floor and nearest
+        // overall in parallel, return same-floor when present. Without
+        // this, Resort sweeps yo-yo across floors because a basement
+        // candidate at low XZ but high Y delta wins on 3D distance.
+        var yTolerance = Plugin.SameFloorLootYTolerance?.Value ?? 0f;
+        var preferSameFloor = yTolerance > 0f;
+        Waypoint bestSame = null;
+        var bestSameDist = float.MaxValue;
+        Waypoint bestAny = null;
+        var bestAnyDist = float.MaxValue;
         for (var dx = -1; dx <= 1; dx++)
         {
             for (var dy = -1; dy <= 1; dy++)
@@ -1095,21 +1163,31 @@ public class WaypointSystem
                 for (var i = 0; i < locs.Count; i++)
                 {
                     var loc = locs[i];
-                    if (loc.Category != WaypointCategory.LooseLoot && loc.Category != WaypointCategory.Corpse) continue;
+                    // All loot categories chain through sweep — excluding
+                    // containers broke the chain and zigzagged the bot to
+                    // a cell-wide random pick after each container loot.
+                    if (!IsLootCategory(loc.Category)) continue;
                     if (squad != null && squad.CompletedPoiIds.Contains(loc.Id)) continue;
+                    if (agentSkips != null && agentSkips.Contains(loc.Id)) continue;
                     if (_claims.ContainsKey(loc.Id)) continue;
                     if (IsSquadKnownUnreachable(squad, loc.Id)) continue;
                     var distSqr = (loc.Position - botPos).sqrMagnitude;
                     if (distSqr > radSqr) continue;
-                    if (distSqr < bestDist)
+                    if (distSqr < bestAnyDist)
                     {
-                        bestDist = distSqr;
-                        best = loc;
+                        bestAnyDist = distSqr;
+                        bestAny = loc;
+                    }
+                    if (preferSameFloor && Mathf.Abs(loc.Position.y - botPos.y) <= yTolerance
+                        && distSqr < bestSameDist)
+                    {
+                        bestSameDist = distSqr;
+                        bestSame = loc;
                     }
                 }
             }
         }
-        return best;
+        return bestSame ?? bestAny;
     }
 
     /// <summary>
@@ -1143,6 +1221,7 @@ public class WaypointSystem
                 {
                     _lootItemIdToWaypointId.Remove(li.Item.Id);
                 }
+                if (removed.Category == WaypointCategory.Corpse) _cells[coords.x, coords.y].CorpseCount--;
                 waypoints.RemoveAt(i);
                 return true;
             }
@@ -1200,6 +1279,7 @@ public class WaypointSystem
         {
             _lootItemIdToWaypointId[li.Item.Id] = loc.Id;
         }
+        if (loc.Category == WaypointCategory.Corpse) _cells[coords.x, coords.y].CorpseCount++;
         // Subscribe to ExfiltrationPoint status changes so V-Ex (and other
         // one-shot exits) are pruned from the grid the moment they become
         // unusable. Also useful for logging the "real" exfil settings once
@@ -1686,7 +1766,11 @@ public class WaypointSystem
             for (var i = 0; i < waypoints.Count; i++)
             {
                 var loc = waypoints[i];
-                // Quest waypoints are reserved for main objectives.
+                if (loc.Category == WaypointCategory.Exfil && !squad.ExtractRequested)
+                {
+                    skippedExfil++;
+                    continue;
+                }
                 if (loc.Category == WaypointCategory.Quest
                     && !SquadOwnsQuest(squad, loc))
                 {
@@ -1770,6 +1854,7 @@ public class WaypointSystem
             for (var i = 0; i < waypoints.Count; i++)
             {
                 var loc = waypoints[i];
+                if (loc.Category == WaypointCategory.Exfil && !squad.ExtractRequested) continue;
                 if (loc.Category == WaypointCategory.Quest
                     && !SquadOwnsQuest(squad, loc)) continue;
                 if (hasBlacklist && squad.CompletedPoiIds.Contains(loc.Id)) continue;
@@ -1960,13 +2045,9 @@ public class WaypointSystem
         switch (loc.Category)
         {
             case WaypointCategory.ContainerLoot:
-                maxDist = LootConfig.DetectContainerDistance?.Value ?? float.MaxValue;
-                break;
             case WaypointCategory.LooseLoot:
-                maxDist = LootConfig.DetectItemDistance?.Value ?? float.MaxValue;
-                break;
             case WaypointCategory.Corpse:
-                maxDist = LootConfig.DetectCorpseDistance?.Value ?? float.MaxValue;
+                maxDist = LootConfig.DetectDistance?.Value ?? float.MaxValue;
                 break;
             default:
                 return true; // Quest/Synthetic/Exfil aren't loot — no detour cap
@@ -2061,14 +2142,15 @@ public class WaypointSystem
             {
                 case ERequirementState.ScavCooperation:
                 case ERequirementState.WorldEvent:
-                case ERequirementState.TransferItem:
                 case ERequirementState.SecretTransferItem:
                 case ERequirementState.HasItem:
                 case ERequirementState.WearsItem:
                 case ERequirementState.Reference:
                 case ERequirementState.Train:
                 case ERequirementState.SkillLevel:
-                case ERequirementState.Timer:
+                case ERequirementState.Empty:
+                case ERequirementState.EmptyOrSize:
+                case ERequirementState.NotEmpty:
                     return true;
             }
         }
@@ -2264,7 +2346,7 @@ public class WaypointSystem
     }
 
     /// <summary>
-    /// Sum of <see cref="ItemValuator"/> handbook prices for every item
+    /// Sum of handbook prices for every item
     /// in every Container + LooseLoot waypoint of the cell. Returns 0 if
     /// the valuator isn't initialised yet (raid still loading) or the
     /// cell has no loot waypoints.
@@ -2272,7 +2354,6 @@ public class WaypointSystem
     public float SumCellLootValue(Vector2Int cell)
     {
         if (!IsValidCell(cell)) return 0f;
-        if (LootConfig.ItemValuator == null) return 0f;
         ref var cellRef = ref _cells[cell.x, cell.y];
         if (!cellRef.HasWaypoints) return 0f;
         var sum = 0f;
@@ -2293,7 +2374,7 @@ public class WaypointSystem
         {
             if (loc.Target is LootItem li && li.Item != null)
             {
-                return LootConfig.ItemValuator.GetItemPrice(li.Item, null);
+                return ItemPriceLookup.GetPrice(li.Item);
             }
             if (loc.Target is LootableContainer container
                 && container.ItemOwner?.RootItem is SearchableItemItemClass searchable)
@@ -2309,7 +2390,7 @@ public class WaypointSystem
                         foreach (var item in grid.Items)
                         {
                             if (item == null) continue;
-                            sum += LootConfig.ItemValuator.GetItemPrice(item, null);
+                            sum += ItemPriceLookup.GetPrice(item);
                         }
                     }
                 }

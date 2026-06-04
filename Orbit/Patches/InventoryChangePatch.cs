@@ -5,7 +5,7 @@ using EFT.InventoryLogic;
 using Orbit.Core;
 using SPT.Reflection.Patching;
 
-namespace Orbit.Inventory.Patches;
+namespace Orbit.Patches;
 
 /// <summary>
 /// Fires whenever any Player (human OR bot) picks up an item. We use this

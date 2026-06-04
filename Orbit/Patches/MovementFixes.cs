@@ -81,12 +81,7 @@ public class HardTeleportTracePatch : ModulePatch
     }
 }
 
-/// <summary>
-/// Forces MovementContext.IsAI to return false so the movement system runs
-/// the human-control code path even for our bots. Without this BSG's AI
-/// short-circuits much of the smoothing pipeline. Borrowed approach from
-/// Solarint's SAIN.
-/// </summary>
+/// <summary>Forces MovementContext.IsAI to false for ORBIT bots so the human-control smoothing pipeline runs.</summary>
 public class MovementContextHumanizePatch : ModulePatch
 {
     protected override MethodBase GetTargetMethod()
@@ -95,18 +90,19 @@ public class MovementContextHumanizePatch : ModulePatch
     }
 
     [PatchPrefix]
-    public static bool Patch(ref bool __result)
+    public static bool Patch(Player ____player, ref bool __result)
     {
+        var bot = ____player?.AIData?.BotOwner;
+        var roster = Singleton<BotRoster>.Instance;
+        if (bot == null || roster == null || !roster.IsOrbitActive(bot)) return true;
         __result = false;
         return false;
     }
 }
 
 /// <summary>
-/// Skips BSG's BotMover.ManualFixedUpdate for bots we control. Without this
-/// the vanilla mover keeps issuing path corrections that fight our own
-/// movement system, producing the characteristic AI jitter when bots are
-/// also in SAIN combat.
+/// Skips BSG's BotMover.ManualFixedUpdate for ORBIT bots — the vanilla
+/// mover would fight our own movement system and cause jitter.
 /// </summary>
 public class ManualFixedUpdateSkipPatch : ModulePatch
 {

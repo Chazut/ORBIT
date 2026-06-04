@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using Orbit.Entities;
+using Orbit.Helpers;
 using Orbit.Navigation;
 using Orbit.Systems;
 using Unity.Collections;
@@ -65,9 +66,12 @@ public class GuardAction(AgentData dataset, MovementSystem movementSystem, float
             switch (agent.Guard.Status)
             {
                 case GuardStatus.None:
-                    movementSystem.MoveToByPath(agent, coverPoint.Position, sprint: true, urgency: MovementUrgency.Low);
+                    // Sprint to cover honours the same faction / personality
+                    // gate as objective dispatch (scavs and Timmy never sprint).
+                    var sprintAllowed = SprintGate.IsAllowedByFaction(agent);
+                    movementSystem.MoveToByPath(agent, coverPoint.Position, sprint: sprintAllowed, urgency: MovementUrgency.Low);
                     guard.Status = GuardStatus.Moving;
-                    Log.Debug($"{agent} guarding: moving to cover point");
+                    Log.Debug($"{agent} guarding: moving to cover point (sprint={sprintAllowed})");
                     break;
                 case GuardStatus.Moving:
                     if (agent.Movement.Status == MovementStatus.Moving) continue;

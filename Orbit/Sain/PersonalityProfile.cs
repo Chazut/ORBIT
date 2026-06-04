@@ -78,6 +78,15 @@ public sealed class PersonalityProfile
     }
 
     /// <summary>
+    /// Returns the configured per-archetype mini-loot value threshold.
+    /// Scalar — no per-roll sampling.
+    /// </summary>
+    public static int GetMiniLootThresholdFor(PersonalityArchetype archetype)
+    {
+        return ResolveTable(archetype).MiniLootValueThreshold;
+    }
+
+    /// <summary>
     /// Roll a profile for the given archetype using the F12 tables. Each
     /// Vector2 range is sampled once; scalars are passed through. Called
     /// at squad registration when the leader is PMC and SAIN personality
