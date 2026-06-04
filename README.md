@@ -1,5 +1,5 @@
 > ⚠️ **Heads up:** ORBIT is built on **Phobos**'s foundation (MIT-licensed).
-> Full credits at the bottom. ORBIT wouldn't exist without their work 🙏
+> Full credits at the bottom. ORBIT wouldn't exist without [Janky's](https://forge.sp-tarkov.com/user/72916/jankytheclown) work!
 
 > **ORBIT** - Objective-driven Raid Bot Intelligence Tactics
 > 
