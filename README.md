@@ -300,14 +300,11 @@ No ETA, no promises, but on the list:
   - Reserve D-2 (switch 1 → door switch → extract)
 
 **Extracts**
-- Time-extract threshold expressed as % of remaining raid time (vs current fixed minute range)
 - WorldEvent exfils (Reserve / Customs switch-gated)
 - Train exfil (Armored Train availability window)
 - "Drop backpack" exfils (Empty / EmptyOrSize) - usable when bot has no backpack, OR wounded bots drop the bag and use them anyway
 - HasItem (RedRebel-style - bot must own a Red Rebel in inventory, but don't consume it; ignore the paracord and WearsItem gear constraints entirely)
-- Transitions - bots currently try them and get stuck; figure out the right behaviour
 - Fallback to next-closest exfil if the chosen one is unreachable
-- Investigate Reference / SkillLevel requirement states
 
 **Looting (post-MVP)**
 - In-raid weapon swap when bots find something strictly better (gun +
