@@ -5,9 +5,8 @@ using UnityEngine;
 namespace Orbit.Systems;
 
 /// <summary>
-/// Boot-time scan of every interactable door on the map. The waypoint
-/// system reads <see cref="Doors"/> at startup to seed per-POI locked-door
-/// detection (paths that cross a Locked door are routed differently).
+/// Boot-time scan of every interactable door on the map. The waypoint system reads <see cref="Doors"/> at
+/// startup to seed per-POI locked-door detection (paths that cross a Locked door are routed differently).
 /// </summary>
 public class DoorSystem
 {

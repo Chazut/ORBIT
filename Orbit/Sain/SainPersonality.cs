@@ -7,15 +7,12 @@ using EFT;
 namespace Orbit.Sain;
 
 /// <summary>
-/// Reflective lookup against the SAIN plugin to read a bot's currently-
-/// assigned personality brain name (e.g. "Rat", "GigaChad", "Wreckless").
-/// SAIN is a hard dependency, but the brain attachment is asynchronous —
-/// the BotComponent lives in <c>SAIN.Components.BotManagerComponent.Bots</c>
-/// (a dictionary keyed by Profile.Id, not a UnityEngine Component on the
-/// BotOwner GameObject), and SAIN populates it 1-2 seconds after spawn.
-/// Brain name resolution therefore returns null during that window —
-/// callers must defer use of the result (see the deferred-personality
-/// path in <see cref="Orbit.Core.SquadRegistry"/>).
+/// Reflective lookup against the SAIN plugin to read a bot's currently- assigned personality brain name (e.g.
+/// "Rat", "GigaChad", "Wreckless"). SAIN is a hard dependency, but the brain attachment is asynchronous — the
+/// BotComponent lives in <c>SAIN.Components.BotManagerComponent.Bots</c> (a dictionary keyed by Profile.Id,
+/// not a UnityEngine Component on the BotOwner GameObject), and SAIN populates it 1-2 seconds after spawn.
+/// Brain name resolution therefore returns null during that window — callers must defer use of the result
+/// (see the deferred-personality path in <see cref="Orbit.Core.SquadRegistry"/>).
 /// </summary>
 public static class SainPersonality
 {
@@ -63,9 +60,8 @@ public static class SainPersonality
     private static object ResolveBotManager()
     {
         if (_cachedBotManager != null) return _cachedBotManager;
-        // Prefer GameWorld.GetComponent (the canonical way SAIN attaches
-        // the manager). Fall back to the static Instance property if
-        // present.
+        // Prefer GameWorld.GetComponent (the canonical way SAIN attaches the manager). Fall back to the
+        // static Instance property if present.
         try
         {
             var gameWorld = Singleton<GameWorld>.Instance;
@@ -99,11 +95,10 @@ public static class SainPersonality
     }
 
     /// <summary>
-    /// Reads the SAIN-assigned brain name for the given bot. Returns
-    /// null if SAIN isn't loaded, the BotComponent hasn't been attached
-    /// yet (typical in the 1-2 seconds after spawn), or the per-bot
-    /// Info / Personality field couldn't be read. Caller must be
-    /// defensive against the null and retry later if appropriate.
+    /// Reads the SAIN-assigned brain name for the given bot. Returns null if SAIN isn't loaded, the
+    /// BotComponent hasn't been attached yet (typical in the 1-2 seconds after spawn), or the per-bot Info /
+    /// Personality field couldn't be read. Caller must be defensive against the null and retry later if
+    /// appropriate.
     /// </summary>
     public static string GetBrainName(BotOwner bot)
     {
@@ -118,15 +113,15 @@ public static class SainPersonality
             var bots = _botsProperty.GetValue(manager);
             if (bots == null) return null;
 
-            // SAIN's Bots is a Dictionary<string, BotComponent> keyed by
-            // Profile.Id (string). Use the indexer.
+            // SAIN's Bots is a Dictionary<string, BotComponent> keyed by Profile.Id (string). Use the
+            // indexer.
             var profileId = bot.Profile?.Id;
             if (string.IsNullOrEmpty(profileId)) return null;
 
             var dictType = bots.GetType();
             object botComponent = null;
-            // ContainsKey + indexer is the fast path; otherwise iterate
-            // Values (slower fallback for unusual dictionary impls).
+            // ContainsKey + indexer is the fast path; otherwise iterate Values (slower fallback for unusual
+            // dictionary impls).
             var containsKey = dictType.GetMethod("ContainsKey");
             var item = dictType.GetProperty("Item");
             if (containsKey != null && item != null)
@@ -164,9 +159,9 @@ public static class SainPersonality
     }
 
     /// <summary>
-    /// Maps a SAIN brain name to one of the five archetypes using the
-    /// user's F12 mapping strings (comma-separated lists per archetype).
-    /// Null / unknown brain names map to <see cref="PersonalityArchetype.Average"/>.
+    /// Maps a SAIN brain name to one of the five archetypes using the user's F12 mapping strings
+    /// (comma-separated lists per archetype). Null / unknown brain names map to <see
+    /// cref="PersonalityArchetype.Average"/>.
     /// </summary>
     public static PersonalityArchetype MapBrainToArchetype(string brainName)
     {
@@ -175,10 +170,9 @@ public static class SainPersonality
         if (ContainsToken(Plugin.SainArchetypeCautiousBrains?.Value, brainName)) return PersonalityArchetype.Cautious;
         if (ContainsToken(Plugin.SainArchetypeAggressiveBrains?.Value, brainName)) return PersonalityArchetype.Aggressive;
         if (ContainsToken(Plugin.SainArchetypeVeryAggressiveBrains?.Value, brainName)) return PersonalityArchetype.VeryAggressive;
-        // Explicit Average mapping (default "Normal") — keeps the
-        // fallback semantic but lets the user surface specific brain
-        // names in the F12 list. Unknown brains still fall through to
-        // Average via the return below.
+        // Explicit Average mapping (default "Normal") — keeps the fallback semantic but lets the user surface
+        // specific brain names in the F12 list. Unknown brains still fall through to Average via the return
+        // below.
         if (ContainsToken(Plugin.SainArchetypeAverageBrains?.Value, brainName)) return PersonalityArchetype.Average;
         return PersonalityArchetype.Average;
     }

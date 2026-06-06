@@ -22,10 +22,9 @@ using UnityEngine;
 namespace Orbit;
 
 /// <summary>
-/// BepInEx entry point. Owns the F12 configuration surface for every
-/// tunable knob the dispatcher / looting / SAIN integration reads at
-/// runtime. <see cref="LogSource"/> exposes the BepInEx ManualLogSource
-/// consumed by <see cref="Log"/> — named <c>LogSource</c> rather than
+/// BepInEx entry point. Owns the F12 configuration surface for every tunable knob the dispatcher / looting /
+/// SAIN integration reads at runtime. <see cref="LogSource"/> exposes the BepInEx ManualLogSource consumed by
+/// <see cref="Log"/> — named <c>LogSource</c> rather than
 /// <c>Log</c> so the static <see cref="Orbit.Log"/> helper class doesn't
 /// collide.
 /// </summary>
@@ -196,10 +195,9 @@ public class Plugin : BaseUnityPlugin
     {
         LogSource = Logger;
 
-        // The version-label patch must run BEFORE the delayed coroutine —
-        // EFT calls PreloaderUI.method_6 during early scene init, well
-        // before our 5s delay completes. SAIN registers it immediately at
-        // boot for the same reason.
+        // The version-label patch must run BEFORE the delayed coroutine — EFT calls PreloaderUI.method_6
+        // during early scene init, well before our 5s delay completes. SAIN registers it immediately at boot
+        // for the same reason.
         EnableSafe(new VersionLabelPatch());
 
         StartCoroutine(DelayedLoad());
@@ -207,9 +205,8 @@ public class Plugin : BaseUnityPlugin
 
     private IEnumerator DelayedLoad()
     {
-        // Wait for the user's other 500 mods to settle before binding config
-        // and registering patches — early-boot races against handlers other
-        // mods install in Awake are otherwise too easy to lose.
+        // Wait for the user's other 500 mods to settle before binding config and registering patches —
+        // early-boot races against handlers other mods install in Awake are otherwise too easy to lose.
         yield return new WaitForSeconds(5);
 
         try
@@ -219,22 +216,21 @@ public class Plugin : BaseUnityPlugin
         }
         catch (Exception ex)
         {
-            // Config binding errors must not crash boot — they'd block the
-            // entire plugin from registering. Log and continue with defaults.
+            // Config binding errors must not crash boot — they'd block the entire plugin from registering.
+            // Log and continue with defaults.
             Log.Error($"ORBIT config bind failed (sub-systems will degrade to defaults): {ex}");
         }
 
-        // HandbookClass becomes available once GameWorld is up. ItemPriceLookup
-        // reads it lazily per query — no upfront preload needed.
+        // HandbookClass becomes available once GameWorld is up. ItemPriceLookup reads it lazily per query —
+        // no upfront preload needed.
         StartCoroutine(WaitForHandbook());
 
         Log.Info($"ORBIT {OrbitVersion} initialised");
 
-        // Patches — wrap each in EnableSafe so one bad patch (wrong Harmony
-        // parameter name, missing target method after a game update) can't
-        // collapse the rest of init. Without the guard a single failure
-        // skips every subsequent .Enable() AND the BrainManager.AddCustomLayer
-        // call, leaving bots stranded on BSG's vanilla brain.
+        // Patches — wrap each in EnableSafe so one bad patch (wrong Harmony parameter name, missing target
+        // method after a game update) can't collapse the rest of init. Without the guard a single failure
+        // skips every subsequent .Enable() AND the BrainManager.AddCustomLayer call, leaving bots stranded on
+        // BSG's vanilla brain.
         EnableSafe(new OrbitInitPatch());
         EnableSafe(new OrbitTickPatch());
         EnableSafe(new OrbitDisposePatch());
@@ -258,17 +254,14 @@ public class Plugin : BaseUnityPlugin
         EnableSafe(new ExfilLayerBypassPatch());       // high-priority layer (79) that strands bots near exfils
         EnableSafe(new PtrlBirdEyeBypassPatch());      // splits Bird Eye away from the Goons
 
-        // Faction-mod takeover toggles. OrbitBrainLayer always registers
-        // against the standard PMC / Scav / Goon brain names, so mods like
-        // UNTAR / RUAF / BlackDiv whose bots use BaseBrain="PMC" are
-        // hijacked by default. When a toggle is OFF we publish the mod's
-        // WildSpawnType-name substring to OrbitBrainLayer's exclusion list,
-        // and the layer stays inert for matching bots so their own custom
+        // Faction-mod takeover toggles. OrbitBrainLayer always registers against the standard PMC / Scav /
+        // Goon brain names, so mods like UNTAR / RUAF / BlackDiv whose bots use BaseBrain="PMC" are hijacked
+        // by default. When a toggle is OFF we publish the mod's WildSpawnType-name substring to
+        // OrbitBrainLayer's exclusion list, and the layer stays inert for matching bots so their own custom
         // layers (GoToCheckpoint / HuntTarget / …) win instead.
         ApplyFactionTakeoverToggle(UntarPluginGuid,    "UNTAR",         HijackUntar,        "untar");
-        // RUAF Come Home ships two factions: the base RUAF roles (ruaf*) and
-        // the RUAF Hardcore "Remnant" roles (remnant*). Both belong to the
-        // same mod, so the toggle must exclude both substrings.
+        // RUAF Come Home ships two factions: the base RUAF roles (ruaf*) and the RUAF Hardcore "Remnant"
+        // roles (remnant*). Both belong to the same mod, so the toggle must exclude both substrings.
         ApplyFactionTakeoverToggle(RuafPluginGuid,     "RUAF",          HijackRuaf,         "ruaf", "remnant");
         ApplyFactionTakeoverToggle(BlackDivPluginGuid, "BlackDivision", HijackBlackDivision, "blackDiv");
 
@@ -294,11 +287,9 @@ public class Plugin : BaseUnityPlugin
 
         BrainManager.AddCustomLayer(typeof(OrbitBrainLayer), brains, 19);
 
-        // BSG's native LootPatrol layer (priority 3) steals control from
-        // OrbitBrainLayer whenever we briefly go inactive in post-combat,
-        // leaving bots stuck in vanilla loot wandering — which would prevent
-        // LootContainerAction from ever winning the utility roll. Strip it
-        // for every brain we route.
+        // BSG's native LootPatrol layer (priority 3) steals control from OrbitBrainLayer whenever we briefly
+        // go inactive in post-combat, leaving bots stuck in vanilla loot wandering — which would prevent
+        // LootContainerAction from ever winning the utility roll. Strip it for every brain we route.
         BrainManager.RemoveLayer("LootPatrol", brains);
 
         Log.Info($"ORBIT {OrbitVersion} fully loaded — BrainManager wired");
@@ -321,9 +312,9 @@ public class Plugin : BaseUnityPlugin
     }
 
     /// <summary>
-    /// Detects a faction-mod by BepInEx plugin GUID. When OFF AND the mod is
-    /// present, the role-name substring is registered with OrbitBrainLayer's
-    /// exclusion list so matching bots stay on their mod's behaviour layers.
+    /// Detects a faction-mod by BepInEx plugin GUID. When OFF AND the mod is present, the role-name substring
+    /// is registered with OrbitBrainLayer's exclusion list so matching bots stay on their mod's behaviour
+    /// layers.
     /// </summary>
     private static void ApplyFactionTakeoverToggle(string pluginGuid, string label, ConfigEntry<bool> toggle, params string[] roleSubstrings)
     {
@@ -615,11 +606,9 @@ public class Plugin : BaseUnityPlugin
     }
 
     /// <summary>
-    /// Generic per-archetype binder. Takes the section name, all 13
-    /// default values, and 13 assignment lambdas to land the resulting
-    /// ConfigEntries on the right Plugin static fields. Pulled out
-    /// because hand-writing 5 × 13 = 65 Config.Bind calls inline was
-    /// unreadable.
+    /// Generic per-archetype binder. Takes the section name, all 13 default values, and 13 assignment lambdas
+    /// to land the resulting ConfigEntries on the right Plugin static fields. Pulled out because hand-writing
+    /// 5 × 13 = 65 Config.Bind calls inline was unreadable.
     /// </summary>
     private void BindArchetype(string section,
         float mixQ, float mixK, float mixL,
@@ -649,7 +638,7 @@ public class Plugin : BaseUnityPlugin
 
     private static void AdvectionZoneParametersChanged(object sender, EventArgs args)
     {
-        // Phase 7 wires this to OrbitManager so live F12 edits propagate
-        // into the waypoint system's force field. Until then it's a no-op.
+        // Phase 7 wires this to OrbitManager so live F12 edits propagate into the waypoint system's force
+        // field. Until then it's a no-op.
     }
 }

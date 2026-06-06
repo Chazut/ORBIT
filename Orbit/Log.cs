@@ -5,9 +5,9 @@ using UnityEngine;
 namespace Orbit;
 
 /// <summary>
-/// Unified logger for ORBIT. Routes all messages through the BepInEx
-/// ManualLogSource attached in Plugin.Awake, prefixed with the current
-/// Unity frame counter so per-tick events can be correlated across systems.
+/// Unified logger for ORBIT. Routes all messages through the BepInEx ManualLogSource attached in
+/// Plugin.Awake, prefixed with the current Unity frame counter so per-tick events can be correlated across
+/// systems.
 /// </summary>
 public static class Log
 {

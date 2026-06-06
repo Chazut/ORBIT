@@ -6,24 +6,22 @@ using Orbit.Entities;
 namespace Orbit.Api;
 
 /// <summary>
-/// Stable public read-only telemetry surface. External consumers (e.g.
-/// raid-review) reference ORBIT.dll directly and call these methods rather
-/// than reflecting against internal types. DTO types in this namespace are
-/// the API contract — internal renames or restructuring inside <c>Orbit.*</c>
-/// must not change them without a major version bump.
+/// Stable public read-only telemetry surface. External consumers (e.g. raid-review) reference ORBIT.dll
+/// directly and call these methods rather than reflecting against internal types. DTO types in this namespace
+/// are the API contract — internal renames or restructuring inside <c>Orbit.*</c> must not change them
+/// without a major version bump.
 /// </summary>
 public static class OrbitTelemetry
 {
     /// <summary>
-    /// True when an OrbitManager singleton has been created (raid in
-    /// progress). Cheap call — safe to invoke every tick.
+    /// True when an OrbitManager singleton has been created (raid in progress). Cheap call — safe to invoke
+    /// every tick.
     /// </summary>
     public static bool IsAvailable => Singleton<OrbitManager>.Instance != null;
 
     /// <summary>
-    /// Resolve a bot's current objective by profile id. Returns null when
-    /// no ORBIT-managed agent matches, the agent is inactive, or it has no
-    /// objective. Lookup is O(N) over the live agent list — fine at the
+    /// Resolve a bot's current objective by profile id. Returns null when no ORBIT-managed agent matches, the
+    /// agent is inactive, or it has no objective. Lookup is O(N) over the live agent list — fine at the
     /// pacing raid-review uses but caller may want to batch.
     /// </summary>
     public static OrbitBotObjective GetBotObjective(string profileId)
@@ -74,9 +72,8 @@ public static class OrbitTelemetry
     }
 
     /// <summary>
-    /// Snapshot of the advection field + hot zones. Returns null when the
-    /// WaypointSystem isn't ready yet OR the snapshot would be empty (no
-    /// non-zero advection cells AND no zones).
+    /// Snapshot of the advection field + hot zones. Returns null when the WaypointSystem isn't ready yet OR
+    /// the snapshot would be empty (no non-zero advection cells AND no zones).
     /// </summary>
     public static OrbitFieldSnapshot GetFieldSnapshot()
     {
@@ -133,9 +130,8 @@ public static class OrbitTelemetry
     }
 
     /// <summary>
-    /// Per-squad main-objective list snapshot. Empty list when no squad
-    /// carries any mains (e.g. raid hasn't started, or only boss/raider
-    /// squads exist which skip the system entirely).
+    /// Per-squad main-objective list snapshot. Empty list when no squad carries any mains (e.g. raid hasn't
+    /// started, or only boss/raider squads exist which skip the system entirely).
     /// </summary>
     public static List<OrbitSquadMainObjectives> GetMainObjectivesSnapshot()
     {

@@ -201,6 +201,7 @@ shifts automatically based on each bot's SAIN personality.
 
 1. Install dependencies first:
    - [BigBrain](https://forge.sp-tarkov.com/mod/902/bigbrain) by [DrakiaXYZ](https://forge.sp-tarkov.com/user/27605/drakiaxyz)
+   - [Waypoints - Expanded Navmesh](https://forge.sp-tarkov.com/mod/827/waypoints-expanded-navmesh)
    - [SAIN](https://forge.sp-tarkov.com/mod/791/sain-solarints-ai-modifications-full-ai-combat-system-replacement)
 2. Extract the zip in your SPT root folder.
 3. Launch the game. You'll see `ORBIT 1.0.0` in the bottom-left version
@@ -240,6 +241,15 @@ distribution ORBIT was built around.
 
 **Note for [Twitch Player](https://forge.sp-tarkov.com/mod/1895/sain-twitch-players) users**: **Twitch Player** sets several personalities chance to **0** by default, so it's important to apply the SAIN settings as above.
 
+### Compatible & Recommended
+
+Spawn / loadout mods are fine and actually recommended — they shape *who* spawns and *what gear* they bring, while ORBIT decides *where they go and what they do*. The two layers don't fight each other.
+
+- **[SAIN](https://forge.sp-tarkov.com/mod/791/sain-solarints-ai-modifications-full-ai-combat-system-replacement)** — **REQUIRED**. ORBIT plugs into SAIN's personality system; without it the mod won't load.
+- **[APBS](https://forge.sp-tarkov.com/mod/963/algorithmic-progression-bot-system)** — progression-based bot loadouts. Recommended.
+- **[ABPS](https://forge.sp-tarkov.com/mod/2103/another-better-progression-system)** — alternative loadout progression. Recommended.
+- Other pure spawn / loadout / loot-table mods should be safe too.
+
 ### Unsupported Mods
 
 **ORBIT supports only one other AI mod: [SAIN](https://forge.sp-tarkov.com/mod/791/sain-solarints-ai-modifications-full-ai-combat-system-replacement)**
@@ -277,6 +287,7 @@ No ETA, no promises, but on the list:
 **Behaviour**
 - Members can extract alone if they personally hit their loot threshold
 - Squads can decide to camp + ambush instead of always roaming
+- Squad rally — when one member starts taking fire, the rest break from their current objective and bee-line to support (currently each bot reacts to combat individually via SAIN, so an isolated teammate can get gunned down while squadmates have already exited combat on their end)
 - Smarter movement - checking corners, scanning the rear, less straight-line dashing
 - Less static regrouping (bots are easy 1-taps while waiting for squadmates)
 - Post-combat self-heal if meds are in inventory
@@ -284,12 +295,14 @@ No ETA, no promises, but on the list:
 - New personalities
 - Detect bots spawned on isolated navmesh islands (e.g. near Streets transits, Factory silo) and teleport them once to a valid spot nearby so they stay in the raid instead of standing still until raid end. TP destination must respect a safety radius from the player (and other bots) so the rescue can't drop a bot right in front of someone
 - Optional **player-attraction toggle** (Phobos style) - pulls bots toward the player for more action, off by default. Useful for "kill X scavs in an area" quests, viewership runs, etc.
+- Prone or crouch when looting a body in the open to minimise silhouette (a bot lying flat on a corpse in a field is way harder to spot than one standing over it)
+- Weapon-type → behaviour archetype hint (CQB-leaning loadout pushes harder, sniper loadout stays back) driven by MOA + RPM + scope presence, biasing POI selection so a Mosin squad doesn't get routed into Resort interiors
 
 **Objectives**
 - "Marked-key loot rush" for high-tier squads
 - "Spawn rush" for the most aggressive personalities
 - "Boss hunting"
-- Airdrop / helicopter crash / BTR objectives
+- Airdrop / helicopter crash / BTR objectives — squads slow-approach the drop zone, hold position at a nearby vantage for a few minutes (ambush window), then close in and loot. Mimics how players treat airdrops in live — nobody walks straight to the smoke.
 - Multi-step objectives (activate → loot/extract):
   - Interchange Kiba (disable alarm → loot)
   - Interchange ULTRA (power on → loot)
@@ -326,11 +339,22 @@ No ETA, no promises, but on the list:
 
 **Tuning**
 - Faction takeover split: patrols → ORBIT, checkpoints → vanilla (RUAF / UNTAR / BlackDivision)
+- F12 toggle to opt Raiders out of ORBIT entirely (they currently get the brain layer with no main objectives or loot, just patrol idle)
+- Flip the faction-control model to opt-IN instead of opt-OUT — ORBIT only controls explicitly enabled bot types, safer for future custom-bot mods
+
+**Animations / polish**
+- Keycard / key swipe animation for PMC bots opening locked rooms (currently they call the Unlock function instantly with no anim — should walk to the reader and play the swipe like a player)
+
+**Bugs to fix**
+- Bots phantom-walking through closed doors instead of triggering the open animation (door-open condition misfires in some cases)
 
 ### Known Issues
 
 - **1.0.0 is the first public release** - a few rough edges are expected. Bug reports and feedback on the [Discord thread](https://discord.com/channels/875684761291599922/1509314495019745451) are very welcome.
 - **Most Reserve exfils require switches ORBIT doesn't operate yet** - bots there mostly stay until killed or raid end.
+- **Bots phantom-walk through closed doors** - in some cases the door-open trigger doesn't fire and the bot passes straight through without animating the open. Reported on Customs three-story side door so far. Investigating.
+- **Bots walk into the Lighthouse minefield** - the rebuilt POI generation doesn't exclude minefield zones yet, so bots can be routed straight into them. Fix planned for 1.0.1.
+- **Possible interaction with CactusPie's "Transfer Loot Into Container Automatically" mod** - reported symptom: items a bot loots end up in YOUR tagged containers (SICC case, etc.). Best theory at the moment is that ORBIT routes pickups through BSG vanilla APIs (same path as the player), so a mod hooking those APIs may end up applying its logic to bot pickups too. Investigating.
 - **Bots stuck at spawn on isolated navmesh** - vanilla SPT quirk where a spawn point lands a bot on a tiny chunk of navmesh disconnected from the rest of the map (Streets near transits, Factory inside the silo, etc.). Shows up more often with ORBIT than pure vanilla because vanilla's built-in TP rescue is disabled (it was teleporting bots constantly on every unreachable pick). Fix planned: targeted TP rescue that fires only when a bot is genuinely stuck for X seconds.
 - **Rare stuck bots** - usually unstick themselves within a minute. Still iterating.
 - **Mod conflicts** - tested with my own config. Yours may differ. Report anything obviously broken on [GitHub](https://github.com/Chazut/ORBIT/issues).

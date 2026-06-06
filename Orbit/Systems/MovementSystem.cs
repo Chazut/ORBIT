@@ -12,9 +12,8 @@ using UnityEngine.AI;
 namespace Orbit.Systems;
 
 /// <summary>
-/// Per-frame movement engine. Owns the queue of pending navmesh path
-/// jobs, the corner-following + path-deviation steering, door handling,
-/// sprint gating, and the two-stage stuck-detection / remediation
+/// Per-frame movement engine. Owns the queue of pending navmesh path jobs, the corner-following +
+/// path-deviation steering, door handling, sprint gating, and the two-stage stuck-detection / remediation
 /// pipeline (soft = vault/jump, hard = re-path then teleport).
 /// </summary>
 public class MovementSystem
@@ -50,8 +49,7 @@ public class MovementSystem
                     continue;
                 }
 
-                // Discard the move job if the agent is inactive (mod
-                // deactivated, bot died, etc).
+                // Discard the move job if the agent is inactive (mod deactivated, bot died, etc).
                 if (!agent.IsActive)
                     continue;
 
@@ -70,15 +68,12 @@ public class MovementSystem
                 continue;
             }
 
-            // Keep BSG's BotMover anchored to where the bot ACTUALLY is.
-            // BotMover.method_10 (the hard rescue teleport) snaps the bot to
-            // LastGoodCastPoint when it decides the bot is stuck. The brain
-            // layer sets LastGoodCastPoint to agent.Position only at the
-            // layer *transition* — so while we're in control, it stays
-            // frozen at wherever the bot was when handed off. A rescue then
-            // yeets the bot back to that stale anchor (sometimes their
-            // spawn). Refreshing every frame makes any rescue land as a
-            // teleport-to-self no-op.
+            // Keep BSG's BotMover anchored to where the bot ACTUALLY is. BotMover.method_10 (the hard rescue
+            // teleport) snaps the bot to LastGoodCastPoint when it decides the bot is stuck. The brain layer
+            // sets LastGoodCastPoint to agent.Position only at the layer *transition* — so while we're in
+            // control, it stays frozen at wherever the bot was when handed off. A rescue then yeets the bot
+            // back to that stale anchor (sometimes their spawn). Refreshing every frame makes any rescue land
+            // as a teleport-to-self no-op.
             var mover = agent.Bot?.Mover;
             if (mover != null)
             {
@@ -116,8 +111,7 @@ public class MovementSystem
         if (NavMesh.SamplePosition(destination, out var hit, TargetEps, NavMesh.AllAreas))
             destination = hit.position;
 
-        // Set the target up-front so callers' "is the target current?"
-        // checks see the new value immediately.
+        // Set the target up-front so callers' "is the target current?" checks see the new value immediately.
         agent.Movement.Target = destination;
         ScheduleMoveJob(agent, destination);
         ResetGait(agent, pose, speed, prone, sprint, urgency);
@@ -252,9 +246,8 @@ public class MovementSystem
         }
         else
         {
-            // Last corner reached: maybe the path doesn't go all the way to
-            // the target (navmesh truncation, dynamic geometry). Retry if
-            // we're still too far from the actual destination.
+            // Last corner reached: maybe the path doesn't go all the way to the target (navmesh truncation,
+            // dynamic geometry). Retry if we're still too far from the actual destination.
             if ((movement.Path[movement.CurrentCorner] - agent.Player.Position).sqrMagnitude <= TargetEpsSqr)
             {
                 if ((movement.Target - movement.Path[movement.CurrentCorner]).sqrMagnitude > TargetEpsSqr)
@@ -270,8 +263,8 @@ public class MovementSystem
             }
         }
 
-        // Calculate a 2D path deviation so the spring pull-back doesn't
-        // drag the bot backwards on uneven terrain.
+        // Calculate a 2D path deviation so the spring pull-back doesn't drag the bot backwards on uneven
+        // terrain.
         var agentPos2d = new Vector2(agent.Position.x, agent.Position.z);
         var closestPointOnPath = PathHelper.ClosestPointOnLine(
             movement.Path[Math.Max(0, movement.CurrentCorner - 1)].ToVector2(),
@@ -324,34 +317,27 @@ public class MovementSystem
             if (!(door.InteractingPlayer == null && door.enabled && door.Operatable && door.DoorState != EDoorState.Open))
                 continue;
 
-            // Only open doors that the bot's current path actually crosses.
-            // Without this gate, every bot walking past a hallway flings
-            // open every door it brushes — a scav strolling through Dorms
-            // ends up popping every room. Path-crossing test: project the
-            // doorway frame segment (Close1 ↔ Close2_Normal, stable
-            // regardless of swing state) onto the XZ plane and check if
-            // any of the next few path segments intersect it.
+            // Only open doors that the bot's current path actually crosses. Without this gate, every bot
+            // walking past a hallway flings open every door it brushes — a scav strolling through Dorms ends
+            // up popping every room. Path-crossing test: project the doorway frame segment (Close1 ↔
+            // Close2_Normal, stable regardless of swing state) onto the XZ plane and check if any of the next
+            // few path segments intersect it.
             if (!PathCrossesDoorway(agent, doorLink)) continue;
 
-            // Locked doors: only PMCs may attempt to unlock. Scavs/bosses/
-            // raiders don't carry door keys in their loadouts, and even if
-            // vmethod_1 silently fails without a key, letting every bot
-            // poll the interaction wastes ticks and produces unrealistic
-            // behaviour. Real unlock still gated by key inventory inside
-            // BSG's vmethod_1.
+            // Locked doors: only PMCs may attempt to unlock. Scavs/bosses/ raiders don't carry door keys in
+            // their loadouts, and even if vmethod_1 silently fails without a key, letting every bot poll the
+            // interaction wastes ticks and produces unrealistic behaviour. Real unlock still gated by key
+            // inventory inside BSG's vmethod_1.
             if (door.DoorState == EDoorState.Locked)
             {
                 var role = agent.Bot?.Profile?.Info?.Settings?.Role;
                 if (!role.HasValue || !role.Value.IsPMC()) continue;
 
-                // The squad rolled (or was granted 100% as a Main anchor)
-                // for this door at dispatch time — call Door.Unlock() to
-                // bypass the BSG key check. Unlock() flips the state to
-                // Shut on the next coroutine yield; the next HandleDoors
-                // tick will then take the normal OpenDoor branch since
-                // DoorState != Open & != Locked. Without the ForceUnlock
-                // tag, fall through cleanly — vmethod_1 would silently
-                // fail without a key anyway.
+                // The squad rolled (or was granted 100% as a Main anchor) for this door at dispatch time —
+                // call Door.Unlock() to bypass the BSG key check. Unlock() flips the state to Shut on the
+                // next coroutine yield; the next HandleDoors tick will then take the normal OpenDoor branch
+                // since DoorState != Open & != Locked. Without the ForceUnlock tag, fall through cleanly —
+                // vmethod_1 would silently fail without a key anyway.
                 if (agent.Squad != null && agent.Squad.ForceUnlockDoorIds.Contains(door.GetInstanceID()))
                 {
                     door.Unlock();
@@ -371,16 +357,14 @@ public class MovementSystem
     private static void OpenDoor(Agent agent, Door door)
         => agent.Player.vmethod_1(door, new InteractionResult(EInteractionType.Open));
 
-    // Cap how far ahead we look on the path when deciding whether the bot
-    // is actually walking through this door. 5 segments comfortably covers
-    // the next ~10-15m which is well past the 3m proximity gate above,
+    // Cap how far ahead we look on the path when deciding whether the bot is actually walking through this
+    // door. 5 segments comfortably covers the next ~10-15m which is well past the 3m proximity gate above,
     // while keeping the per-tick cost bounded.
     private const int PathCrossLookaheadSegments = 5;
 
     /// <summary>
-    /// True if the bot's current path crosses the doorway frame (segment
-    /// from Close1 to Close2_Normal projected onto XZ). Without this
-    /// gate, HandleDoors would open every door the bot brushes past in a
+    /// True if the bot's current path crosses the doorway frame (segment from Close1 to Close2_Normal
+    /// projected onto XZ). Without this gate, HandleDoors would open every door the bot brushes past in a
     /// hallway just because the door is within 3m and in the same voxel.
     /// </summary>
     private static bool PathCrossesDoorway(Agent agent, NavMeshDoorLink doorLink)
@@ -408,8 +392,7 @@ public class MovementSystem
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void ResetPath(Agent agent, MovementStatus status = MovementStatus.Stopped)
     {
-        // Explicitly DON'T reset the target — it hasn't changed. Only the
-        // path is supposed to be deleted.
+        // Explicitly DON'T reset the target — it hasn't changed. Only the path is supposed to be deleted.
         agent.Movement.Path = null;
         agent.Movement.Status = status;
         agent.Movement.CurrentCorner = 0;
@@ -484,9 +467,9 @@ public class MovementSystem
 
             // Asymmetric speed buffering:
             //   - currentSpeed ≤ lastSpeed: use currentSpeed (don't
-            //     over-estimate expected distance during a slowdown).
+            // over-estimate expected distance during a slowdown).
             //   - currentSpeed > lastSpeed: EWMA with alpha=0.9 (gives
-            //     the agent a frame or two to actually build distance).
+            // the agent a frame or two to actually build distance).
             var currentSpeed = agent.Player.MovementContext.CharacterMovementSpeed;
             var moveSpeed = currentSpeed <= stuck.LastSpeed ? currentSpeed : 0.9f * stuck.LastSpeed + 0.1f * currentSpeed;
             stuck.LastSpeed = moveSpeed;
@@ -563,10 +546,9 @@ public class MovementSystem
 
         public void Update(Agent agent)
         {
-            // If the bot stays within a radius of its position 5 s ago for
-            // extended periods of time, treat as stuck. Radius is
-            // modulated by the bot's target velocity (deliberate slow
-            // movement shouldn't false-positive).
+            // If the bot stays within a radius of its position 5 s ago for extended periods of time, treat as
+            // stuck. Radius is modulated by the bot's target velocity (deliberate slow movement shouldn't
+            // false-positive).
             var stuck = agent.Stuck.Hard;
 
             stuck.PositionHistory.Update(agent.Position);
@@ -592,8 +574,8 @@ public class MovementSystem
                 return;
             }
 
-            // If the bot moved more than the radius × moveSpeed from its
-            // oldest position, treat as not-stuck and reset.
+            // If the bot moved more than the radius × moveSpeed from its oldest position, treat as not-stuck
+            // and reset.
             var moveDistanceSqr = stuck.PositionHistory.GetDistanceSqr();
             var stuckThresholdSqr = StuckRadiusSqr * moveSpeed;
 

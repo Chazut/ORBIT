@@ -12,12 +12,10 @@ using Random = UnityEngine.Random;
 namespace Orbit.Navigation;
 
 /// <summary>
-/// Boot-time scrape of every interesting world object on the map into the
-/// initial waypoint set: quest triggers, lootable containers, loose loot
-/// items, exfiltration points. Each candidate is sampled against the
-/// navmesh and dropped if the bot can't physically stand near it.
-/// Corpses are added at runtime (see CorpseRegistrationPatch), so this
-/// gatherer doesn't touch them.
+/// Boot-time scrape of every interesting world object on the map into the initial waypoint set: quest
+/// triggers, lootable containers, loose loot items, exfiltration points. Each candidate is sampled against
+/// the navmesh and dropped if the bot can't physically stand near it. Corpses are added at runtime (see
+/// CorpseRegistrationPatch), so this gatherer doesn't touch them.
 /// </summary>
 public class WaypointGatherer(float cellSize, BotsController botsController)
 {
@@ -37,13 +35,11 @@ public class WaypointGatherer(float cellSize, BotsController botsController)
             if (trigger.transform == null)
                 continue;
 
-            // trigger.transform.position is often in mid-air or off-mesh
-            // (the anchor point of a tall trigger volume), which makes the
-            // 2 m navmesh sample fail. Prefer the collider's bounds.center,
-            // biased toward the floor for tall volumes (the floor inside is
-            // where a bot would actually stand), and widen the sample
-            // radius for big volumes so long quest zones (Customs office
-            // building, Streets sectors…) stay usable.
+            // trigger.transform.position is often in mid-air or off-mesh (the anchor point of a tall trigger
+            // volume), which makes the 2 m navmesh sample fail. Prefer the collider's bounds.center, biased
+            // toward the floor for tall volumes (the floor inside is where a bot would actually stand), and
+            // widen the sample radius for big volumes so long quest zones (Customs office building, Streets
+            // sectors…) stay usable.
             var position = trigger.transform.position;
             var maxNavDist = 2f;
             var triggerCollider = trigger.GetComponent<Collider>();
@@ -93,9 +89,8 @@ public class WaypointGatherer(float cellSize, BotsController botsController)
 
         Log.Debug("Collecting exfil POIs");
 
-        // Collect every ExfiltrationPoint regardless of faction — we want both
-        // PMC and Scav extracts available in the POI grid. PickFromCell does
-        // the faction filtering at assignment time.
+        // Collect every ExfiltrationPoint regardless of faction — we want both PMC and Scav extracts
+        // available in the POI grid. PickFromCell does the faction filtering at assignment time.
         var uniqueExfils = new HashSet<Exfil>();
 
         foreach (var point in LocationScene.GetAllObjects<ExfiltrationPoint>())
@@ -113,9 +108,8 @@ public class WaypointGatherer(float cellSize, BotsController botsController)
                     ? "scav-only"
                     : "pmc-only";
             var coop = HasScavCoopRequirement(exfil.Point) ? " co-op" : "";
-            // EligibleEntryPoints is empty here because BSG hasn't finished
-            // LoadSettings yet (we run before it). Real entries surface at
-            // runtime via the OnStatusChanged log.
+            // EligibleEntryPoints is empty here because BSG hasn't finished LoadSettings yet (we run before
+            // it). Real entries surface at runtime via the OnStatusChanged log.
             Log.Info($"Exfil {exfil.Point.name} [{access}{coop}] status={exfil.Point.Status}");
             ValidateAndAddWaypoint(collection, WaypointCategory.Exfil, exfil.Point.name, exfil.Point.transform.position, 5f, target: exfil.Point);
         }
@@ -154,18 +148,14 @@ public class WaypointGatherer(float cellSize, BotsController botsController)
 
     private Waypoint CreateBuiltinWaypoint(WaypointCategory category, string name, Vector3 position, MonoBehaviour target)
     {
-        // Arrival radii for "real" targets. 1m euclidean — matches BSG's
-        // native interaction range. Wall-through false-arrivals are
-        // prevented by the 3D Physics.Raycast (vs.
-        // LayerMaskClass.HighPolyWithTerrainMask) gate in
-        // GotoObjectiveAction, same raycast BSG uses for cover/vision.
-        // BSG's BotMover nav-snap drift (1.5-2.5m off Waypoint.Position)
-        // is absorbed by GotoObjectiveAction's nav-snap rescue path
-        // (Stopped + ≤4m + raycast clear → accept arrival).
+        // Arrival radii for "real" targets. 1m euclidean — matches BSG's native interaction range.
+        // Wall-through false-arrivals are prevented by the 3D Physics.Raycast (vs.
+        // LayerMaskClass.HighPolyWithTerrainMask) gate in GotoObjectiveAction, same raycast BSG uses for
+        // cover/vision. BSG's BotMover nav-snap drift (1.5-2.5m off Waypoint.Position) is absorbed by
+        // GotoObjectiveAction's nav-snap rescue path (Stopped + ≤4m + raycast clear → accept arrival).
         //
-        // Synthetic (patrol filler) keeps its wider radius — it's not a
-        // specific target, just a navmesh point in a cell. Exfil radius
-        // also stays — EFT's own extract zone gates the actual transition.
+        // Synthetic (patrol filler) keeps its wider radius — it's not a specific target, just a navmesh point
+        // in a cell. Exfil radius also stays — EFT's own extract zone gates the actual transition.
         var radius = category switch
         {
             WaypointCategory.ContainerLoot => 1f,
@@ -332,10 +322,9 @@ public class WaypointGatherer(float cellSize, BotsController botsController)
     {
         public readonly ExfiltrationPoint Point = point;
 
-        // ExfiltrationPoint.Id is empty in SPT 4.0 (BSG API change), so the
-        // original MongoID-based equality would collapse every exfil on the
-        // map into a single deduped entry. Dedupe on the component reference
-        // instead — each ExfiltrationPoint is a unique MonoBehaviour.
+        // ExfiltrationPoint.Id is empty in SPT 4.0 (BSG API change), so the original MongoID-based equality
+        // would collapse every exfil on the map into a single deduped entry. Dedupe on the component
+        // reference instead — each ExfiltrationPoint is a unique MonoBehaviour.
         public bool Equals(Exfil other) => ReferenceEquals(Point, other.Point);
 
         public override bool Equals(object obj) => obj is Exfil other && Equals(other);

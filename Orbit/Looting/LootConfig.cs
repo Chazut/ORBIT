@@ -19,6 +19,8 @@ public static class LootConfig
     public static ConfigEntry<ExtractFaction> ExtractAllowedFor;
     public static ConfigEntry<float> ExtractAtLootValuePlayerScav;
     public static ConfigEntry<int> ScavLootChancePct;
+    public static ConfigEntry<float> WeaponSwapMargin;
+    public static ConfigEntry<bool> WeaponSwapEnabled;
 
     private static bool _initialized;
 
@@ -43,7 +45,13 @@ public static class LootConfig
             new ConfigDescription(
                 "Bot scavs (NOT PlayerScavs) skip the per-archetype loot-value gate entirely and instead roll this chance per item on corpses, containers, and loose loot. Mirrors vanilla scav behaviour — opportunistic pickups, not deliberate searches. PlayerScavs and PMCs are unaffected.",
                 new AcceptableValueRange<int>(0, 100)));
+        WeaponSwapMargin = config.Bind(section, "Weapon swap margin", 1.10f,
+            new ConfigDescription(
+                "PMC / PlayerScav swap threshold: a candidate weapon must score this many times its target slot's current weapon to trigger a swap. 1.00 = swap on any improvement, 1.20 = swap only on a 20% better score. Scavs ignore this — they only equip into empty slots.",
+                new AcceptableValueRange<float>(1.0f, 2.0f)));
+        WeaponSwapEnabled = config.Bind(section, "Enable weapon swap (Phase 1)", true,
+            "Master toggle for the in-raid weapon swap layer. When OFF, looted weapons fall back to the default placement path (equip into empty slot or stash in inventory). Useful for isolating swap-related issues during testing.");
 
-        Log.Info($"LootConfig.Init: DONE — looting={LootingEnabled.Value}, detectDist={DetectDistance.Value}m");
+        Log.Info($"LootConfig.Init: DONE — looting={LootingEnabled.Value}, detectDist={DetectDistance.Value}m, weaponSwapMargin={WeaponSwapMargin.Value:F2}");
     }
 }

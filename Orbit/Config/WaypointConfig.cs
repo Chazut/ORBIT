@@ -5,11 +5,10 @@ using UnityEngine;
 namespace Orbit.Config;
 
 /// <summary>
-/// Per-map navigation tuning: the grid geometry (origin, extent, cell
-/// size) that drives waypoint binning, plus the advection zones (positive
-/// attractors / negative repellers) that bias squad pull. Backed by JSON
-/// files under <c>Config/Maps/</c>; defaults shipped inline so first-run
-/// users have a sensible baseline for every supported map.
+/// Per-map navigation tuning: the grid geometry (origin, extent, cell size) that drives waypoint binning,
+/// plus the advection zones (positive attractors / negative repellers) that bias squad pull. Backed by JSON
+/// files under <c>Config/Maps/</c>; defaults shipped inline so first-run users have a sensible baseline for
+/// every supported map.
 /// </summary>
 public class WaypointConfig
 {

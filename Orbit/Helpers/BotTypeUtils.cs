@@ -12,8 +12,8 @@ namespace Orbit.Helpers;
 // ╚══════════════════════════════════════════════════════════════════╝
 
 /// <summary>
-/// Full bot-type bitmask used internally by the gating predicates. Not
-/// directly surfaced in F12; the user-facing toggles use the restricted
+/// Full bot-type bitmask used internally by the gating predicates. Not directly surfaced in F12; the
+/// user-facing toggles use the restricted
 /// <see cref="LootingFaction"/> and <see cref="ExtractFaction"/> subsets.
 /// </summary>
 [Flags]
@@ -27,9 +27,8 @@ public enum BotType
     Boss = 32,
     Follower = 64,
     Bloodhound = 128,
-    // Goons (Knight + Big Pipe + Bird Eye) as a unit — all three brains
-    // go through the same inventory pipeline, splitting across Boss +
-    // Follower in the F12 mask would be confusing.
+    // Goons (Knight + Big Pipe + Bird Eye) as a unit — all three brains go through the same inventory
+    // pipeline, splitting across Boss + Follower in the F12 mask would be confusing.
     Goon = 256,
 
     None = 0,
@@ -37,9 +36,8 @@ public enum BotType
 }
 
 /// <summary>
-/// Restricted subset surfaced in "Enable corpse / container / loose item
-/// looting" F12 toggles. Same bit positions as <see cref="BotType"/> so
-/// a plain cast forwards into the full resolver, but the dropdown only
+/// Restricted subset surfaced in "Enable corpse / container / loose item looting" F12 toggles. Same bit
+/// positions as <see cref="BotType"/> so a plain cast forwards into the full resolver, but the dropdown only
 /// shows the factions actually modified AND likely to loot.
 /// </summary>
 [Flags]
@@ -54,8 +52,8 @@ public enum LootingFaction
 }
 
 /// <summary>
-/// Restricted subset surfaced in the "Extract allowed for" F12 toggle.
-/// Only PMC and PlayerScav can route to an exfil.
+/// Restricted subset surfaced in the "Extract allowed for" F12 toggle. Only PMC and PlayerScav can route to
+/// an exfil.
 /// </summary>
 [Flags]
 public enum ExtractFaction
@@ -80,8 +78,7 @@ public static class BotTypeUtils
     public static bool HasGoon(this BotType botType) => (botType & BotType.Goon) != 0;
 
     // ── Restricted-enum dispatch ────────────────────────────────────
-    // Same bit layout as BotType, so a plain cast forwards to the
-    // per-WildSpawnType resolver.
+    // Same bit layout as BotType, so a plain cast forwards to the per-WildSpawnType resolver.
     public static bool IsBotEnabled(this LootingFaction enabledTypes, WildSpawnType botType)
         => ((BotType)enabledTypes).IsBotEnabled(botType);
 
@@ -93,8 +90,8 @@ public static class BotTypeUtils
         if (botType.IsPMC())
             return enabledTypes.HasPmc();
 
-        // Goons route to their own flag (Knight is also a Boss in BSG's
-        // taxonomy but we treat the trio as a single faction).
+        // Goons route to their own flag (Knight is also a Boss in BSG's taxonomy but we treat the trio as a
+        // single faction).
         if (botType.IsGoon())
             return enabledTypes.HasGoon();
 
@@ -146,9 +143,8 @@ public static class BotTypeUtils
         => wildSpawnType is WildSpawnType.assault or WildSpawnType.assaultGroup;
 
     /// <summary>
-    /// The Goons trio: Knight (boss) + Big Pipe + Bird Eye (followers).
-    /// Treated as a unit by dispatcher rules — same roaming behaviour,
-    /// same local-pin opt-in.
+    /// The Goons trio: Knight (boss) + Big Pipe + Bird Eye (followers). Treated as a unit by dispatcher rules
+    /// — same roaming behaviour, same local-pin opt-in.
     /// </summary>
     public static bool IsGoon(this WildSpawnType wildSpawnType)
         => wildSpawnType is WildSpawnType.bossKnight
@@ -156,8 +152,8 @@ public static class BotTypeUtils
             or WildSpawnType.followerBirdEye;
 
     /// <summary>
-    /// Cultists: the night-only sectant trio (Priest + Warriors) plus the
-    /// "cursed" scav variant that follows their behaviour.
+    /// Cultists: the night-only sectant trio (Priest + Warriors) plus the "cursed" scav variant that follows
+    /// their behaviour.
     /// </summary>
     public static bool IsCultist(this WildSpawnType wildSpawnType)
         => wildSpawnType is WildSpawnType.sectantPriest
@@ -187,10 +183,9 @@ public static class BotTypeUtils
     }
 
     /// <summary>
-    /// True when this profile will be controlled by a human player as a
-    /// PlayerScav. Shares WildSpawnType.assault with bot scavs but needs
-    /// distinct dispatch — PlayerScavs follow main objectives like PMCs,
-    /// not the home-pinning bot-scav pattern.
+    /// True when this profile will be controlled by a human player as a PlayerScav. Shares
+    /// WildSpawnType.assault with bot scavs but needs distinct dispatch — PlayerScavs follow main objectives
+    /// like PMCs, not the home-pinning bot-scav pattern.
     /// </summary>
     public static bool WillBeAPlayerScav(this Profile profile)
     {

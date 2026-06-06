@@ -6,16 +6,15 @@ using EFT;
 namespace Orbit.Entities;
 
 /// <summary>
-/// ECS-style storage for entities + their side components. Merges what
-/// was a 6-file <c>Data/</c> + <c>Entities/Entity.cs</c> structure into
-/// one cohesive unit. Three layers:
+/// ECS-style storage for entities + their side components. Merges what was a 6-file <c>Data/</c> +
+/// <c>Entities/Entity.cs</c> structure into one cohesive unit. Three layers:
 ///   - <see cref="EntityArray{T}"/> owns the live entities, indexable by
-///     stable id, swap-removable in O(1).
+/// stable id, swap-removable in O(1).
 ///   - <see cref="ComponentArray{T}"/> is a parallel side-array keyed on
-///     the same id, used when a per-entity component shouldn't live as a
-///     field on the entity itself (rare — most components do).
+/// the same id, used when a per-entity component shouldn't live as a field on the entity itself (rare — most
+/// components do).
 ///   - <see cref="Dataset{T,TE}"/> couples one EntityArray with N
-///     ComponentArrays so adding/removing an entity propagates correctly.
+/// ComponentArrays so adding/removing an entity propagates correctly.
 /// </summary>
 public interface IComponentArray
 {
@@ -39,8 +38,7 @@ public class ComponentArray<T>(int capacity = 16) : IComponentArray where T : cl
 
         if (id >= _data.Count)
         {
-            // Add empty slots up to and excluding the one represented by id,
-            // then the new component.
+            // Add empty slots up to and excluding the one represented by id, then the new component.
             for (var i = _data.Count; i < id; i++)
                 _data.Add(null);
             _data.Add(component);
@@ -63,9 +61,8 @@ public class ComponentArray<T>(int capacity = 16) : IComponentArray where T : cl
 }
 
 /// <summary>
-/// Id-indexed entity list with free-id recycling. Removal swaps the last
-/// entry into the gap and pops the tail, so iteration order isn't stable
-/// but lookup-by-id and removal are both O(1).
+/// Id-indexed entity list with free-id recycling. Removal swaps the last entry into the gap and pops the
+/// tail, so iteration order isn't stable but lookup-by-id and removal are both O(1).
 /// </summary>
 public class EntityArray<T>(int capacity = 16) where T : Entity
 {
@@ -158,8 +155,8 @@ public class SquadArray(int capacity = 16) : EntityArray<Squad>(capacity)
         var id = Reserve();
         var squad = new Squad(id, new float[taskCount], targetMembersCount)
         {
-            // SAIN-style spread: same-faction squads in the same raid don't all
-            // hit their extract threshold at the exact same rouble count.
+            // SAIN-style spread: same-faction squads in the same raid don't all hit their extract threshold
+            // at the exact same rouble count.
             ExtractValueRandomization = UnityEngine.Random.Range(0.75f, 1.25f),
         };
         Values.Add(squad);
@@ -168,9 +165,9 @@ public class SquadArray(int capacity = 16) : EntityArray<Squad>(capacity)
 }
 
 /// <summary>
-/// One entity array + N registered component arrays. RegisterComponent
-/// wires a component array so AddEntity/RemoveEntity propagate to every
-/// component. <see cref="GetComponentArray"/> looks one up by its T.
+/// One entity array + N registered component arrays. RegisterComponent wires a component array so
+/// AddEntity/RemoveEntity propagate to every component. <see cref="GetComponentArray"/> looks one up by its
+/// T.
 /// </summary>
 public class Dataset<T, TE>(TE entities) where TE : EntityArray<T> where T : Entity
 {

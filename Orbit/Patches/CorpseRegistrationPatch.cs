@@ -12,20 +12,17 @@ using SPT.Reflection.Patching;
 namespace Orbit.Patches;
 
 /// <summary>
-/// When any Player (human / PMC bot / scav bot) dies, BSG instantiates a
-/// Corpse GameObject via Player.CreateCorpse(). We register the fresh
-/// corpse as a runtime Corpse waypoint so other bots can be dispatched to
-/// loot it. When the kill is attributable to an ORBIT-managed agent, we
-/// also tag the corpse as "owned" by that agent's squad and force an
-/// immediate re-dispatch of the killer onto the body.
+/// When any Player (human / PMC bot / scav bot) dies, BSG instantiates a Corpse GameObject via
+/// Player.CreateCorpse(). We register the fresh corpse as a runtime Corpse waypoint so other bots can be
+/// dispatched to loot it. When the kill is attributable to an ORBIT-managed agent, we also tag the corpse as
+/// "owned" by that agent's squad and force an immediate re-dispatch of the killer onto the body.
 /// </summary>
 public class CorpseRegistrationPatch : ModulePatch
 {
     protected override MethodBase GetTargetMethod()
     {
-        // Parameterless overload — Player.CreateCorpse() — which delegates
-        // to the generic CreateCorpse<T>(Vector3 velocity). Capturing the
-        // result here is simpler than patching the generic.
+        // Parameterless overload — Player.CreateCorpse() — which delegates to the generic
+        // CreateCorpse<T>(Vector3 velocity). Capturing the result here is simpler than patching the generic.
         return typeof(Player).GetMethod(nameof(Player.CreateCorpse), Type.EmptyTypes);
     }
 
@@ -63,11 +60,10 @@ public class CorpseRegistrationPatch : ModulePatch
             var victimName = __instance?.Profile?.Info?.Nickname ?? "?";
             Log.Debug($"CorpseRegistration: registered Corpse waypoint {loc} for victim {victimName} at ({pos.x:F2},{pos.y:F2},{pos.z:F2})");
 
-            // Attribute the kill to an ORBIT squad if possible. The victim's
-            // LastAggressor is set by BSG's damage pipeline just before
-            // CreateCorpse fires, so by the time this postfix runs it points
-            // at whoever landed the killing blow. The field is internal —
-            // Traverse keeps us from hand-rolling the reflection.
+            // Attribute the kill to an ORBIT squad if possible. The victim's LastAggressor is set by BSG's
+            // damage pipeline just before CreateCorpse fires, so by the time this postfix runs it points at
+            // whoever landed the killing blow. The field is internal — Traverse keeps us from hand-rolling
+            // the reflection.
             var aggressor = Traverse.Create(__instance).Field("LastAggressor").GetValue<IPlayer>();
             if (aggressor == null)
             {
@@ -92,14 +88,13 @@ public class CorpseRegistrationPatch : ModulePatch
                     return;
                 }
                 manager.WaypointSystem.TagCorpseKillerSquad(loc.Id, a.Squad.Id);
-                // Force immediate re-dispatch so the own-kill priority-pick
-                // fires before the killer drifts away from the body.
+                // Force immediate re-dispatch so the own-kill priority-pick fires before the killer drifts
+                // away from the body.
                 a.Squad.Objective.Duration = 0;
-                // Route the killer specifically onto the corpse on the next
-                // dispatch tick — without this they'd be just one of N
-                // candidates in the roam splinter reservoir sample, with a
-                // ~1/N chance of being chosen. UpdateAgents reads these two
-                // fields and clears them once the dispatch is set.
+                // Route the killer specifically onto the corpse on the next dispatch tick — without this
+                // they'd be just one of N candidates in the roam splinter reservoir sample, with a ~1/N
+                // chance of being chosen. UpdateAgents reads these two fields and clears them once the
+                // dispatch is set.
                 a.Squad.PendingOwnKillKillerAgentId = a.Id;
                 a.Squad.PendingOwnKillCorpseLocId = loc.Id;
                 Log.Info($"CorpseRegistration: {a} ({a.Squad}) credited with {loc} — forced squad re-dispatch + direct-route on next tick");

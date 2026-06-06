@@ -6,11 +6,9 @@ using UnityEngine;
 namespace Orbit.Helpers;
 
 /// <summary>
-/// Catch-all for small, single-purpose static helpers that don't deserve
-/// their own file. Grows phase by phase as later subsystems land. Phase 2
-/// covers the bare minimum needed by entities + components: list utility
-/// extensions, the two pacing variants, rolling-average accumulator, and
-/// Vector3↔Vector2 conversions.
+/// Catch-all for small, single-purpose static helpers that don't deserve their own file. Grows phase by phase
+/// as later subsystems land. Phase 2 covers the bare minimum needed by entities + components: list utility
+/// extensions, the two pacing variants, rolling-average accumulator, and Vector3↔Vector2 conversions.
 /// </summary>
 public static class ListHelpers
 {
@@ -46,9 +44,8 @@ public static class VectorExtensions
 }
 
 /// <summary>
-/// Gate that returns true only once every <c>Interval</c> seconds; used to
-/// throttle per-tick work (e.g. corpse scan, gizmo refresh) without
-/// scattering manual time-since-last-call bookkeeping across systems.
+/// Gate that returns true only once every <c>Interval</c> seconds; used to throttle per-tick work (e.g.
+/// corpse scan, gizmo refresh) without scattering manual time-since-last-call bookkeeping across systems.
 /// </summary>
 public class TimePacing(float interval)
 {
@@ -95,9 +92,8 @@ public class FramePacing(int interval)
 }
 
 /// <summary>
-/// Fixed-window rolling-average accumulator. Periodically re-sums the
-/// buffer (every <c>recalcInterval</c> updates) to prevent floating-point
-/// drift on very long runs.
+/// Fixed-window rolling-average accumulator. Periodically re-sums the buffer (every <c>recalcInterval</c>
+/// updates) to prevent floating-point drift on very long runs.
 /// </summary>
 public class RollingAverage(int windowSize, int recalcInterval = 1000)
 {
@@ -154,9 +150,8 @@ public class RollingAverage(int windowSize, int recalcInterval = 1000)
 }
 
 /// <summary>
-/// Sort a collider list by squared distance to a reference position.
-/// Used by the inventory pickup chain to walk nearby containers in
-/// nearest-first order.
+/// Sort a collider list by squared distance to a reference position. Used by the inventory pickup chain to
+/// walk nearby containers in nearest-first order.
 /// </summary>
 public class ColliderDistanceComparer(Vector3 referencePosition) : IComparer<Collider>
 {
@@ -169,9 +164,8 @@ public class ColliderDistanceComparer(Vector3 referencePosition) : IComparer<Col
 }
 
 /// <summary>
-/// Non-LINQ scans over BSG's controller event lists — the LINQ-based
-/// equivalents allocate enumerators every tick which adds up across
-/// hundreds of bots. Same checks BSG does internally, just hand-rolled.
+/// Non-LINQ scans over BSG's controller event lists — the LINQ-based equivalents allocate enumerators every
+/// tick which adds up across hundreds of bots. Same checks BSG does internally, just hand-rolled.
 /// </summary>
 public static class ControllerExtensions
 {

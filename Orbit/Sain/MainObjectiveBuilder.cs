@@ -10,16 +10,15 @@ using Random = UnityEngine.Random;
 namespace Orbit.Sain;
 
 /// <summary>
-/// Rolls a squad's <see cref="Squad.MainObjectives"/> list at creation
-/// time. Player-blind — no read of <c>MainPlayer.Position</c> or any
-/// other player state. Anchors come from static map data
-/// (positive-Force zones for <see cref="MainObjectiveType.Kills"/>;
-/// top-quartile loot cells for <see cref="MainObjectiveType.LootValue"/>;
+/// Rolls a squad's <see cref="Squad.MainObjectives"/> list at creation time. Player-blind — no read of
+/// <c>MainPlayer.Position</c> or any other player state. Anchors come from static map data (positive-Force
+/// zones for <see cref="MainObjectiveType.Kills"/>; top-quartile loot cells for <see
+/// cref="MainObjectiveType.LootValue"/>;
 /// <c>TriggerWithId</c> POI positions for
 /// <see cref="MainObjectiveType.Quest"/>).
 ///
-/// Only PMCs and PlayerScavs receive main objectives. Bot scavs, bosses,
-/// raiders, goons, cultists, bloodhounds skip the system entirely.
+/// Only PMCs and PlayerScavs receive main objectives. Bot scavs, bosses, raiders, goons, cultists,
+/// bloodhounds skip the system entirely.
 /// </summary>
 public static class MainObjectiveBuilder
 {
@@ -52,9 +51,9 @@ public static class MainObjectiveBuilder
             return;
         }
 
-        // Per-squad count source. PMC with SAIN personality → already
-        // rolled into squad.Personality.MainCount. Otherwise (PlayerScav
-        // or PMC with master toggle OFF) → use the global F12 range.
+        // Per-squad count source. PMC with SAIN personality → already rolled into
+        // squad.Personality.MainCount. Otherwise (PlayerScav or PMC with master toggle OFF) → use the global
+        // F12 range.
         int count;
         if (squad.Personality != null)
         {
@@ -75,9 +74,8 @@ public static class MainObjectiveBuilder
         List<Vector3> killZoneAnchors = null;
         List<Waypoint> questPool = null;
 
-        // Resolve mix weights — PMC with SAIN personality uses
-        // archetype-specific weights, PlayerScav and personality-OFF
-        // PMCs fall back to the global F12 weights. Auto-normalised.
+        // Resolve mix weights — PMC with SAIN personality uses archetype-specific weights, PlayerScav and
+        // personality-OFF PMCs fall back to the global F12 weights. Auto-normalised.
         float wQuest, wKills, wLootValue;
         if (squad.Personality != null)
         {
@@ -102,14 +100,11 @@ public static class MainObjectiveBuilder
         var thQuest = wQuest / wSum;
         var thKills = thQuest + wKills / wSum;
 
-        // Per-squad cell-use tracking. Without this, two RollKills or
-        // RollLootValue calls can land on the same anchor cell because
-        // the underlying pools (positive-Force zones, top-loot cells)
-        // are small. A duplicate is redundant (the squad would do the
-        // same thing twice) and inflates the count toward the timeout
-        // fallback. Each roll retries up to MaxRolls times against this
-        // set; if every retry collides we accept the duplicate as a
-        // last resort rather than dropping the main entirely.
+        // Per-squad cell-use tracking. Without this, two RollKills or RollLootValue calls can land on the
+        // same anchor cell because the underlying pools (positive-Force zones, top-loot cells) are small. A
+        // duplicate is redundant (the squad would do the same thing twice) and inflates the count toward the
+        // timeout fallback. Each roll retries up to MaxRolls times against this set; if every retry collides
+        // we accept the duplicate as a last resort rather than dropping the main entirely.
         var usedCells = new HashSet<Vector2Int>();
         const int MaxRetriesOnDuplicate = 6;
 
@@ -137,11 +132,9 @@ public static class MainObjectiveBuilder
                         break;
                 }
 
-                // LootValue path. Used both for explicit LootValue rolls
-                // and as a fallback when Quest/Kills couldn't find an
-                // anchor (questPool exhausted for this squad, or map has
-                // no PvP zones). Loops here too so a duplicate LootValue
-                // cell gets retried against `usedCells`.
+                // LootValue path. Used both for explicit LootValue rolls and as a fallback when Quest/Kills
+                // couldn't find an anchor (questPool exhausted for this squad, or map has no PvP zones).
+                // Loops here too so a duplicate LootValue cell gets retried against `usedCells`.
                 if (candidate == null)
                 {
                     topLootCells ??= waypointSystem.GetTopLootCells();
@@ -151,11 +144,9 @@ public static class MainObjectiveBuilder
 
                 if (!usedCells.Contains(candidate.CellCoords))
                     main = candidate;
-                // else: collision with an existing cell within THIS
-                // squad — retry the same type. Cross-squad collisions
-                // are intentional (multiple squads can target the same
-                // Quest / Kills / LootValue cell, which is exactly how
-                // friction points emerge in PvP).
+                // else: collision with an existing cell within THIS squad — retry the same type. Cross-squad
+                // collisions are intentional (multiple squads can target the same Quest / Kills / LootValue
+                // cell, which is exactly how friction points emerge in PvP).
             }
 
             if (main != null)
@@ -189,9 +180,8 @@ public static class MainObjectiveBuilder
     {
         if (anchors.Count == 0) return null;
         var pos = anchors[Random.Range(0, anchors.Count)];
-        // Per-archetype roam-duration range if the squad has a SAIN
-        // personality; falls back to the global F12 range for
-        // PlayerScavs and personality-OFF PMCs.
+        // Per-archetype roam-duration range if the squad has a SAIN personality; falls back to the global F12
+        // range for PlayerScavs and personality-OFF PMCs.
         var roamRange = squad.Personality != null
             ? squad.Personality.KillsRoamDuration
             : Plugin.MainObjectivesKillsRoamDuration.Value;
@@ -207,10 +197,8 @@ public static class MainObjectiveBuilder
     private static MainObjective RollLootValue(List<Vector2Int> topCells, WaypointSystem waypointSystem, Squad squad)
     {
         if (topCells.Count == 0) return null;
-        // Per-archetype slice of the global top-loot pool. PMC with SAIN
-        // personality restricts to the first N entries (e.g. top-3 for
-        // VeryAggressive, top-10 for Cautious). PlayerScav / OFF uses
-        // the full pool.
+        // Per-archetype slice of the global top-loot pool. PMC with SAIN personality restricts to the first N
+        // entries (e.g. top-3 for VeryAggressive, top-10 for Cautious). PlayerScav / OFF uses the full pool.
         var slice = squad.Personality != null
             ? Mathf.Clamp(squad.Personality.TopLootCellsMax, 1, topCells.Count)
             : topCells.Count;
@@ -220,25 +208,21 @@ public static class MainObjectiveBuilder
             Type = MainObjectiveType.LootValue,
             CellCoords = cell,
             Position = waypointSystem.CellToWorld(cell),
-            // One-shot rouble-value compute for the raid-review viz
-            // tooltip / sidebar label. Static — the cell's loot doesn't
-            // get richer over the raid.
+            // One-shot rouble-value compute for the raid-review viz tooltip / sidebar label. Static — the
+            // cell's loot doesn't get richer over the raid.
             LootValueTotal = waypointSystem.SumCellLootValue(cell),
         };
     }
 
     private static MainObjective RollQuest(List<Waypoint> questPool, WaypointSystem waypointSystem, Squad squad)
     {
-        // Walk the pool in random order, pick the first trigger that is
-        // REACHABLE from the squad's spawn position AND not already
-        // owned by this same squad. Cross-squad collisions are
-        // intentional: two squads holding the same Quest main means
-        // they'll both route to the same trigger position — that's the
-        // PvP friction the main-objective system is designed to create.
-        // The reachability check (NavMesh.CalculatePath) prevents a
-        // Quest main on a navmesh fragment that's disconnected from the
-        // squad's spawn — bot would otherwise roam the entire map
-        // without ever being able to touch the trigger.
+        // Walk the pool in random order, pick the first trigger that is REACHABLE from the squad's spawn
+        // position AND not already owned by this same squad. Cross-squad collisions are intentional: two
+        // squads holding the same Quest main means they'll both route to the same trigger position — that's
+        // the PvP friction the main-objective system is designed to create. The reachability check
+        // (NavMesh.CalculatePath) prevents a Quest main on a navmesh fragment that's disconnected from the
+        // squad's spawn — bot would otherwise roam the entire map without ever being able to touch the
+        // trigger.
         if (questPool == null || questPool.Count == 0) return null;
         var startIdx = Random.Range(0, questPool.Count);
         for (var i = 0; i < questPool.Count; i++)
@@ -247,13 +231,12 @@ public static class MainObjectiveBuilder
             var triggerId = loc.Name;
             if (string.IsNullOrEmpty(triggerId)) continue;
 
-            // Intra-squad dedup: don't roll the same Quest trigger
-            // twice for the same squad (cross-squad reuse is fine).
+            // Intra-squad dedup: don't roll the same Quest trigger twice for the same squad (cross-squad
+            // reuse is fine).
             if (SquadAlreadyHasQuest(squad, triggerId)) continue;
 
-            // Reachability gate. Uses squad.SpawnPosition (captured at
-            // squad creation) as the source. If unreachable, skip and
-            // try the next pool entry.
+            // Reachability gate. Uses squad.SpawnPosition (captured at squad creation) as the source. If
+            // unreachable, skip and try the next pool entry.
             if (squad != null && squad.SpawnPosition != Vector3.zero
                 && !waypointSystem.IsReachableFromPosition(squad.SpawnPosition, loc.Position))
             {
@@ -267,9 +250,8 @@ public static class MainObjectiveBuilder
                 Position = loc.Position,
                 CellCoords = waypointSystem.WorldToCell(loc.Position),
                 QuestTriggerId = triggerId,
-                // Title resolution against the SPT quest DB is future
-                // work; fall back to the trigger ID for now (readable
-                // enough for the raid-review tooltip).
+                // Title resolution against the SPT quest DB is future work; fall back to the trigger ID for
+                // now (readable enough for the raid-review tooltip).
                 QuestTitle = triggerId,
             };
         }

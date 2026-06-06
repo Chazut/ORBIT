@@ -5,8 +5,8 @@ using Newtonsoft.Json;
 namespace Orbit.Config;
 
 /// <summary>
-/// JSON-backed configuration bundle. Reads-or-creates a file under the
-/// plugin's Config/ directory on first access; subsequent calls to
+/// JSON-backed configuration bundle. Reads-or-creates a file under the plugin's Config/ directory on first
+/// access; subsequent calls to
 /// <see cref="Reload"/> re-read it from disk so hot-edits take effect
 /// without a game restart.
 /// </summary>

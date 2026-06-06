@@ -13,15 +13,12 @@ using Orbit.Tasks.Strategies;
 namespace Orbit.Core;
 
 /// <summary>
-/// The wire-everything orchestrator. Owns one instance of every
-/// subsystem (waypoint grid, movement, look, doors, navmesh jobs,
-/// action/strategy managers, squad + bot rosters), drives them per-
-/// frame from the BSG game loop, and routes Add/RemoveAgent through
-/// the right ECS datasets + registries.
+/// The wire-everything orchestrator. Owns one instance of every subsystem (waypoint grid, movement, look,
+/// doors, navmesh jobs, action/strategy managers, squad + bot rosters), drives them per- frame from the BSG
+/// game loop, and routes Add/RemoveAgent through the right ECS datasets + registries.
 ///
-/// External integrations (e.g. raid-review hooks, custom F12 actions)
-/// can extend the action / strategy / component registries by handling
-/// the static <see cref="OnRegisterActions"/> etc. callbacks.
+/// External integrations (e.g. raid-review hooks, custom F12 actions) can extend the action / strategy /
+/// component registries by handling the static <see cref="OnRegisterActions"/> etc. callbacks.
 /// </summary>
 public class OrbitManager
 {
@@ -63,9 +60,8 @@ public class OrbitManager
         MapId = gameWorld.LocationId;
         Waypoints = new WaypointConfig();
 
-        // Human players list — passed to MovementSystem's stuck-rescue
-        // path so teleports never happen within line-of-sight of a real
-        // player.
+        // Human players list — passed to MovementSystem's stuck-rescue path so teleports never happen within
+        // line-of-sight of a real player.
         List<Player> humanPlayers = [];
         var allPlayers = gameWorld.AllAlivePlayersList;
         for (var i = 0; i < allPlayers.Count; i++)

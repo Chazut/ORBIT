@@ -1,11 +1,9 @@
 namespace Orbit.Config;
 
 /// <summary>
-/// Standard BepInEx ConfigurationManager attribute helper — copied verbatim
-/// per the documented convention (see
-/// https://github.com/BepInEx/BepInEx.ConfigurationManager). Each ORBIT
-/// Config.Bind call attaches one of these via the ConfigDescription tag
-/// argument to control Order, IsAdvanced, etc. in the F12 manager UI.
+/// Standard BepInEx ConfigurationManager attribute helper — copied verbatim per the documented convention
+/// (see https://github.com/BepInEx/BepInEx.ConfigurationManager). Each ORBIT Config.Bind call attaches one of
+/// these via the ConfigDescription tag argument to control Order, IsAdvanced, etc. in the F12 manager UI.
 /// </summary>
 #pragma warning disable 0169, 0414, 0649
 internal sealed class ConfigurationManagerAttributes

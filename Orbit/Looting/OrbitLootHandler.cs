@@ -9,14 +9,15 @@ using EFT.Interactive;
 using EFT.InventoryLogic;
 using Orbit.Core;
 using Orbit.Helpers;
+using Orbit.Looting.WeaponSwap;
 using UnityEngine;
 
 namespace Orbit.Looting;
 
 public class OrbitLootHandler : MonoBehaviour, ILootHandler
 {
-    // Fallback per-slot threshold for bots without an archetype-resolved value
-    // (PlayerScavs, or PMCs while SAIN attach is still pending).
+    // Fallback per-slot threshold for bots without an archetype-resolved value (PlayerScavs, or PMCs while
+    // SAIN attach is pending).
     internal const float DefaultMinPickupPrice = 5000f;
     private const int ContainerOpenAnimMs = 2500;
     private const int InitialSearchMs = 1500;
@@ -32,8 +33,7 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
         EquipmentSlot.Pockets, EquipmentSlot.Dogtag,
     };
 
-    // Non-PMC corpses keep Scabbard (melee) lootable. PMC melee is body-bound
-    // in live and excluded above.
+    // Non-PMC corpses keep Scabbard (melee) lootable. PMC melee is body-bound in live and excluded above.
     private static readonly EquipmentSlot[] CorpseLootableSlotsNonPmc =
     {
         EquipmentSlot.FirstPrimaryWeapon, EquipmentSlot.SecondPrimaryWeapon, EquipmentSlot.Holster,
@@ -42,8 +42,8 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
         EquipmentSlot.Pockets, EquipmentSlot.Scabbard, EquipmentSlot.Dogtag,
     };
 
-    // Slots that require a search animation (contents hidden until inspected).
-    // Other slots are visible on the body and grabbed without a reveal cycle.
+    // Slots that require a search animation (contents hidden until inspected). Other slots are visible on the
+    // body and grabbed without a reveal cycle.
     private static readonly HashSet<EquipmentSlot> SearchableCorpseSlots = new()
     {
         EquipmentSlot.TacticalVest, EquipmentSlot.ArmorVest,
@@ -52,6 +52,20 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
 
     private BotOwner _bot;
     private CancellationTokenSource _cts;
+
+    // Current loot source root (corpse equipment / container fixture / loose item). Set per LootXxxAsync
+    // entry; used by the swap evaluator to size the candidate's reachable ammo pool.
+    private Item _currentSourceRoot;
+    // Ids of weapons consumed by a successful swap this session. Subsequent drain entries that descend from
+    // them are skipped so the swapped weapon's mods aren't stripped off in the bot's inventory by a stray
+    // QFAP transfer.
+    private readonly HashSet<string> _swappedWeaponIds = new();
+
+    // Gates the full swap path inside TransferItemAsync. Only the corpse phase 4 entry sets this true, so
+    // weapons encountered during multi-item drains (container, corpse phase 1) cannot trigger a swap
+    // mid-drain.
+    private bool _allowWeaponSwapPath;
+
 
     public LootStats Stats { get; } = new();
     public bool LootTaskRunning { get; private set; }
@@ -92,6 +106,7 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
         Stats.LastItemsTaken = false;
         Stats.LastMaxPerSlotSeen = 0f;
         Stats.LastHadBypassItem = false;
+        _swappedWeaponIds.Clear();
 
         Log.Info($"OrbitLootHandler.StartLooting({Nick}): kind={CurrentTargetKind}, target={CurrentTarget.name}, minPrice={GetMinPickupPrice():N0}₽");
 
@@ -106,6 +121,10 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
     {
         var sw = Time.realtimeSinceStartup;
         var takenBefore = Stats.LastItemsTaken;
+        // Pin the bot stationary for the loot session. BSG's BotMover.SetPlayerToNavMesh ticks in LateUpdate
+        // and can throw on a bot whose movement state is in flux while weapon slots are being mutated; pose=0
+        // + Mover.Pause keeps it quiescent.
+        FreezeBotForLootSession();
         try
         {
             switch (kind)
@@ -140,9 +159,50 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
         }
         finally
         {
+            // Session-end weapon-draw animation. Mid-drain we only refresh internal data; the animation-side
+            // switch (SetSlotItem) is deferred here so it doesn't collide with the loot animation and stall
+            // the main thread.
+            if (_swappedWeaponIds.Count > 0)
+                SyncBotWeaponStateAtSessionEnd();
+            UnfreezeBotAfterLootSession();
             LootTaskRunning = false;
             var elapsed = Time.realtimeSinceStartup - sw;
             Log.Info($"OrbitLootHandler.RunAsync({Nick}): done in {elapsed:F1}s, kind={kind}, target={loot?.name}, ItemsTaken={Stats.LastItemsTaken} (was {takenBefore})");
+        }
+    }
+
+    private void FreezeBotForLootSession()
+    {
+        try
+        {
+            if (_bot == null) return;
+            // PatrollingData ticks nav recalcs in LateUpdate; pausing it prevents them from racing with
+            // weapon-slot mutations during the loot session.
+            try { _bot.PatrollingData?.Pause(); } catch (System.Exception e) { Log.Warning($"OrbitLootHandler.FreezeBotForLootSession({Nick}): PatrollingData.Pause THREW {e.Message}"); }
+            try { _bot.Mover?.Stop(); } catch (System.Exception e) { Log.Warning($"OrbitLootHandler.FreezeBotForLootSession({Nick}): Mover.Stop THREW {e.Message}"); }
+            try { if (_bot.Mover != null) _bot.Mover.Pause = true; } catch (System.Exception e) { Log.Warning($"OrbitLootHandler.FreezeBotForLootSession({Nick}): Mover.Pause THREW {e.Message}"); }
+            try { _bot.SetPose(0f); } catch (System.Exception e) { Log.Warning($"OrbitLootHandler.FreezeBotForLootSession({Nick}): SetPose THREW {e.Message}"); }
+            Log.Debug($"OrbitLootHandler.FreezeBotForLootSession({Nick}): bot pinned crouched + movement paused + patrol data paused for loot session");
+        }
+        catch (System.Exception e)
+        {
+            Log.Warning($"OrbitLootHandler.FreezeBotForLootSession({Nick}) THREW: {e}");
+        }
+    }
+
+    private void UnfreezeBotAfterLootSession()
+    {
+        try
+        {
+            if (_bot == null) return;
+            try { _bot.PatrollingData?.Unpause(); } catch (System.Exception e) { Log.Warning($"OrbitLootHandler.UnfreezeBotAfterLootSession({Nick}): PatrollingData.Unpause THREW {e.Message}"); }
+            try { if (_bot.Mover != null) _bot.Mover.Pause = false; } catch (System.Exception e) { Log.Warning($"OrbitLootHandler.UnfreezeBotAfterLootSession({Nick}): Mover.Pause THREW {e.Message}"); }
+            try { _bot.SetPose(1f); } catch (System.Exception e) { Log.Warning($"OrbitLootHandler.UnfreezeBotAfterLootSession({Nick}): SetPose THREW {e.Message}"); }
+            Log.Debug($"OrbitLootHandler.UnfreezeBotAfterLootSession({Nick}): bot movement resumed + standing + patrol data resumed");
+        }
+        catch (System.Exception e)
+        {
+            Log.Warning($"OrbitLootHandler.UnfreezeBotAfterLootSession({Nick}) THREW: {e}");
         }
     }
 
@@ -181,14 +241,14 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
         }
 
         var rootItem = container.ItemOwner?.RootItem;
+        _currentSourceRoot = rootItem;
         if (rootItem == null)
         {
             Log.Warning($"OrbitLootHandler.Container({Nick}, {container.name}): ItemOwner.RootItem is null — can't enumerate items");
         }
         else
         {
-            // RootItem is the container fixture itself (not pickable); walk its
-            // immediate children only.
+            // RootItem is the container fixture itself (not pickable); walk its immediate children only.
             var drain = new List<DrainEntry>();
             foreach (var child in CollectImmediateChildren(rootItem))
                 EnumerateItemsForDrain(child, "", drain);
@@ -225,19 +285,36 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
 
         var isPmc = corpse.Side == EPlayerSide.Bear || corpse.Side == EPlayerSide.Usec;
         var lootableSlots = isPmc ? CorpseLootableSlotsPmc : CorpseLootableSlotsNonPmc;
+        _currentSourceRoot = inventoryEquipment;
 
-        // Two interleaved timelines merged into one chronological queue:
-        // visible-track grabs are spaced by InstantGrabDelayMs, search-track
-        // slots are sequential with progressive per-item reveal. Slot order
+        // Two interleaved timelines merged into one chronological queue: visible-track grabs are spaced by
+        // InstantGrabDelayMs, search-track slots are sequential with progressive per-item reveal. Slot order
         // is randomised per track for natural variation.
         var visibleOrder = lootableSlots.Where(s => !SearchableCorpseSlots.Contains(s)).OrderBy(_ => Random.value).ToList();
         var searchOrder = lootableSlots.Where(s => SearchableCorpseSlots.Contains(s)).OrderBy(_ => Random.value).ToList();
         Log.Debug($"OrbitLootHandler.Corpse({Nick}, {corpse.name}): side={corpse.Side} pmc={isPmc} visibleOrder=[{string.Join(",", visibleOrder)}] searchOrder=[{string.Join(",", searchOrder)}]");
 
+        // Loot session phases: 1 — drain non-weapon equipment + searchable grids; 2 — pre-classify every
+        // corpse weapon (synchronous WouldSwap); 3 — strip mods of non-best weapons; 4 — fire the single best
+        // swap, last BSG op of the session.
+        bool IsWeaponSlot(EquipmentSlot s)
+            => s == EquipmentSlot.FirstPrimaryWeapon || s == EquipmentSlot.SecondPrimaryWeapon || s == EquipmentSlot.Holster;
+
+        // Hoist every weapon found on the corpse — slot-equipped or nested in a container — out of the drain
+        // queue and into the phase 2/4 swap pipeline. Keeps swap dispatch separated from mid-drain pickup tx.
+        var corpseWeapons = new List<(string sourcePath, Weapon weapon)>();
+        foreach (var slotKind in new[] { EquipmentSlot.FirstPrimaryWeapon, EquipmentSlot.SecondPrimaryWeapon, EquipmentSlot.Holster })
+        {
+            var slot = inventoryEquipment.GetSlot(slotKind);
+            if (slot?.ContainedItem is Weapon weaponInSlot)
+                corpseWeapons.Add((slotKind.ToString(), weaponInSlot));
+        }
+
         var queue = new List<(int revealMs, EquipmentSlot slot, DrainEntry entry)>();
         var visibleCursorMs = 0;
         foreach (var slotKind in visibleOrder)
         {
+            if (IsWeaponSlot(slotKind)) continue;
             var slot = inventoryEquipment.GetSlot(slotKind);
             var root = slot?.ContainedItem;
             if (root == null) continue;
@@ -245,6 +322,11 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
             EnumerateItemsForDrain(root, slotKind.ToString(), slotItems);
             foreach (var entry in slotItems)
             {
+                if (entry.Item is Weapon nestedWeapon)
+                {
+                    corpseWeapons.Add((entry.Path, nestedWeapon));
+                    continue;
+                }
                 queue.Add((visibleCursorMs, slotKind, entry));
                 visibleCursorMs += InstantGrabDelayMs;
             }
@@ -253,6 +335,7 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
         var searchCursorMs = 0;
         foreach (var slotKind in searchOrder)
         {
+            if (IsWeaponSlot(slotKind)) continue;
             var slot = inventoryEquipment.GetSlot(slotKind);
             var root = slot?.ContainedItem;
             if (root == null) continue;
@@ -261,6 +344,11 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
             var lastRevealOffset = 0;
             for (var i = 0; i < slotItems.Count; i++)
             {
+                if (slotItems[i].Item is Weapon nestedWeapon)
+                {
+                    corpseWeapons.Add((slotItems[i].Path, nestedWeapon));
+                    continue;
+                }
                 var offset = System.Math.Min(InitialSearchMs + i * PerItemRevealMs, MaxRevealCapMs);
                 queue.Add((searchCursorMs + offset, slotKind, slotItems[i]));
                 lastRevealOffset = offset;
@@ -268,15 +356,23 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
             searchCursorMs += lastRevealOffset;
         }
 
+        // Drop any drain entries that descend from a nested weapon — those mods belong to a weapon being
+        // evaluated for swap in phase 2 and would otherwise be stripped before the decision.
+        var nestedWeaponIds = new HashSet<string>();
+        foreach (var (_, w) in corpseWeapons) nestedWeaponIds.Add(w.Id);
+        queue.RemoveAll(e => IsDescendantOfWeaponSet(e.entry.Item, nestedWeaponIds));
+
         queue.Sort((a, b) => a.revealMs.CompareTo(b.revealMs));
         var totalEstimatedMs = queue.Count > 0 ? queue[queue.Count - 1].revealMs : 0;
-        Log.Info($"OrbitLootHandler.Corpse({Nick}, {corpse.name}): drain queue size={queue.Count}, last reveal at {totalEstimatedMs}ms");
+        Log.Info($"OrbitLootHandler.Corpse({Nick}, {corpse.name}): phase1 drain queue size={queue.Count} non-weapon entries, {corpseWeapons.Count} weapon(s) deferred to phase 2, last reveal at {totalEstimatedMs}ms");
         for (var i = 0; i < queue.Count; i++)
         {
             var e = queue[i];
             Log.Debug($"  [{i}] T={e.revealMs}ms slot={e.slot} path={e.entry.Path} item={e.entry.Item.LocalizedName()} ({e.entry.Item.Width}x{e.entry.Item.Height}, price={ItemPriceLookup.GetPrice(e.entry.Item):N0}₽, perSlot={ItemPriceLookup.GetPricePerSlot(e.entry.Item):N0}₽)");
         }
 
+        // Phase 1: drain everything that isn't a corpse weapon slot (rig / pockets / armor / bag, plus their
+        // contents).
         var startTime = Time.realtimeSinceStartup;
         for (var i = 0; i < queue.Count; i++)
         {
@@ -295,12 +391,126 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
             }
             await TransferItemAsync(entry.entry, ct);
         }
+
+        // Phase 2: synchronous WouldSwap pre-check on every corpse weapon. No BSG tx is fired. Keeps the
+        // highest-scoring accepted weapon as the single swap candidate; all others (rejected or not-best) are
+        // queued for mod-stripping.
+        (string sourcePath, Weapon weapon, float score)? best = null;
+        var toStrip = new List<(string sourcePath, Weapon weapon)>();
+        foreach (var (sourcePath, weaponRoot) in corpseWeapons)
+        {
+            if (LootConfig.WeaponSwapEnabled?.Value != true)
+            {
+                toStrip.Add((sourcePath, weaponRoot));
+                continue;
+            }
+            var verdict = WeaponSwapper.WouldSwap(_bot, weaponRoot, _currentSourceRoot);
+            Log.Info($"OrbitLootHandler.Corpse({Nick}, {corpse.name}): phase2 pre-eval {sourcePath} → {weaponRoot.LocalizedName()} would-swap={verdict.WouldSwap} score={verdict.CandidateScore:F1}");
+            if (!verdict.WouldSwap)
+            {
+                toStrip.Add((sourcePath, weaponRoot));
+                continue;
+            }
+            if (best == null || verdict.CandidateScore > best.Value.score)
+            {
+                if (best != null) toStrip.Add((best.Value.sourcePath, best.Value.weapon));
+                best = (sourcePath, weaponRoot, verdict.CandidateScore);
+            }
+            else
+            {
+                toStrip.Add((sourcePath, weaponRoot));
+            }
+        }
+        if (best != null)
+            Log.Info($"OrbitLootHandler.Corpse({Nick}, {corpse.name}): phase2 winner = {best.Value.sourcePath} → {best.Value.weapon.LocalizedName()} (score {best.Value.score:F1}); stripping {toStrip.Count} other weapon(s)");
+
+        // Phase 3: strip the mods of every weapon we won't swap. Pickup tx are safe here because no swap has
+        // fired yet.
+        foreach (var (sourcePath, weaponToStrip) in toStrip)
+        {
+            ct.ThrowIfCancellationRequested();
+            var modItems = new List<DrainEntry>();
+            EnumerateItemsForDrain(weaponToStrip, sourcePath, modItems);
+            foreach (var modEntry in modItems)
+            {
+                if (ReferenceEquals(modEntry.Item, weaponToStrip)) continue;
+                ct.ThrowIfCancellationRequested();
+                Log.Debug($"OrbitLootHandler.Corpse({Nick}, {corpse.name}): phase3 strip mod {modEntry.Path}/{modEntry.Item.LocalizedName()} from {weaponToStrip.LocalizedName()}");
+                await TransferItemAsync(modEntry, ct);
+            }
+        }
+
+        // Phase 4: perform the single best swap — last BSG-affecting op of the session.
+        if (best != null)
+        {
+            ct.ThrowIfCancellationRequested();
+            // Pre-swap settle: let pickup tx fired in phases 1 and 3 quiesce. Mirrors the post-swap settle so
+            // the bot is stable on both sides of the swap window.
+            Log.Info($"OrbitLootHandler.Corpse({Nick}, {corpse.name}): phase4 pre-swap settle (2500ms)");
+            await Task.Delay(2500, ct);
+            // Re-evaluate against the bot's updated loadout (phase 3 may have widened its ammo pool, shifting
+            // the baseline). The recheck also surfaces the weapon that will be displaced so its mods can be
+            // salvaged before the swap fires.
+            var recheck = WeaponSwapper.WouldSwap(_bot, best.Value.weapon, _currentSourceRoot);
+            if (!recheck.WouldSwap)
+            {
+                Log.Info($"OrbitLootHandler.Corpse({Nick}, {corpse.name}): phase4 SKIP {best.Value.sourcePath} → {best.Value.weapon.LocalizedName()} — no longer beats updated loadout");
+                return;
+            }
+            if (recheck.DisplacedWeapon != null)
+            {
+                Log.Info($"OrbitLootHandler.Corpse({Nick}, {corpse.name}): phase4 pre-strip mods of {recheck.DisplacedWeapon.LocalizedName()} (will be thrown to corpse by swap)");
+                var displacedModItems = new List<DrainEntry>();
+                EnumerateItemsForDrain(recheck.DisplacedWeapon, "BotDisplaced", displacedModItems);
+                foreach (var modEntry in displacedModItems)
+                {
+                    if (ReferenceEquals(modEntry.Item, recheck.DisplacedWeapon)) continue;
+                    ct.ThrowIfCancellationRequested();
+                    Log.Debug($"OrbitLootHandler.Corpse({Nick}, {corpse.name}): phase4 strip mod {modEntry.Path}/{modEntry.Item.LocalizedName()} from to-be-displaced {recheck.DisplacedWeapon.LocalizedName()}");
+                    await TransferItemAsync(modEntry, ct);
+                }
+            }
+            Log.Info($"OrbitLootHandler.Corpse({Nick}, {corpse.name}): phase4 perform swap {best.Value.sourcePath} → {best.Value.weapon.LocalizedName()}");
+            _allowWeaponSwapPath = true;
+            try { await TransferItemAsync(new DrainEntry(best.Value.weapon, best.Value.sourcePath), ct); }
+            finally { _allowWeaponSwapPath = false; }
+        }
     }
 
-    // Progressive reveal: each item becomes discoverable at
-    // InitialSearchMs + i × PerItemRevealMs (capped). Grabs fire as soon as
-    // the reveal time has elapsed, so a fast grab waits for the next reveal
-    // and a slow grab transitions straight to an already-visible item.
+    // Parent ids already reported for a self-referencing CurrentAddress (BSG's InventoryEquipment loops back
+    // on itself as a root). De-dups the warning so it fires once per id per session.
+    private static readonly HashSet<string> _cycleWarningSeen = new();
+
+    private static bool IsDescendantOfWeaponSet(Item item, HashSet<string> weaponIds)
+    {
+        if (weaponIds.Count == 0 || item == null) return false;
+        const int maxDepth = 32;
+        HashSet<string> visited = null;
+        var addr = item.CurrentAddress;
+        var depth = 0;
+        while (addr != null && depth < maxDepth)
+        {
+            var parent = addr.Container?.ParentItem;
+            if (parent == null) return false;
+            if (weaponIds.Contains(parent.Id)) return true;
+            if (visited == null) visited = new HashSet<string>();
+            if (!visited.Add(parent.Id))
+            {
+                if (_cycleWarningSeen.Add(parent.Id))
+                    Log.Debug($"OrbitLootHandler.IsDescendantOfWeaponSet: cycle at parent id={parent.Id} after {depth} hops (BSG-side root self-reference, expected)");
+                return false;
+            }
+            addr = parent.CurrentAddress;
+            depth++;
+        }
+        if (depth >= maxDepth)
+            Log.Warning($"OrbitLootHandler.IsDescendantOfWeaponSet: max depth {maxDepth} reached without root — bailing");
+        return false;
+    }
+
+    // Progressive reveal: each item becomes discoverable at InitialSearchMs + i × PerItemRevealMs (capped).
+    // Grabs fire as soon as the reveal time elapses; a fast grab waits for the next reveal, a slow grab
+    // transitions straight to an already-visible item.
     private async Task DrainProgressiveAsync(List<DrainEntry> items, CancellationToken ct)
     {
         if (items.Count == 0) return;
@@ -338,17 +548,63 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
             return;
         }
         Log.Debug($"OrbitLootHandler.Loose({Nick}, {lootItem.name}): awaiting 0.5s, item={lootItem.Item.LocalizedName()}");
+        _currentSourceRoot = lootItem.Item;
         await Task.Delay(500, ct);
         await PickupLooseAsync(lootItem.Item, ct);
     }
 
-    // Silent inventory→inventory transfer (container/corpse path). No per-item
-    // Pickup state — the open/inspect animation already played once.
+    // Silent inventory→inventory transfer (container/corpse path). No per-item Pickup state — the
+    // open/inspect animation already played once.
     private Task<bool> TransferItemAsync(Item item, CancellationToken ct)
         => TransferItemAsync(new DrainEntry(item, ""), ct);
 
     private async Task<bool> TransferItemAsync(DrainEntry entry, CancellationToken ct)
     {
+        // Skip entries that descend from a weapon already moved into the bot's slots by a swap — re-picking
+        // them would detach mods from the freshly equipped weapon.
+        if (entry.Item != null && IsDescendantOfSwappedWeapon(entry.Item))
+        {
+            Log.Debug($"OrbitLootHandler.Transfer({Nick}): SKIP {entry.Item.LocalizedName()} at {entry.Path} (descends from a swapped weapon)");
+            return false;
+        }
+
+        // Weapons take the swap path. Only corpse loot (phase 4) can fire the displacement variant — that
+        // path is sequenced to make the swap the last BSG op of the session. Container weapons go through
+        // equip-only; if no empty slot fits, fall through to the default placement so the weapon lands in the
+        // bot's bag instead of being left behind.
+        if (entry.Item is Weapon candidateWeapon && (LootConfig.WeaponSwapEnabled?.Value ?? true))
+        {
+            WeaponSwapper.Outcome outcome;
+            if (_allowWeaponSwapPath)
+            {
+                outcome = await WeaponSwapper.TryHandleAsync(_bot, candidateWeapon, _currentSourceRoot, ct);
+            }
+            else
+            {
+                outcome = await WeaponSwapper.TryEquipOnlyAsync(_bot, candidateWeapon, ct);
+                // Skipped here just means "no empty slot fits" — fall through to default bag placement.
+                if (outcome == WeaponSwapper.Outcome.Skipped) outcome = WeaponSwapper.Outcome.NotApplicable;
+            }
+            if (outcome == WeaponSwapper.Outcome.Swapped)
+            {
+                _swappedWeaponIds.Add(candidateWeapon.Id);
+                var weaponName = candidateWeapon.LocalizedName();
+                var weaponPrice = ItemPriceLookup.GetPrice(candidateWeapon);
+                RecordPickup(weaponName, weaponPrice, entry.Path);
+                // Refresh internal weapon-manager data, then wait for BSG's hands controller and deferred
+                // slot observers to settle. IsChangingWeapon catches the animation path; the blind hold
+                // covers the rest.
+                SyncBotWeaponStateAfterSwap();
+                await WaitForHandsControllerSettleAsync(ct);
+                Log.Debug($"OrbitLootHandler.Transfer({Nick}): post-swap blind hold (2500ms)");
+                await Task.Delay(2500, ct);
+                return true;
+            }
+            if (outcome == WeaponSwapper.Outcome.Skipped)
+                return false;
+            // NotApplicable: fall through to default loot path.
+        }
+
         if (!ValidatePickup(entry, out var name, out var price, out var pricePerSlot, out var inventoryController)) return false;
         var place = FindPlace(entry, inventoryController, name, price);
         if (!place.Succeeded) return false;
@@ -359,8 +615,95 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
         return success;
     }
 
-    // Loose world item path: kneel animation per pickup via the player's
-    // managed Pickup state.
+    /// <summary>
+    /// Refresh the bot's weapon-manager weapons list and recompute its combat power rating after a swap.
+    /// Intentionally skips FastForwardCurrentState and SetSlotItem — both queue hands-controller animations
+    /// and must not run while the bot is still in the loot animation. The animation-side switch is deferred
+    /// to <see cref="SyncBotWeaponStateAtSessionEnd"/>.
+    /// </summary>
+    private void SyncBotWeaponStateAfterSwap()
+    {
+        try
+        {
+            if (_bot == null) return;
+            try { _bot.WeaponManager?.Selector?.UpdateWeaponsList(); }
+            catch (System.Exception ulEx) { Log.Warning($"OrbitLootHandler.SyncBotWeaponStateAfterSwap({Nick}): UpdateWeaponsList THREW {ulEx.Message}"); }
+            try { _bot.AIData?.CalcPower(); }
+            catch (System.Exception cpEx) { Log.Warning($"OrbitLootHandler.SyncBotWeaponStateAfterSwap({Nick}): CalcPower THREW {cpEx.Message}"); }
+            Log.Info($"OrbitLootHandler.SyncBotWeaponStateAfterSwap({Nick}): refreshed WeaponManager list + AIData (animation deferred to session end)");
+        }
+        catch (System.Exception e)
+        {
+            Log.Warning($"OrbitLootHandler.SyncBotWeaponStateAfterSwap({Nick}) THREW: {e}");
+        }
+    }
+
+    /// <summary>
+    /// Poll the inventory controller's <c>IsChangingWeapon</c> flag until it clears, <paramref name="ct"/> is
+    /// cancelled, or the cap is hit. A swap leaves BSG's hands controller mid weapon-draw; firing the next op
+    /// during that window is liable to stall the main thread.
+    /// </summary>
+    private async Task WaitForHandsControllerSettleAsync(CancellationToken ct)
+    {
+        const int maxWaitMs = 10000;
+        const int pollIntervalMs = 100;
+        var ic = _bot?.GetPlayer?.InventoryController;
+        if (ic == null) return;
+        var elapsed = 0;
+        while (elapsed < maxWaitMs)
+        {
+            bool changing;
+            try { changing = ic.IsChangingWeapon; }
+            catch { changing = false; }
+            if (!changing)
+            {
+                if (elapsed > 0)
+                    Log.Info($"OrbitLootHandler.WaitForHandsControllerSettleAsync({Nick}): hands controller idle after {elapsed}ms");
+                return;
+            }
+            await Task.Delay(pollIntervalMs, ct);
+            elapsed += pollIntervalMs;
+        }
+        Log.Warning($"OrbitLootHandler.WaitForHandsControllerSettleAsync({Nick}): timed out after {maxWaitMs}ms — proceeding anyway");
+    }
+
+    /// <summary>
+    /// End-of-session sync. Bot is no longer in the loot animation cycle: fast-forward the hands controller
+    /// and call SetSlotItem so BSG re-picks and draws the new best weapon.
+    /// </summary>
+    private void SyncBotWeaponStateAtSessionEnd()
+    {
+        try
+        {
+            var player = _bot?.GetPlayer;
+            if (player == null) return;
+            try { player.HandsController?.FastForwardCurrentState(); }
+            catch (System.Exception ffEx) { Log.Warning($"OrbitLootHandler.SyncBotWeaponStateAtSessionEnd({Nick}): FastForward THREW {ffEx.Message}"); }
+            try { _bot.WeaponManager?.Selector?.SetSlotItem(new Callback<IHandsController>(_ => { }), true); }
+            catch (System.Exception ssEx) { Log.Warning($"OrbitLootHandler.SyncBotWeaponStateAtSessionEnd({Nick}): SetSlotItem THREW {ssEx.Message}"); }
+            Log.Info($"OrbitLootHandler.SyncBotWeaponStateAtSessionEnd({Nick}): triggered weapon-draw animation after {_swappedWeaponIds.Count} swapped weapon(s)");
+        }
+        catch (System.Exception e)
+        {
+            Log.Warning($"OrbitLootHandler.SyncBotWeaponStateAtSessionEnd({Nick}) THREW: {e}");
+        }
+    }
+
+    private bool IsDescendantOfSwappedWeapon(Item item)
+    {
+        if (_swappedWeaponIds.Count == 0) return false;
+        var addr = item.CurrentAddress;
+        while (addr != null)
+        {
+            var parent = addr.Container?.ParentItem;
+            if (parent == null) return false;
+            if (_swappedWeaponIds.Contains(parent.Id)) return true;
+            addr = parent.CurrentAddress;
+        }
+        return false;
+    }
+
+    // Loose world item path: kneel animation per pickup via the player's managed Pickup state.
     private async Task<bool> PickupLooseAsync(Item item, CancellationToken ct)
     {
         var entry = new DrainEntry(item, "");
@@ -412,17 +755,15 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
         name = item.LocalizedName();
         price = ItemPriceLookup.GetPrice(item);
         pricePerSlot = ItemPriceLookup.GetPricePerSlot(item);
-        // Currency / frag grenades / dogtags bypass the value gate and the
-        // scav random roll.
+        // Currency / frag grenades / dogtags bypass the value gate and the scav random roll.
         if (IsValueGateBypass(item, out var bypassReason))
         {
             Stats.LastHadBypassItem = true;
             Log.Debug($"OrbitLootHandler.Pickup({Nick}): {name} at {entry.Path} bypasses value gate ({bypassReason}, perSlot={pricePerSlot:N0}₽)");
             return true;
         }
-        // Bot scavs use a per-item random roll instead of a value threshold —
-        // mirrors vanilla opportunistic looting. PlayerScavs and PMCs continue
-        // to the per-archetype gate below.
+        // Bot scavs use a per-item random roll instead of a value threshold — mirrors vanilla opportunistic
+        // looting. PlayerScavs and PMCs continue to the per-archetype gate below.
         if (IsBotScav(_bot))
         {
             var chance = (LootConfig.ScavLootChancePct?.Value ?? 30) / 100f;
@@ -435,9 +776,8 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
             Log.Debug($"OrbitLootHandler.Pickup({Nick}): scav SKIP {name} at {entry.Path} (roll {roll:F2} ≥ {chance:F2}, perSlot={pricePerSlot:N0}₽)");
             return false;
         }
-        // PMC / PlayerScav: per-archetype threshold gate. Tracks the highest
-        // non-bypass perSlot so the post-loot blacklist can identify which
-        // squadmates would also reject this POI.
+        // PMC / PlayerScav: per-archetype threshold gate. Tracks the highest non-bypass perSlot so the
+        // post-loot blacklist can identify which squadmates would also reject this POI.
         var minPrice = GetMinPickupPrice();
         if (pricePerSlot > Stats.LastMaxPerSlotSeen)
             Stats.LastMaxPerSlotSeen = pricePerSlot;
@@ -449,8 +789,8 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
         return true;
     }
 
-    // True for AI scavs (Savage side, excluding PlayerScavs which are
-    // routed through the PMC-style threshold path).
+    // True for AI scavs (Savage side, excluding PlayerScavs which are routed through the PMC-style threshold
+    // path).
     private static bool IsBotScav(BotOwner bot)
     {
         var profile = bot?.Profile;
@@ -497,11 +837,10 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
         Log.Info($"OrbitLootHandler.Pickup({Nick}): ✓ PICKED {name}{pathSuffix} ({price:N0}₽), invValue={Stats.InventoryValue:N0}₽, gained={Stats.TotalGained:N0}₽");
     }
 
-    // Recursive drain enumeration. Containers with grid contents (wallets,
-    // rigs, backpacks, pockets) emit children before the wrapper so loose
-    // contents are extracted before the wrapper itself is moved. Slot chains
-    // (weapon + mods, armor + plates) emit root-first. Non-RaidModdable
-    // weapon mods are skipped — they can't be detached in raid.
+    // Recursive drain enumeration. Containers with grid contents (wallets, rigs, backpacks, pockets) emit
+    // children before the wrapper so loose contents are extracted before the wrapper itself is moved. Slot
+    // chains (weapon + mods, armor + plates) emit root-first. Non-RaidModdable weapon mods are skipped — they
+    // can't be detached in raid.
     private static void EnumerateItemsForDrain(Item item, string parentPath, List<DrainEntry> output)
     {
         if (item == null) return;
@@ -549,9 +888,8 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
         return list;
     }
 
-    // Items that always get picked regardless of per-slot value or scav roll:
-    // currency stacks, frag grenades (tactical), and dogtags (quest hand-ins).
-    // Smokes / flashes / gas grenades stay on the normal gate.
+    // Items that always get picked regardless of per-slot value or scav roll: currency stacks, frag grenades
+    // (tactical), and dogtags (quest hand-ins). Smokes / flashes / gas grenades stay on the normal gate.
     private static bool IsValueGateBypass(Item item, out string reason)
     {
         if (item is MoneyItemClass) { reason = "currency"; return true; }

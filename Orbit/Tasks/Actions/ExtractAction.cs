@@ -9,48 +9,41 @@ using UnityEngine;
 namespace Orbit.Tasks.Actions;
 
 /// <summary>
-/// Final stage of an exfil dispatch. The squad has arrived at the Exfil
-/// POI and GotoObjectiveAction transitioned us to
+/// Final stage of an exfil dispatch. The squad has arrived at the Exfil POI and GotoObjectiveAction
+/// transitioned us to
 /// <see cref="ObjectiveStatus.Extracting"/>. This action holds the bot in
-/// place for a short countdown (mirrors the real player exfil animation),
-/// then calls BSG's <c>BotLeaveData.RemoveFromMap</c> to despawn the bot.
+/// place for a short countdown (mirrors the real player exfil animation), then calls BSG's
+/// <c>BotLeaveData.RemoveFromMap</c> to despawn the bot.
 ///
-/// Two-mode behaviour:
-///   • Standard (foot) exfils — per-agent 5s kneel then despawn. Members
-///     extract as they arrive; no synchronisation.
-///   • V-Ex / SharedTimer (car) exfils — the squad waits at the exfil
-///     for all currently-alive members to arrive (capped at
-///     VExWaitTimeout), then a single 60s countdown ticks for the whole
-///     squad. At the end every member at the V-Ex despawns simultaneously
-///     and the exfil is flipped to NotPresent so the human player can't
-///     use it after the car has "left". A real player extract triggers
-///     the car to leave for good, so we match that.
+/// Two-mode behaviour: • Standard (foot) exfils — per-agent 5s kneel then despawn. Members extract as they
+/// arrive; no synchronisation. • V-Ex / SharedTimer (car) exfils — the squad waits at the exfil for all
+/// currently-alive members to arrive (capped at VExWaitTimeout), then a single 60s countdown ticks for the
+/// whole squad. At the end every member at the V-Ex despawns simultaneously and the exfil is flipped to
+/// NotPresent so the human player can't use it after the car has "left". A real player extract triggers the
+/// car to leave for good, so we match that.
 /// </summary>
 public class ExtractAction(AgentData dataset, float hysteresis) : Task<Agent>(hysteresis)
 {
-    // Beats LootContainerAction's 0.75 — once we're extracting, nothing
-    // else (loot, guard, goto) should preempt.
+    // Beats LootContainerAction's 0.75 — once we're extracting, nothing else (loot, guard, goto) should
+    // preempt.
     private const float UtilityScore = 0.9f;
 
-    // Time a foot-exfil bot kneels at the exfil before being removed.
-    // Real player exfils are 7-10s; we keep it short so squads don't
-    // pile up at the same point waiting (visually ugly).
+    // Time a foot-exfil bot kneels at the exfil before being removed. Real player exfils are 7-10s; we keep
+    // it short so squads don't pile up at the same point waiting (visually ugly).
     private const float FootExtractStandTime = 5f;
 
-    // V-Ex car countdown — once all squad members have arrived at the
-    // SharedTimer exfil (or VExWaitTimeout elapsed), this many seconds
-    // tick down before the simultaneous despawn. Matches BSG's typical
-    // V-Ex countdown.
+    // V-Ex car countdown — once all squad members have arrived at the SharedTimer exfil (or VExWaitTimeout
+    // elapsed), this many seconds tick down before the simultaneous despawn. Matches BSG's typical V-Ex
+    // countdown.
     private const float VExCountdownSeconds = 60f;
 
-    // Max time the squad will wait at a V-Ex for the LAST member to
-    // arrive before starting the countdown anyway. Without this cap a
-    // single straggler (stuck on geometry, killed mid-route without us
-    // noticing yet) blocks the rest of the squad's extract.
+    // Max time the squad will wait at a V-Ex for the LAST member to arrive before starting the countdown
+    // anyway. Without this cap a single straggler (stuck on geometry, killed mid-route without us noticing
+    // yet) blocks the rest of the squad's extract.
     private const float VExWaitTimeout = 90f;
 
-    // Per-agent kneel-start timestamp for foot exfils. V-Ex uses a per-
-    // squad shared timer instead (VExState below).
+    // Per-agent kneel-start timestamp for foot exfils. V-Ex uses a per- squad shared timer instead (VExState
+    // below).
     private readonly Dictionary<int, float> _footExtractStartTime = new();
 
     // Per-squad shared timer for V-Ex extracts.
@@ -84,9 +77,8 @@ public class ExtractAction(AgentData dataset, float hysteresis) : Task<Agent>(hy
         if (loc == null || loc.Category != WaypointCategory.Exfil
             || loc.Target is not ExfiltrationPoint exfil)
         {
-            // Defensive: agent in Extracting state without a valid exfil
-            // POI. Should not happen; fall back to the foot-extract path
-            // so we don't strand the bot.
+            // Defensive: agent in Extracting state without a valid exfil POI. Should not happen; fall back to
+            // the foot-extract path so we don't strand the bot.
             UpdateFootExtract(agent);
             return;
         }
@@ -130,9 +122,8 @@ public class ExtractAction(AgentData dataset, float hysteresis) : Task<Agent>(hy
 
         if (!_vexSquadStates.TryGetValue(squad.Id, out var state) || state.Exfil != exfil)
         {
-            // First member of this squad to land on this V-Ex (or squad's
-            // exfil target changed). Initialise state, kneel the bot, and
-            // start the wait window.
+            // First member of this squad to land on this V-Ex (or squad's exfil target changed). Initialise
+            // state, kneel the bot, and start the wait window.
             state = new VExState
             {
                 Exfil = exfil,
@@ -183,9 +174,8 @@ public class ExtractAction(AgentData dataset, float hysteresis) : Task<Agent>(hy
     private void DespawnSquadAtVEx(Squad squad, ExfiltrationPoint exfil)
     {
         Log.Info($"{squad}: V-Ex {exfil.name} countdown ended — despawning all members at the exfil and marking the car departed");
-        // Snapshot the member list — DespawnAgent mutates Squad.Members
-        // through OrbitManager.RemoveAgent; iterating in-place would skip
-        // entries.
+        // Snapshot the member list — DespawnAgent mutates Squad.Members through OrbitManager.RemoveAgent;
+        // iterating in-place would skip entries.
         var snapshot = new List<Agent>(squad.Size);
         for (var i = 0; i < squad.Size; i++) snapshot.Add(squad.Members[i]);
         for (var i = 0; i < snapshot.Count; i++)
@@ -198,10 +188,9 @@ public class ExtractAction(AgentData dataset, float hysteresis) : Task<Agent>(hy
             _footExtractStartTime.Remove(member.Id);
             DespawnAgent(member);
         }
-        // Mark the car as departed so the human player can't pile in
-        // after the squad has left. NotPresent is BSG's natural V-Ex
-        // post-departure state — broadcasts to clients so the UI hides
-        // the exfil from the player.
+        // Mark the car as departed so the human player can't pile in after the squad has left. NotPresent is
+        // BSG's natural V-Ex post-departure state — broadcasts to clients so the UI hides the exfil from the
+        // player.
         try
         {
             exfil.SetStatusLogged(EExfiltrationStatus.NotPresent, "Orbit-VEx-Departed");
@@ -233,11 +222,9 @@ public class ExtractAction(AgentData dataset, float hysteresis) : Task<Agent>(hy
 
     protected override void Deactivate(Agent entity)
     {
-        // Combat takeover or external state change mid-extract — drop the
-        // per-agent foot tracker. The V-Ex squad timer is intentionally
-        // NOT cleared here: if a member temporarily exits Extracting
-        // (combat, takeover), the squad-wide countdown keeps ticking so
-        // the rest of the squad isn't stranded.
+        // Combat takeover or external state change mid-extract — drop the per-agent foot tracker. The V-Ex
+        // squad timer is intentionally NOT cleared here: if a member temporarily exits Extracting (combat,
+        // takeover), the squad-wide countdown keeps ticking so the rest of the squad isn't stranded.
         if (_footExtractStartTime.Remove(entity.Id))
             Log.Debug($"{entity} ExtractAction.Deactivate: foot-extract timer cancelled");
     }

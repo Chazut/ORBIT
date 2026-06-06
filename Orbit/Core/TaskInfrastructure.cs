@@ -15,10 +15,9 @@ namespace Orbit.Core;
 // ╚══════════════════════════════════════════════════════════════════╝
 
 /// <summary>
-/// Type-keyed bag of task definitions used at boot to assemble the
-/// action / strategy / component registries before they're frozen into
-/// arrays. The Type key is the concrete class, which prevents the same
-/// task from being registered twice by accident.
+/// Type-keyed bag of task definitions used at boot to assemble the action / strategy / component registries
+/// before they're frozen into arrays. The Type key is the concrete class, which prevents the same task from
+/// being registered twice by accident.
 /// </summary>
 public class DefinitionRegistry<T>
 {
@@ -38,11 +37,9 @@ public class DefinitionRegistry<T>
 }
 
 /// <summary>
-/// Base scoring/picking loop shared by ActionManager (per-Agent) and
-/// StrategyManager (per-Squad). Each tick: every task computes its score
-/// per entity, then per entity we pick the highest-scoring task (with
-/// hysteresis bias toward the current pick to avoid thrash), then every
-/// active task runs Update.
+/// Base scoring/picking loop shared by ActionManager (per-Agent) and StrategyManager (per-Squad). Each tick:
+/// every task computes its score per entity, then per entity we pick the highest-scoring task (with
+/// hysteresis bias toward the current pick to avoid thrash), then every active task runs Update.
 /// </summary>
 public class BaseTaskManager<TEntity>(Task<TEntity>[] tasks) where TEntity : Entity
 {
@@ -77,8 +74,8 @@ public class BaseTaskManager<TEntity>(Task<TEntity>[] tasks) where TEntity : Ent
         var highestScore = 0f;
         var nextTaskOrdinal = 0;
 
-        // Seed from the current task plus its hysteresis bonus so a tied
-        // score doesn't cause every-tick switching.
+        // Seed from the current task plus its hysteresis bonus so a tied score doesn't cause every-tick
+        // switching.
         if (assignment.Task != null)
         {
             nextTaskOrdinal = assignment.Ordinal;
@@ -149,10 +146,9 @@ public class ActionManager(AgentData dataset, Task<Agent>[] tasks) : BaseTaskMan
 }
 
 /// <summary>
-/// Per-Squad strategy manager. Throttled to twice a second — strategies
-/// don't need frame-rate granularity (they re-pick objectives on the
-/// order of seconds anyway) and the per-squad work is heavier than per-
-/// agent action scoring.
+/// Per-Squad strategy manager. Throttled to twice a second — strategies don't need frame-rate granularity
+/// (they re-pick objectives on the order of seconds anyway) and the per-squad work is heavier than per- agent
+/// action scoring.
 /// </summary>
 public class StrategyManager(SquadData dataset, Task<Squad>[] tasks) : BaseTaskManager<Squad>(tasks)
 {

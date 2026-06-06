@@ -15,10 +15,9 @@ namespace Orbit.Core;
 // ╚══════════════════════════════════════════════════════════════════╝
 
 /// <summary>
-/// BSG-bot-id → Agent lookup. Bot ids are dense small integers, so a
-/// growable List with null padding outperforms a Dictionary at the access
-/// pattern we have (hot path: per-frame patch hooks checking "is this bot
-/// one of ours?").
+/// BSG-bot-id → Agent lookup. Bot ids are dense small integers, so a growable List with null padding
+/// outperforms a Dictionary at the access pattern we have (hot path: per-frame patch hooks checking "is this
+/// bot one of ours?").
 /// </summary>
 public class BotRoster
 {
@@ -72,9 +71,8 @@ public class BotRoster
 }
 
 /// <summary>
-/// Groups agents into squads based on BSG's BotsGroup id, with special
-/// handling for vanilla scavs (always solo, never grouped) and PMC
-/// squads (deferred SAIN personality resolution before main-objective
+/// Groups agents into squads based on BSG's BotsGroup id, with special handling for vanilla scavs (always
+/// solo, never grouped) and PMC squads (deferred SAIN personality resolution before main-objective
 /// generation).
 /// </summary>
 public class SquadRegistry(SquadData squadData, StrategyManager strategyManager, WaypointSystem waypointSystem)
@@ -89,11 +87,10 @@ public class SquadRegistry(SquadData squadData, StrategyManager strategyManager,
 
         var role = agent.Bot.Profile.Info.Settings.Role;
 
-        // Vanilla scavs (assault / assaultGroup) always get their own
-        // 1-member squad — never grouped. The old 'Brown Tide' toggle that
-        // let scavs share squads (and congeal into map-spanning waves) has
-        // been removed; the settled preference is solo-scav behaviour.
-        // Goons, raiders, bosses, PMCs etc still group via BSG BotsGroup id.
+        // Vanilla scavs (assault / assaultGroup) always get their own 1-member squad — never grouped. The old
+        // 'Brown Tide' toggle that let scavs share squads (and congeal into map-spanning waves) has been
+        // removed; the settled preference is solo-scav behaviour. Goons, raiders, bosses, PMCs etc still
+        // group via BSG BotsGroup id.
         if (role is WildSpawnType.assault or WildSpawnType.assaultGroup)
         {
             squad = AddNewSquad(agent);
@@ -141,30 +138,26 @@ public class SquadRegistry(SquadData squadData, StrategyManager strategyManager,
 
     private Squad AddNewSquad(Agent agent)
     {
-        // BSG quirk: BotsGroup.TargetMembersCount is off-by-one (always 0
-        // for scavs, etc.). Bump by 1 to get the real count.
+        // BSG quirk: BotsGroup.TargetMembersCount is off-by-one (always 0 for scavs, etc.). Bump by 1 to get
+        // the real count.
         var targetMembersCount = agent.Bot.BotsGroup.TargetMembersCount + 1;
         var squad = squadData.AddEntity(strategyManager.Tasks.Length, targetMembersCount);
         Log.Debug($"Registered new {squad} with {targetMembersCount} target members");
         squad.Leader = agent;
         squad.Leader.IsLeader = true;
-        // Capture leader's spawn world position — used by the waypoint
-        // system to derive an Infiltration name when Profile.Info.EntryPoint
-        // is empty (mod-spawned PMCs, special-spawn bots).
+        // Capture leader's spawn world position — used by the waypoint system to derive an Infiltration name
+        // when Profile.Info.EntryPoint is empty (mod-spawned PMCs, special-spawn bots).
         squad.SpawnPosition = agent.Bot.GetPlayer != null ? agent.Bot.GetPlayer.Position : agent.Bot.Position;
         Log.Debug($"{squad} assigned new leader {squad.Leader} (spawn pos captured: {squad.SpawnPosition})");
 
-        // Personality resolution is DEFERRED for PMC squads. SAIN attaches
-        // its BotComponent asynchronously after spawn (1-2s typical) so
-        // calling SainPersonality.GetBrainName at squad creation almost
-        // always returns null. Flag the squad as "pending" and let the
-        // strategy retry the lookup at every tick until it resolves or the
-        // 5 s deadline elapses. Main objectives are NOT generated here for
-        // PMCs — they're rolled once the personality is locked, so the mix
-        // weights match the resolved archetype.
+        // Personality resolution is DEFERRED for PMC squads. SAIN attaches its BotComponent asynchronously
+        // after spawn (1-2s typical) so calling SainPersonality.GetBrainName at squad creation almost always
+        // returns null. Flag the squad as "pending" and let the strategy retry the lookup at every tick until
+        // it resolves or the 5 s deadline elapses. Main objectives are NOT generated here for PMCs — they're
+        // rolled once the personality is locked, so the mix weights match the resolved archetype.
         //
-        // Non-PMC (scavs, PlayerScavs, bosses): no personality, no deferral.
-        // Generate mains immediately using the global weights.
+        // Non-PMC (scavs, PlayerScavs, bosses): no personality, no deferral. Generate mains immediately using
+        // the global weights.
         var roleLeader = agent.Bot.Profile?.Info?.Settings?.Role;
         var isPmc = roleLeader.HasValue && IsPmcRole(roleLeader.Value);
         squad.Archetype = PersonalityArchetype.Average;
@@ -178,21 +171,18 @@ public class SquadRegistry(SquadData squadData, StrategyManager strategyManager,
             return squad; // skip MainObjectiveBuilder until resolved (see TryResolvePersonality)
         }
 
-        // Roll the squad's main objectives at creation. Builder is
-        // player-blind and self-contained — skips boss/raider/goon roles
-        // internally, picks anchors from static map data.
+        // Roll the squad's main objectives at creation. Builder is player-blind and self-contained — skips
+        // boss/raider/goon roles internally, picks anchors from static map data.
         MainObjectiveBuilder.Generate(squad, waypointSystem);
 
         return squad;
     }
 
     /// <summary>
-    /// Strategy-tick callback for PMC squads with deferred personality
-    /// resolution. Retries the SAIN brain lookup; once resolved (or the
-    /// 5 s deadline elapses, locking to Average), rolls the
-    /// PersonalityProfile and generates the squad's main objectives using
-    /// the resolved archetype's mix weights. Safe to call every tick —
-    /// early-returns if the squad isn't pending.
+    /// Strategy-tick callback for PMC squads with deferred personality resolution. Retries the SAIN brain
+    /// lookup; once resolved (or the 5 s deadline elapses, locking to Average), rolls the PersonalityProfile
+    /// and generates the squad's main objectives using the resolved archetype's mix weights. Safe to call
+    /// every tick — early-returns if the squad isn't pending.
     /// </summary>
     public void TryResolvePersonality(Squad squad)
     {
@@ -209,8 +199,7 @@ public class SquadRegistry(SquadData squadData, StrategyManager strategyManager,
         var reason = resolved ? "SAIN resolved" : "timeout, lock to Average";
         Log.Info($"{squad} PMC personality locked: brain='{brainName ?? "(none)"}' → {squad.Archetype} ({reason}) | extract={squad.Personality.ExtractLootThreshold:N0}₽ coverage={squad.Personality.LootCoverage:P0} mains={squad.Personality.MainCount} sprint={squad.Personality.SprintPropensity:F1}");
 
-        // Now that the archetype is known, generate the main objectives
-        // using the locked mix weights.
+        // Now that the archetype is known, generate the main objectives using the locked mix weights.
         MainObjectiveBuilder.Generate(squad, waypointSystem);
     }
 

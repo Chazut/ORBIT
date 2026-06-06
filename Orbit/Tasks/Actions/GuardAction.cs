@@ -12,11 +12,9 @@ using Random = UnityEngine.Random;
 namespace Orbit.Tasks.Actions;
 
 /// <summary>
-/// Steady-state "hold this objective" behaviour: walk to the assigned
-/// cover point, crouch, raycast-sweep nearby directions for the longest
-/// sightlines, then cycle the bot's gaze across them while holding the
-/// position. Activates once the bot has arrived at a POI and there's
-/// nothing to loot or path away to.
+/// Steady-state "hold this objective" behaviour: walk to the assigned cover point, crouch, raycast-sweep
+/// nearby directions for the longest sightlines, then cycle the bot's gaze across them while holding the
+/// position. Activates once the bot has arrived at a POI and there's nothing to loot or path away to.
 /// </summary>
 public class GuardAction(AgentData dataset, MovementSystem movementSystem, float hysteresis) : Task<Agent>(hysteresis)
 {
@@ -66,8 +64,8 @@ public class GuardAction(AgentData dataset, MovementSystem movementSystem, float
             switch (agent.Guard.Status)
             {
                 case GuardStatus.None:
-                    // Sprint to cover honours the same faction / personality
-                    // gate as objective dispatch (scavs and Timmy never sprint).
+                    // Sprint to cover honours the same faction / personality gate as objective dispatch
+                    // (scavs and Timmy never sprint).
                     var sprintAllowed = SprintGate.IsAllowedByFaction(agent);
                     movementSystem.MoveToByPath(agent, coverPoint.Position, sprint: sprintAllowed, urgency: MovementUrgency.Low);
                     guard.Status = GuardStatus.Moving;
@@ -134,8 +132,8 @@ public class GuardAction(AgentData dataset, MovementSystem movementSystem, float
                 _candidateBuffer.Add(coverPoint.Direction);
         }
 
-        // The objective's Y can produce odd directions relative to the bot's
-        // head. Force it into the same elevation for the direction maths.
+        // The objective's Y can produce odd directions relative to the bot's head. Force it into the same
+        // elevation for the direction maths.
         var coplanarObjective = new Vector3(agent.Objective.Location.Position.x, origin.y, agent.Objective.Location.Position.z);
         var objectiveVector = coplanarObjective - origin;
         objectiveVector.Normalize();
@@ -234,8 +232,7 @@ public class GuardAction(AgentData dataset, MovementSystem movementSystem, float
 
         _sortBuffer.Sort(Comparer.Instance);
 
-        // Keep the 5 longest-distance directions — those are the most
-        // worthwhile to watch (open sightlines).
+        // Keep the 5 longest-distance directions — those are the most worthwhile to watch (open sightlines).
         var limit = Math.Min(_sortBuffer.Count, 5) + 1;
 
         for (var i = 1; i < limit; i++)

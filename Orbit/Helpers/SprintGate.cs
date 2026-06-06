@@ -3,9 +3,8 @@ using Orbit.Entities;
 namespace Orbit.Helpers;
 
 /// <summary>
-/// Faction- and personality-level sprint eligibility. Scavs never sprint;
-/// PMCs with near-zero SprintPropensity (Timmy) never sprint. Distance-based
-/// ramp-up is handled at the call site.
+/// Faction- and personality-level sprint eligibility. Scavs never sprint; PMCs with near-zero
+/// SprintPropensity (Timmy) never sprint. Distance-based ramp-up is handled at the call site.
 /// </summary>
 public static class SprintGate
 {

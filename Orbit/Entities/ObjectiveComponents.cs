@@ -23,12 +23,10 @@ public class Objective
     public Vector3[] ArrivalPath;
 
     /// <summary>
-    /// When this agent was dispatched as a follower to a loot splinter
-    /// instead of the squad's main objective, this points to the squad's
-    /// main objective the splinter was picked around. Lets UpdateAgents
-    /// recognise that the follower is still "aligned" with the squad even
-    /// though Location != squad.Objective.Location, and avoid re-dispatching
-    /// them every tick.
+    /// When this agent was dispatched as a follower to a loot splinter instead of the squad's main objective,
+    /// this points to the squad's main objective the splinter was picked around. Lets UpdateAgents recognise
+    /// that the follower is still "aligned" with the squad even though Location != squad.Objective.Location,
+    /// and avoid re-dispatching them every tick.
     /// </summary>
     public Waypoint SplinterParent;
 

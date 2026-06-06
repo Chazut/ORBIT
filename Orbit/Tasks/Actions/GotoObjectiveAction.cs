@@ -11,9 +11,8 @@ namespace Orbit.Tasks.Actions;
 /// <summary>
 /// Drives a bot from wherever they are to their currently-assigned
 /// <see cref="Waypoint"/>. Owns the arrival logic: strict-radius gate
-/// with line-of-sight check (no looting through walls), nav-snap rescue
-/// for the case where BSG's mover stopped 1.5-2.5m off the exact point,
-/// status transition to Looting/Extracting/Finished, and per-agent
+/// with line-of-sight check (no looting through walls), nav-snap rescue for the case where BSG's mover
+/// stopped 1.5-2.5m off the exact point, status transition to Looting/Extracting/Finished, and per-agent
 /// blacklist when the same POI keeps failing.
 /// </summary>
 public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSystem, WaypointSystem waypointSystem, float hysteresis) : Task<Agent>(hysteresis)
@@ -22,23 +21,21 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
     private const float UtilityBoost = 0.15f;
     private const float UtilityBoostMaxDistSqr = 50f * 50f;
 
-    // Sprint only when far enough that running is worth the awareness
-    // penalty. Within 50m of the objective we walk: the bot's vision
-    // sensor updates more often when not sprinting, letting it spot
-    // enemies it would otherwise blast past.
+    // Sprint only when far enough that running is worth the awareness penalty. Within 50m of the objective we
+    // walk: the bot's vision sensor updates more often when not sprinting, letting it spot enemies it would
+    // otherwise blast past.
     private const float WalkApproachDistanceSqr = 50f * 50f;
 
-    // BSG nav-snap arrival rescue. The bot's path consumes at the nearest
-    // navmesh node, which can sit 1.5-2.5m off the exact Waypoint.Position.
-    // With the strict 1m POI arrival radius we'd otherwise time out at
+    // BSG nav-snap arrival rescue. The bot's path consumes at the nearest navmesh node, which can sit
+    // 1.5-2.5m off the exact Waypoint.Position. With the strict 1m POI arrival radius we'd otherwise time out
+    // at
     // 1.0-2.5m without ever flipping to Looting. 4m is the upper bound
     // where the LoS check still makes sense.
     private const float NavSnapArrivalRadius = 4f;
     private const float NavSnapArrivalRadiusSqr = NavSnapArrivalRadius * NavSnapArrivalRadius;
 
-    // Per-agent stuck watchdog on Exfil objectives: if the bot's position
-    // barely moves for this duration while targeting an exfil, blacklist
-    // the exfil and re-pick. Walking from across the map is fine — only
+    // Per-agent stuck watchdog on Exfil objectives: if the bot's position barely moves for this duration
+    // while targeting an exfil, blacklist the exfil and re-pick. Walking from across the map is fine — only
     // genuinely stationary bots trip the watchdog.
     private const float ExfilStuckThresholdSeconds = 30f;
     private const float ExfilStuckMoveDistSqr = 2f * 2f;
@@ -52,13 +49,11 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
             var agent = agents[i];
             var location = agent.Objective.Location;
 
-            // Release control when the objective has terminated OR moved
-            // into a phase owned by another action (LootContainerAction
-            // handles Looting, ExtractAction handles Extracting). Without
-            // these two extra exclusions the nav-snap arrival rescue
-            // accepts arrival 1-4m off the POI, flips status to Looting,
-            // but our distSqr is still > RadiusSqr — so utilityDecay
-            // clamps to 1.0 and our score (0.65) + Hysteresis (0.15) =
+            // Release control when the objective has terminated OR moved into a phase owned by another action
+            // (LootContainerAction handles Looting, ExtractAction handles Extracting). Without these two
+            // extra exclusions the nav-snap arrival rescue accepts arrival 1-4m off the POI, flips status to
+            // Looting, but our distSqr is still > RadiusSqr — so utilityDecay clamps to 1.0 and our score
+            // (0.65) + Hysteresis (0.15) =
             // 0.80 still beats LootContainerAction's 0.75. Bot then sits
             // frozen at Status=Looting until the loot watchdog times out
             // 25s later, producing a "bot stops at a point without an
@@ -72,8 +67,8 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                 continue;
             }
 
-            // Baseline 0.5f, boosted to 0.65f as the bot gets nearer.
-            // Once within the objective radius, utility falls off sharply.
+            // Baseline 0.5f, boosted to 0.65f as the bot gets nearer. Once within the objective radius,
+            // utility falls off sharply.
             var distSqr = (location.Position - agent.Position).sqrMagnitude;
 
             var utilityBoostFactor = Mathf.InverseLerp(UtilityBoostMaxDistSqr, location.RadiusSqr, distSqr);
@@ -107,8 +102,8 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
 
                     var distanceSqr = (objective.Location.Position - agent.Position).sqrMagnitude;
 
-                    // Exfil stuck watchdog: blacklist + re-pick when the
-                    // bot has stopped moving while targeting an exfil.
+                    // Exfil stuck watchdog: blacklist + re-pick when the bot has stopped moving while
+                    // targeting an exfil.
                     if (objective.Location.Category == WaypointCategory.Exfil)
                     {
                         if (!_exfilStuckTracker.TryGetValue(agent.Id, out var t)
@@ -137,11 +132,9 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                         _exfilStuckTracker.Remove(agent.Id);
                     }
 
-                    // Stop sprinting once inside the 50m "scan" radius so
-                    // the bot has time to spot enemies on the final
-                    // approach. Personality override: agents with sprint
-                    // propensity ~1.0 (e.g. VeryAggressive GigaChad) keep
-                    // sprinting all the way in.
+                    // Stop sprinting once inside the 50m "scan" radius so the bot has time to spot enemies on
+                    // the final approach. Personality override: agents with sprint propensity ~1.0 (e.g.
+                    // VeryAggressive GigaChad) keep sprinting all the way in.
                     var sprintPropensity = agent.Squad?.Personality?.SprintPropensity ?? 0.5f;
                     if (agent.Movement.Sprint
                         && distanceSqr < WalkApproachDistanceSqr
@@ -150,28 +143,21 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                         MovementSystem.ResetGait(agent);
                     }
 
-                    // Arrival gate — two-stage check that both prevents
-                    // looting through walls AND tolerates BSG's nav-snap
-                    // drift:
+                    // Arrival gate — two-stage check that both prevents looting through walls AND tolerates
+                    // BSG's nav-snap drift:
                     //
                     //   1. Within the strict 1m radius → still require a
-                    //      Physics.Raycast LoS clear between the bot's
-                    //      head and the POI. A bot standing 0.9m from a
-                    //      loot pile on the OTHER side of a wall would
-                    //      otherwise pass the euclidean check and loot
-                    //      through the wall. Uses the same
-                    //      HighPolyWithTerrainMask BSG uses natively —
-                    //      tests real 3D world geometry, not navmesh edges.
+                    // Physics.Raycast LoS clear between the bot's head and the POI. A bot standing 0.9m from
+                    // a loot pile on the OTHER side of a wall would otherwise pass the euclidean check and
+                    // loot through the wall. Uses the same HighPolyWithTerrainMask BSG uses natively — tests
+                    // real 3D world geometry, not navmesh edges.
                     //
                     //   2. Between 1m and 4m, AND bot is Stopped (BSG
-                    //      reports "destination reached" but stopped on
-                    //      the nearest navmesh node, 1.5-2.5m off the
-                    //      exact Waypoint.Position) → same Physics
-                    //      raycast LoS check. BSG nav-snap rescue path.
+                    // reports "destination reached" but stopped on the nearest navmesh node, 1.5-2.5m off the
+                    // exact Waypoint.Position) → same Physics raycast LoS check. BSG nav-snap rescue path.
                     //
-                    // Lootables only — Synthetic / Exfil still use the
-                    // wide radius without LoS (those don't suffer from
-                    // through-wall validation).
+                    // Lootables only — Synthetic / Exfil still use the wide radius without LoS (those don't
+                    // suffer from through-wall validation).
                     var inRadius = false;
                     if (distanceSqr <= objective.Location.RadiusSqr)
                     {
@@ -201,24 +187,18 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                     }
                     if (inRadius)
                     {
-                        // If this is a lootable POI and we can grab the
-                        // claim, chain straight into Looting state.
-                        // Otherwise (claim held, or non-lootable category)
-                        // fall through to Finished — the squad waits here
-                        // and another task can run.
+                        // If this is a lootable POI and we can grab the claim, chain straight into Looting
+                        // state. Otherwise (claim held, or non-lootable category) fall through to Finished —
+                        // the squad waits here and another task can run.
                         if (IsLootableForAgent(agent, objective.Location))
                         {
                             if (waypointSystem.TryClaim(objective.Location.Id, agent.Id))
                             {
                                 objective.Status = ObjectiveStatus.Looting;
-                                // Looting keeps the bot stationary for
-                                // several seconds. If we leave the path
-                                // pointing at the previous destination,
-                                // BSG's BotMover eventually decides the bot
-                                // is "stuck" relative to its last good
-                                // cast point and teleports it away —
-                                // sometimes 200m+. Re-aim at current pos
-                                // so BSG re-links here and resets its
+                                // Looting keeps the bot stationary for several seconds. If we leave the path
+                                // pointing at the previous destination, BSG's BotMover eventually decides the
+                                // bot is "stuck" relative to its last good cast point and teleports it away —
+                                // sometimes 200m+. Re-aim at current pos so BSG re-links here and resets its
                                 // rescue timer.
                                 movementSystem.MoveToByPath(agent, agent.Position, sprint: false, urgency: MovementUrgency.Low);
                                 Log.Debug($"{agent} arrived at lootable {objective.Location}, claim OK → Looting (path refreshed to {agent.Position})");
@@ -232,10 +212,8 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                         else if (objective.Location.Category == WaypointCategory.Exfil
                                  && objective.Location.Target is ExfiltrationPoint exfil)
                         {
-                            // Activate the exfil if still gated behind
-                            // requirements (V-Ex / pay-to-leave), then
-                            // hand off to ExtractAction which waits the
-                            // countdown and despawns the bot.
+                            // Activate the exfil if still gated behind requirements (V-Ex / pay-to-leave),
+                            // then hand off to ExtractAction which waits the countdown and despawns the bot.
                             ActivateExfilForBot(exfil, agent);
                             objective.Status = ObjectiveStatus.Extracting;
                             movementSystem.MoveToByPath(agent, agent.Position, sprint: false, urgency: MovementUrgency.Low);
@@ -251,20 +229,16 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
 
                     if (agent.Movement.Status == MovementStatus.Failed)
                     {
-                        // MovementSystem's HardStuck escalation ran out
-                        // (recalc → teleport → giving up) and reset path
-                        // to Failed. The bot is jammed against geometry.
+                        // MovementSystem's HardStuck escalation ran out (recalc → teleport → giving up) and
+                        // reset path to Failed. The bot is jammed against geometry.
                         objective.Status = ObjectiveStatus.Failed;
                         Log.Debug($"{agent} movement Failed en-route to {objective.Location} — HardStuck giving up");
                         TrackArrivalFailure(agent, objective.Location);
                     }
-                    // Stuck-at-destination guard: BSG's BotMover reports
-                    // Reached but our euclidean radius check above failed
-                    // (bot stopped just outside the arrival radius). If
-                    // the bot stays in this in-between state too long it
-                    // would never advance — fail the agent objective so
-                    // the wait-timer / re-dispatch path kicks in
-                    // immediately.
+                    // Stuck-at-destination guard: BSG's BotMover reports Reached but our euclidean radius
+                    // check above failed (bot stopped just outside the arrival radius). If the bot stays in
+                    // this in-between state too long it would never advance — fail the agent objective so the
+                    // wait-timer / re-dispatch path kicks in immediately.
                     else if (agent.Movement.Status == MovementStatus.Stopped)
                     {
                         objective.Status = ObjectiveStatus.Failed;
@@ -287,15 +261,14 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                                     or ObjectiveStatus.Looting or ObjectiveStatus.Extracting)
             return;
 
-        // Reset the status if the bot wasn't failed/finished — otherwise
-        // we won't resubmit the move order the next time we're activated.
+        // Reset the status if the bot wasn't failed/finished — otherwise we won't resubmit the move order the
+        // next time we're activated.
         entity.Objective.Status = ObjectiveStatus.None;
     }
 
-    // Sprint-to-objective decision. Non-sprinting factions (scavs, Timmy)
-    // are filtered by SprintGate; PMCs sprint when far and walk on the final
-    // approach, with the walk window shrinking as SprintPropensity rises.
-    // Combat sprint is decided by SAIN.
+    // Sprint-to-objective decision. Non-sprinting factions (scavs, Timmy) are filtered by SprintGate; PMCs
+    // sprint when far and walk on the final approach, with the walk window shrinking as SprintPropensity
+    // rises. Combat sprint is decided by SAIN.
     private static bool ShouldSprintToObjective(Agent agent, float startDistSqr)
     {
         if (!SprintGate.IsAllowedByFaction(agent)) return false;
@@ -306,12 +279,10 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
         return startDistSqr > effectiveWalkSqr;
     }
 
-    // Per-agent blacklist on repeated arrival failures for the same POI.
-    // The squad-level ConsecutiveFailedDispatches only fires when ALL
-    // members fail at once; a single member stuck on an unreachable
-    // splinter while squadmates loot fine never triggers it. Two failure
-    // modes feed in: "stopped outside arrival radius" (navmesh sample
-    // lands 4m+ off) AND HardStuck "giving up" (bot jammed en-route).
+    // Per-agent blacklist on repeated arrival failures for the same POI. The squad-level
+    // ConsecutiveFailedDispatches only fires when ALL members fail at once; a single member stuck on an
+    // unreachable splinter while squadmates loot fine never triggers it. Two failure modes feed in: "stopped
+    // outside arrival radius" (navmesh sample lands 4m+ off) AND HardStuck "giving up" (bot jammed en-route).
     private static void TrackArrivalFailure(Agent agent, Waypoint location)
     {
         if (location == null || agent?.Squad == null) return;
@@ -328,15 +299,12 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
         if (agent.ConsecutiveSamePoiFailures >= 3)
         {
             agent.Squad.CompletedPoiIds.Add(locId);
-            // Adding to CompletedPoiIds only filters FUTURE picks; the
-            // current dispatch still has agent.Objective.Location pinned
-            // at the bad POI (set by AssignNewObjective, by a follower
-            // splinter pick, or by the loot routine's scavenge sweep which
-            // pins squad.Objective.Location at the chain target for 60s).
-            // If we don't break both pins explicitly the bot oscillates
-            // Goto → Failed → reset to None → Goto re-submits move order
-            // toward the same POI → fails again, every ~1s, even though
-            // the blacklist is already armed.
+            // Adding to CompletedPoiIds only filters FUTURE picks; the current dispatch still has
+            // agent.Objective.Location pinned at the bad POI (set by AssignNewObjective, by a follower
+            // splinter pick, or by the loot routine's scavenge sweep which pins squad.Objective.Location at
+            // the chain target for 60s). If we don't break both pins explicitly the bot oscillates Goto →
+            // Failed → reset to None → Goto re-submits move order toward the same POI → fails again, every
+            // ~1s, even though the blacklist is already armed.
             if (agent.Squad.Objective.Location != null
                 && agent.Squad.Objective.Location.Id == locId)
             {
@@ -351,17 +319,15 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
         }
     }
 
-    // Mirrors BSG's ActivateExfil flow: forces a still-gated exfil into a
-    // usable state right when the bot arrives. Without this, V-Ex / pay
-    // exfils stay at UncompleteRequirements and the BSG flow never lets
-    // the bot leave. OnItemTransferred starts the V-Ex car countdown.
+    // Mirrors BSG's ActivateExfil flow: forces a still-gated exfil into a usable state right when the bot
+    // arrives. Without this, V-Ex / pay exfils stay at UncompleteRequirements and the BSG flow never lets the
+    // bot leave. OnItemTransferred starts the V-Ex car countdown.
     private static void ActivateExfilForBot(ExfiltrationPoint exfil, Agent agent)
     {
         try
         {
-            // ProfileId overload — the IPlayer overload pulls in
-            // IDissonancePlayer which Orbit's csproj doesn't reference.
-            // BSG's string overload resolves the IPlayer for us.
+            // ProfileId overload — the IPlayer overload pulls in IDissonancePlayer which Orbit's csproj
+            // doesn't reference. BSG's string overload resolves the IPlayer for us.
             exfil.OnItemTransferred(agent.Bot.GetPlayer.ProfileId);
 
             if (exfil.Status == EExfiltrationStatus.UncompleteRequirements)
@@ -375,9 +341,8 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                         exfil.SetStatusLogged(EExfiltrationStatus.Countdown, "Orbit-Proceed-VEx");
                         break;
                     case EExfiltrationType.Manual:
-                        // Manual exfils need a switch interaction (Lab
-                        // keycard, Scav switch). Out of scope — set the
-                        // bot to Failed so it picks another objective.
+                        // Manual exfils need a switch interaction (Lab keycard, Scav switch). Out of scope —
+                        // set the bot to Failed so it picks another objective.
                         Log.Info($"{agent} reached Manual exfil {exfil.name}, no switch logic yet → failing objective");
                         agent.Objective.Status = ObjectiveStatus.Failed;
                         break;
@@ -390,17 +355,16 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
         }
     }
 
-    // Corpse excluded: bodies spawn behind cover the killer used; the
-    // selection-time gate already prevents picking unseen bodies.
+    // Corpse excluded: bodies spawn behind cover the killer used; the selection-time gate already prevents
+    // picking unseen bodies.
     private static bool RequiresArrivalLoSCheck(WaypointCategory category)
         => category == WaypointCategory.ContainerLoot
             || category == WaypointCategory.LooseLoot
             || category == WaypointCategory.Quest;
 
-    // 3D world-space line-of-sight check between the bot's head and the
-    // POI, using the same HighPolyWithTerrainMask BSG uses for cover and
-    // vision tests. Real Tarkov walls are HighPoly colliders so any wall
-    // between head and POI registers as a Physics.Raycast hit.
+    // 3D world-space line-of-sight check between the bot's head and the POI, using the same
+    // HighPolyWithTerrainMask BSG uses for cover and vision tests. Real Tarkov walls are HighPoly colliders
+    // so any wall between head and POI registers as a Physics.Raycast hit.
     private static bool HasArrivalLineOfSight(Agent agent, Vector3 poiPosition)
     {
         Vector3 head;
