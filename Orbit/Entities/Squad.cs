@@ -37,6 +37,14 @@ public class Squad(int id, float[] taskScores, int targetMembersCount) : Entity(
     public readonly Dictionary<Vector2Int, float> LootCellCooldowns = new();
 
     /// <summary>
+    /// For cells whose POIs span multiple floors, the Y coordinate of the floor this squad has currently
+    /// committed to cleaning. PickFromCell filters candidates to that floor (within SameFloorLootYTolerance)
+    /// so the squad finishes one floor before moving to the next instead of yo-yoing between them. Initialised
+    /// to a random floor on first entry so the cleaning order varies between bots / raids.
+    /// </summary>
+    public readonly Dictionary<Vector2Int, float> CellFloorAssignments = new();
+
+    /// <summary>
     /// Cell where this squad most recently picked a loot POI. Used to detect "left the cell" — when the
     /// squad's next pick lands in a different cell, the previous one is armed in LootCellCooldowns.
     /// </summary>

@@ -1595,6 +1595,82 @@ public class WaypointSystem
     // cap, exfil eligibility, PMC loot-cell cooldown). If everything is filtered, falls back to a re-pick
     // with only the *hard* constraints. Returns null only when even the hard-constraint pass finds nothing.
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    /// <summary>
+    /// Resolve which floor Y this squad should clean in <paramref name="coords"/>. If an assignment already
+    /// exists for the cell, returns it. Otherwise checks whether the cell spans multiple floor clusters; if it
+    /// does, picks one cluster at random (weighted uniformly across distinct floor groups) and stores it on
+    /// the squad. Returns null when the cell is single-floor or floor filtering is disabled.
+    /// </summary>
+    private float? ResolveSquadFloor(Squad squad, Vector2Int coords, List<Waypoint> waypoints, float tolerance)
+    {
+        if (tolerance <= 0f) return null;
+        if (squad.CellFloorAssignments.TryGetValue(coords, out var existing)) return existing;
+        var floors = _floorScratch;
+        floors.Clear();
+        for (var i = 0; i < waypoints.Count; i++)
+        {
+            var y = waypoints[i].Position.y;
+            var matched = false;
+            for (var f = 0; f < floors.Count; f++)
+            {
+                if (Mathf.Abs(floors[f] - y) <= tolerance) { matched = true; break; }
+            }
+            if (!matched) floors.Add(y);
+        }
+        if (floors.Count <= 1) return floors.Count == 1 ? floors[0] : (float?)null;
+        var chosen = floors[Random.Range(0, floors.Count)];
+        squad.CellFloorAssignments[coords] = chosen;
+        Log.Debug($"PickFromCell: {squad} entered multi-floor cell {coords} (floors=[{string.Join(",", floors)}]) — committed to floor Y={chosen:F1}");
+        return chosen;
+    }
+
+    /// <summary>
+    /// Called when the current-floor pass found no eligible candidate. Looks for a different floor in the
+    /// cell that has at least one passing candidate (using the same filter set as the reservoir sample) and
+    /// assigns it to the squad. Returns true and outputs the new floor Y when re-rolled, false otherwise.
+    /// </summary>
+    private bool RerollFloorIfExhausted(Squad squad, Vector2Int coords, List<Waypoint> waypoints,
+        bool? squadIsPmc, bool hasBlacklist, bool lootCooldownActive, bool corpseGate,
+        float tolerance, float exhaustedFloorY, out float newFloorY)
+    {
+        newFloorY = 0f;
+        var candidatesPerFloor = _floorScratch;
+        candidatesPerFloor.Clear();
+        var nowForVisitCheck = Time.time;
+        for (var i = 0; i < waypoints.Count; i++)
+        {
+            var loc = waypoints[i];
+            if (Mathf.Abs(loc.Position.y - exhaustedFloorY) <= tolerance) continue; // same floor we just exhausted
+            if (loc.Category == WaypointCategory.Exfil && !squad.ExtractRequested) continue;
+            if (loc.Category == WaypointCategory.Quest && !SquadOwnsQuest(squad, loc)) continue;
+            if (hasBlacklist && squad.CompletedPoiIds.Contains(loc.Id)) continue;
+            if (squad.RecentlyVisitedPoiCooldowns.TryGetValue(loc.Id, out var visitExpiry) && nowForVisitCheck < visitExpiry) continue;
+            if (lootCooldownActive && IsLootCategory(loc.Category)) continue;
+            if (corpseGate && loc.Category == WaypointCategory.Corpse
+                && !WasCorpseKilledBySquad(loc.Id, squad.Id)
+                && !HasLineOfSightToCorpse(squad, loc)) continue;
+            if (RequiresReachabilityCheck(loc.Category) && !IsWaypointReachable(loc, squad)) continue;
+            if (loc.LockedDoorsOnPath != null && loc.LockedDoorsOnPath.Count > 0 && squadIsPmc != true) continue;
+            if (HasFailedDoorOnPath(squad, loc)) continue;
+            if (!WithinLootDetourRange(loc, squad)) continue;
+            if (!SquadCanUseWaypoint(squad, squadIsPmc, loc)) continue;
+
+            var matched = false;
+            for (var f = 0; f < candidatesPerFloor.Count; f++)
+            {
+                if (Mathf.Abs(candidatesPerFloor[f] - loc.Position.y) <= tolerance) { matched = true; break; }
+            }
+            if (!matched) candidatesPerFloor.Add(loc.Position.y);
+        }
+        if (candidatesPerFloor.Count == 0) return false;
+        newFloorY = candidatesPerFloor[Random.Range(0, candidatesPerFloor.Count)];
+        squad.CellFloorAssignments[coords] = newFloorY;
+        Log.Debug($"PickFromCell: {squad} exhausted floor Y={exhaustedFloorY:F1} in cell {coords} — re-rolled to floor Y={newFloorY:F1} (remaining floors with candidates: {candidatesPerFloor.Count})");
+        return true;
+    }
+
+    private readonly List<float> _floorScratch = new(4);
+
     private Waypoint PickFromCell(in Cell cell, Entity entity, Vector2Int coords)
     {
         // Drain unreachable-waypoint removals queued by the previous PickFromCell. We can't RemoveWaypoint
@@ -1626,6 +1702,14 @@ public class WaypointSystem
             var corpseGate = CorpseRequiresSightOrSquadKillForSquad(squad);
             var waypoints = cell.Waypoints;
 
+            // Multi-floor cell handling. If this cell has POIs spread across multiple Y clusters and the squad
+            // hasn't already committed to a floor, pick one at random — keeps cleaning order varied between
+            // bots/raids. Once committed, all picks below filter to that floor. When that floor is exhausted
+            // (no eligible candidate left within tolerance) the next call re-rolls a new floor.
+            var floorTolerance = Plugin.SameFloorLootYTolerance?.Value ?? 0f;
+            var floorY = ResolveSquadFloor(squad, coords, waypoints, floorTolerance);
+            var floorFilterActive = floorTolerance > 0f && floorY.HasValue;
+
             // Strong bias toward "the body I dropped" — if this cell contains a runtime corpse this squad is
             // credited with the kill on, pick it first.
             for (var i = 0; i < waypoints.Count; i++)
@@ -1656,6 +1740,7 @@ public class WaypointSystem
                 if (HasFailedDoorOnPath(squad, loc)) continue;
                 if (RequiresReachabilityCheck(loc.Category) && !IsWaypointReachable(loc, squad)) continue;
                 if (!SquadCanUseWaypoint(squad, squadIsPmc, loc)) continue;
+                if (floorFilterActive && Mathf.Abs(loc.Position.y - floorY.Value) > floorTolerance) continue;
                 Log.Debug($"PickFromCell: {squad} priority-picked Main anchor {loc} (within 5m of an active Main)");
                 return loc;
             }
@@ -1737,6 +1822,7 @@ public class WaypointSystem
                     skippedExfil++;
                     continue;
                 }
+                if (floorFilterActive && Mathf.Abs(loc.Position.y - floorY.Value) > floorTolerance) continue;
                 candidates++;
                 if (Random.Range(0, candidates) == 0)
                     pick = loc;
@@ -1748,6 +1834,14 @@ public class WaypointSystem
                     Log.Debug($"PickFromCell: {squad} got {pick} after skipping {skippedBlacklist} blacklisted + {skippedExfil} ineligible exfil + {skippedUnreachable} unreachable + {skippedTooFar} too far + {skippedLootCooldown} loot-cooldown + {skippedCorpseHidden} corpse-hidden + {skippedRecentVisit} recent-visit + {skippedQuestNotMine} quest-not-mine");
                 }
                 return pick;
+            }
+            // Current floor is exhausted for this squad in this cell: re-roll a different floor (one with
+            // remaining eligible POIs) and retry. Without this the squad would fall into the looser
+            // cross-cell fallback and potentially skip cleaning the rest of the building floor by floor.
+            if (floorFilterActive && RerollFloorIfExhausted(squad, coords, waypoints, squadIsPmc, hasBlacklist, lootCooldownActive, corpseGate, floorTolerance, floorY.Value, out var newFloorY))
+            {
+                floorY = newFloorY;
+                return PickFromCell(in cell, entity, coords);
             }
             if (skippedBlacklist + skippedExfil + skippedUnreachable + skippedTooFar + skippedLootCooldown + skippedCorpseHidden + skippedRecentVisit + skippedQuestNotMine > 0)
             {
