@@ -125,6 +125,7 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
         // and can throw on a bot whose movement state is in flux while weapon slots are being mutated; pose=0
         // + Mover.Pause keeps it quiescent.
         FreezeBotForLootSession();
+        LookAtLootTarget(loot);
         try
         {
             switch (kind)
@@ -168,6 +169,25 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
             LootTaskRunning = false;
             var elapsed = Time.realtimeSinceStartup - sw;
             Log.Info($"OrbitLootHandler.RunAsync({Nick}): done in {elapsed:F1}s, kind={kind}, target={loot?.name}, ItemsTaken={Stats.LastItemsTaken} (was {takenBefore})");
+        }
+    }
+
+    /// <summary>
+    /// Orient the bot's head and steering toward the loot target so the crouched inspect / pickup animations
+    /// read naturally instead of having the bot stare off in whatever direction the approach left it facing.
+    /// </summary>
+    private void LookAtLootTarget(InteractableObject loot)
+    {
+        if (_bot == null || loot == null) return;
+        try
+        {
+            var target = loot.transform?.position;
+            if (!target.HasValue) return;
+            _bot.Steering?.LookToPoint(target.Value);
+        }
+        catch (System.Exception e)
+        {
+            Log.Warning($"OrbitLootHandler.LookAtLootTarget({Nick}): THREW {e.Message}");
         }
     }
 
