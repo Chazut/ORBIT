@@ -261,7 +261,17 @@ public class LootContainerAction(AgentData dataset, WaypointSystem waypointSyste
         var role = agent.Bot?.Profile?.Info?.Settings?.Role;
         if (!role.HasValue) return;
         // Don't even arm the loot-value extract trigger for factions that aren't allowed to extract at all.
-        if (!(LootConfig.ExtractAllowedFor?.Value ?? ExtractFaction.All).IsBotEnabled(role.Value)) return;
+        // Same PlayerScav carve-out as SquadCanUseWaypoint: their role is WildSpawnType.assault, which the
+        // BotType resolver collapses onto the Scav flag, but ExtractFaction only exposes Pmc / PlayerScav.
+        // Without this special case, every PlayerScav fails the gate and the loot-value trigger never arms —
+        // even when they loot a 4.5M-rouble Mona Lisa.
+        var allowedFactions = LootConfig.ExtractAllowedFor?.Value ?? ExtractFaction.All;
+        var isPlayerScav = agent.Bot?.Profile != null && agent.Bot.Profile.WillBeAPlayerScav();
+        if (isPlayerScav)
+        {
+            if ((allowedFactions & ExtractFaction.PlayerScav) == 0) return;
+        }
+        else if (!allowedFactions.IsBotEnabled(role.Value)) return;
 
         // Sum each alive member's OWN rolled threshold (per-brain archetype for PMC, faction-default for
         // PlayerScav). A mixed Rat (200-500k) + Chad (1.5-2.5M) squad needs Rat-range + Chad-range total, not

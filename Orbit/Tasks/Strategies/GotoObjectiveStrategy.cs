@@ -335,20 +335,19 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
             var splinterAlreadyDone = agentObjective.SplinterParent != null
                                       && (agentObjective.Status == ObjectiveStatus.Finished
                                           || agentObjective.Status == ObjectiveStatus.Failed);
-            // Cross-anchor sticky: if the squad anchor flips while the agent is en route to a still-valid
-            // splinter (in range of the new anchor), keep the current target and rebase SplinterParent below
-            // to avoid an oscillating re-roll.
-            var splinterRadius = squad.Personality != null
-                ? squad.Personality.SplinterSearchRadius
-                : Plugin.SplinterSearchRadius.Value;
+            // Cross-anchor sticky: when the squad anchor flips (current main completed, leader switched
+            // targets, etc.), keep every member on their CURRENT splinter until they physically reach it or it
+            // gets blacklisted. The previous radius gate (only sticky if the splinter sits within
+            // SplinterSearchRadius of the new anchor) was too aggressive — it ripped members off live loot
+            // routes mid-run as soon as the leader moved on, producing the rapid "switch without reaching"
+            // pattern. Each agent now runs their own splinter pipeline independently: arrive → finish → pick
+            // next; squadmates don't synchronise on the leader's progress.
             var splinterStickyAcrossAnchor = !splinterAlreadyDone
                                              && agentObjective.SplinterParent != null
                                              && agentObjective.Location != null
                                              && squadObjective.Location != null
                                              && agentObjective.SplinterParent != squadObjective.Location
-                                             && !squad.CompletedPoiIds.Contains(agentObjective.Location.Id)
-                                             && WaypointSystem.XzDistanceSqr(agentObjective.Location.Position, squadObjective.Location.Position)
-                                                <= splinterRadius * splinterRadius;
+                                             && !squad.CompletedPoiIds.Contains(agentObjective.Location.Id);
             var aligned = !splinterAlreadyDone
                           && (agentObjective.Location == squadObjective.Location
                               || (agentObjective.SplinterParent != null

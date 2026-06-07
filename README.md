@@ -280,6 +280,56 @@ duplicate work it already does. Don't install them alongside ORBIT.
   controls looting / extracting / questing, assume it conflicts unless
   proven otherwise.
 
+**AI Limiter / Bot Culling mods**
+- Anything that deactivates, pauses, freezes, or culls bots while
+  they're still alive (typically to save CPU when bots are off-screen)
+  breaks ORBIT's core loop. ORBIT relies on every squad running their
+  full lifecycle in the background — patrolling, looting, fighting,
+  extracting — even when you're nowhere near them. The moment a bot
+  gets deactivated mid-objective, it never reaches the next waypoint,
+  never engages, never extracts. No support planned on the ORBIT side
+  for now — a built-in degraded-tickrate option for off-screen squads
+  is on the roadmap as a potential future workaround.
+
+### Troubleshooting
+
+**Bots freeze / stand still / never extract**
+- Check for AI-limiter / bot-culling mods (see Unsupported Mods).
+- If you've extended raid duration via SVM, RaidOverhaul, Custom Raid
+  Times etc., test with vanilla raid times — long raids have been
+  reported to cause odd bot behaviour over time.
+- If you have ABPS installed and recently upgraded or reinstalled it,
+  delete its config file and let it regenerate from defaults — a
+  stale ABPS config has been reported to clash.
+
+**If the above doesn't help → 50/50 method**
+
+[The 50/50 method](https://wiki.sp-tarkov.com/en/5050-method) is the
+canonical SPT way to pin down a mod conflict: disable half your mods,
+test the raid, see if the issue persists, split again, repeat until the
+culprit is isolated. Tedious but reliable.
+
+**If you're going to report the issue**
+
+Quoting Shynd (FIKA dev):
+
+> When reporting aberrant behavior to a mod dev it is best to do so
+> with a much smaller subset of your normal mods — for ORBIT I would
+> have just ABPS / SAIN / ORBIT — and with nothing changed in SVM or
+> anything else. Each individual person here has a functionally unique
+> mod pack. Let's try to make it as similar as possible before trying
+> to help fix issues that may only occur for you specifically.
+
+So before pinging me: try to reproduce the issue with just
+**ORBIT + SAIN + BigBrain + Waypoints + ABPS** and default configs
+across the board. If the issue still reproduces there, then I have
+something I can actually act on.
+
+**Still stuck?**
+
+Drop by the ORBIT thread in the SPT 4.0 Discord or the SPT 4.0 support
+channel — link in Support.
+
 ### Roadmap
 
 No ETA, no promises, but on the list:
@@ -298,6 +348,7 @@ No ETA, no promises, but on the list:
 - Prone or crouch when looting a body in the open to minimise silhouette (a bot lying flat on a corpse in a field is way harder to spot than one standing over it)
 - Weapon-type → behaviour archetype hint (CQB-leaning loadout pushes harder, sniper loadout stays back) driven by MOA + RPM + scope presence, biasing POI selection so a Mosin squad doesn't get routed into Resort interiors
 - Cross-raid player-movement heatmap — aggregate the player positions raid-review already logs into a per-map occurrence map, then weight squad dispatch toward those hotspots so the side routes a player habitually rats through stop being safe over time (suggested by Fiodor on Discord)
+- Built-in degraded-tickrate mode for off-screen / far-from-player squads — runs the dispatch / loot / extract loops at a lower frequency (e.g. once every 5-10s instead of every tick) to reclaim CPU on lower-end machines without flat-out deactivating bots the way external AI-limiter mods do. Goal: keep the "full lifecycle" guarantee while trying to help out low-end PCs
 
 **Objectives**
 - "Marked-key loot rush" for high-tier squads
