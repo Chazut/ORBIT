@@ -23,6 +23,8 @@ public static class LootConfig
     public static ConfigEntry<bool> WeaponSwapEnabled;
     public static ConfigEntry<float> ArmorSwapMargin;
     public static ConfigEntry<bool> ArmorSwapEnabled;
+    public static ConfigEntry<float> RigSwapMargin;
+    public static ConfigEntry<bool> RigSwapEnabled;
 
     private static bool _initialized;
 
@@ -59,6 +61,12 @@ public static class LootConfig
                 new AcceptableValueRange<float>(1.0f, 2.0f)));
         ArmorSwapEnabled = config.Bind(section, "Enable armor & helmet swap (Phase 2)", true,
             "Master toggle for the in-raid armor / helmet swap layer. When OFF, looted armor and helmets fall back to the default placement path. Independent of the weapon swap toggle.");
+        RigSwapMargin = config.Bind(section, "Rig swap margin", 1.10f,
+            new ConfigDescription(
+                "PMC / PlayerScav body-rig swap threshold (simple-rig ↔ simple-rig and armored-rig ↔ armored-rig). Candidate score (cells + armor class) must exceed this multiple of the currently-equipped rig's score to trigger a swap. Cross-type swaps (simple ↔ armored) are never attempted. Scavs ignore this — they only equip into empty slots.",
+                new AcceptableValueRange<float>(1.0f, 2.0f)));
+        RigSwapEnabled = config.Bind(section, "Enable rig swap (Phase 3)", true,
+            "Master toggle for the in-raid TacticalVest swap layer. When OFF, looted rigs fall back to the default placement path. Independent of the weapon and armor toggles.");
 
         Log.Info($"LootConfig.Init: DONE — looting={LootingEnabled.Value}, detectDist={DetectDistance.Value}m, weaponSwapMargin={WeaponSwapMargin.Value:F2}");
     }

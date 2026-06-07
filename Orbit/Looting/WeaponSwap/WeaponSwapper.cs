@@ -382,7 +382,7 @@ public static class WeaponSwapper
         Log.Info($"[TRACE-STATE] active=[{snapshot}] count={_activeOps.Count}");
     }
 
-    private static async Task<bool> RunGuardedTransactionAsync<T>(BotOwner bot, GStruct154<T> op, string label, string nick, CancellationToken ct)
+    internal static async Task<bool> RunGuardedTransactionAsync<T>(BotOwner bot, GStruct154<T> op, string label, string nick, CancellationToken ct)
         where T : IRaiseEvents
     {
         var ic = bot.GetPlayer?.InventoryController;
