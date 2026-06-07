@@ -297,6 +297,7 @@ No ETA, no promises, but on the list:
 - Optional **player-attraction toggle** (Phobos style) - pulls bots toward the player for more action, off by default. Useful for "kill X scavs in an area" quests, viewership runs, etc.
 - Prone or crouch when looting a body in the open to minimise silhouette (a bot lying flat on a corpse in a field is way harder to spot than one standing over it)
 - Weapon-type → behaviour archetype hint (CQB-leaning loadout pushes harder, sniper loadout stays back) driven by MOA + RPM + scope presence, biasing POI selection so a Mosin squad doesn't get routed into Resort interiors
+- Cross-raid player-movement heatmap — aggregate the player positions raid-review already logs into a per-map occurrence map, then weight squad dispatch toward those hotspots so the side routes a player habitually rats through stop being safe over time (suggested by Fiodor on Discord)
 
 **Objectives**
 - "Marked-key loot rush" for high-tier squads

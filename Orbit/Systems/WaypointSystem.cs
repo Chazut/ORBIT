@@ -989,7 +989,16 @@ public class WaypointSystem
                     var entries = exfil.EligibleEntryPoints != null && exfil.EligibleEntryPoints.Length > 0
                         ? string.Join("/", exfil.EligibleEntryPoints)
                         : "<any>";
-                    Log.Info($"  - {exfil.name} dist={dist:F0}m status={exfil.Status} entries={entries} → {verdict}");
+                    var reqs = "<none>";
+                    if (exfil.Requirements != null && exfil.Requirements.Length > 0)
+                    {
+                        var reqList = new List<string>(exfil.Requirements.Length);
+                        for (var r = 0; r < exfil.Requirements.Length; r++)
+                            if (exfil.Requirements[r] != null) reqList.Add(exfil.Requirements[r].Requirement.ToString());
+                        if (reqList.Count > 0) reqs = string.Join("+", reqList);
+                    }
+                    var kind = exfil is SharedExfiltrationPoint ? "Shared" : exfil is ScavExfiltrationPoint ? "ScavExfil" : "Exfil";
+                    Log.Info($"  - {exfil.name} dist={dist:F0}m kind={kind} status={exfil.Status} entries={entries} reqs={reqs} → {verdict}");
                 }
             }
         }
@@ -1671,6 +1680,27 @@ public class WaypointSystem
 
     private readonly List<float> _floorScratch = new(4);
 
+    /// <summary>
+    /// True when every alive member of the squad has the POI in their personal <see
+    /// cref="Agent.ValueSkippedPoiIds"/>. In that case the POI is effectively dead for this squad — no one is
+    /// willing to take it — and the priority / reservoir picks should treat it the same as a
+    /// CompletedPoiIds entry. Solo squads collapse to "this single bot personally skipped it" which is exactly
+    /// what we want to avoid the priority-pick loop on a value-skipped Main anchor.
+    /// </summary>
+    private static bool AllAliveMembersValueSkipped(Squad squad, int locId)
+    {
+        if (squad?.Members == null || squad.Members.Count == 0) return false;
+        var any = false;
+        for (var i = 0; i < squad.Members.Count; i++)
+        {
+            var m = squad.Members[i];
+            if (m == null || m.Bot == null || m.Bot.IsDead) continue;
+            any = true;
+            if (!m.ValueSkippedPoiIds.Contains(locId)) return false;
+        }
+        return any;
+    }
+
     private Waypoint PickFromCell(in Cell cell, Entity entity, Vector2Int coords)
     {
         // Drain unreachable-waypoint removals queued by the previous PickFromCell. We can't RemoveWaypoint
@@ -1741,6 +1771,7 @@ public class WaypointSystem
                 if (RequiresReachabilityCheck(loc.Category) && !IsWaypointReachable(loc, squad)) continue;
                 if (!SquadCanUseWaypoint(squad, squadIsPmc, loc)) continue;
                 if (floorFilterActive && Mathf.Abs(loc.Position.y - floorY.Value) > floorTolerance) continue;
+                if (AllAliveMembersValueSkipped(squad, loc.Id)) continue;
                 Log.Debug($"PickFromCell: {squad} priority-picked Main anchor {loc} (within 5m of an active Main)");
                 return loc;
             }
@@ -1771,6 +1802,11 @@ public class WaypointSystem
                     continue;
                 }
                 if (hasBlacklist && squad.CompletedPoiIds.Contains(loc.Id))
+                {
+                    skippedBlacklist++;
+                    continue;
+                }
+                if (AllAliveMembersValueSkipped(squad, loc.Id))
                 {
                     skippedBlacklist++;
                     continue;
@@ -2066,10 +2102,20 @@ public class WaypointSystem
         if (loc.Target is not ExfiltrationPoint exfil) return true;
 
         // Faction-level extract gate. Scavs / bloodhounds / raiders / bosses / Goons normally don't extract
-        // in Tarkov — they despawn, stay on the map, or leave on a script.
-        var role = squad?.Leader?.Bot?.Profile?.Info?.Settings?.Role;
+        // in Tarkov — they despawn, stay on the map, or leave on a script. PlayerScavs share WildSpawnType
+        // .assault with bot scavs so IsBotEnabled (BotType resolver) collapses them onto the Scav flag, which
+        // ExtractFaction doesn't expose — both get filtered out without this carve-out. Detect PlayerScav via
+        // WillBeAPlayerScav and route to the PlayerScav flag explicitly.
+        var leaderBot = squad?.Leader?.Bot;
+        var role = leaderBot?.Profile?.Info?.Settings?.Role;
         if (!role.HasValue) return false;
-        if (!(LootConfig.ExtractAllowedFor?.Value ?? ExtractFaction.All).IsBotEnabled(role.Value)) return false;
+        var allowedFactions = LootConfig.ExtractAllowedFor?.Value ?? ExtractFaction.All;
+        var isPlayerScavLeader = leaderBot?.Profile != null && leaderBot.Profile.WillBeAPlayerScav();
+        if (isPlayerScavLeader)
+        {
+            if ((allowedFactions & ExtractFaction.PlayerScav) == 0) return false;
+        }
+        else if (!allowedFactions.IsBotEnabled(role.Value)) return false;
 
         // Reserve blanket-block: every exfil on this map is conditional (D-2 power+key, Hermetic Door
         // power+key, Train timed, Sewer Manhole, Cliff Descent w/ Paracord+Red Rebel...). Bots can't satisfy
@@ -2150,9 +2196,16 @@ public class WaypointSystem
     {
         if (loc.Category != WaypointCategory.Exfil) return true;
         if (loc.Target is not ExfiltrationPoint exfil) return true;
-        var role = squad?.Leader?.Bot?.Profile?.Info?.Settings?.Role;
+        var leaderBot = squad?.Leader?.Bot;
+        var role = leaderBot?.Profile?.Info?.Settings?.Role;
         if (!role.HasValue) return false;
-        if (!(LootConfig.ExtractAllowedFor?.Value ?? ExtractFaction.All).IsBotEnabled(role.Value)) return false;
+        var allowedFactions = LootConfig.ExtractAllowedFor?.Value ?? ExtractFaction.All;
+        var isPlayerScavLeader = leaderBot?.Profile != null && leaderBot.Profile.WillBeAPlayerScav();
+        if (isPlayerScavLeader)
+        {
+            if ((allowedFactions & ExtractFaction.PlayerScav) == 0) return false;
+        }
+        else if (!allowedFactions.IsBotEnabled(role.Value)) return false;
         if (string.Equals(_mapId, "RezervBase", StringComparison.OrdinalIgnoreCase)) return false;
         if (exfil.Status == EExfiltrationStatus.NotPresent
             || exfil.Status == EExfiltrationStatus.Hidden

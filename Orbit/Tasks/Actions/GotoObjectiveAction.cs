@@ -166,15 +166,18 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                             if (HasArrivalLineOfSight(agent, objective.Location.Position))
                             {
                                 inRadius = true;
+                                ClearLoSBlockedTracking(agent);
                             }
                             else
                             {
                                 Log.Debug($"{agent} within {Mathf.Sqrt(distanceSqr):F1}m of {objective.Location} but Physics raycast BLOCKED — wall in between, holding off arrival");
+                                if (TrackLoSBlocked(agent, objective.Location)) continue;
                             }
                         }
                         else
                         {
                             inRadius = true;
+                            ClearLoSBlockedTracking(agent);
                         }
                     }
                     else if (agent.Movement.Status == MovementStatus.Stopped
@@ -184,6 +187,11 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                     {
                         Log.Debug($"{agent} BSG nav-snap arrival rescue: stopped {Mathf.Sqrt(distanceSqr):F1}m off {objective.Location} but Physics raycast clear → accepting arrival");
                         inRadius = true;
+                        ClearLoSBlockedTracking(agent);
+                    }
+                    else
+                    {
+                        ClearLoSBlockedTracking(agent);
                     }
                     if (inRadius)
                     {
@@ -277,6 +285,50 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
         var walkApproachScale = 1.5f - propensity;
         var effectiveWalkSqr = WalkApproachDistanceSqr * walkApproachScale * walkApproachScale;
         return startDistSqr > effectiveWalkSqr;
+    }
+
+    // Maximum time an agent is allowed to stand within the arrival radius of a Lootable/Quest POI with the
+    // Physics raycast continuously blocked before we give up on that POI and blacklist it for the squad. Quest
+    // mains in particular have no other timeout — the trotil-drop point sitting inside a wall would otherwise
+    // pin the bot for the whole raid.
+    private const float LoSBlockedTimeoutSeconds = 10f;
+
+    /// <summary>
+    /// Track how long this agent has been "within radius but LoS blocked" on the current POI. When that window
+    /// exceeds <see cref="LoSBlockedTimeoutSeconds"/>, blacklist the POI for the squad and clear the agent's
+    /// pinned target so the next dispatch tick picks a new one. Returns true when the blacklist fired and the
+    /// caller should skip the rest of the current arrival-resolution branch.
+    /// </summary>
+    private static bool TrackLoSBlocked(Agent agent, Waypoint location)
+    {
+        if (agent == null || location == null || agent.Squad == null) return false;
+        var locId = location.Id;
+        if (agent.LoSBlockedPoiId != locId)
+        {
+            agent.LoSBlockedPoiId = locId;
+            agent.LoSBlockedSinceTime = Time.time;
+            return false;
+        }
+        if (Time.time - agent.LoSBlockedSinceTime < LoSBlockedTimeoutSeconds) return false;
+        agent.Squad.CompletedPoiIds.Add(locId);
+        if (agent.Squad.Objective.Location != null
+            && agent.Squad.Objective.Location.Id == locId)
+        {
+            agent.Squad.Objective.Location = null;
+        }
+        agent.Objective.Location = null;
+        agent.Objective.SplinterParent = null;
+        agent.Objective.Status = ObjectiveStatus.None;
+        Log.Info($"{agent} blacklisting {location} for {agent.Squad} after {LoSBlockedTimeoutSeconds:F0}s of LoS-blocked arrival (target appears to be inside a wall) — cleared agent + squad target to force re-dispatch");
+        ClearLoSBlockedTracking(agent);
+        return true;
+    }
+
+    private static void ClearLoSBlockedTracking(Agent agent)
+    {
+        if (agent == null) return;
+        agent.LoSBlockedPoiId = -1;
+        agent.LoSBlockedSinceTime = -1f;
     }
 
     // Per-agent blacklist on repeated arrival failures for the same POI. The squad-level

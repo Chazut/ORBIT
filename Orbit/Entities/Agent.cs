@@ -49,6 +49,18 @@ public class Agent(int id, BotOwner bot, float[] taskScores) : Entity(id, taskSc
     public int ConsecutiveSamePoiFailures;
 
     /// <summary>
+    /// POI id this agent is currently failing arrival on because Physics.Raycast LoS is blocked (within the
+    /// arrival radius but a wall sits between bot and target). -1 = not tracking. Together with <see
+    /// cref="LoSBlockedSinceTime"/> this drives a time-based blacklist for Quest waypoints whose target
+    /// position sits inside a wall — the standard TrackArrivalFailure counter never fires there because the
+    /// bot keeps "moving" instead of stopping.
+    /// </summary>
+    public int LoSBlockedPoiId = -1;
+
+    /// <summary>Time.time at which the current LoS-blocked tracking window started. -1 = not tracking.</summary>
+    public float LoSBlockedSinceTime = -1f;
+
+    /// <summary>
     /// This agent's own extract-loot threshold, rolled from their OWN SAIN brain's archetype range (for PMCs)
     /// or set to the faction-default global knob (PlayerScavs). 0 = not yet resolved (SAIN async attach still
     /// pending, or just never tried). Resolved lazily inside the loot routine the first time the squad's loot
