@@ -25,6 +25,8 @@ public static class LootConfig
     public static ConfigEntry<bool> ArmorSwapEnabled;
     public static ConfigEntry<float> RigSwapMargin;
     public static ConfigEntry<bool> RigSwapEnabled;
+    public static ConfigEntry<float> HeadsetSwapMargin;
+    public static ConfigEntry<bool> HeadsetSwapEnabled;
 
     private static bool _initialized;
 
@@ -67,6 +69,12 @@ public static class LootConfig
                 new AcceptableValueRange<float>(1.0f, 2.0f)));
         RigSwapEnabled = config.Bind(section, "Enable rig swap (Phase 3)", true,
             "Master toggle for the in-raid TacticalVest swap layer. When OFF, looted rigs fall back to the default placement path. Independent of the weapon and armor toggles.");
+        HeadsetSwapMargin = config.Bind(section, "Headset swap margin", 1.10f,
+            new ConfigDescription(
+                "PMC / PlayerScav audio-headset (Earpiece) swap threshold. Candidate handbook price must exceed this multiple of the currently-equipped headset's price to trigger a swap. Scavs ignore this — they only equip into empty slots.",
+                new AcceptableValueRange<float>(1.0f, 2.0f)));
+        HeadsetSwapEnabled = config.Bind(section, "Enable headset swap", true,
+            "Master toggle for the in-raid audio-headset swap layer. When OFF, looted headsets fall back to the default placement path. Independent of the other swap toggles.");
 
         Log.Info($"LootConfig.Init: DONE — looting={LootingEnabled.Value}, detectDist={DetectDistance.Value}m, weaponSwapMargin={WeaponSwapMargin.Value:F2}");
     }

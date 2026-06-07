@@ -295,6 +295,7 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
         var containerArmors = new List<(Item item, string path)>();
         var containerHelmets = new List<(Item item, string path)>();
         var containerRigs = new List<(Item item, string path)>();
+        var containerHeadsets = new List<(Item item, string path)>();
         foreach (var child in CollectImmediateChildren(rootItem))
         {
             var slotItems = new List<DrainEntry>();
@@ -321,6 +322,11 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
                     containerRigs.Add((rigItem, entry.Path));
                     continue;
                 }
+                if (entry.Item is HeadphonesItemClass headsetItem)
+                {
+                    containerHeadsets.Add((headsetItem, entry.Path));
+                    continue;
+                }
                 drain.Add(entry);
             }
         }
@@ -330,12 +336,12 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
             foreach (var (w, _) in containerWeapons) nestedWeaponIds.Add(w.Id);
             drain.RemoveAll(e => IsDescendantOfWeaponSet(e.Item, nestedWeaponIds));
         }
-        Log.Info($"OrbitLootHandler.Container({Nick}, {container.name}): phase1 drain queue size={drain.Count} non-gear entries, {containerWeapons.Count} weapon(s) + {containerArmors.Count} armor(s) + {containerHelmets.Count} helmet(s) + {containerRigs.Count} rig(s) deferred to phase 2");
+        Log.Info($"OrbitLootHandler.Container({Nick}, {container.name}): phase1 drain queue size={drain.Count} non-gear entries, {containerWeapons.Count} weapon(s) + {containerArmors.Count} armor(s) + {containerHelmets.Count} helmet(s) + {containerRigs.Count} rig(s) + {containerHeadsets.Count} headset(s) deferred to phase 2");
 
         // Phase 1: drain non-weapon items.
         await DrainProgressiveAsync(drain, ct);
 
-        if (containerWeapons.Count == 0 && containerArmors.Count == 0 && containerHelmets.Count == 0 && containerRigs.Count == 0) return;
+        if (containerWeapons.Count == 0 && containerArmors.Count == 0 && containerHelmets.Count == 0 && containerRigs.Count == 0 && containerHeadsets.Count == 0) return;
 
         // Phase 2: pre-classify container weapons. Containers use equip-only semantics (no displacement) —
         // a candidate is only viable if it fits in one of the bot's currently empty weapon slots. The
@@ -412,6 +418,24 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
                     Log.Info($"OrbitLootHandler.Container({Nick}, {container.name}): phase2 rig winner = {bestRig.Value.path} → {bestRig.Value.item.LocalizedName()} (score {bestRig.Value.score:F1})");
             }
         }
+        (Item item, string path, float score)? bestHeadset = null;
+        if (containerHeadsets.Count > 0 && LootConfig.HeadsetSwapEnabled?.Value == true)
+        {
+            var equipment = _bot?.GetPlayer?.Inventory?.Equipment;
+            var earpieceSlot = equipment?.GetSlot(EquipmentSlot.Earpiece);
+            if (earpieceSlot != null && earpieceSlot.ContainedItem == null)
+            {
+                foreach (var (item, path) in containerHeadsets)
+                {
+                    if (!earpieceSlot.CheckCompatibility(item)) continue;
+                    var score = HeadsetScorer.Score(item);
+                    if (score <= 0f) continue;
+                    if (bestHeadset == null || score > bestHeadset.Value.score) bestHeadset = (item, path, score);
+                }
+                if (bestHeadset != null)
+                    Log.Info($"OrbitLootHandler.Container({Nick}, {container.name}): phase2 headset winner = {bestHeadset.Value.path} → {bestHeadset.Value.item.LocalizedName()} (score {bestHeadset.Value.score:F1})");
+            }
+        }
 
         // Phase 4: perform up to four equips in sequence (weapon → armor → helmet → rig), each preceded by a
         // settle so the bot's BSG-side state is quiescent before the next op. These are the last BSG ops of
@@ -457,6 +481,14 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
             Log.Info($"OrbitLootHandler.Container({Nick}, {container.name}): phase4 perform rig equip → {bestRig.Value.item.LocalizedName()}");
             await RigSwapper.TryEquipOnlyAsync(_bot, bestRig.Value.item, ct);
             _bot.AIData?.CalcPower();
+        }
+        if (bestHeadset != null)
+        {
+            ct.ThrowIfCancellationRequested();
+            Log.Info($"OrbitLootHandler.Container({Nick}, {container.name}): phase4 pre-equip settle (2500ms) — headset");
+            await Task.Delay(2500, ct);
+            Log.Info($"OrbitLootHandler.Container({Nick}, {container.name}): phase4 perform headset equip → {bestHeadset.Value.item.LocalizedName()}");
+            await HeadsetSwapper.TryEquipOnlyAsync(_bot, bestHeadset.Value.item, ct);
         }
     }
 
@@ -523,7 +555,7 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
         bool IsWeaponSlot(EquipmentSlot s)
             => s == EquipmentSlot.FirstPrimaryWeapon || s == EquipmentSlot.SecondPrimaryWeapon || s == EquipmentSlot.Holster;
         bool IsGearSlot(EquipmentSlot s)
-            => s == EquipmentSlot.ArmorVest || s == EquipmentSlot.Headwear;
+            => s == EquipmentSlot.ArmorVest || s == EquipmentSlot.Headwear || s == EquipmentSlot.Earpiece;
 
         // Hoist every weapon found on the corpse — slot-equipped or nested in a container — out of the drain
         // queue and into the phase 2/4 swap pipeline. Keeps swap dispatch separated from mid-drain pickup tx.
@@ -539,12 +571,15 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
         Item corpseArmorItem = null;
         Item corpseHelmetItem = null;
         Item corpseRigItem = null;
+        Item corpseHeadsetItem = null;
         var armorSlot = inventoryEquipment.GetSlot(EquipmentSlot.ArmorVest);
         if (armorSlot?.ContainedItem != null) corpseArmorItem = armorSlot.ContainedItem;
         var headwearSlot = inventoryEquipment.GetSlot(EquipmentSlot.Headwear);
         if (headwearSlot?.ContainedItem != null) corpseHelmetItem = headwearSlot.ContainedItem;
         var corpseRigSlot = inventoryEquipment.GetSlot(EquipmentSlot.TacticalVest);
         if (corpseRigSlot?.ContainedItem != null) corpseRigItem = corpseRigSlot.ContainedItem;
+        var earpieceSlot = inventoryEquipment.GetSlot(EquipmentSlot.Earpiece);
+        if (earpieceSlot?.ContainedItem != null) corpseHeadsetItem = earpieceSlot.ContainedItem;
 
         var queue = new List<(int revealMs, EquipmentSlot slot, DrainEntry entry)>();
         var visibleCursorMs = 0;
@@ -687,6 +722,13 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
             Log.Info($"OrbitLootHandler.Corpse({Nick}, {corpse.name}): phase2 pre-eval TacticalVest → {corpseRigItem.LocalizedName()} would-swap={verdict.WouldSwap} score={verdict.CandidateScore:F1}");
             if (verdict.WouldSwap) bestRig = (corpseRigItem, verdict.CandidateScore);
         }
+        (Item candidate, float score)? bestHeadset = null;
+        if (corpseHeadsetItem != null && LootConfig.HeadsetSwapEnabled?.Value == true)
+        {
+            var verdict = HeadsetSwapper.WouldSwap(_bot, corpseHeadsetItem);
+            Log.Info($"OrbitLootHandler.Corpse({Nick}, {corpse.name}): phase2 pre-eval Earpiece → {corpseHeadsetItem.LocalizedName()} would-swap={verdict.WouldSwap} score={verdict.CandidateScore:F1}");
+            if (verdict.WouldSwap) bestHeadset = (corpseHeadsetItem, verdict.CandidateScore);
+        }
 
         // Phase 3: strip the mods of every weapon we won't swap. Pickup tx are safe here because no swap has
         // fired yet.
@@ -797,6 +839,24 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
                 Log.Info($"OrbitLootHandler.Corpse({Nick}, {corpse.name}): phase4 perform rig swap → {bestRig.Value.candidate.LocalizedName()}");
                 await RigSwapper.TryHandleAsync(_bot, bestRig.Value.candidate, ct);
                 _bot.AIData?.CalcPower();
+            }
+        }
+
+        // Phase 4e: headset swap. Simple atomic swap, no grids / contents / no AI-power impact.
+        if (bestHeadset != null)
+        {
+            ct.ThrowIfCancellationRequested();
+            Log.Info($"OrbitLootHandler.Corpse({Nick}, {corpse.name}): phase4 pre-headset settle (2500ms)");
+            await Task.Delay(2500, ct);
+            var recheck = HeadsetSwapper.WouldSwap(_bot, bestHeadset.Value.candidate);
+            if (!recheck.WouldSwap)
+            {
+                Log.Info($"OrbitLootHandler.Corpse({Nick}, {corpse.name}): phase4 SKIP headset → {bestHeadset.Value.candidate.LocalizedName()} — no longer beats updated loadout");
+            }
+            else
+            {
+                Log.Info($"OrbitLootHandler.Corpse({Nick}, {corpse.name}): phase4 perform headset swap → {bestHeadset.Value.candidate.LocalizedName()}");
+                await HeadsetSwapper.TryHandleAsync(_bot, bestHeadset.Value.candidate, ct);
             }
         }
     }
