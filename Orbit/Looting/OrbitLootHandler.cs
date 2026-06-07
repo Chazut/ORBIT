@@ -268,12 +268,7 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
         }
         else
         {
-            // RootItem is the container fixture itself (not pickable); walk its immediate children only.
-            var drain = new List<DrainEntry>();
-            foreach (var child in CollectImmediateChildren(rootItem))
-                EnumerateItemsForDrain(child, "", drain);
-            Log.Info($"OrbitLootHandler.Container({Nick}, {container.name}): {drain.Count} drain entries, progressive reveal (initial {InitialSearchMs}ms + {PerItemRevealMs}ms each)");
-            await DrainProgressiveAsync(drain, ct);
+            await LootContainerDrainAsync(container, rootItem, ct);
         }
 
         try
@@ -285,6 +280,179 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
         {
             Log.Warning($"OrbitLootHandler.Container({Nick}, {container.name}): close failed: {e.Message}");
         }
+    }
+
+    /// <summary>
+    /// Four-phase drain for a container, mirroring the corpse pipeline so a weapon equip can never be
+    /// followed by another pickup tx in the same session (the post-swap deferred-work freeze window).
+    /// </summary>
+    private async Task LootContainerDrainAsync(LootableContainer container, Item rootItem, CancellationToken ct)
+    {
+        // Hoist every weapon, body armor and helmet found in the container out of the drain queue and into
+        // their deferred phase 2/4 pipelines. Keeps every gear-affecting tx as the last op of the session.
+        var drain = new List<DrainEntry>();
+        var containerWeapons = new List<(Weapon weapon, string path)>();
+        var containerArmors = new List<(Item item, string path)>();
+        var containerHelmets = new List<(Item item, string path)>();
+        foreach (var child in CollectImmediateChildren(rootItem))
+        {
+            var slotItems = new List<DrainEntry>();
+            EnumerateItemsForDrain(child, "", slotItems);
+            foreach (var entry in slotItems)
+            {
+                if (entry.Item is Weapon w)
+                {
+                    containerWeapons.Add((w, entry.Path));
+                    continue;
+                }
+                if (entry.Item is ArmorItemClass armorItem)
+                {
+                    containerArmors.Add((armorItem, entry.Path));
+                    continue;
+                }
+                if (entry.Item is HeadwearItemClass helmetItem)
+                {
+                    containerHelmets.Add((helmetItem, entry.Path));
+                    continue;
+                }
+                drain.Add(entry);
+            }
+        }
+        if (containerWeapons.Count > 0)
+        {
+            var nestedWeaponIds = new HashSet<string>();
+            foreach (var (w, _) in containerWeapons) nestedWeaponIds.Add(w.Id);
+            drain.RemoveAll(e => IsDescendantOfWeaponSet(e.Item, nestedWeaponIds));
+        }
+        Log.Info($"OrbitLootHandler.Container({Nick}, {container.name}): phase1 drain queue size={drain.Count} non-gear entries, {containerWeapons.Count} weapon(s) + {containerArmors.Count} armor(s) + {containerHelmets.Count} helmet(s) deferred to phase 2");
+
+        // Phase 1: drain non-weapon items.
+        await DrainProgressiveAsync(drain, ct);
+
+        if (containerWeapons.Count == 0 && containerArmors.Count == 0 && containerHelmets.Count == 0) return;
+
+        // Phase 2: pre-classify container weapons. Containers use equip-only semantics (no displacement) —
+        // a candidate is only viable if it fits in one of the bot's currently empty weapon slots. The
+        // highest-scoring viable candidate becomes the single phase 4 equip; all others get their mods
+        // stripped in phase 3.
+        (Weapon weapon, string path, float score)? bestWeapon = null;
+        var toStrip = new List<(Weapon weapon, string path)>();
+        foreach (var (w, path) in containerWeapons)
+        {
+            if (LootConfig.WeaponSwapEnabled?.Value != true || !CanEquipWeaponIntoEmptySlot(w))
+            {
+                toStrip.Add((w, path));
+                continue;
+            }
+            var mapId = Singleton<OrbitManager>.Instance?.MapId;
+            var weights = MapWeaponWeights.Resolve(mapId);
+            var sourceItems = new List<Item>(WeaponScorer.Walk(_currentSourceRoot));
+            var score = WeaponScorer.Score(w, sourceItems, weights);
+            Log.Info($"OrbitLootHandler.Container({Nick}, {container.name}): phase2 pre-eval {path} → {w.LocalizedName()} fits-empty=True score={score:F1}");
+            if (bestWeapon == null || score > bestWeapon.Value.score)
+            {
+                if (bestWeapon != null) toStrip.Add((bestWeapon.Value.weapon, bestWeapon.Value.path));
+                bestWeapon = (w, path, score);
+            }
+            else
+            {
+                toStrip.Add((w, path));
+            }
+        }
+        if (bestWeapon != null)
+            Log.Info($"OrbitLootHandler.Container({Nick}, {container.name}): phase2 winner = {bestWeapon.Value.path} → {bestWeapon.Value.weapon.LocalizedName()} (score {bestWeapon.Value.score:F1}); stripping {toStrip.Count} other weapon(s)");
+
+        // Phase 3: strip the mods of every weapon we won't equip. Pickup tx are safe here because no swap
+        // has fired yet.
+        foreach (var (w, path) in toStrip)
+        {
+            ct.ThrowIfCancellationRequested();
+            var modItems = new List<DrainEntry>();
+            EnumerateItemsForDrain(w, path, modItems);
+            foreach (var modEntry in modItems)
+            {
+                if (ReferenceEquals(modEntry.Item, w)) continue;
+                ct.ThrowIfCancellationRequested();
+                await TransferItemAsync(modEntry, ct);
+            }
+        }
+
+        // Phase 2b: pre-classify armor and helmet candidates. Container path is equip-only — a candidate
+        // qualifies only if the bot's target slot is empty AND the candidate compatible. The highest-scoring
+        // qualifying item per slot is kept; the others get nothing done to them (no mods to strip on armor).
+        (Item item, string path, float score)? bestArmor = ResolveBestGearForEmptySlot(containerArmors, EquipmentSlot.ArmorVest);
+        if (bestArmor != null)
+            Log.Info($"OrbitLootHandler.Container({Nick}, {container.name}): phase2 armor winner = {bestArmor.Value.path} → {bestArmor.Value.item.LocalizedName()} (score {bestArmor.Value.score:F1})");
+        (Item item, string path, float score)? bestHelmet = ResolveBestGearForEmptySlot(containerHelmets, EquipmentSlot.Headwear);
+        if (bestHelmet != null)
+            Log.Info($"OrbitLootHandler.Container({Nick}, {container.name}): phase2 helmet winner = {bestHelmet.Value.path} → {bestHelmet.Value.item.LocalizedName()} (score {bestHelmet.Value.score:F1})");
+
+        // Phase 4: perform up to three equips in sequence (weapon → armor → helmet), each preceded by a
+        // settle so the bot's BSG-side state is quiescent before the next op. These are the last BSG ops of
+        // the session — no further pickup tx can collide with deferred work.
+        if (bestWeapon != null)
+        {
+            ct.ThrowIfCancellationRequested();
+            Log.Info($"OrbitLootHandler.Container({Nick}, {container.name}): phase4 pre-equip settle (2500ms) — weapon");
+            await Task.Delay(2500, ct);
+            if (!CanEquipWeaponIntoEmptySlot(bestWeapon.Value.weapon))
+            {
+                Log.Info($"OrbitLootHandler.Container({Nick}, {container.name}): phase4 SKIP {bestWeapon.Value.path} → {bestWeapon.Value.weapon.LocalizedName()} — no longer fits any empty slot");
+            }
+            else
+            {
+                Log.Info($"OrbitLootHandler.Container({Nick}, {container.name}): phase4 perform equip {bestWeapon.Value.path} → {bestWeapon.Value.weapon.LocalizedName()}");
+                await TransferItemAsync(new DrainEntry(bestWeapon.Value.weapon, bestWeapon.Value.path), ct);
+            }
+        }
+        if (bestArmor != null)
+        {
+            ct.ThrowIfCancellationRequested();
+            Log.Info($"OrbitLootHandler.Container({Nick}, {container.name}): phase4 pre-equip settle (2500ms) — armor");
+            await Task.Delay(2500, ct);
+            Log.Info($"OrbitLootHandler.Container({Nick}, {container.name}): phase4 perform armor equip → {bestArmor.Value.item.LocalizedName()}");
+            await ArmorSwapper.TryEquipOnlyAsync(_bot, bestArmor.Value.item, EquipmentSlot.ArmorVest, ct);
+            _bot.AIData?.CalcPower();
+        }
+        if (bestHelmet != null)
+        {
+            ct.ThrowIfCancellationRequested();
+            Log.Info($"OrbitLootHandler.Container({Nick}, {container.name}): phase4 pre-equip settle (2500ms) — helmet");
+            await Task.Delay(2500, ct);
+            Log.Info($"OrbitLootHandler.Container({Nick}, {container.name}): phase4 perform helmet equip → {bestHelmet.Value.item.LocalizedName()}");
+            await ArmorSwapper.TryEquipOnlyAsync(_bot, bestHelmet.Value.item, EquipmentSlot.Headwear, ct);
+            _bot.AIData?.CalcPower();
+        }
+    }
+
+    private (Item item, string path, float score)? ResolveBestGearForEmptySlot(List<(Item item, string path)> candidates, EquipmentSlot slotKind)
+    {
+        if (candidates.Count == 0 || LootConfig.ArmorSwapEnabled?.Value != true) return null;
+        var equipment = _bot?.GetPlayer?.Inventory?.Equipment;
+        var slot = equipment?.GetSlot(slotKind);
+        if (slot == null || slot.ContainedItem != null) return null; // equip-only — slot must already be empty
+        (Item item, string path, float score)? best = null;
+        foreach (var (item, path) in candidates)
+        {
+            if (!slot.CheckCompatibility(item)) continue;
+            var score = ArmorScorer.Score(item);
+            if (score <= 0f) continue;
+            if (best == null || score > best.Value.score) best = (item, path, score);
+        }
+        return best;
+    }
+
+    private bool CanEquipWeaponIntoEmptySlot(Weapon weapon)
+    {
+        var equipment = _bot?.GetPlayer?.Inventory?.Equipment;
+        if (equipment == null) return false;
+        foreach (var slotKind in new[] { EquipmentSlot.FirstPrimaryWeapon, EquipmentSlot.SecondPrimaryWeapon, EquipmentSlot.Holster })
+        {
+            var slot = equipment.GetSlot(slotKind);
+            if (slot == null || slot.ContainedItem != null) continue;
+            if (slot.CheckCompatibility(weapon)) return true;
+        }
+        return false;
     }
 
     private async Task LootCorpseAsync(Corpse corpse, CancellationToken ct)
@@ -319,6 +487,8 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
         // swap, last BSG op of the session.
         bool IsWeaponSlot(EquipmentSlot s)
             => s == EquipmentSlot.FirstPrimaryWeapon || s == EquipmentSlot.SecondPrimaryWeapon || s == EquipmentSlot.Holster;
+        bool IsGearSlot(EquipmentSlot s)
+            => s == EquipmentSlot.ArmorVest || s == EquipmentSlot.Headwear;
 
         // Hoist every weapon found on the corpse — slot-equipped or nested in a container — out of the drain
         // queue and into the phase 2/4 swap pipeline. Keeps swap dispatch separated from mid-drain pickup tx.
@@ -329,12 +499,20 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
             if (slot?.ContainedItem is Weapon weaponInSlot)
                 corpseWeapons.Add((slotKind.ToString(), weaponInSlot));
         }
+        // Same hoisting for body armor and helmet so they go through the armor swap path instead of being
+        // looted as loose items by the regular drain.
+        Item corpseArmorItem = null;
+        Item corpseHelmetItem = null;
+        var armorSlot = inventoryEquipment.GetSlot(EquipmentSlot.ArmorVest);
+        if (armorSlot?.ContainedItem != null) corpseArmorItem = armorSlot.ContainedItem;
+        var headwearSlot = inventoryEquipment.GetSlot(EquipmentSlot.Headwear);
+        if (headwearSlot?.ContainedItem != null) corpseHelmetItem = headwearSlot.ContainedItem;
 
         var queue = new List<(int revealMs, EquipmentSlot slot, DrainEntry entry)>();
         var visibleCursorMs = 0;
         foreach (var slotKind in visibleOrder)
         {
-            if (IsWeaponSlot(slotKind)) continue;
+            if (IsWeaponSlot(slotKind) || IsGearSlot(slotKind)) continue;
             var slot = inventoryEquipment.GetSlot(slotKind);
             var root = slot?.ContainedItem;
             if (root == null) continue;
@@ -355,7 +533,7 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
         var searchCursorMs = 0;
         foreach (var slotKind in searchOrder)
         {
-            if (IsWeaponSlot(slotKind)) continue;
+            if (IsWeaponSlot(slotKind) || IsGearSlot(slotKind)) continue;
             var slot = inventoryEquipment.GetSlot(slotKind);
             var root = slot?.ContainedItem;
             if (root == null) continue;
@@ -444,6 +622,23 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
         if (best != null)
             Log.Info($"OrbitLootHandler.Corpse({Nick}, {corpse.name}): phase2 winner = {best.Value.sourcePath} → {best.Value.weapon.LocalizedName()} (score {best.Value.score:F1}); stripping {toStrip.Count} other weapon(s)");
 
+        // Same pre-classification for body armor and helmet. Each slot is independent — the bot can swap a
+        // better armor and a better helmet in the same session.
+        (EquipmentSlot slotKind, Item candidate, float score)? bestArmor = null;
+        if (corpseArmorItem != null && LootConfig.ArmorSwapEnabled?.Value == true)
+        {
+            var verdict = ArmorSwapper.WouldSwap(_bot, corpseArmorItem, EquipmentSlot.ArmorVest);
+            Log.Info($"OrbitLootHandler.Corpse({Nick}, {corpse.name}): phase2 pre-eval ArmorVest → {corpseArmorItem.LocalizedName()} would-swap={verdict.WouldSwap} score={verdict.CandidateScore:F1}");
+            if (verdict.WouldSwap) bestArmor = (EquipmentSlot.ArmorVest, corpseArmorItem, verdict.CandidateScore);
+        }
+        (EquipmentSlot slotKind, Item candidate, float score)? bestHelmet = null;
+        if (corpseHelmetItem != null && LootConfig.ArmorSwapEnabled?.Value == true)
+        {
+            var verdict = ArmorSwapper.WouldSwap(_bot, corpseHelmetItem, EquipmentSlot.Headwear);
+            Log.Info($"OrbitLootHandler.Corpse({Nick}, {corpse.name}): phase2 pre-eval Headwear → {corpseHelmetItem.LocalizedName()} would-swap={verdict.WouldSwap} score={verdict.CandidateScore:F1}");
+            if (verdict.WouldSwap) bestHelmet = (EquipmentSlot.Headwear, corpseHelmetItem, verdict.CandidateScore);
+        }
+
         // Phase 3: strip the mods of every weapon we won't swap. Pickup tx are safe here because no swap has
         // fired yet.
         foreach (var (sourcePath, weaponToStrip) in toStrip)
@@ -494,6 +689,45 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
             _allowWeaponSwapPath = true;
             try { await TransferItemAsync(new DrainEntry(best.Value.weapon, best.Value.sourcePath), ct); }
             finally { _allowWeaponSwapPath = false; }
+        }
+
+        // Phase 4b: body armor swap. Independent of the weapon swap; if both fired, the bot's inventory
+        // controller already had its post-weapon-swap settle window so we just pre-settle again and proceed.
+        if (bestArmor != null)
+        {
+            ct.ThrowIfCancellationRequested();
+            Log.Info($"OrbitLootHandler.Corpse({Nick}, {corpse.name}): phase4 pre-armor settle (2500ms)");
+            await Task.Delay(2500, ct);
+            var recheck = ArmorSwapper.WouldSwap(_bot, bestArmor.Value.candidate, bestArmor.Value.slotKind);
+            if (!recheck.WouldSwap)
+            {
+                Log.Info($"OrbitLootHandler.Corpse({Nick}, {corpse.name}): phase4 SKIP armor → {bestArmor.Value.candidate.LocalizedName()} — no longer beats updated loadout");
+            }
+            else
+            {
+                Log.Info($"OrbitLootHandler.Corpse({Nick}, {corpse.name}): phase4 perform armor swap → {bestArmor.Value.candidate.LocalizedName()}");
+                await ArmorSwapper.TryHandleAsync(_bot, bestArmor.Value.candidate, bestArmor.Value.slotKind, ct);
+                _bot.AIData?.CalcPower();
+            }
+        }
+
+        // Phase 4c: helmet swap. Same pattern as armor.
+        if (bestHelmet != null)
+        {
+            ct.ThrowIfCancellationRequested();
+            Log.Info($"OrbitLootHandler.Corpse({Nick}, {corpse.name}): phase4 pre-helmet settle (2500ms)");
+            await Task.Delay(2500, ct);
+            var recheck = ArmorSwapper.WouldSwap(_bot, bestHelmet.Value.candidate, bestHelmet.Value.slotKind);
+            if (!recheck.WouldSwap)
+            {
+                Log.Info($"OrbitLootHandler.Corpse({Nick}, {corpse.name}): phase4 SKIP helmet → {bestHelmet.Value.candidate.LocalizedName()} — no longer beats updated loadout");
+            }
+            else
+            {
+                Log.Info($"OrbitLootHandler.Corpse({Nick}, {corpse.name}): phase4 perform helmet swap → {bestHelmet.Value.candidate.LocalizedName()}");
+                await ArmorSwapper.TryHandleAsync(_bot, bestHelmet.Value.candidate, bestHelmet.Value.slotKind, ct);
+                _bot.AIData?.CalcPower();
+            }
         }
     }
 

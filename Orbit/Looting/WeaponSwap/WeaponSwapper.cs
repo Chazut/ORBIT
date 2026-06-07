@@ -430,7 +430,7 @@ public static class WeaponSwapper
     /// cref="InteractionsHandlerClass.Swap"/>, the same op the vanilla UI dispatches when dragging an item
     /// onto an already-occupied slot. Neither slot is transiently empty during the exchange.
     /// </summary>
-    private static async Task<bool> SwapInPlaceAsync(BotOwner bot, Item itemA, Item itemB, string nick, CancellationToken ct)
+    internal static async Task<bool> SwapInPlaceAsync(BotOwner bot, Item itemA, Item itemB, string nick, CancellationToken ct)
     {
         TraceMark(nick, "SwapInPlace");
         Log.Info($"[TRACE] SwapInPlace({nick}) ENTER A={itemA?.LocalizedName() ?? "?"} B={itemB?.LocalizedName() ?? "?"}");
@@ -463,7 +463,7 @@ public static class WeaponSwapper
         return ok;
     }
 
-    private static async Task<bool> MoveIntoSlotAsync(BotOwner bot, Item item, Slot slot, string nick, CancellationToken ct)
+    internal static async Task<bool> MoveIntoSlotAsync(BotOwner bot, Item item, Slot slot, string nick, CancellationToken ct)
     {
         TraceMark(nick, $"MoveIntoSlot({slot?.ID ?? "?"})");
         Log.Info($"[TRACE] MoveIntoSlot({nick}) ENTER item={item?.LocalizedName() ?? "?"} slot={slot?.ID ?? "?"}");
