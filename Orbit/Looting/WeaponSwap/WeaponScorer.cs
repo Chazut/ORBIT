@@ -59,9 +59,31 @@ public static class WeaponScorer
         if (bricked) total *= NoAmmoFloor;
 
         if (!string.IsNullOrEmpty(logTag))
+        {
             Orbit.Log.Debug($"WeaponScorer[{logTag}] {weapon.LocalizedName()} ({weapon.AmmoCaliber}): rounds={ammoBag.TotalRounds}(cap={cappedRounds}) pen={ammoBag.BestPenetration} dmg={ammoBag.BestDamage} ergo={ergo:F1} recoil={recoil:F1}×{recoilFactor:F2} sight={sighting:F0} → count={ammoCountScore:F1} stats={statsScore:F1} quality={qualityScore:F1} priceTie={priceTie:F1}{(bricked ? " (BRICK ×0.05)" : "")} = {total:F1}");
+            Orbit.Log.Debug($"WeaponScorer[{logTag}-mods] {DescribeWeaponMods(weapon)}");
+        }
 
         return total;
+    }
+
+    /// <summary>
+    /// Walk the weapon's slots and produce a compact human-readable summary of attached mods (suppressor,
+    /// scope, grip, foregrip, mag, muzzle, etc.) plus their immediate children. Used in the dashboard
+    /// scoring view to explain WHY a weapon's ergo / recoil / sight numbers landed where they did.
+    /// </summary>
+    private static string DescribeWeaponMods(Weapon weapon)
+    {
+        if (weapon?.Slots == null || weapon.Slots.Length == 0) return "<no slots>";
+        var parts = new List<string>(weapon.Slots.Length);
+        for (var i = 0; i < weapon.Slots.Length; i++)
+        {
+            var slot = weapon.Slots[i];
+            var item = slot?.ContainedItem;
+            if (item == null) continue;
+            parts.Add($"{slot.ID}={item.LocalizedName()}");
+        }
+        return parts.Count == 0 ? "<empty>" : string.Join(", ", parts);
     }
 
     public readonly struct AmmoSnapshot
