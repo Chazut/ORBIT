@@ -118,28 +118,20 @@ public static class SainPersonality
             var profileId = bot.Profile?.Id;
             if (string.IsNullOrEmpty(profileId)) return null;
 
-            var dictType = bots.GetType();
+            // Always iterate Bots.Values + match against each botComponent.Player.ProfileId — same approach
+            // as raid-review (Client/integrations/SAIN.cs). The previous fast-path via ContainsKey(profileId)
+            // could return false EVEN WHEN the bot was in the dict — likely because SAIN changed the dict
+            // keying between versions, or because the entry was added by SAIN's tick AFTER the squad lock
+            // attempt of the same frame. Either way, raid-review reading the same dict at the same frame
+            // succeeds with the iterate-Values approach. Slower (O(n) per lookup) but correct.
             object botComponent = null;
-            // ContainsKey + indexer is the fast path; otherwise iterate Values (slower fallback for unusual
-            // dictionary impls).
-            var containsKey = dictType.GetMethod("ContainsKey");
-            var item = dictType.GetProperty("Item");
-            if (containsKey != null && item != null)
+            var values = bots.GetType().GetProperty("Values")?.GetValue(bots) as IEnumerable;
+            if (values == null) return null;
+            foreach (var bc in values)
             {
-                var has = (bool)containsKey.Invoke(bots, new object[] { profileId });
-                if (!has) return null;
-                botComponent = item.GetValue(bots, new object[] { profileId });
-            }
-            else
-            {
-                var values = bots.GetType().GetProperty("Values")?.GetValue(bots) as IEnumerable;
-                if (values == null) return null;
-                foreach (var bc in values)
-                {
-                    var p = bc?.GetType().GetProperty("Player")?.GetValue(bc);
-                    var pid = p?.GetType().GetProperty("ProfileId")?.GetValue(p) as string;
-                    if (pid == profileId) { botComponent = bc; break; }
-                }
+                var p = bc?.GetType().GetProperty("Player")?.GetValue(bc);
+                var pid = p?.GetType().GetProperty("ProfileId")?.GetValue(p) as string;
+                if (pid == profileId) { botComponent = bc; break; }
             }
             if (botComponent == null) return null;
 
