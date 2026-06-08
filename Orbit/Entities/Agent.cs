@@ -61,6 +61,17 @@ public class Agent(int id, BotOwner bot, float[] taskScores) : Entity(id, taskSc
     public float LoSBlockedSinceTime = -1f;
 
     /// <summary>
+    /// Time.time at which the agent entered GuardAction with a loot POI as their objective but WITHOUT
+    /// transitioning through Looting status first. -1 = not tracking. Drives the scavenge-sweep stuck
+    /// watchdog: a scavenge sweep chains to a nearby POI but the arrival check (1m radius + LoS raycast)
+    /// fails — the agent falls into GuardAction by default, status stays None, and the squad's alignment
+    /// check sees the objective already matches → no re-dispatch ever. The watchdog times out after
+    /// <c>GuardOnLootPoiTimeoutSeconds</c> and blacklists the chain target so the next dispatch picks a
+    /// different POI. Cleared when the agent leaves GuardAction or actually starts Looting.
+    /// </summary>
+    public float GuardOnLootPoiSinceTime = -1f;
+
+    /// <summary>
     /// This agent's own extract-loot threshold, rolled from their OWN SAIN brain's archetype range (for PMCs)
     /// or set to the faction-default global knob (PlayerScavs). 0 = not yet resolved (SAIN async attach still
     /// pending, or just never tried). Resolved lazily inside the loot routine the first time the squad's loot

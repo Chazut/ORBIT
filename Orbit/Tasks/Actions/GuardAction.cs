@@ -49,6 +49,15 @@ public class GuardAction(AgentData dataset, MovementSystem movementSystem, float
         }
     }
 
+    /// <summary>
+    /// Seconds an agent can sit in GuardAction with a loot POI as their objective WITHOUT having entered
+    /// Looting status before the watchdog assumes the arrival check failed (radius / LoS raycast) and
+    /// blacklists the chain target. 5s is generous — the bot has already finished moving (otherwise it'd
+    /// be in GotoObjectiveAction, not Guard), so the only thing left to wait for is the arrival ack +
+    /// LootContainerAction takeover, both of which fire within ~1s when nothing is wrong.
+    /// </summary>
+    private const float GuardOnLootPoiTimeoutSeconds = 5f;
+
     public override void Update()
     {
         for (var i = 0; i < ActiveEntities.Count; i++)
@@ -57,7 +66,46 @@ public class GuardAction(AgentData dataset, MovementSystem movementSystem, float
             var guard = agent.Guard;
 
             if (agent.Objective.Location == null || guard.CoverPoint == null)
+            {
+                agent.GuardOnLootPoiSinceTime = -1f;
                 continue;
+            }
+
+            // Stuck-on-loot-POI watchdog. Scavenge sweeps chain to a nearby POI, the bot walks the 0-2m,
+            // movement-destination-reached fires, BUT the arrival check (1m radius + Physics raycast LoS)
+            // sometimes returns false (slight overshoot, vertical mismatch, wall corner blocking LoS) — the
+            // bot doesn't flip Status=Looting and falls into GuardAction by default. The squad keeps its
+            // anchor on this POI, alignment check sees agent.Objective matches squad anchor, no re-dispatch
+            // fires, agent stays guarding indefinitely. Detect by tracking how long the agent has been in
+            // Guard while the objective is a loot category AND status hasn't transitioned through Looting.
+            // Bot in GotoObjectiveAction (still walking) won't tick this branch — Guard isn't active there.
+            var loc = agent.Objective.Location;
+            var stuckCandidate = (loc.Category == WaypointCategory.ContainerLoot
+                                  || loc.Category == WaypointCategory.LooseLoot
+                                  || loc.Category == WaypointCategory.Corpse)
+                                 && agent.Objective.Status != ObjectiveStatus.Looting
+                                 && agent.Objective.Status != ObjectiveStatus.Finished;
+            if (stuckCandidate)
+            {
+                if (agent.GuardOnLootPoiSinceTime < 0f) agent.GuardOnLootPoiSinceTime = Time.time;
+                if (Time.time - agent.GuardOnLootPoiSinceTime >= GuardOnLootPoiTimeoutSeconds)
+                {
+                    agent.Squad?.CompletedPoiIds.Add(loc.Id);
+                    if (agent.Squad?.Objective.Location != null && agent.Squad.Objective.Location.Id == loc.Id)
+                        agent.Squad.Objective.Location = null;
+                    var locForLog = loc;
+                    agent.Objective.Location = null;
+                    agent.Objective.SplinterParent = null;
+                    agent.Objective.Status = ObjectiveStatus.None;
+                    agent.GuardOnLootPoiSinceTime = -1f;
+                    Log.Info($"{agent} guard-on-loot-POI watchdog: blacklisting {locForLog} for {agent.Squad} after {GuardOnLootPoiTimeoutSeconds:F0}s in Guard without Looting (arrival check probably failed — radius / LoS raycast) — cleared agent + squad target to force re-dispatch");
+                    continue;
+                }
+            }
+            else
+            {
+                agent.GuardOnLootPoiSinceTime = -1f;
+            }
 
             var coverPoint = guard.CoverPoint.Value;
 
