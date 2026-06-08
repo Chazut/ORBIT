@@ -1640,7 +1640,7 @@ public class WaypointSystem
     /// </summary>
     private bool RerollFloorIfExhausted(Squad squad, Vector2Int coords, List<Waypoint> waypoints,
         bool? squadIsPmc, bool hasBlacklist, bool lootCooldownActive, bool corpseGate,
-        float tolerance, float exhaustedFloorY, out float newFloorY)
+        float tolerance, HashSet<float> exhaustedFloors, out float newFloorY)
     {
         newFloorY = 0f;
         var candidatesPerFloor = _floorScratch;
@@ -1649,7 +1649,10 @@ public class WaypointSystem
         for (var i = 0; i < waypoints.Count; i++)
         {
             var loc = waypoints[i];
-            if (Mathf.Abs(loc.Position.y - exhaustedFloorY) <= tolerance) continue; // same floor we just exhausted
+            var alreadyExhausted = false;
+            foreach (var ex in exhaustedFloors)
+                if (Mathf.Abs(loc.Position.y - ex) <= tolerance) { alreadyExhausted = true; break; }
+            if (alreadyExhausted) continue;
             if (loc.Category == WaypointCategory.Exfil && !squad.ExtractRequested) continue;
             if (loc.Category == WaypointCategory.Quest && !SquadOwnsQuest(squad, loc)) continue;
             if (hasBlacklist && squad.CompletedPoiIds.Contains(loc.Id)) continue;
@@ -1674,7 +1677,7 @@ public class WaypointSystem
         if (candidatesPerFloor.Count == 0) return false;
         newFloorY = candidatesPerFloor[Random.Range(0, candidatesPerFloor.Count)];
         squad.CellFloorAssignments[coords] = newFloorY;
-        Log.Debug($"PickFromCell: {squad} exhausted floor Y={exhaustedFloorY:F1} in cell {coords} — re-rolled to floor Y={newFloorY:F1} (remaining floors with candidates: {candidatesPerFloor.Count})");
+        Log.Debug($"PickFromCell: {squad} exhausted {exhaustedFloors.Count} floor(s) in cell {coords} — re-rolled to floor Y={newFloorY:F1} (remaining floors with candidates: {candidatesPerFloor.Count})");
         return true;
     }
 
@@ -1702,6 +1705,11 @@ public class WaypointSystem
     }
 
     private Waypoint PickFromCell(in Cell cell, Entity entity, Vector2Int coords)
+        => PickFromCell(in cell, entity, coords, null);
+
+    private readonly HashSet<float> _exhaustedFloorsScratch = new();
+
+    private Waypoint PickFromCell(in Cell cell, Entity entity, Vector2Int coords, HashSet<float> exhaustedFloors)
     {
         // Drain unreachable-waypoint removals queued by the previous PickFromCell. We can't RemoveWaypoint
         // mid-iteration (it mutates cell.Waypoints), so detection enqueues and the next call cleans up.
@@ -1874,10 +1882,20 @@ public class WaypointSystem
             // Current floor is exhausted for this squad in this cell: re-roll a different floor (one with
             // remaining eligible POIs) and retry. Without this the squad would fall into the looser
             // cross-cell fallback and potentially skip cleaning the rest of the building floor by floor.
-            if (floorFilterActive && RerollFloorIfExhausted(squad, coords, waypoints, squadIsPmc, hasBlacklist, lootCooldownActive, corpseGate, floorTolerance, floorY.Value, out var newFloorY))
+            //
+            // Track every floor we've already tried this dispatch tick — without that, two-floor cells where
+            // BOTH floors are exhausted ping-pong between A → B → A → B forever in a single frame, the main
+            // thread locks up, the process freezes. Seen in cell (5, 7) Y={-64.6, -59.8} on a Streets raid.
+            if (floorFilterActive)
             {
-                floorY = newFloorY;
-                return PickFromCell(in cell, entity, coords);
+                var tracker = exhaustedFloors ?? _exhaustedFloorsScratch;
+                if (exhaustedFloors == null) tracker.Clear();
+                tracker.Add(floorY.Value);
+                if (RerollFloorIfExhausted(squad, coords, waypoints, squadIsPmc, hasBlacklist, lootCooldownActive, corpseGate, floorTolerance, tracker, out var newFloorY))
+                {
+                    floorY = newFloorY;
+                    return PickFromCell(in cell, entity, coords, tracker);
+                }
             }
             if (skippedBlacklist + skippedExfil + skippedUnreachable + skippedTooFar + skippedLootCooldown + skippedCorpseHidden + skippedRecentVisit + skippedQuestNotMine > 0)
             {
