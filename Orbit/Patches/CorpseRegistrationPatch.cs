@@ -6,6 +6,7 @@ using EFT;
 using EFT.Interactive;
 using HarmonyLib;
 using Orbit.Core;
+using Orbit.Helpers;
 using Orbit.Navigation;
 using SPT.Reflection.Patching;
 
@@ -88,6 +89,22 @@ public class CorpseRegistrationPatch : ModulePatch
                     return;
                 }
                 manager.WaypointSystem.TagCorpseKillerSquad(loc.Id, a.Squad.Id);
+                // Goons / bosses / raiders / cultists / bloodhounds run on either vanilla BSG brain or
+                // ORBIT's basic roam-with-no-mains pipeline — they don't have a loot layer that knows what
+                // to do with the corpse. Forcing the own-kill bee-line on them just pins the squad on a body
+                // they'll never loot AND dispatches followers (Big Pipe / Birdeye) onto splinter loot POIs
+                // around the corpse, which then loops on arrival-check failures. Skip the routing entirely
+                // for non-PMC / non-PlayerScav squads — they keep the corpse-killer credit tag (so loot
+                // dispatch from OTHER squads still respects it) but don't get the bee-line themselves.
+                var role = a.Bot?.Profile?.Info?.Settings?.Role;
+                var isPmc = role.HasValue && role.Value.IsPMC();
+                var isPlayerScav = a.Bot?.Profile != null && a.Bot.Profile.WillBeAPlayerScav();
+                var isBotScav = role.HasValue && role.Value.IsScav() && !isPlayerScav;
+                if (!isPmc && !isPlayerScav && !isBotScav)
+                {
+                    Log.Info($"CorpseRegistration: {a} ({a.Squad}) credited with {loc} but role={role} is not PMC / PlayerScav / scav — skipping own-kill bee-line (Goons / bosses / cultists don't have a loot layer to consume the dispatch)");
+                    return;
+                }
                 // Force immediate re-dispatch so the own-kill priority-pick fires before the killer drifts
                 // away from the body.
                 a.Squad.Objective.Duration = 0;
