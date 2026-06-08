@@ -278,6 +278,9 @@ public static class WeaponSwapper
             // Atomic positional swap: candidate moves to the holster, the previous holster weapon takes the
             // candidate's source address.
             Log.Info($"WeaponSwap({nick}): holster SWAP {current.LocalizedName()}({currentScore:F1}) → {candidate.LocalizedName()}({candidateScore:F1}, margin {margin:F2})");
+            // Phase 5 — strip valuable mods off the holster weapon before it leaves. Post-swap loadout will
+            // be the bot's primaries (unchanged) + candidate in holster.
+            await StripValuableModsBeforeDiscardAsync(bot, current, GatherPostSwapWeapons(bot, candidate, EquipmentSlot.Holster), nick, ct);
             var ok = await SwapInPlaceAsync(bot, candidate, current, nick, ct);
             return ok ? Outcome.Swapped : Outcome.Skipped;
         }
@@ -335,6 +338,10 @@ public static class WeaponSwapper
         if (candidateScore > score1 * margin)
         {
             Log.Info($"WeaponSwap({nick}): full rotate — atomic swap1 {candidate.LocalizedName()}({candidateScore:F1}) ↔ {current2.LocalizedName()}({score2:F1}), then atomic swap2 with {current1.LocalizedName()}({score1:F1})");
+            // Phase 5 — strip mods off current2 (the weapon about to leave for the corpse) before the
+            // atomic Swap moves it. After the full rotate, the bot will hold the candidate (PRI1) + the
+            // demoted current1 (PRI2); current2 is gone, taking any un-stripped mods with it.
+            await StripValuableModsBeforeDiscardAsync(bot, current2, new[] { candidate, current1 }, nick, ct);
             if (!await SwapInPlaceAsync(bot, candidate, current2, nick, ct)) return Outcome.Skipped;
             SyncBotBetweenSwaps(bot, nick);
             await WaitForIsChangingWeaponAsync(bot, nick, ct);
@@ -351,6 +358,8 @@ public static class WeaponSwapper
         if (candidateScore > score2 * margin)
         {
             Log.Info($"WeaponSwap({nick}): primary2 swap — atomic {candidate.LocalizedName()}({candidateScore:F1}) ↔ {current2.LocalizedName()}({score2:F1})");
+            // Phase 5 — strip current2 before it leaves. Bot keeps current1 in PRI1 + candidate in PRI2.
+            await StripValuableModsBeforeDiscardAsync(bot, current2, new[] { candidate, current1 }, nick, ct);
             var ok = await SwapInPlaceAsync(bot, candidate, current2, nick, ct);
             return ok ? Outcome.Swapped : Outcome.Skipped;
         }
@@ -586,6 +595,108 @@ public static class WeaponSwapper
 
     // Bot's full ammo pool: every item across equipment slots, including the secure container (part of
     // Inventory.Equipment).
+    /// <summary>
+    /// Phase 5 — strip valuable mods off a weapon about to be discarded by an atomic Swap. A mod is
+    /// stripped when its per-slot handbook price clears <see cref="LootConfig.WeaponStripMinPricePerSlot"/>
+    /// OR it's a magazine whose caliber matches any weapon the bot will keep / acquire post-swap (loose
+    /// rounds inside the mag will be useful for the kept guns). Stripped mods QFAP into the bot's grids
+    /// via the standard guarded tx. After this returns the caller fires the atomic Swap that sends the
+    /// remaining (cheap) weapon skeleton to the corpse.
+    /// </summary>
+    private static async Task StripValuableModsBeforeDiscardAsync(
+        BotOwner bot, Weapon weaponToDiscard, IList<Weapon> postSwapWeapons, string nick, CancellationToken ct)
+    {
+        if (LootConfig.WeaponStripEnabled?.Value != true) return;
+        if (weaponToDiscard?.Slots == null || weaponToDiscard.Slots.Length == 0) return;
+        var ic = bot.GetPlayer?.InventoryController;
+        if (ic == null) return;
+        var threshold = LootConfig.WeaponStripMinPricePerSlot?.Value ?? 10000f;
+
+        // Build the set of weapon mag-slots the post-swap loadout will have. A mag whose template fits any
+        // of these is worth keeping (we can extract its rounds for the matching weapon later).
+        var postSwapMagSlots = new List<Slot>(postSwapWeapons?.Count ?? 0);
+        if (postSwapWeapons != null)
+            foreach (var w in postSwapWeapons)
+            {
+                if (w == null) continue;
+                var ms = w.GetMagazineSlot();
+                if (ms != null) postSwapMagSlots.Add(ms);
+            }
+
+        // Sort by price/slot desc so the most valuable mods get stripped first; if the bot's bag runs out
+        // mid-strip, the cheap mods stay on the discarded weapon (the right tradeoff).
+        var candidates = new List<(Slot slot, Item mod, float pricePerSlot, string reason)>();
+        for (var i = 0; i < weaponToDiscard.Slots.Length; i++)
+        {
+            var slot = weaponToDiscard.Slots[i];
+            var mod = slot?.ContainedItem;
+            if (mod == null) continue;
+            var pricePerSlot = ItemPriceLookup.GetPricePerSlot(mod);
+            string reason = null;
+            if (pricePerSlot >= threshold) reason = $"price/slot={pricePerSlot:N0}₽ ≥ {threshold:N0}₽";
+            else if (mod is MagazineItemClass mag && postSwapMagSlots.Count > 0)
+            {
+                foreach (var pms in postSwapMagSlots)
+                {
+                    try { if (pms.CheckCompatibility(mag)) { reason = $"mag fits post-swap weapon ({pms.ParentItem?.LocalizedName()})"; break; } }
+                    catch { /* slot probe can throw — treat as no-fit */ }
+                }
+            }
+            if (reason != null) candidates.Add((slot, mod, pricePerSlot, reason));
+        }
+        if (candidates.Count == 0)
+        {
+            Log.Debug($"WeaponStrip({nick}): no valuable mods on {weaponToDiscard.LocalizedName()} (threshold {threshold:N0}₽/slot) — full discard");
+            return;
+        }
+        candidates.Sort((a, b) => b.pricePerSlot.CompareTo(a.pricePerSlot));
+
+        Log.Info($"WeaponStrip({nick}): {candidates.Count} mod(s) to strip off {weaponToDiscard.LocalizedName()} before discard");
+        var emptyGrids = new List<CompoundItem>(0); // QFAP scans the full inventory by default; null = use bot's grids
+        foreach (var (slot, mod, pricePerSlot, reason) in candidates)
+        {
+            ct.ThrowIfCancellationRequested();
+            try
+            {
+                var place = InteractionsHandlerClass.QuickFindAppropriatePlace(
+                    mod, ic, emptyGrids,
+                    InteractionsHandlerClass.EMoveItemOrder.PickUp, true);
+                if (!place.Succeeded)
+                {
+                    Log.Debug($"WeaponStrip({nick}): QFAP failed for {mod.LocalizedName()} — no room, leaving on weapon");
+                    continue;
+                }
+                Log.Info($"WeaponStrip({nick}): strip {slot.ID}={mod.LocalizedName()} → bot grids ({reason})");
+                var ok = await RunGuardedTransactionAsync(bot, place, $"WeaponStrip({mod.LocalizedName()})", nick, ct);
+                if (!ok) Log.Debug($"WeaponStrip({nick}): network tx failed for {mod.LocalizedName()} — leaving on weapon");
+            }
+            catch (System.Exception ex)
+            {
+                Log.Debug($"WeaponStrip({nick}): strip {mod.LocalizedName()} threw — {ex.Message}");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Compose the post-swap weapon set for Phase 5's mag-compat check from inside the swap path. The
+    /// bot keeps every weapon currently in their slots EXCEPT the one being discarded, plus the candidate
+    /// going into the named slot. Used by the holster-swap path; the primary-rotate paths pass the post
+    /// loadout explicitly.
+    /// </summary>
+    private static IList<Weapon> GatherPostSwapWeapons(BotOwner bot, Weapon candidate, EquipmentSlot equippingSlot)
+    {
+        var list = new List<Weapon>();
+        if (candidate != null) list.Add(candidate);
+        var equipment = bot.GetPlayer?.Inventory?.Equipment;
+        if (equipment == null) return list;
+        foreach (var sk in new[] { EquipmentSlot.FirstPrimaryWeapon, EquipmentSlot.SecondPrimaryWeapon, EquipmentSlot.Holster })
+        {
+            if (sk == equippingSlot) continue; // the slot being filled by the candidate
+            if (equipment.GetSlot(sk)?.ContainedItem is Weapon w) list.Add(w);
+        }
+        return list;
+    }
+
     /// <summary>
     /// Concatenate the bot's inventory ammo pool with the corpse / container source tree to get the
     /// post-swap ammo pool a CANDIDATE weapon will be able to feed from. No de-duplication needed —

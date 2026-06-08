@@ -27,6 +27,8 @@ public static class LootConfig
     public static ConfigEntry<bool> RigSwapEnabled;
     public static ConfigEntry<float> HeadsetSwapMargin;
     public static ConfigEntry<bool> HeadsetSwapEnabled;
+    public static ConfigEntry<float> WeaponStripMinPricePerSlot;
+    public static ConfigEntry<bool> WeaponStripEnabled;
 
     private static bool _initialized;
 
@@ -75,6 +77,12 @@ public static class LootConfig
                 new AcceptableValueRange<float>(1.0f, 2.0f)));
         HeadsetSwapEnabled = config.Bind(section, "Enable headset swap", true,
             "Master toggle for the in-raid audio-headset swap layer. When OFF, looted headsets fall back to the default placement path. Independent of the other swap toggles.");
+        WeaponStripMinPricePerSlot = config.Bind(section, "Weapon strip min price/slot (₽)", 10000f,
+            new ConfigDescription(
+                "Phase 5 — when a swap is about to send the bot's old weapon to the corpse, mods on that weapon whose per-slot price exceeds this threshold are stripped into the bot's bag first (so a 300k thermal scope doesn't fall with a beat-up AKM). Mags whose caliber matches a post-swap weapon also strip regardless of price. Set lower to be greedier with stripping, higher to skip cheaper mods.",
+                new AcceptableValueRange<float>(0f, 100000f)));
+        WeaponStripEnabled = config.Bind(section, "Enable weapon strip on discard (Phase 5)", true,
+            "Master toggle for the strip-before-discard layer. When OFF, displaced weapons go to the corpse with all their mods intact (1.0.x behaviour).");
 
         Log.Info($"LootConfig.Init: DONE — looting={LootingEnabled.Value}, detectDist={DetectDistance.Value}m, weaponSwapMargin={WeaponSwapMargin.Value:F2}");
     }
