@@ -268,9 +268,9 @@ public class Plugin : BaseUnityPlugin
         OrbitBrainLayer.SetVanillaScavExclusion(VanillaScavs.Value);
         OrbitBrainLayer.SetVanillaGoonExclusion(VanillaGoons.Value);
         OrbitBrainLayer.SetVanillaCultistExclusion(VanillaCultists.Value);
-        if (VanillaScavs.Value) Logger.LogInfo("Vanilla scavs ON — ORBIT will not attach to bot scavs (PlayerScavs unaffected).");
-        if (VanillaGoons.Value) Logger.LogInfo("Vanilla goons ON — ORBIT will not attach to Goons (Knight / Big Pipe / Bird Eye).");
-        if (VanillaCultists.Value) Logger.LogInfo("Vanilla cultists ON — ORBIT will not attach to Cultists (Priest / Warriors / cursed scavs).");
+        if (VanillaScavs.Value) Logger.LogInfo("Disable ORBIT on scavs ON — bot scavs running on BSG's vanilla brain (PlayerScavs unaffected).");
+        if (VanillaGoons.Value) Logger.LogInfo("Disable ORBIT on goons ON — Goons (Knight / Big Pipe / Bird Eye) running on BSG's vanilla brain.");
+        if (VanillaCultists.Value) Logger.LogInfo("Disable ORBIT on cultists ON — Cultists (Priest / Warriors / cursed scavs) running on BSG's vanilla brain.");
 
         var brains = new List<string>
         {
@@ -358,15 +358,18 @@ public class Plugin : BaseUnityPlugin
         const string takeover = "06. Faction-mod takeover (RESTART)";
 
         // ── 01. General ─────────────────────────────────────────────
+        // Underlying keys kept as "Vanilla X" so 1.0.x configs aren't broken. F12 displays use DispName
+        // to surface the clearer "Disable ORBIT on X" wording without flipping polarity (ON still means
+        // detach ORBIT → vanilla brain).
         VanillaScavs = Config.Bind(general, "Vanilla scavs (RESTART)", false, new ConfigDescription(
             "OFF (default): bot scavs are controlled by ORBIT (cell dispatch, home pull, loot routing). ON: bot scavs run on BSG's vanilla brain — ORBIT doesn't attach to them, so 'Roaming Scavs' below has no effect. PlayerScavs always stay on ORBIT regardless of this toggle.",
-            null, new ConfigurationManagerAttributes { Order = 5 }));
+            null, new ConfigurationManagerAttributes { DispName = "Disable ORBIT on scavs (RESTART)", Order = 5 }));
         VanillaGoons = Config.Bind(general, "Vanilla goons (RESTART)", false, new ConfigDescription(
             "OFF (default): Goons (Knight + Big Pipe + Bird Eye) are controlled by ORBIT. ON: Goons run on BSG's vanilla brain.",
-            null, new ConfigurationManagerAttributes { Order = 4 }));
+            null, new ConfigurationManagerAttributes { DispName = "Disable ORBIT on goons (RESTART)", Order = 4 }));
         VanillaCultists = Config.Bind(general, "Vanilla cultists (RESTART)", false, new ConfigDescription(
             "OFF (default): Cultists (Priest + Warriors + cursed scavs) are controlled by ORBIT. ON: Cultists run on BSG's vanilla brain.",
-            null, new ConfigurationManagerAttributes { Order = 3 }));
+            null, new ConfigurationManagerAttributes { DispName = "Disable ORBIT on cultists (RESTART)", Order = 3 }));
         RoamingScavs = Config.Bind(general, "Roaming Scavs", false, new ConfigDescription(
             "OFF (default): scavs stay near their spawn quartier (current cell + 8 neighbours). ON: scavs roam the whole map like PMCs. Ignored when Vanilla scavs is ON.",
             null, new ConfigurationManagerAttributes { Order = 2 }));
