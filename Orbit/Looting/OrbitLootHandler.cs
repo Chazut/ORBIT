@@ -66,6 +66,14 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
     // mid-drain.
     private bool _allowWeaponSwapPath;
 
+    // Phase 4 (mag compat) — the set of weapons the bot will have AFTER all swaps this session resolve.
+    // Computed once at corpse / container session start (post weapon-hoist, pre phase 1 drain) and read by
+    // ValidatePickup to bypass the value gate for mags / ammo that fit any of those weapons. Excludes
+    // weapons that will be displaced into the source (so we don't keep grabbing mags for a gun we're about
+    // to discard) and includes phase 2 candidate winners (so we DO grab mags for the gun we're about to
+    // equip).
+    private readonly List<Weapon> _postSwapWeapons = new();
+
 
     public LootStats Stats { get; } = new();
     public bool LootTaskRunning { get; private set; }
@@ -337,6 +345,10 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
             drain.RemoveAll(e => IsDescendantOfWeaponSet(e.Item, nestedWeaponIds));
         }
         Log.Info($"OrbitLootHandler.Container({Nick}, {container.name}): phase1 drain queue size={drain.Count} non-gear entries, {containerWeapons.Count} weapon(s) + {containerArmors.Count} armor(s) + {containerHelmets.Count} helmet(s) + {containerRigs.Count} rig(s) + {containerHeadsets.Count} headset(s) deferred to phase 2");
+
+        // Resolve the post-swap weapon set so mag / ammo pickups during phase 1 can be gated against the
+        // loadout the bot will end the session with (not the one it currently holds).
+        ResolvePostSwapWeapons(null, containerWeapons);
 
         // Phase 1: drain non-weapon items.
         await DrainProgressiveAsync(drain, ct);
@@ -645,6 +657,11 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
             var e = queue[i];
             Log.Debug($"  [{i}] T={e.revealMs}ms slot={e.slot} path={e.entry.Path} item={e.entry.Item.LocalizedName()} ({e.entry.Item.Width}x{e.entry.Item.Height}, price={ItemPriceLookup.GetPrice(e.entry.Item):N0}₽, perSlot={ItemPriceLookup.GetPricePerSlot(e.entry.Item):N0}₽)");
         }
+
+        // Resolve the post-swap weapon set so mag / ammo pickups during phase 1 can be gated against the
+        // loadout the bot will end the session with (not the one it currently holds).
+        var corpseWeaponsForResolver = corpseWeapons.ConvertAll(t => (t.sourcePath, t.weapon));
+        ResolvePostSwapWeapons(corpseWeaponsForResolver, null);
 
         // Phase 1: drain everything that isn't a corpse weapon slot (rig / pockets / armor / bag, plus their
         // contents).
@@ -1146,6 +1163,14 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
             Log.Debug($"OrbitLootHandler.Pickup({Nick}): {name} at {entry.Path} bypasses value gate ({bypassReason}, perSlot={pricePerSlot:N0}₽)");
             return true;
         }
+        // Phase 4 mag-compat bypass — mags / ammo that fit any weapon the bot will own post-swap are useful
+        // even if their cash value is below threshold. See SWAP_PLAN.md for the post-swap caliber rationale.
+        if (FitsPostSwapWeapon(item, out var fitReason))
+        {
+            Stats.LastHadBypassItem = true;
+            Log.Debug($"OrbitLootHandler.Pickup({Nick}): {name} at {entry.Path} bypasses value gate ({fitReason}, perSlot={pricePerSlot:N0}₽)");
+            return true;
+        }
         // Bot scavs use a per-item random roll instead of a value threshold — mirrors vanilla opportunistic
         // looting. PlayerScavs and PMCs continue to the per-archetype gate below.
         if (IsBotScav(_bot))
@@ -1289,6 +1314,95 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
         }
         reason = null;
         return false;
+    }
+
+    /// <summary>
+    /// Phase 4 mag-compat bypass. Mags and loose ammo whose caliber matches ANY weapon in
+    /// <see cref="_postSwapWeapons"/> (the post-session loadout) bypass the value gate — they're useful
+    /// even when below the per-archetype price threshold. Empty post-swap set falls through to the default
+    /// value gate, so this is a no-op for non-corpse / non-container drains that haven't run the resolver.
+    /// </summary>
+    private bool FitsPostSwapWeapon(Item item, out string reason)
+    {
+        reason = null;
+        if (_postSwapWeapons.Count == 0) return false;
+        switch (item)
+        {
+            case MagazineItemClass mag:
+                foreach (var w in _postSwapWeapons)
+                {
+                    var slot = w.GetMagazineSlot();
+                    if (slot == null) continue;
+                    try
+                    {
+                        if (slot.CheckCompatibility(mag))
+                        {
+                            reason = $"mag fits {w.LocalizedName()}";
+                            return true;
+                        }
+                    }
+                    catch { /* BSG can throw on filter probe — treat as no-fit */ }
+                }
+                return false;
+            case AmmoItemClass ammo:
+                foreach (var w in _postSwapWeapons)
+                {
+                    if (string.Equals(ammo.Caliber, w.AmmoCaliber, System.StringComparison.OrdinalIgnoreCase))
+                    {
+                        reason = $"ammo caliber matches {w.LocalizedName()}";
+                        return true;
+                    }
+                }
+                return false;
+            default:
+                return false;
+        }
+    }
+
+    /// <summary>
+    /// Build <see cref="_postSwapWeapons"/> for the current session: walk the bot's slots, drop weapons
+    /// that will be displaced by phase 4 swaps, add the phase 2 weapon winners (corpse) or empty-slot
+    /// equips (container). Called once per session, before phase 1 drain runs.
+    /// </summary>
+    private void ResolvePostSwapWeapons(List<(string sourcePath, Weapon weapon)> corpseWeapons,
+                                        List<(Weapon weapon, string path)> containerWeapons)
+    {
+        _postSwapWeapons.Clear();
+        var displaced = new HashSet<string>();
+        if (LootConfig.WeaponSwapEnabled?.Value == true)
+        {
+            if (corpseWeapons != null)
+            {
+                foreach (var (_, w) in corpseWeapons)
+                {
+                    var verdict = WeaponSwapper.WouldSwap(_bot, w, _currentSourceRoot);
+                    if (!verdict.WouldSwap) continue;
+                    _postSwapWeapons.Add(w);
+                    if (verdict.DisplacedWeapon != null) displaced.Add(verdict.DisplacedWeapon.Id);
+                }
+            }
+            if (containerWeapons != null)
+            {
+                foreach (var (w, _) in containerWeapons)
+                {
+                    if (CanEquipWeaponIntoEmptySlot(w)) _postSwapWeapons.Add(w);
+                }
+            }
+        }
+        var equipment = _bot?.GetPlayer?.Inventory?.Equipment;
+        if (equipment != null)
+        {
+            foreach (var slotKind in new[] { EquipmentSlot.FirstPrimaryWeapon, EquipmentSlot.SecondPrimaryWeapon, EquipmentSlot.Holster })
+            {
+                if (equipment.GetSlot(slotKind)?.ContainedItem is Weapon w
+                    && !displaced.Contains(w.Id)
+                    && !_postSwapWeapons.Contains(w))
+                {
+                    _postSwapWeapons.Add(w);
+                }
+            }
+        }
+        Log.Debug($"OrbitLootHandler.ResolvePostSwapWeapons({Nick}): {_postSwapWeapons.Count} post-swap weapon(s) — [{string.Join(", ", _postSwapWeapons.ConvertAll(w => $"{w.LocalizedName()}({w.AmmoCaliber})"))}]");
     }
 
     // Compact "bp=X/Y free, vest=…, pockets=…" summary used in no-slot logs.

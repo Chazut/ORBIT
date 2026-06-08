@@ -99,38 +99,61 @@ public static class WeaponScorer
         var caliber = weapon.AmmoCaliber;
         var magSlot = weapon.GetMagazineSlot();
         var totalRounds = 0;
-        var bestPen = 0;
-        var bestDmg = 0;
+        var fallbackPen = 0;
+        var fallbackDmg = 0;
 
         if (items == null)
             return new AmmoSnapshot(0, 0, 0);
 
-        // Ammo already loaded in the weapon's current mag + chamber (handles regular and cylinder mags).
-        var currentMag = weapon.GetCurrentMagazine();
-        if (currentMag != null)
-        {
-            totalRounds += currentMag.Count;
-            ConsiderAmmoQuality(currentMag.FirstRealAmmo() as AmmoItemClass, ref bestPen, ref bestDmg);
-        }
-
+        // Walk descends into mag.Cartridges, so every round is yielded as an AmmoItemClass. To count each
+        // round exactly once AND only when it's usable (= loose, or sitting in a mag the weapon accepts),
+        // gate on the cartridge's PARENT:
+        //   - parent is a MagazineItemClass → only count if that mag fits this weapon's mag slot.
+        //     Rounds locked in incompatible mag types (e.g. AK 7.62x39 mag vs SKS) stay invisible — a
+        //     bot can't transfer them mid-combat, so they're not "usable" for this weapon.
+        //   - parent is a grid (ammo box, rig pouch, etc.) → loose ammo, always count.
+        //   - parent is the weapon's chamber → counted as loaded, always count.
         foreach (var item in items)
         {
-            if (item == null) continue;
-            switch (item)
-            {
-                case MagazineItemClass mag when MagFitsWeapon(mag, magSlot):
-                    if (mag != currentMag)
-                        totalRounds += mag.Count;
-                    ConsiderAmmoQuality(mag.FirstRealAmmo() as AmmoItemClass, ref bestPen, ref bestDmg);
-                    break;
-                case AmmoItemClass ammo when string.Equals(ammo.Caliber, caliber, System.StringComparison.OrdinalIgnoreCase):
-                    totalRounds += ammo.StackObjectsCount;
-                    ConsiderAmmoQuality(ammo, ref bestPen, ref bestDmg);
-                    break;
-            }
+            if (item is not AmmoItemClass ammo) continue;
+            if (!string.Equals(ammo.Caliber, caliber, System.StringComparison.OrdinalIgnoreCase)) continue;
+            if (!IsAmmoUsableByWeapon(ammo, magSlot)) continue;
+            totalRounds += ammo.StackObjectsCount;
+            // Track best pen/dmg across the pool as a fallback only — used when the weapon's currently
+            // loaded mag is empty (rare). The bot's actual first-mag firing quality comes from the loaded
+            // ammo below.
+            ConsiderAmmoQuality(ammo, ref fallbackPen, ref fallbackDmg);
         }
 
+        // Quality reflects what the bot will actually FIRE first — the round currently loaded in their
+        // mag. A bot with 5× M61 (pen 70) + 200× M80 (pen 50) but M80 loaded scores as pen=50, because
+        // that's what comes out the barrel next. BSG combat AI doesn't hot-swap mid-fight to load the
+        // "best" spare ammo, so scoring by the loaded round is the realistic forecast. Falls back to the
+        // pool's max-pen/max-dmg only when the mag is empty.
+        var loadedPen = 0;
+        var loadedDmg = 0;
+        var loadedAmmo = weapon.GetCurrentMagazine()?.FirstRealAmmo() as AmmoItemClass;
+        if (loadedAmmo != null) ConsiderAmmoQuality(loadedAmmo, ref loadedPen, ref loadedDmg);
+        var bestPen = loadedPen > 0 ? loadedPen : fallbackPen;
+        var bestDmg = loadedDmg > 0 ? loadedDmg : fallbackDmg;
+
         return new AmmoSnapshot(totalRounds, bestPen, bestDmg);
+    }
+
+    /// <summary>
+    /// True when <paramref name="ammo"/>'s parent container is either NOT a magazine (loose ammo in a
+    /// grid / chamber / etc.) or IS a magazine that physically fits the weapon's mag slot. Rounds locked
+    /// inside an incompatible mag type that happens to share the caliber are NOT usable — the bot has no
+    /// reload-from-other-mag flow in combat — and must be filtered out so the score reflects what the
+    /// weapon can actually feed.
+    /// </summary>
+    private static bool IsAmmoUsableByWeapon(AmmoItemClass ammo, Slot weaponMagSlot)
+    {
+        var parent = ammo?.Parent?.Container?.ParentItem;
+        if (parent is not MagazineItemClass mag) return true; // loose ammo (grid / chamber / etc.) — usable
+        if (weaponMagSlot == null) return false;
+        try { return weaponMagSlot.CheckCompatibility(mag); }
+        catch { return false; }
     }
 
     /// <summary>
@@ -157,13 +180,6 @@ public static class WeaponScorer
         }
         if (!hasFullAuto) factor *= SemiAutoRecoilFactor;
         return factor;
-    }
-
-    private static bool MagFitsWeapon(MagazineItemClass mag, Slot weaponMagSlot)
-    {
-        if (mag == null || weaponMagSlot == null) return false;
-        try { return weaponMagSlot.CheckCompatibility(mag); }
-        catch { return false; }
     }
 
     private static void ConsiderAmmoQuality(AmmoItemClass ammo, ref int bestPen, ref int bestDmg)
@@ -203,6 +219,15 @@ public static class WeaponScorer
                             foreach (var child in grid.Items)
                                 if (child != null) stack.Push(child);
             }
+            // Mag cartridges. Without this branch the walker stops at the magazine — its rounds are only
+            // counted via mag.Count when MagFitsWeapon passes. AK / SKS / similar cross-platform mags all
+            // hold the same caliber rounds but fail each other's slot filters, so the corpse's full ammo
+            // carry was invisible to candidate scoring even though the loose rounds would be perfectly
+            // usable post-strip. BSG's own Equipment.GetAllItems() descends into cartridges; matching that
+            // behaviour here closes the CAND-vs-PRI asymmetry on cross-platform calibers.
+            if (item is MagazineItemClass mag && mag.Cartridges?.Items != null)
+                foreach (var round in mag.Cartridges.Items)
+                    if (round != null) stack.Push(round);
         }
     }
 

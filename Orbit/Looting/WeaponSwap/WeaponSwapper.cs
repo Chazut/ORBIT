@@ -72,7 +72,15 @@ public static class WeaponSwapper
         var mapId = Singleton<OrbitManager>.Instance?.MapId;
         var weights = MapWeaponWeights.Resolve(mapId);
         var sourceItems = new List<Item>(WeaponScorer.Walk(rootSource));
-        var candidateScore = WeaponScorer.Score(candidate, sourceItems, weights);
+        // Candidate ammo pool = bot inventory + corpse loot — post-swap the bot keeps their own rounds AND
+        // inherits the corpse's via phase 1 drain. Without this union the candidate is scored against the
+        // corpse's tiny carry (typically 1 mag worth) while the bot's current weapons are scored against the
+        // full inventory (1000+ rounds when ammo boxes are involved), producing a structural ~+18
+        // count_score bias against ANY candidate regardless of actual weapon quality. See WeaponScorer for
+        // the formula.
+        var inventoryItems = CollectBotInventoryAmmoPool(bot);
+        var candidatePool = CombineAmmoPools(inventoryItems, sourceItems);
+        var candidateScore = WeaponScorer.Score(candidate, candidatePool, weights);
 
         var isBotScav = profile.Side == EPlayerSide.Savage && !profile.WillBeAPlayerScav();
         if (isBotScav)
@@ -89,9 +97,8 @@ public static class WeaponSwapper
         }
 
         var margin = LootConfig.WeaponSwapMargin?.Value ?? 1.10f;
-        var inventoryItems = CollectBotInventoryAmmoPool(bot);
 
-        var candidateAmmo = WeaponScorer.CollectUsableAmmo(candidate, sourceItems);
+        var candidateAmmo = WeaponScorer.CollectUsableAmmo(candidate, candidatePool);
         if (candidateAmmo.BestPenetration < 20 && BotHasGoodPenWeapon(bot, inventoryItems))
             return WouldSwapResult.No;
 
@@ -228,15 +235,16 @@ public static class WeaponSwapper
         Log.Info($"[TRACE] EvaluateAndPerformAsync({nick}): collecting bot inventory ammo pool");
         var inventoryItems = CollectBotInventoryAmmoPool(bot);
         Log.Info($"[TRACE] EvaluateAndPerformAsync({nick}): collected {inventoryItems.Count} bot items, walking source");
-        var sourceItems = WeaponScorer.Walk(rootSource);
-        Log.Info($"[TRACE] EvaluateAndPerformAsync({nick}): walked source, scoring candidate");
-        var candidateScore = WeaponScorer.Score(candidate, sourceItems, weights, $"{nick}:CAND");
+        var sourceItems = new List<Item>(WeaponScorer.Walk(rootSource));
+        var candidatePool = CombineAmmoPools(inventoryItems, sourceItems);
+        Log.Info($"[TRACE] EvaluateAndPerformAsync({nick}): walked source, scoring candidate against {candidatePool.Count} items (bot inventory + corpse loot)");
+        var candidateScore = WeaponScorer.Score(candidate, candidatePool, weights, $"{nick}:CAND");
         Log.Info($"[TRACE] EvaluateAndPerformAsync({nick}): candidate scored {candidateScore:F1}, dispatching");
 
         // No-downgrade guard: if the candidate's ammo is sub-threshold and the bot already has a high-pen
         // weapon equipped, refuse the swap outright. Prevents cascade chains where SMGs / shotguns keep
         // displacing the bot's good rifle one slot at a time.
-        var candidateAmmo = WeaponScorer.CollectUsableAmmo(candidate, sourceItems);
+        var candidateAmmo = WeaponScorer.CollectUsableAmmo(candidate, candidatePool);
         if (candidateAmmo.BestPenetration < 20 && BotHasGoodPenWeapon(bot, inventoryItems))
         {
             Log.Info($"WeaponSwap({nick}): no-downgrade guard — candidate {candidate.LocalizedName()} (pen={candidateAmmo.BestPenetration}) rejected, bot already has a pen≥20 weapon");
@@ -578,6 +586,21 @@ public static class WeaponSwapper
 
     // Bot's full ammo pool: every item across equipment slots, including the secure container (part of
     // Inventory.Equipment).
+    /// <summary>
+    /// Concatenate the bot's inventory ammo pool with the corpse / container source tree to get the
+    /// post-swap ammo pool a CANDIDATE weapon will be able to feed from. No de-duplication needed —
+    /// `WeaponScorer.CollectUsableAmmo` filters by mag-slot compatibility and caliber, so an item showing
+    /// up twice would still only contribute its stack once on the bot side. The two sources are physically
+    /// distinct (bot vs. corpse) so they shouldn't share item references anyway.
+    /// </summary>
+    private static List<Item> CombineAmmoPools(List<Item> inventoryItems, List<Item> sourceItems)
+    {
+        var combined = new List<Item>((inventoryItems?.Count ?? 0) + (sourceItems?.Count ?? 0));
+        if (inventoryItems != null) combined.AddRange(inventoryItems);
+        if (sourceItems != null) combined.AddRange(sourceItems);
+        return combined;
+    }
+
     private static List<Item> CollectBotInventoryAmmoPool(BotOwner bot)
     {
         var list = new List<Item>();
