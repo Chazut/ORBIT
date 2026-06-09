@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -53,6 +54,23 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
     private BotOwner _bot;
     private CancellationTokenSource _cts;
 
+    /// <summary>
+    /// Timestamp of the last observed activity in the current loot session — bumped on session start,
+    /// on every successful pickup, on every drain-entry evaluation (TAKE / SKIP / SWAP), and on every
+    /// async-tx completion. If the loot session is alive (<see cref="LootTaskRunning"/> true) and no
+    /// activity has been observed for more than <see cref="LootSessionInactivityTimeoutSeconds"/>, the
+    /// Unity Update loop cancels the session — covers the "loose loot stuck for 210s" hang pattern
+    /// (RussiaYpa on Woods: PickupLooseAsync hung silently after a 0.5s Task.Delay, bot stayed pinned
+    /// crouched). Container / corpse sessions can run for minutes legitimately as long as the drain
+    /// loop keeps making forward progress; this watchdog ONLY fires when there's no progress at all.
+    /// </summary>
+    private float _lastLootActivityTime;
+
+    private const float LootSessionInactivityTimeoutSeconds = 30f;
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void BumpLootActivity() => _lastLootActivityTime = Time.realtimeSinceStartup;
+
     // Current loot source root (corpse equipment / container fixture / loose item). Set per LootXxxAsync
     // entry; used by the swap evaluator to size the candidate's reachable ammo pool.
     private Item _currentSourceRoot;
@@ -95,6 +113,27 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
         Log.Debug($"OrbitLootHandler.Init({Nick}): spawnValue={Stats.SpawnValue:N0}₽, minPickupFallback={DefaultMinPickupPrice:N0}₽");
     }
 
+    /// <summary>
+    /// Unity Update — runs the loot-session inactivity watchdog. If the session has been alive for more
+    /// than <see cref="LootSessionInactivityTimeoutSeconds"/> without any activity (no pickup, no drain
+    /// entry processed, no tx completion), assume the session is hung and cancel it. The activity-based
+    /// gate is what lets corpse / container sessions legitimately run for minutes — they keep processing
+    /// drain entries, each one bumps the timer.
+    /// </summary>
+    private void Update()
+    {
+        if (!LootTaskRunning) return;
+        var elapsedSinceActivity = Time.realtimeSinceStartup - _lastLootActivityTime;
+        if (elapsedSinceActivity < LootSessionInactivityTimeoutSeconds) return;
+
+        Log.Warning($"OrbitLootHandler.Watchdog({Nick}): loot session HUNG — no activity for {elapsedSinceActivity:F1}s on {CurrentTarget?.name} (kind={CurrentTargetKind}) → cancelling. Bot will unfreeze + re-dispatch.");
+        // Push the activity timer forward so we don't re-fire the warning every frame while
+        // RunAsync's finally block tears down the session (UnfreezeBot + log emit can take a couple
+        // frames). The cancellation drives the actual cleanup; this just suppresses the spam.
+        _lastLootActivityTime = Time.realtimeSinceStartup;
+        _cts?.Cancel();
+    }
+
     public void StartLooting()
     {
         if (LootTaskRunning)
@@ -115,6 +154,7 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
         Stats.LastMaxPerSlotSeen = 0f;
         Stats.LastHadBypassItem = false;
         _swappedWeaponIds.Clear();
+        BumpLootActivity();
 
         Log.Info($"OrbitLootHandler.StartLooting({Nick}): kind={CurrentTargetKind}, target={CurrentTarget.name}, minPrice={GetMinPickupPrice():N0}₽");
 
@@ -925,6 +965,7 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
         for (var i = 0; i < items.Count; i++)
         {
             ct.ThrowIfCancellationRequested();
+            BumpLootActivity(); // each drain entry is forward progress, keeps the watchdog patient
             var revealMs = System.Math.Min(InitialSearchMs + i * PerItemRevealMs, MaxRevealCapMs);
             var elapsedMs = (int)((Time.realtimeSinceStartup - startTime) * 1000);
             var waitMs = revealMs - elapsedMs;
@@ -961,6 +1002,9 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
 
     private async Task<bool> TransferItemAsync(DrainEntry entry, CancellationToken ct)
     {
+        // Bump the watchdog on every transfer attempt — each one is forward progress regardless of
+        // outcome (TAKE / SKIP / SWAP all count).
+        BumpLootActivity();
         // Skip entries that descend from a weapon already moved into the bot's slots by a swap — re-picking
         // them would detach mods from the freshly equipped weapon.
         if (entry.Item != null && IsDescendantOfSwappedWeapon(entry.Item))
@@ -1242,6 +1286,7 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
         Stats.InventoryValue += price;
         Stats.TotalGained = Stats.InventoryValue - Stats.SpawnValue;
         Stats.LastItemsTaken = true;
+        BumpLootActivity();
         var pathSuffix = string.IsNullOrEmpty(path) ? "" : $" at {path}";
         Log.Info($"OrbitLootHandler.Pickup({Nick}): ✓ PICKED {name}{pathSuffix} ({price:N0}₽), invValue={Stats.InventoryValue:N0}₽, gained={Stats.TotalGained:N0}₽");
     }
