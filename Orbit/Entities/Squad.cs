@@ -223,6 +223,23 @@ public class Squad(int id, float[] taskScores, int targetMembersCount) : Entity(
     public int PendingOwnKillCorpseLocId;
 
     /// <summary>
+    /// ProfileId of a squad member who just died WITH meaningful loot — the surviving members should
+    /// bee-line to their corpse to recover the goods (their kit dropped with them). Set in
+    /// LootContainerAction.ReevaluateExtractOnDeath when a loot-threshold extract gets cancelled by the
+    /// death. Consumed by CorpseRegistrationPatch when the matching Corpse waypoint registers (timing:
+    /// BSG instantiates the corpse a few frames AFTER the agent is removed from the squad). Null = no
+    /// pending recovery.
+    /// </summary>
+    public string PendingDeadMemberRecoveryProfileId;
+
+    /// <summary>
+    /// The dead member's <see cref="OrbitLootHandler.Stats.TotalGained"/> at the moment of death — logged
+    /// when the corpse-recovery dispatch fires so the rationale is visible in the raid log. 0 when no
+    /// recovery is pending.
+    /// </summary>
+    public float PendingDeadMemberRecoveryValue;
+
+    /// <summary>
     /// Door instance IDs this squad is authorised to force-unlock on arrival, bypassing the BSG key-inventory
     /// check. Populated when a picked POI has locked doors on its path: each door is rolled against an unlock
     /// probability (100% if the POI is the squad's current Main anchor, F12-config probability otherwise).

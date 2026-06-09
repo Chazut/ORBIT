@@ -59,7 +59,30 @@ public class CorpseRegistrationPatch : ModulePatch
 
             manager.WaypointSystem.AddRuntimeWaypoint(loc);
             var victimName = __instance?.Profile?.Info?.Nickname ?? "?";
+            var victimProfileId = __instance?.Profile?.Id;
             Log.Debug($"CorpseRegistration: registered Corpse waypoint {loc} for victim {victimName} at ({pos.x:F2},{pos.y:F2},{pos.z:F2})");
+
+            // Dead-member-loot recovery: if any active squad armed PendingDeadMemberRecoveryProfileId for
+            // this victim (LootContainerAction.ReevaluateExtractOnDeath fired when the squad cancelled a
+            // loot-threshold extract after losing this member), pin the squad's objective to the corpse
+            // immediately. Survivors bee-line to recover the loot instead of returning to roam / mains.
+            if (!string.IsNullOrEmpty(victimProfileId))
+            {
+                var squads = manager.SquadData.Entities.Values;
+                for (var s = 0; s < squads.Count; s++)
+                {
+                    var squad = squads[s];
+                    if (squad?.PendingDeadMemberRecoveryProfileId != victimProfileId) continue;
+                    var recoveryValue = squad.PendingDeadMemberRecoveryValue;
+                    squad.PendingDeadMemberRecoveryProfileId = null;
+                    squad.PendingDeadMemberRecoveryValue = 0f;
+                    squad.Objective.Location = loc;
+                    squad.Objective.LocationPrevious = null;
+                    squad.Objective.Duration = 0; // force re-dispatch onto the corpse next tick
+                    squad.Objective.StartTime = UnityEngine.Time.time;
+                    Log.Info($"{squad}: bee-lining to dead-member corpse {loc} for {victimName} ({recoveryValue:N0}₽ loot recovery)");
+                }
+            }
 
             // Attribute the kill to an ORBIT squad if possible. The victim's LastAggressor is set by BSG's
             // damage pipeline just before CreateCorpse fires, so by the time this postfix runs it points at

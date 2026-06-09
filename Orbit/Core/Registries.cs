@@ -4,6 +4,7 @@ using EFT;
 using Orbit.Entities;
 using Orbit.Sain;
 using Orbit.Systems;
+using Orbit.Tasks.Actions;
 
 namespace Orbit.Core;
 
@@ -118,6 +119,13 @@ public class SquadRegistry(SquadData squadData, StrategyManager strategyManager,
         var squad = agent.Squad;
         squad.RemoveAgent(agent);
         Log.Debug($"Removed {agent} from {squad} with {squad.Size} members remaining");
+
+        // If the squad had committed to extracting and the death wiped enough loot to fall below the
+        // new sum-of-survivors threshold, cancel the extract — the surviving members no longer have a
+        // reason to bee-line for the exfil. Re-eval BEFORE the leader-reassign / empty-squad cleanup so
+        // we don't compute against a half-deconstructed squad. Pass the dead agent so the re-eval can
+        // also arm a dead-member-loot-recovery dispatch (survivors bee-line to the corpse).
+        LootContainerAction.ReevaluateExtractOnDeath(squad, agent);
 
         if (squad.Size > 0)
         {

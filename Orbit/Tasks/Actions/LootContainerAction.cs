@@ -249,6 +249,67 @@ public class LootContainerAction(AgentData dataset, WaypointSystem waypointSyste
         CheckExtractTrigger(squad.Members[0]);
     }
 
+    /// <summary>
+    /// Called after a member dies (and is removed from the squad). Re-eval applies ONLY to loot-threshold
+    /// extracts: if the squad triggered extract because their summed loot crossed the per-archetype
+    /// threshold, and the death dropped the survivors below the recomputed sum, undo the extract. The
+    /// other two extract triggers (all mains complete, raid time low) are explicitly NOT re-evaluated —
+    /// those reasons stand regardless of who's alive.
+    ///
+    /// Canonical loot-threshold case: 2-member squad triggered extract on member B's 4.5M Mona Lisa
+    /// pickup; B dies on the way to the exfil with the item; surviving member A has looted ~0₽, far
+    /// below their own threshold. Without this re-eval, A keeps walking to the exfil despite having no
+    /// real reason to. With it, ExtractRequested flips back to false → A goes back to roam / mains /
+    /// scavenge until they re-cross the threshold on their own.
+    /// </summary>
+    public static void ReevaluateExtractOnDeath(Squad squad, Agent deadAgent)
+    {
+        if (squad == null) return;
+        if (!squad.ExtractRequested) return;
+        if (squad.Members.Count == 0) return;
+        // Only loot-threshold extracts get re-evaluated. The "all mains done" / "raid time low" paths
+        // produce different reason strings and must stay armed regardless of the death.
+        var reason = squad.ExtractRequestedReason;
+        if (string.IsNullOrEmpty(reason) || !reason.StartsWith("loot ", System.StringComparison.Ordinal))
+            return;
+
+        var totalLooted = SumSquadLootedAlive(squad, out var aliveCount);
+        var sumThreshold = 0f;
+        var resolvedCount = 0;
+        for (var i = 0; i < squad.Members.Count; i++)
+        {
+            var m = squad.Members[i];
+            if (m?.Player?.gameObject == null) continue;
+            var memberThreshold = GetOrResolveAgentExtractThreshold(m);
+            if (memberThreshold <= 0f) continue;
+            sumThreshold += memberThreshold;
+            resolvedCount++;
+        }
+
+        if (resolvedCount == 0) return;       // nothing resolved → keep current state, can't decide
+        if (sumThreshold <= 0f) return;       // feature off
+        if (totalLooted >= sumThreshold) return; // survivors still cover the new threshold → stay committed
+
+        squad.ExtractRequested = false;
+        squad.ExtractRequestedReason = null;
+        squad.Objective.Duration = 0; // force immediate re-dispatch off the exfil
+        Log.Info($"{squad}: extract canceled after member death — surviving loot {totalLooted:N0}₽ < new threshold {sumThreshold:N0}₽ ({aliveCount} alive). Squad returns to roam / mains until threshold met again.");
+
+        // Recovery: if the dead member carried meaningful loot, prime the squad to bee-line to their
+        // corpse as soon as it registers (BSG's Player.CreateCorpse hook fires a few frames after this).
+        // Skip if the dead member had ~nothing (no point pulling survivors off their mains for empty
+        // kit recovery).
+        if (deadAgent?.Player == null) return;
+        var deadHandler = deadAgent.Player.gameObject?.GetComponent<OrbitLootHandler>();
+        var deadValue = deadHandler?.Stats?.TotalGained ?? 0f;
+        if (deadValue < 100_000f) return; // not worth the detour
+        var deadProfileId = deadAgent.Player.ProfileId;
+        if (string.IsNullOrEmpty(deadProfileId)) return;
+        squad.PendingDeadMemberRecoveryProfileId = deadProfileId;
+        squad.PendingDeadMemberRecoveryValue = deadValue;
+        Log.Info($"{squad}: arming dead-member loot recovery for {deadAgent.Bot?.Profile?.Nickname ?? "<unknown>"} ({deadValue:N0}₽) — will bee-line to corpse once it registers");
+    }
+
     private static void CheckExtractTrigger(Agent agent)
     {
         var squad = agent.Squad;
