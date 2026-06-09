@@ -1778,7 +1778,15 @@ public class WaypointSystem
                 if (HasFailedDoorOnPath(squad, loc)) continue;
                 if (RequiresReachabilityCheck(loc.Category) && !IsWaypointReachable(loc, squad)) continue;
                 if (!SquadCanUseWaypoint(squad, squadIsPmc, loc)) continue;
-                if (floorFilterActive && Mathf.Abs(loc.Position.y - floorY.Value) > floorTolerance) continue;
+                // Quest waypoints are exempt from the floor filter — they're precise trigger points the
+                // squad MUST reach, and the squad's mains generation already pre-flighted reachability
+                // from spawn. When the squad commits to floor Y=A but the Quest sits on floor Y=B (e.g.
+                // pr_scout_col at Y=12.21 on a squad whose ResolveSquadFloor picked Y=7.4), the filter
+                // would otherwise reject the Quest forever and the bot just circles its mains cell on
+                // Synthetics. Other loot / synthetic POIs stay under the floor filter for the standard
+                // "don't dispatch across floors" logic; only Quest gets the bypass.
+                if (floorFilterActive && loc.Category != WaypointCategory.Quest
+                    && Mathf.Abs(loc.Position.y - floorY.Value) > floorTolerance) continue;
                 if (AllAliveMembersValueSkipped(squad, loc.Id)) continue;
                 Log.Debug($"PickFromCell: {squad} priority-picked Main anchor {loc} (within 5m of an active Main)");
                 return loc;
@@ -1866,7 +1874,8 @@ public class WaypointSystem
                     skippedExfil++;
                     continue;
                 }
-                if (floorFilterActive && Mathf.Abs(loc.Position.y - floorY.Value) > floorTolerance) continue;
+                if (floorFilterActive && loc.Category != WaypointCategory.Quest
+                    && Mathf.Abs(loc.Position.y - floorY.Value) > floorTolerance) continue;
                 candidates++;
                 if (Random.Range(0, candidates) == 0)
                     pick = loc;
