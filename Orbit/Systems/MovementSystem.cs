@@ -37,6 +37,8 @@ public class MovementSystem
 
     public void Update(List<Agent> liveAgents)
     {
+        TickDoorOpenWatches();
+
         if (_moveJobs.Count > 0)
         {
             for (var i = 0; i < _moveJobs.Count; i++)
@@ -293,7 +295,90 @@ public class MovementSystem
         return new Vector2(vector.x, vector.y);
     }
 
-    private static bool HandleDoors(Agent agent)
+    /// <summary>
+    /// Tracks every OpenDoor / force-unlock interaction we've initiated. After
+    /// <see cref="DoorWatchTimeoutSeconds"/> we poll the door's actual state — if it never reached Open AND
+    /// the bot has walked past the door anyway, we log a `PHANTOM-WALKED` warning. Pure diagnostic, no
+    /// behaviour change; lets us audit the door-phasing class of bug from a single raid log instead of
+    /// freecaming bots in real time.
+    /// </summary>
+    private readonly Dictionary<long, DoorOpenWatch> _pendingDoorOpens = new();
+
+    private struct DoorOpenWatch
+    {
+        public Agent Agent;
+        public Door Door;
+        public float RequestedAtTime;
+        public Vector3 DoorPos;
+        public float InitDistance;
+        public string Kind;
+    }
+
+    private const float DoorWatchTimeoutSeconds = 3f;
+    private const float DoorWatchMinPhaseDistance = 2f;
+
+    private static long DoorWatchKey(int agentId, int doorInstanceId)
+        => ((long)agentId << 32) | (uint)doorInstanceId;
+
+    private void StartDoorWatch(Agent agent, Door door, string kind)
+    {
+        var key = DoorWatchKey(agent.Id, door.GetInstanceID());
+        var doorPos = door.transform.position;
+        var initDist = Vector3.Distance(agent.Position, doorPos);
+        _pendingDoorOpens[key] = new DoorOpenWatch
+        {
+            Agent = agent,
+            Door = door,
+            RequestedAtTime = Time.time,
+            DoorPos = doorPos,
+            InitDistance = initDist,
+            Kind = kind,
+        };
+        Log.Info($"DoorWatch: {agent} initiated {kind} on door Id={door.Id} (state={door.DoorState}, dist={initDist:F1}m)");
+    }
+
+    private readonly List<long> _doorWatchRemoveBuffer = new();
+
+    private void TickDoorOpenWatches()
+    {
+        if (_pendingDoorOpens.Count == 0) return;
+        var now = Time.time;
+        _doorWatchRemoveBuffer.Clear();
+        foreach (var kv in _pendingDoorOpens)
+        {
+            var watch = kv.Value;
+            if (watch.Door == null || watch.Agent == null)
+            {
+                _doorWatchRemoveBuffer.Add(kv.Key);
+                continue;
+            }
+
+            var state = watch.Door.DoorState;
+            if (state == EDoorState.Open)
+            {
+                Log.Info($"DoorWatch: {watch.Agent} successfully opened door Id={watch.Door.Id} after {now - watch.RequestedAtTime:F1}s ({watch.Kind} → Open)");
+                _doorWatchRemoveBuffer.Add(kv.Key);
+                continue;
+            }
+
+            var elapsed = now - watch.RequestedAtTime;
+            if (elapsed < DoorWatchTimeoutSeconds) continue;
+
+            var currentDist = Vector3.Distance(watch.Agent.Position, watch.DoorPos);
+            if (currentDist > watch.InitDistance && currentDist >= DoorWatchMinPhaseDistance)
+            {
+                Log.Warning($"DoorWatch: {watch.Agent} PHANTOM-WALKED through door Id={watch.Door.Id} — requested {watch.Kind} {elapsed:F1}s ago, state still={state}, agent moved from {watch.InitDistance:F1}m → {currentDist:F1}m (past the door)");
+            }
+            else
+            {
+                Log.Debug($"DoorWatch: {watch.Agent} watch timeout on door Id={watch.Door.Id} after {elapsed:F1}s, state={state}, dist {watch.InitDistance:F1}m → {currentDist:F1}m — interaction may have failed but bot didn't pass through");
+            }
+            _doorWatchRemoveBuffer.Add(kv.Key);
+        }
+        for (var i = 0; i < _doorWatchRemoveBuffer.Count; i++) _pendingDoorOpens.Remove(_doorWatchRemoveBuffer[i]);
+    }
+
+    private bool HandleDoors(Agent agent)
     {
         var currentVoxel = agent.Bot.VoxelesPersonalData.CurVoxel;
 
@@ -314,7 +399,15 @@ public class MovementSystem
 
             foundDoors = true;
 
-            if (!(door.InteractingPlayer == null && door.enabled && door.Operatable && door.DoorState != EDoorState.Open))
+            // Also reject doors mid-animation (state=Interacting) — the door is already opening / closing
+            // and BSG silently no-ops a second vmethod_1 call against an in-flight transition. The
+            // DoorWatch diagnostic on Woods saw 3/3 interactions hit doors already in the Interacting
+            // state, all 3 watch-timeouts at 3s with state still=Interacting. The original guard checked
+            // InteractingPlayer != null which handles a player actively pressing F on the door, but the
+            // state can remain Interacting for ~1s AFTER the player releases / the AI lets go, with
+            // InteractingPlayer back to null — that's the window we were hitting.
+            if (!(door.InteractingPlayer == null && door.enabled && door.Operatable
+                  && door.DoorState != EDoorState.Open && door.DoorState != EDoorState.Interacting))
                 continue;
 
             // Only open doors that the bot's current path actually crosses. Without this gate, every bot
@@ -342,12 +435,14 @@ public class MovementSystem
                 {
                     door.Unlock();
                     Log.Debug($"{agent} force-unlocked {door.Id} (was Locked, squad had ForceUnlock tag)");
+                    StartDoorWatch(agent, door, "Unlock");
                     continue; // next tick: door is Shut → normal Open path runs
                 }
                 continue;
             }
 
             OpenDoor(agent, door);
+            StartDoorWatch(agent, door, "Open");
         }
 
         return foundDoors;
