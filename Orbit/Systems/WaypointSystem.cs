@@ -1141,7 +1141,8 @@ public class WaypointSystem
         if (string.IsNullOrEmpty(entry))
             entry = ResolveDerivedEntryPoint(squad);
         if (string.IsNullOrEmpty(entry)) entry = "(none)";
-        Log.Info($"{squad} eligible exfils (leader entry='{entry}', isPmc={squadIsPmc}):");
+        // Re-fires on every AssignNewObjective tick while ExtractRequested — Debug, not Info.
+        Log.Debug($"{squad} eligible exfils (leader entry='{entry}', isPmc={squadIsPmc}):");
         for (var cx = 0; cx < _gridSize.x; cx++)
         {
             for (var cy = 0; cy < _gridSize.y; cy++)
@@ -1171,7 +1172,7 @@ public class WaypointSystem
                         if (reqList.Count > 0) reqs = string.Join("+", reqList);
                     }
                     var kind = exfil is SharedExfiltrationPoint ? "Shared" : exfil is ScavExfiltrationPoint ? "ScavExfil" : "Exfil";
-                    Log.Info($"  - {exfil.name} dist={dist:F0}m kind={kind} status={exfil.Status} entries={entries} reqs={reqs} → {verdict}");
+                    Log.Debug($"  - {exfil.name} dist={dist:F0}m kind={kind} status={exfil.Status} entries={entries} reqs={reqs} → {verdict}");
                 }
             }
         }
@@ -2513,7 +2514,7 @@ public class WaypointSystem
 
         var derived = bestMarker?.SpawnPoint?.Infiltration ?? string.Empty;
         squad.DerivedEntryPoint = derived;
-        Log.Info($"{squad} derived EntryPoint='{derived}' from spawn pos {spawnPos} (closest SpawnPointMarker {Mathf.Sqrt(bestDistSqr):F1}m away)");
+        Log.Debug($"{squad} derived EntryPoint='{derived}' from spawn pos {spawnPos} (closest SpawnPointMarker {Mathf.Sqrt(bestDistSqr):F1}m away)");
         return derived;
     }
 
@@ -2599,7 +2600,7 @@ public class WaypointSystem
             if (i > 0) summary.Append(", ");
             summary.Append($"{cellValues[i].Key}=₽{cellValues[i].Value:F0}");
         }
-        Log.Info($"GetTopLootCells: ranked {cellValues.Count} loot-bearing cells, kept top {keep} — [{summary}]");
+        Log.Debug($"GetTopLootCells: ranked {cellValues.Count} loot-bearing cells, kept top {keep} — [{summary}]");
         return _topLootCellsCache;
     }
 

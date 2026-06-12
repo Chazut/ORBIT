@@ -136,32 +136,18 @@ public static class WeaponSwapper
 
     public static async Task<Outcome> TryHandleAsync(BotOwner bot, Weapon candidate, Item rootSource, CancellationToken ct)
     {
-        Log.Info($"[TRACE] TryHandleAsync ENTER bot={bot?.Profile?.Nickname ?? "?"} candidate={candidate?.LocalizedName() ?? "?"}");
-        if (bot == null || candidate == null) { Log.Info("[TRACE] TryHandleAsync EXIT(NotApplicable, null args)"); return Outcome.NotApplicable; }
+        if (bot == null || candidate == null) return Outcome.NotApplicable;
         var player = bot.GetPlayer;
-        if (player?.InventoryController == null) { Log.Info("[TRACE] TryHandleAsync EXIT(NotApplicable, no ic)"); return Outcome.NotApplicable; }
+        if (player?.InventoryController == null) return Outcome.NotApplicable;
         var profile = bot.Profile;
-        if (profile == null) { Log.Info("[TRACE] TryHandleAsync EXIT(NotApplicable, no profile)"); return Outcome.NotApplicable; }
+        if (profile == null) return Outcome.NotApplicable;
 
         var nick = profile.Nickname ?? "(no-nick)";
         var isBotScav = profile.Side == EPlayerSide.Savage && !profile.WillBeAPlayerScav();
-        TraceMark(nick, "TryHandleAsync");
-        Log.Info($"[TRACE] TryHandleAsync({nick}): isBotScav={isBotScav}, dispatching");
 
-        Outcome outcome;
-        try
-        {
-            if (isBotScav)
-                outcome = await TryEquipIntoFirstEmptySlotAsync(bot, candidate, nick, ct);
-            else
-                outcome = await EvaluateAndPerformAsync(bot, candidate, rootSource, nick, ct);
-        }
-        finally
-        {
-            TraceClear(nick);
-        }
-        Log.Info($"[TRACE] TryHandleAsync({nick}) EXIT outcome={outcome}");
-        return outcome;
+        return isBotScav
+            ? await TryEquipIntoFirstEmptySlotAsync(bot, candidate, nick, ct)
+            : await EvaluateAndPerformAsync(bot, candidate, rootSource, nick, ct);
     }
 
     private static readonly EquipmentSlot[] WeaponSlotsPrimaryFirst =
@@ -185,61 +171,43 @@ public static class WeaponSwapper
 
     private static async Task<Outcome> TryEquipIntoFirstEmptySlotAsync(BotOwner bot, Weapon candidate, string nick, CancellationToken ct)
     {
-        TraceMark(nick, "TryEquipIntoFirstEmptySlot");
-        Log.Info($"[TRACE] TryEquipIntoFirstEmptySlot({nick}) ENTER");
         var equipment = bot.GetPlayer.Inventory.Equipment;
         foreach (var slotKind in WeaponSlotsPrimaryFirst)
         {
-            Log.Info($"[TRACE] TryEquipIntoFirstEmptySlot({nick}): testing slot {slotKind}");
             var slot = equipment.GetSlot(slotKind);
-            if (slot == null || slot.ContainedItem != null) { Log.Info($"[TRACE] TryEquipIntoFirstEmptySlot({nick}): {slotKind} occupied or null, skip"); continue; }
-            if (!slot.CheckCompatibility(candidate)) { Log.Info($"[TRACE] TryEquipIntoFirstEmptySlot({nick}): {slotKind} rejects candidate, skip"); continue; }
+            if (slot == null || slot.ContainedItem != null) continue;
+            if (!slot.CheckCompatibility(candidate)) continue;
             Log.Info($"WeaponSwap.Scav({nick}): equip {candidate.LocalizedName()} → {slotKind}");
             var moved = await MoveIntoSlotAsync(bot, candidate, slot, nick, ct);
-            Log.Info($"[TRACE] TryEquipIntoFirstEmptySlot({nick}) EXIT moved={moved}");
             return moved ? Outcome.Swapped : Outcome.Skipped;
         }
-        Log.Info($"[TRACE] TryEquipIntoFirstEmptySlot({nick}) EXIT skip (no empty compatible slot)");
         return Outcome.Skipped;
     }
 
 
     private static async Task<Outcome> EvaluateAndPerformAsync(BotOwner bot, Weapon candidate, Item rootSource, string nick, CancellationToken ct)
     {
-        TraceMark(nick, "EvaluateAndPerformAsync");
-        Log.Info($"[TRACE] EvaluateAndPerformAsync({nick}) ENTER");
         var equipment = bot.GetPlayer.Inventory.Equipment;
-        Log.Info($"[TRACE] EvaluateAndPerformAsync({nick}): got equipment, fetching slots");
         var primary1Slot = equipment.GetSlot(EquipmentSlot.FirstPrimaryWeapon);
         var primary2Slot = equipment.GetSlot(EquipmentSlot.SecondPrimaryWeapon);
         var holsterSlot = equipment.GetSlot(EquipmentSlot.Holster);
-        Log.Info($"[TRACE] EvaluateAndPerformAsync({nick}): slots fetched (p1={primary1Slot != null}, p2={primary2Slot != null}, h={holsterSlot != null})");
 
         var mapId = Singleton<OrbitManager>.Instance?.MapId;
         var weights = MapWeaponWeights.Resolve(mapId);
         const float margin = LootConfig.SwapMargin;
         Log.Debug($"WeaponSwap({nick}): map={mapId ?? "?"} weights=ergo×{weights.Ergo:F2} recoil×{weights.Recoil:F2} dist×{weights.EffectiveDist:F2} ammoQ×{weights.AmmoQuality:F2}, margin={margin:F2}");
 
-        Log.Info($"[TRACE] EvaluateAndPerformAsync({nick}): checking slot compatibilities");
         var candidateFitsHolster = holsterSlot != null && holsterSlot.CheckCompatibility(candidate);
         var candidateFitsPrimary = (primary1Slot != null && primary1Slot.CheckCompatibility(candidate))
                                 || (primary2Slot != null && primary2Slot.CheckCompatibility(candidate));
-        Log.Info($"[TRACE] EvaluateAndPerformAsync({nick}): fits primary={candidateFitsPrimary} fits holster={candidateFitsHolster}");
 
         if (!candidateFitsPrimary && !candidateFitsHolster)
-        {
-            Log.Info($"[TRACE] EvaluateAndPerformAsync({nick}) EXIT Skipped (fits no slot)");
             return Outcome.Skipped;
-        }
 
-        Log.Info($"[TRACE] EvaluateAndPerformAsync({nick}): collecting bot inventory ammo pool");
         var inventoryItems = CollectBotInventoryAmmoPool(bot);
-        Log.Info($"[TRACE] EvaluateAndPerformAsync({nick}): collected {inventoryItems.Count} bot items, walking source");
         var sourceItems = new List<Item>(WeaponScorer.Walk(rootSource));
         var candidatePool = CombineAmmoPools(inventoryItems, sourceItems);
-        Log.Info($"[TRACE] EvaluateAndPerformAsync({nick}): walked source, scoring candidate against {candidatePool.Count} items (bot inventory + corpse loot)");
         var candidateScore = WeaponScorer.Score(candidate, candidatePool, weights, $"{nick}:CAND");
-        Log.Info($"[TRACE] EvaluateAndPerformAsync({nick}): candidate scored {candidateScore:F1}, dispatching");
 
         // No-downgrade guard: if the candidate's ammo is sub-threshold and the bot already has a high-pen
         // weapon equipped, refuse the swap outright. Prevents cascade chains where SMGs / shotguns keep
@@ -251,13 +219,9 @@ public static class WeaponSwapper
             return Outcome.Skipped;
         }
 
-        Outcome outcome;
-        if (!candidateFitsPrimary && candidateFitsHolster)
-            outcome = await HandleHolsterCandidateAsync(bot, candidate, holsterSlot, inventoryItems, weights, margin, candidateScore, rootSource, nick, ct);
-        else
-            outcome = await HandlePrimaryCandidateAsync(bot, candidate, primary1Slot, primary2Slot, inventoryItems, weights, margin, candidateScore, rootSource, nick, ct);
-        Log.Info($"[TRACE] EvaluateAndPerformAsync({nick}) EXIT outcome={outcome}");
-        return outcome;
+        return !candidateFitsPrimary && candidateFitsHolster
+            ? await HandleHolsterCandidateAsync(bot, candidate, holsterSlot, inventoryItems, weights, margin, candidateScore, rootSource, nick, ct)
+            : await HandlePrimaryCandidateAsync(bot, candidate, primary1Slot, primary2Slot, inventoryItems, weights, margin, candidateScore, rootSource, nick, ct);
     }
 
     private static async Task<Outcome> HandleHolsterCandidateAsync(
@@ -376,37 +340,13 @@ public static class WeaponSwapper
     // execute" build failures and main-thread stalls.
     private const int PostTransactionSettleMs = 2500;
 
-    // Tracks the swap operation each bot is currently executing. Snapshotted on every enter/exit so a cut-off
-    // BepInEx log retains the most recent in-flight set just before a freeze.
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> _activeOps =
-        new System.Collections.Concurrent.ConcurrentDictionary<string, string>();
-
-    private static void TraceMark(string nick, string method)
-    {
-        _activeOps[nick] = method;
-        DumpActiveState();
-    }
-
-    private static void TraceClear(string nick)
-    {
-        _activeOps.TryRemove(nick, out _);
-        DumpActiveState();
-    }
-
-    private static void DumpActiveState()
-    {
-        var snapshot = string.Join(", ", _activeOps.Select(kv => $"{kv.Key}:{kv.Value}"));
-        Log.Info($"[TRACE-STATE] active=[{snapshot}] count={_activeOps.Count}");
-    }
-
     internal static async Task<bool> RunGuardedTransactionAsync<T>(BotOwner bot, GStruct154<T> op, string label, string nick, CancellationToken ct)
         where T : IRaiseEvents
     {
         var ic = bot.GetPlayer?.InventoryController;
         if (ic == null) return false;
 
-        TraceMark(nick, $"RunGuardedTransaction.{label}");
-        Log.Info($"WeaponSwap.{label}({nick}): tx STARTED (awaiting TryRunNetworkTransaction)");
+        Log.Debug($"WeaponSwap.{label}({nick}): tx STARTED (awaiting TryRunNetworkTransaction)");
 
         using var timeoutCts = new CancellationTokenSource(NetworkTransactionTimeoutMs);
         var networkTask = ic.TryRunNetworkTransaction(op, null);
@@ -430,7 +370,7 @@ public static class WeaponSwapper
                 Log.Warning($"WeaponSwap.{label}({nick}): tx FAILED — {result.Error}");
                 return false;
             }
-            Log.Info($"WeaponSwap.{label}({nick}): tx DONE (succeeded), settling {PostTransactionSettleMs}ms");
+            Log.Debug($"WeaponSwap.{label}({nick}): tx DONE (succeeded), settling {PostTransactionSettleMs}ms");
             await Task.Delay(PostTransactionSettleMs, ct);
             return true;
         }
@@ -449,68 +389,45 @@ public static class WeaponSwapper
     /// </summary>
     internal static async Task<bool> SwapInPlaceAsync(BotOwner bot, Item itemA, Item itemB, string nick, CancellationToken ct)
     {
-        TraceMark(nick, "SwapInPlace");
-        Log.Info($"[TRACE] SwapInPlace({nick}) ENTER A={itemA?.LocalizedName() ?? "?"} B={itemB?.LocalizedName() ?? "?"}");
         var ic = bot.GetPlayer?.InventoryController;
-        if (ic == null || itemA == null || itemB == null) { Log.Info($"[TRACE] SwapInPlace({nick}) EXIT false (null args)"); return false; }
-        Log.Info($"[TRACE] SwapInPlace({nick}): fetching addresses");
+        if (ic == null || itemA == null || itemB == null) return false;
         var addrA = itemA.CurrentAddress;
         var addrB = itemB.CurrentAddress;
         if (addrA == null || addrB == null)
         {
             Log.Warning($"WeaponSwap.Swap({nick}, {itemA.LocalizedName()} ↔ {itemB.LocalizedName()}): missing CurrentAddress on one of the items — aborting");
-            Log.Info($"[TRACE] SwapInPlace({nick}) EXIT false (no address)");
             return false;
         }
-        Log.Info($"[TRACE] SwapInPlace({nick}): describing addresses");
         var descA = DescribeAddress(addrA, bot);
         var descB = DescribeAddress(addrB, bot);
-        Log.Info($"[TRACE] SwapInPlace({nick}): A@{descA} B@{descB}, building Swap op");
         var op = InteractionsHandlerClass.Swap(itemA, addrB, itemB, addrA, ic, true);
-        Log.Info($"[TRACE] SwapInPlace({nick}): Swap op built, succeeded={op.Succeeded}");
         if (!op.Succeeded)
         {
             Log.Warning($"WeaponSwap.Swap({nick}, {itemA.LocalizedName()}@{descA} ↔ {itemB.LocalizedName()}@{descB}): build FAILED — {op.Error}");
-            Log.Info($"[TRACE] SwapInPlace({nick}) EXIT false (build failed)");
             return false;
         }
-        Log.Info($"[TRACE] SwapInPlace({nick}): handing off to RunGuardedTransaction");
-        var ok = await RunGuardedTransactionAsync(bot, op, $"Swap({itemA.LocalizedName()}@{descA} ↔ {itemB.LocalizedName()}@{descB})", nick, ct);
-        Log.Info($"[TRACE] SwapInPlace({nick}) EXIT {ok}");
-        return ok;
+        return await RunGuardedTransactionAsync(bot, op, $"Swap({itemA.LocalizedName()}@{descA} ↔ {itemB.LocalizedName()}@{descB})", nick, ct);
     }
 
     internal static async Task<bool> MoveIntoSlotAsync(BotOwner bot, Item item, Slot slot, string nick, CancellationToken ct)
     {
-        TraceMark(nick, $"MoveIntoSlot({slot?.ID ?? "?"})");
-        Log.Info($"[TRACE] MoveIntoSlot({nick}) ENTER item={item?.LocalizedName() ?? "?"} slot={slot?.ID ?? "?"}");
         var ic = bot.GetPlayer?.InventoryController;
-        if (ic == null || item == null || slot == null) { Log.Info($"[TRACE] MoveIntoSlot({nick}) EXIT false (null args)"); return false; }
+        if (ic == null || item == null || slot == null) return false;
         var destSlotId = slot.ID ?? "?";
-        Log.Info($"[TRACE] MoveIntoSlot({nick}): describing source address");
         var fromDesc = DescribeAddress(item.CurrentAddress, bot);
-        Log.Info($"[TRACE] MoveIntoSlot({nick}): from={fromDesc}, checking compatibility");
         if (!slot.CheckCompatibility(item))
         {
             Log.Warning($"WeaponSwap.Move({nick}, {item.LocalizedName()} from {fromDesc} → {destSlotId}): slot rejects item");
-            Log.Info($"[TRACE] MoveIntoSlot({nick}) EXIT false (incompatible)");
             return false;
         }
-        Log.Info($"[TRACE] MoveIntoSlot({nick}): creating dest address");
         var address = slot.CreateItemAddress();
-        Log.Info($"[TRACE] MoveIntoSlot({nick}): building Move op (simulate=true)");
         var op = InteractionsHandlerClass.Move(item, address, ic, true);
-        Log.Info($"[TRACE] MoveIntoSlot({nick}): Move op built, succeeded={op.Succeeded}");
         if (!op.Succeeded)
         {
             Log.Warning($"WeaponSwap.Move({nick}, {item.LocalizedName()} from {fromDesc} → {destSlotId}): build FAILED — {op.Error}");
-            Log.Info($"[TRACE] MoveIntoSlot({nick}) EXIT false (build failed)");
             return false;
         }
-        Log.Info($"[TRACE] MoveIntoSlot({nick}): handing off to RunGuardedTransaction");
-        var ok = await RunGuardedTransactionAsync(bot, op, $"Move({item.LocalizedName()}: {fromDesc}→{destSlotId})", nick, ct);
-        Log.Info($"[TRACE] MoveIntoSlot({nick}) EXIT {ok}");
-        return ok;
+        return await RunGuardedTransactionAsync(bot, op, $"Move({item.LocalizedName()}: {fromDesc}→{destSlotId})", nick, ct);
     }
 
     private static string DescribeAddress(ItemAddress address, BotOwner bot = null)
@@ -526,7 +443,7 @@ public static class WeaponSwapper
         }
         catch (System.Exception ex)
         {
-            Log.Warning($"[TRACE] DescribeAddress THREW {ex.Message}");
+            Log.Debug($"DescribeAddress threw (cosmetic, fallback label used): {ex.Message}");
             return "(addr-error)";
         }
     }
