@@ -96,6 +96,7 @@ public class Plugin : BaseUnityPlugin
     public static ConfigEntry<float> SplinterSearchRadius;
     public static ConfigEntry<float> ScavengeSweepRadius;
     public static ConfigEntry<float> SameFloorLootYTolerance;
+    public static ConfigEntry<float> CrossFloorSplinterChance;
 
     // 06. Faction-mod takeover (consumers wired in Phase 7)
     public static ConfigEntry<bool> HijackUntar;
@@ -485,6 +486,9 @@ public class Plugin : BaseUnityPlugin
         SameFloorLootYTolerance = Config.Bind(mainTune, "Same-floor sweep tolerance (m)", 2.5f, new ConfigDescription(
             "During chain-loot sweeps, candidates within this vertical Y delta of the bot are treated as 'same floor' and preferred over cross-floor candidates. Two-pass: same-floor first, cross-floor only if nothing same-floor is in range. 0 disables the bias (chain-loot ignores floors). Stops the elevator yo-yo on Resort.",
             new AcceptableValueRange<float>(0f, 10f), new ConfigurationManagerAttributes { Order = 65 }));
+        CrossFloorSplinterChance = Config.Bind(mainTune, "Cross-floor splinter chance", 0.2f, new ConfigDescription(
+            "Per-pick probability that a roam splinter ignores the same-floor preference and picks floor-blind. Keeps bots from vacuuming an entire floor before ever touching a staircase: they loot some of the current floor, then naturally drift up or down. 0 = never change floor until the current one is exhausted; 1 = floor-blind picking (the old staircase yo-yo).",
+            new AcceptableValueRange<float>(0f, 1f), new ConfigurationManagerAttributes { Order = 64 }));
         TimeExtractWindowPmc = Config.Bind(mainTune, "Time extract window — PMC (%)", new Vector2(5f, 30f), new ConfigDescription(
             "Per-squad random window (% of total raid duration remaining) at which ExtractRequested flips. Rolled once per squad. Matches SAIN's default range.",
             null, new ConfigurationManagerAttributes { Order = 60 }));

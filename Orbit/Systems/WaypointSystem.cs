@@ -854,6 +854,15 @@ public class WaypointSystem
                 }
             }
         }
+        // Escape valve: an absolute same-floor preference would park the bot on a dense floor until
+        // it's vacuumed clean before ever touching a staircase. A small per-pick chance ignores the
+        // preference for this ONE pick (uniform across all floors in radius) — bots loot some of the
+        // current floor, then drift up or down naturally. Floor exhaustion still forces the change.
+        if (bestSameFloor != null && Random.value < (Plugin.CrossFloorSplinterChance?.Value ?? 0f))
+        {
+            Log.Debug($"FindRoamSplinterForMember: cross-floor roll — picking floor-blind {best} (member Y={memberPos.y:F1}, pick Y={best.Position.y:F1})");
+            return best;
+        }
         if (bestSameFloor != null) return bestSameFloor;
         if (preferSameFloor && best != null)
             Log.Debug($"FindRoamSplinterForMember: no same-floor splinter in radius (member Y={memberPos.y:F1}) — cross-floor pick {best} (Y={best.Position.y:F1})");

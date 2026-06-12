@@ -400,13 +400,6 @@ public class MovementSystem
             }
 
             var state = watch.Door.DoorState;
-            if (state == EDoorState.Open)
-            {
-                Log.Info($"DoorWatch: {watch.Agent} successfully opened door Id={watch.Door.Id} after {now - watch.RequestedAtTime:F1}s ({watch.Kind} → Open)");
-                _doorWatchRemoveBuffer.Add(kv.Key);
-                continue;
-            }
-
             var elapsed = now - watch.RequestedAtTime;
             if (elapsed < DoorWatchTimeoutSeconds) continue;
 
@@ -420,21 +413,22 @@ public class MovementSystem
                 Log.Debug($"DoorWatch: {watch.Agent} watch timeout on door Id={watch.Door.Id} after {elapsed:F1}s, state={state}, dist {watch.InitDistance:F1}m → {currentDist:F1}m — interaction may have failed but bot didn't pass through");
             }
 
-            // The open animation finishes in ~1s, so a door still Interacting at watch timeout (3s) is
-            // an interaction that died mid-flight. Left alone, the door stays Interacting for the rest
-            // of the raid: HandleDoors' state filter skips it (every later bot phases through with zero
-            // log) and the player's interaction prompt refuses it too. We initiated this interaction,
-            // so claw the state back to Shut and let the next approach retry cleanly.
+            // Bot-driven interactions never finalize the BSG door state: the animation plays and the
+            // door is visually open, but DoorState stays Interacting forever (the completion callback
+            // is tied to player-side animation events bots don't emit). Accepted desync — the visual is
+            // what matters. Settling the state back to Shut keeps the door alive: a door left on
+            // Interacting is skipped by HandleDoors (later bots would phase through silently) and shows
+            // no interaction prompt to the player.
             if (state == EDoorState.Interacting)
             {
                 try
                 {
                     watch.Door.DoorState = EDoorState.Shut;
-                    Log.Info($"DoorWatch: reset door Id={watch.Door.Id} from stuck Interacting → Shut (interaction never completed)");
+                    Log.Debug($"DoorWatch: reset door Id={watch.Door.Id} Interacting → Shut after {watch.Kind} window (bot interactions never finalize door state)");
                 }
                 catch (System.Exception e)
                 {
-                    Log.Debug($"DoorWatch: failed to reset stuck door Id={watch.Door.Id}: {e.Message}");
+                    Log.Debug($"DoorWatch: failed to reset door Id={watch.Door.Id}: {e.Message}");
                 }
             }
             _doorWatchRemoveBuffer.Add(kv.Key);
@@ -681,11 +675,8 @@ public class MovementSystem
                 list.RemoveAt(i);
                 continue;
             }
-            if (door.DoorState != EDoorState.Open)
-            {
-                list.RemoveAt(i);
-                continue;
-            }
+            // Mid-animation: let the DoorWatch settle the state first, retry on the next fire.
+            if (door.DoorState == EDoorState.Interacting) continue;
             var dist = XzDistance(agentPos, door.transform.position);
             if (dist < CloseDoorBehindMinDistance) continue;
             if (dist > CloseDoorBehindMaxDistance)
@@ -697,13 +688,25 @@ public class MovementSystem
             }
             try
             {
+                // Every door in this list was opened by us and sits visually open, but its state reads
+                // Shut (bot interactions never finalize state; the DoorWatch settled it). BSG validates
+                // Close against Open state only — re-align the state with the visual truth first, then
+                // settle it to Shut right after firing the close, matching the swing we just played.
+                if (door.DoorState != EDoorState.Open)
+                    door.DoorState = EDoorState.Open;
                 player.MovementContext.ResetCanUsePropState();
                 var gstruct = Door.Interact(player, EInteractionType.Close);
                 if (gstruct.Succeeded)
                 {
                     player.vmethod_1(door, gstruct.Value);
+                    door.DoorState = EDoorState.Shut;
+                    _doorInteractCooldown[door.GetInstanceID()] = Time.time;
                     closed++;
                     Log.Debug($"{agent} closed previously-opened door {door.Id} (stuck remediation, agent moved away)");
+                }
+                else
+                {
+                    door.DoorState = EDoorState.Shut;
                 }
             }
             catch (System.Exception e)
