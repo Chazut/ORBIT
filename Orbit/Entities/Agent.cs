@@ -72,6 +72,26 @@ public class Agent(int id, BotOwner bot, float[] taskScores) : Entity(id, taskSc
     public float GuardOnLootPoiSinceTime = -1f;
 
     /// <summary>
+    /// Doors this agent has opened recently. Capped at the most recent N entries. Consulted by the
+    /// "close doors behind me" remediation when the agent gets hard-stuck or starts churning across
+    /// multiple POIs — open doors swinging into corridors can wedge a bot's nav off the mesh, and
+    /// closing them gives the next path recalc a clean cross-section to work with. Closing fires only
+    /// on those remediation signals, never on a timer; an agent that's making progress never closes
+    /// anything.
+    /// </summary>
+    public readonly List<EFT.Interactive.Door> RecentOpenedDoors = new();
+
+    /// <summary>
+    /// Time.time of the last few per-agent POI blacklist firings (3-fail arrival blacklist or
+    /// guard-on-loot-POI watchdog). Used by the close-doors-behind remediation to detect "rapid
+    /// switching across MULTIPLE different POIs" — the per-POI 3-fail counter resets between POIs, so
+    /// the Exillius pattern (blacklist POI A, switch to POI B, blacklist B, etc.) never piles up on
+    /// any one counter and the door-close never triggers. This timestamp ring lets us see the
+    /// across-POI churn explicitly.
+    /// </summary>
+    public readonly List<float> RecentPoiBlacklistTimes = new();
+
+    /// <summary>
     /// This agent's own extract-loot threshold, rolled from their OWN SAIN brain's archetype range (for PMCs)
     /// or set to the faction-default global knob (PlayerScavs). 0 = not yet resolved (SAIN async attach still
     /// pending, or just never tried). Resolved lazily inside the loot routine the first time the squad's loot

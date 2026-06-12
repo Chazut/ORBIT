@@ -92,6 +92,11 @@ public class Movement
     public bool Prone = false;
     public MovementUrgency Urgency = MovementUrgency.Medium;
 
+    /// <summary>Until this time, path-following backs off instead of advancing — a door
+    /// interaction is in flight and the open animation is cancelled if the bot keeps
+    /// pushing forward through the doorway.</summary>
+    public float DoorInteractHoldUntil = -1f;
+
     public bool HasPath
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]

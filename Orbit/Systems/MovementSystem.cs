@@ -200,6 +200,18 @@ public class MovementSystem
         if (doorsNearby)
             moveSpeedMult = 0.25f;
 
+        // While a door interaction is in flight, the open animation only plays if the bot stops pushing
+        // forward through the doorway — the interact state is silently cancelled by movement input, the
+        // door stays stuck in Interacting and the bot phantom-walks. Back off toward the previous path
+        // corner for the animation window instead of advancing. User-reported case: CaptainShady on
+        // Shoreline, 6 doors followed in freecam — the only door that visually opened was the one where
+        // the bot happened to slow down; every full-speed pass phased.
+        if (Time.time < movement.DoorInteractHoldUntil)
+        {
+            HoldForDoorInteraction(agent);
+            return;
+        }
+
         // Speed
         var movementSpeed = movement.Speed * moveSpeedMult;
         var speedDelta = movementSpeed - player.Speed;
@@ -296,6 +308,40 @@ public class MovementSystem
     }
 
     /// <summary>
+    /// Step back toward the previous path corner at low speed while a door interaction plays out.
+    /// Backing off (rather than just standing) also clears the bot out of the swing arc for doors
+    /// that open toward them. When already at/near the hold point, no movement input is issued this
+    /// tick — the bot simply stands and lets the animation finish.
+    /// </summary>
+    private static void HoldForDoorInteraction(Agent agent)
+    {
+        var movement = agent.Movement;
+        var player = agent.Player;
+        if (player == null) return;
+
+        var holdTarget = movement.HasPath
+            ? movement.Path[Math.Max(0, movement.CurrentCorner - 1)]
+            : agent.Position;
+        var backVector = holdTarget - agent.Position;
+        backVector.y = 0f;
+        if (backVector.sqrMagnitude < 0.09f)
+            return;
+
+        backVector.Normalize();
+        agent.Bot.Mover.SetTargetMoveSpeed(DoorHoldMoveSpeed);
+        player.CharacterController.SetSteerDirection(backVector);
+        player.Move(CalcMoveDirection(backVector, player.Rotation));
+    }
+
+    private const float DoorHoldMoveSpeed = 0.33f;
+
+    /// <summary>
+    /// How long path-following backs off after firing a door interaction. Covers the push-open
+    /// animation (~1 s) plus margin for pull-open doors whose swing takes slightly longer.
+    /// </summary>
+    private const float DoorInteractHoldSeconds = 1.25f;
+
+    /// <summary>
     /// Tracks every OpenDoor / force-unlock interaction we've initiated. After
     /// <see cref="DoorWatchTimeoutSeconds"/> we poll the door's actual state — if it never reached Open AND
     /// the bot has walked past the door anyway, we log a `PHANTOM-WALKED` warning. Pure diagnostic, no
@@ -373,6 +419,24 @@ public class MovementSystem
             {
                 Log.Debug($"DoorWatch: {watch.Agent} watch timeout on door Id={watch.Door.Id} after {elapsed:F1}s, state={state}, dist {watch.InitDistance:F1}m → {currentDist:F1}m — interaction may have failed but bot didn't pass through");
             }
+
+            // The open animation finishes in ~1s, so a door still Interacting at watch timeout (3s) is
+            // an interaction that died mid-flight. Left alone, the door stays Interacting for the rest
+            // of the raid: HandleDoors' state filter skips it (every later bot phases through with zero
+            // log) and the player's interaction prompt refuses it too. We initiated this interaction,
+            // so claw the state back to Shut and let the next approach retry cleanly.
+            if (state == EDoorState.Interacting)
+            {
+                try
+                {
+                    watch.Door.DoorState = EDoorState.Shut;
+                    Log.Info($"DoorWatch: reset door Id={watch.Door.Id} from stuck Interacting → Shut (interaction never completed)");
+                }
+                catch (System.Exception e)
+                {
+                    Log.Debug($"DoorWatch: failed to reset stuck door Id={watch.Door.Id}: {e.Message}");
+                }
+            }
             _doorWatchRemoveBuffer.Add(kv.Key);
         }
         for (var i = 0; i < _doorWatchRemoveBuffer.Count; i++) _pendingDoorOpens.Remove(_doorWatchRemoveBuffer[i]);
@@ -410,12 +474,11 @@ public class MovementSystem
                   && door.DoorState != EDoorState.Open && door.DoorState != EDoorState.Interacting))
                 continue;
 
-            // Only open doors that the bot's current path actually crosses. Without this gate, every bot
-            // walking past a hallway flings open every door it brushes — a scav strolling through Dorms ends
-            // up popping every room. Path-crossing test: project the doorway frame segment (Close1 ↔
-            // Close2_Normal, stable regardless of swing state) onto the XZ plane and check if any of the next
-            // few path segments intersect it.
-            if (!PathCrossesDoorway(agent, doorLink)) continue;
+            // Only open doors the bot is actively heading toward — distance + forward-cone check.
+            // Without this gate, every bot in a hallway would pop every door they brush past just because
+            // the door is within voxel range. See IsBotApproachingDoor for the rationale (Dipcor field
+            // repro: segment-intersection missed ~80 % of doors).
+            if (!IsBotApproachingDoor(agent, doorLink)) continue;
 
             // Locked doors: only PMCs may attempt to unlock. Scavs/bosses/ raiders don't carry door keys in
             // their loadouts, and even if vmethod_1 silently fails without a key, letting every bot poll the
@@ -433,7 +496,14 @@ public class MovementSystem
                 // vmethod_1 would silently fail without a key anyway.
                 if (agent.Squad != null && agent.Squad.ForceUnlockDoorIds.Contains(door.GetInstanceID()))
                 {
+                    var doorIdForUnlock = door.GetInstanceID();
+                    if (_doorInteractCooldown.TryGetValue(doorIdForUnlock, out var lastUnlockTime)
+                        && Time.time - lastUnlockTime < DoorInteractCooldownSeconds)
+                    {
+                        continue; // already unlocking this door, wait for animation
+                    }
                     door.Unlock();
+                    _doorInteractCooldown[doorIdForUnlock] = Time.time;
                     Log.Debug($"{agent} force-unlocked {door.Id} (was Locked, squad had ForceUnlock tag)");
                     StartDoorWatch(agent, door, "Unlock");
                     continue; // next tick: door is Shut → normal Open path runs
@@ -441,16 +511,218 @@ public class MovementSystem
                 continue;
             }
 
-            OpenDoor(agent, door);
-            StartDoorWatch(agent, door, "Open");
+            if (OpenDoor(agent, door))
+                StartDoorWatch(agent, door, "Open");
         }
 
         return foundDoors;
     }
 
+    /// <summary>
+    /// Reset the player's "can use prop" state machine, ask BSG to construct a validated InteractionResult
+    /// via <see cref="Door.Interact"/> (this is the call that checks key inventory, ownership, lock state,
+    /// and produces the proper internal transition struct), then fire vmethod_1 with THAT result. The
+    /// previous implementation built an InteractionResult by hand — BSG silently no-op'd when the missing
+    /// internal fields were stale, which manifested as our PHANTOM-WALK signature on Customs dorm doors
+    /// (148 interactions initiated, 0 logged successfully opened, 7 phantom-walks). Also pre-enables
+    /// IgnoreInteractionCollision so the bot doesn't bounce off the door's collider during the animation
+    /// window.
+    /// </summary>
+    private bool OpenDoor(Agent agent, Door door)
+    {
+        var player = agent.Player;
+        if (player == null) return false;
+        // Per-door cooldown: HandleDoors runs every frame, but BSG's vmethod_1 takes a few frames to
+        // transition the door from Shut → Interacting → Open. If we re-fire vmethod_1 each frame in
+        // that window, BSG silently no-ops the duplicate calls and the door may never finish opening
+        // (canonical case: Customs dorm doors, 148 vmethod_1 fires in a row across multiple frames, 0
+        // confirmed transitions to Open). 1.5 s is enough to cover the open / unlock animation window
+        // and matches SAIN's _doorInteractionEndTime.
+        var doorId = door.GetInstanceID();
+        if (_doorInteractCooldown.TryGetValue(doorId, out var lastTime)
+            && Time.time - lastTime < DoorInteractCooldownSeconds)
+        {
+            return false;
+        }
+        try
+        {
+            // BSG won't play the door open animation unless the bot is in the right movement state at
+            // the moment vmethod_1 fires — a sprinting / proning / ADS'd bot's interaction is silently
+            // dropped, vmethod_1 returns successfully but visually nothing happens. The bot then walks
+            // through the collider (which we ignore for the duration) and phantom-walks. Prepare the
+            // bot exactly like the vanilla door interact flow: stand, no prone, no sprint, no ADS,
+            // target pose 1 (standing), normal walking speed.
+            var botOwner = agent.Bot;
+            try
+            {
+                botOwner.Sprint(false);
+                botOwner.SetPose(1f);
+                botOwner.Mover?.SetTargetMoveSpeed(1f);
+            }
+            catch (System.Exception prepEx)
+            {
+                Log.Debug($"{agent} OpenDoor prep on {door.Id} threw (non-fatal): {prepEx.Message}");
+            }
+
+            player.MovementContext.ResetCanUsePropState();
+            var gstruct = Door.Interact(player, EInteractionType.Open);
+            if (!gstruct.Succeeded)
+            {
+                Log.Debug($"{agent} OpenDoor on {door.Id}: Door.Interact returned non-success — interaction rejected by BSG (likely lock / key / state)");
+                return false;
+            }
+            player.vmethod_1(door, gstruct.Value);
+            // Set collision-pass AFTER vmethod_1 so the door's animation can drive the bot's traversal
+            // through the swing arc. Order matters: setting it before vmethod_1 lets the bot rush the
+            // collider before the animation has actually started.
+            if (door.Collider != null)
+                player.MovementContext.IgnoreInteractionCollision(door.Collider, true);
+            // Freeze forward path-following for the animation window — movement input cancels the
+            // interact state and the door never completes Interacting → Open (see UpdateMovement).
+            agent.Movement.DoorInteractHoldUntil = Time.time + DoorInteractHoldSeconds;
+            _doorInteractCooldown[doorId] = Time.time;
+            // Remember the door so the stuck remediation can close it later if the bot's nav gets
+            // wedged on a swing-arc-into-corridor pattern. Cap the list at MaxRecentOpenedDoors so it
+            // doesn't grow unbounded over a long raid.
+            var list = agent.RecentOpenedDoors;
+            list.Remove(door); // dedup if reopened
+            list.Add(door);
+            if (list.Count > MaxRecentOpenedDoors) list.RemoveAt(0);
+            return true;
+        }
+        catch (System.Exception e)
+        {
+            Log.Debug($"{agent} OpenDoor on {door.Id} threw: {e.Message}");
+            return false;
+        }
+    }
+
+    private readonly Dictionary<int, float> _doorInteractCooldown = new();
+    private const float DoorInteractCooldownSeconds = 1.5f;
+
+    private const int MaxRecentOpenedDoors = 10;
+
+    /// <summary>
+    /// Min XZ distance between the agent and a door before we consider the door "behind" the agent and
+    /// safe to close without slamming into them. 4 m is enough that an agent looting in a small room
+    /// doesn't auto-close the door they just walked through.
+    /// </summary>
+    private const float CloseDoorBehindMinDistance = 4f;
+
+    /// <summary>
+    /// Max XZ distance between the agent and a door before we stop considering it relevant to the
+    /// current stuck. A door 100 m behind cannot possibly be the cause of the bot's nav-wedge right now,
+    /// closing it is pure noise. 30 m is a comfortable upper bound for "still nearby on the same
+    /// section of the map".
+    /// </summary>
+    private const float CloseDoorBehindMaxDistance = 30f;
+
+    /// <summary>
+    /// Window (in seconds) over which we count distinct per-agent blacklist firings to detect the
+    /// "rapid POI churn" pattern. The Exillius case on Customs saw POI 349 blacklisted at F102866 then
+    /// POI 371 blacklisted at F103041 — different POIs ~4 s apart, but the per-POI 3-fail counter never
+    /// catches across-POI switching. Tracking distinct fires in a sliding window does.
+    /// </summary>
+    private const float RapidChurnWindowSeconds = 10f;
+
+    /// <summary>
+    /// Number of distinct blacklist firings in <see cref="RapidChurnWindowSeconds"/> that triggers the
+    /// door-close remediation. 3 fires in 10 s ≈ 1 every 3 s, well above the baseline rate of healthy
+    /// play (~1 blacklist per 30-60 s). 2 was too sensitive — a single unlucky POI placement followed
+    /// by a sweep-chain miss would tip it. 3 confirms the bot is genuinely churning, not just having
+    /// one bad streak.
+    /// </summary>
+    private const int RapidChurnThreshold = 3;
+
+    /// <summary>
+    /// Record a per-agent POI blacklist firing and, if the bot has just crossed the rapid-churn
+    /// threshold, fire the close-doors-behind remediation. Called from both the 3-fail arrival
+    /// blacklist (GotoObjectiveAction.TrackArrivalFailure) and the Guard-on-loot-POI watchdog
+    /// (GuardAction.Update) — either signal counts toward the same window.
+    /// </summary>
+    public void RegisterPoiBlacklistAndMaybeCloseDoors(Agent agent)
+    {
+        var times = agent?.RecentPoiBlacklistTimes;
+        if (times == null) return;
+        var now = Time.time;
+        var cutoff = now - RapidChurnWindowSeconds;
+        // Drop expired entries
+        for (var i = times.Count - 1; i >= 0; i--)
+            if (times[i] < cutoff) times.RemoveAt(i);
+        times.Add(now);
+        if (times.Count >= RapidChurnThreshold)
+        {
+            Log.Debug($"{agent} hit rapid POI churn threshold ({times.Count} blacklists in {RapidChurnWindowSeconds:F0}s) — closing doors behind to free paths");
+            CloseRecentDoorsBehindAgent(agent);
+            times.Clear(); // don't immediately re-trigger; the next fire restarts the window
+        }
+    }
+
+    /// <summary>
+    /// Fired by the stuck remediation paths (hard-stuck recalculate, per-agent 3-fail blacklist) when
+    /// the bot has trouble pathing. Closes any still-Open doors the agent personally opened and that
+    /// they've now walked away from — swing-arc geometry from one of those doors is the prime suspect
+    /// for wedging the bot's nav, and a recalculated path through a clean cross-section often succeeds.
+    /// Cheap: only walks the agent's own opened-doors list, only fires under explicit stuck signals.
+    /// </summary>
+    public void CloseRecentDoorsBehindAgent(Agent agent)
+    {
+        var list = agent?.RecentOpenedDoors;
+        if (list == null || list.Count == 0) return;
+        var player = agent.Player;
+        if (player == null) return;
+        var agentPos = agent.Position;
+        var closed = 0;
+        for (var i = list.Count - 1; i >= 0; i--)
+        {
+            var door = list[i];
+            if (door == null || !door.enabled || !door.Operatable)
+            {
+                list.RemoveAt(i);
+                continue;
+            }
+            if (door.DoorState != EDoorState.Open)
+            {
+                list.RemoveAt(i);
+                continue;
+            }
+            var dist = XzDistance(agentPos, door.transform.position);
+            if (dist < CloseDoorBehindMinDistance) continue;
+            if (dist > CloseDoorBehindMaxDistance)
+            {
+                // Door is far away — can't possibly be causing the current stuck. Drop it from the
+                // tracking list so the next fire doesn't waste cycles on it.
+                list.RemoveAt(i);
+                continue;
+            }
+            try
+            {
+                player.MovementContext.ResetCanUsePropState();
+                var gstruct = Door.Interact(player, EInteractionType.Close);
+                if (gstruct.Succeeded)
+                {
+                    player.vmethod_1(door, gstruct.Value);
+                    closed++;
+                    Log.Debug($"{agent} closed previously-opened door {door.Id} (stuck remediation, agent moved away)");
+                }
+            }
+            catch (System.Exception e)
+            {
+                Log.Debug($"{agent} CloseRecentDoorsBehindAgent on {door.Id} threw: {e.Message}");
+            }
+            list.RemoveAt(i);
+        }
+        if (closed > 0)
+            Log.Info($"{agent} closed {closed} previously-opened door(s) on stuck signal to free the path");
+    }
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static void OpenDoor(Agent agent, Door door)
-        => agent.Player.vmethod_1(door, new InteractionResult(EInteractionType.Open));
+    private static float XzDistance(Vector3 a, Vector3 b)
+    {
+        var dx = a.x - b.x;
+        var dz = a.z - b.z;
+        return Mathf.Sqrt(dx * dx + dz * dz);
+    }
 
     // Cap how far ahead we look on the path when deciding whether the bot is actually walking through this
     // door. 5 segments comfortably covers the next ~10-15m which is well past the 3m proximity gate above,
@@ -458,31 +730,77 @@ public class MovementSystem
     private const int PathCrossLookaheadSegments = 5;
 
     /// <summary>
-    /// True if the bot's current path crosses the doorway frame (segment from Close1 to Close2_Normal
-    /// projected onto XZ). Without this gate, HandleDoors would open every door the bot brushes past in a
-    /// hallway just because the door is within 3m and in the same voxel.
+    /// True if the bot's forward ray crosses the doorway threshold — distance ≤ 3 m to door center AND
+    /// the bot's forward direction (path next-corner or velocity) sweeps through the doorway frame
+    /// segment (Close1 ↔ Close2_Normal projected onto XZ). Replaces the previous segment-intersection
+    /// test against pre-computed path segments: that test failed when the path was stale or short, and
+    /// missed bots driven by BSG nav directly (Movement.Path null). Field repro: Dipcor on Shoreline
+    /// walked through ~10 doors but only fired 2 DoorWatch entries.
+    ///
+    /// Why forward-ray instead of cone-around-door-position: a cone catches doors that are slightly to
+    /// the side (bot walking down a narrow corridor with doors on the wall would pop them all). The
+    /// threshold-segment intersection only fires when the bot's IMMEDIATE forward path crosses the
+    /// doorway line — bot walking parallel to a wall doesn't trigger, bot turning to enter a doorway
+    /// does.
     /// </summary>
-    private static bool PathCrossesDoorway(Agent agent, NavMeshDoorLink doorLink)
+    private static bool IsBotApproachingDoor(Agent agent, NavMeshDoorLink doorLink)
     {
+        var door = doorLink.Door;
+        if (door == null) return false;
+
+        var agentPos = agent.Position;
+        var doorPos = door.transform.position;
+        var dx = doorPos.x - agentPos.x;
+        var dz = doorPos.z - agentPos.z;
+        var distSqr = dx * dx + dz * dz;
+        if (distSqr > 9f) return false; // > 3 m XZ — out of reach for this tick
+
+        // Bot's forward direction — prefer the path's next-corner direction, fall back to live
+        // velocity for bots whose nav is driven by BSG directly.
         var movement = agent.Movement;
-        if (!movement.HasPath || movement.Path == null) return false;
-
-        var b1 = doorLink.Close1;
-        var b2 = doorLink.Close2_Normal;
-
-        // First segment: bot position → current corner.
-        var current = movement.CurrentCorner;
-        if (current >= movement.Path.Length) return false;
-        if (PathHelper.Segments2dIntersectXZ(agent.Position, movement.Path[current], b1, b2)) return true;
-
-        // Following segments up to the lookahead cap.
-        var end = Math.Min(movement.Path.Length - 1, current + PathCrossLookaheadSegments);
-        for (var i = current; i < end; i++)
+        Vector3 forward;
+        if (movement.HasPath && movement.Path != null
+            && movement.CurrentCorner < movement.Path.Length)
         {
-            if (PathHelper.Segments2dIntersectXZ(movement.Path[i], movement.Path[i + 1], b1, b2)) return true;
+            forward = movement.Path[movement.CurrentCorner] - agentPos;
+        }
+        else
+        {
+            forward = agent.Player?.Velocity ?? Vector3.zero;
+        }
+        forward.y = 0f;
+        if (forward.sqrMagnitude < 0.04f) return false; // not moving meaningfully
+
+        forward.Normalize();
+
+        // Forward ray endpoint — far enough ahead to span any door at < 3 m distance even when the
+        // bot is approaching diagonally.
+        const float ForwardRayLength = 3.5f;
+        var rayEnd = new Vector3(
+            agentPos.x + forward.x * ForwardRayLength,
+            agentPos.y,
+            agentPos.z + forward.z * ForwardRayLength);
+
+        // Crosses the doorway threshold segment (Close1 ↔ Close2_Normal) projected onto XZ.
+        if (PathHelper.Segments2dIntersectXZ(agentPos, rayEnd, doorLink.Close1, doorLink.Close2_Normal))
+            return true;
+
+        // Fallback: ray the door's own collider. The threshold segment is a thin line at the frame's
+        // base — an off-axis approach can have the forward ray pass over the panel without crossing
+        // that segment in XZ (user repro: CaptainShady phased through 2 doors he reached diagonally,
+        // zero DoorWatch entries). "About to physically touch the door panel" is approach evidence
+        // regardless of angle, and Collider.Raycast tests just this one collider, not the scene.
+        var doorCollider = door.Collider;
+        if (doorCollider != null)
+        {
+            var ray = new Ray(agentPos + Vector3.up, forward);
+            if (doorCollider.Raycast(ray, out _, DoorColliderRayLength))
+                return true;
         }
         return false;
     }
+
+    private const float DoorColliderRayLength = 1.5f;
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void ResetPath(Agent agent, MovementStatus status = MovementStatus.Stopped)
@@ -687,6 +1005,10 @@ public class MovementSystem
                 case HardStuckStatus.None when stuck.Timer >= PathRetryDelay:
                     Log.Debug($"{agent} is hard stuck, attempting to recalculate path.");
                     stuck.Status = HardStuckStatus.Retrying;
+                    // Before retrying, close any doors the agent opened that might be wedging the
+                    // corridor — swing-arc geometry is a common cause of HardStuck in interior maps.
+                    // No-op if the agent hasn't opened any doors or all openings are still nearby.
+                    movementSystem.CloseRecentDoorsBehindAgent(agent);
                     movementSystem.MoveRetry(agent, agent.Movement.Target);
                     break;
                 case HardStuckStatus.Retrying when stuck.Timer >= TeleportDelay:
