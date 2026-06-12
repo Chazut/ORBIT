@@ -25,6 +25,8 @@ public static class LootConfig
     public static ConfigEntry<bool> ArmorSwapEnabled;
     public static ConfigEntry<float> RigSwapMargin;
     public static ConfigEntry<bool> RigSwapEnabled;
+    public static ConfigEntry<float> BackpackSwapMargin;
+    public static ConfigEntry<bool> BackpackSwapEnabled;
     public static ConfigEntry<float> HeadsetSwapMargin;
     public static ConfigEntry<bool> HeadsetSwapEnabled;
     public static ConfigEntry<float> WeaponStripMinPricePerSlot;
@@ -71,6 +73,12 @@ public static class LootConfig
                 new AcceptableValueRange<float>(1.0f, 2.0f)));
         RigSwapEnabled = config.Bind(section, "Enable rig swap (Phase 3)", true,
             "Master toggle for the in-raid TacticalVest swap layer. When OFF, looted rigs fall back to the default placement path. Independent of the weapon and armor toggles.");
+        BackpackSwapMargin = config.Bind(section, "Backpack swap margin", 1.10f,
+            new ConfigDescription(
+                "PMC / PlayerScav backpack swap threshold. Candidate score (grid cells, price tie-breaker) must exceed this multiple of the currently-equipped bag's score to trigger a swap. The bot's carry is transferred into the new bag before the exchange; the swap is skipped when it wouldn't fit. Scavs ignore this — they only equip into empty slots.",
+                new AcceptableValueRange<float>(1.0f, 2.0f)));
+        BackpackSwapEnabled = config.Bind(section, "Enable backpack swap", true,
+            "Master toggle for the in-raid backpack swap layer. When OFF, looted backpacks fall back to the default placement path. Independent of the other swap toggles.");
         HeadsetSwapMargin = config.Bind(section, "Headset swap margin", 1.10f,
             new ConfigDescription(
                 "PMC / PlayerScav audio-headset (Earpiece) swap threshold. Candidate handbook price must exceed this multiple of the currently-equipped headset's price to trigger a swap. Scavs ignore this — they only equip into empty slots.",
