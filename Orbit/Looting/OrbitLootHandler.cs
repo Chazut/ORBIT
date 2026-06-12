@@ -409,7 +409,7 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
         var toStrip = new List<(Weapon weapon, string path)>();
         foreach (var (w, path) in containerWeapons)
         {
-            if (LootConfig.WeaponSwapEnabled?.Value != true || !CanEquipWeaponIntoEmptySlot(w))
+            if (!CanEquipWeaponIntoEmptySlot(w))
             {
                 toStrip.Add((w, path));
                 continue;
@@ -459,7 +459,7 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
         // Rig candidates use a dedicated resolver because RigScorer is keyed off TacticalVest cells + armor
         // class instead of ArmorComponent alone.
         (Item item, string path, float score)? bestRig = null;
-        if (containerRigs.Count > 0 && LootConfig.RigSwapEnabled?.Value == true)
+        if (containerRigs.Count > 0)
         {
             var equipment = _bot?.GetPlayer?.Inventory?.Equipment;
             var rigSlot = equipment?.GetSlot(EquipmentSlot.TacticalVest);
@@ -477,7 +477,7 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
             }
         }
         (Item item, string path, float score)? bestBackpack = null;
-        if (containerBackpacks.Count > 0 && LootConfig.BackpackSwapEnabled?.Value == true)
+        if (containerBackpacks.Count > 0)
         {
             var equipment = _bot?.GetPlayer?.Inventory?.Equipment;
             var backpackSlot = equipment?.GetSlot(EquipmentSlot.Backpack);
@@ -495,7 +495,7 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
             }
         }
         (Item item, string path, float score)? bestHeadset = null;
-        if (containerHeadsets.Count > 0 && LootConfig.HeadsetSwapEnabled?.Value == true)
+        if (containerHeadsets.Count > 0)
         {
             var equipment = _bot?.GetPlayer?.Inventory?.Equipment;
             var earpieceSlot = equipment?.GetSlot(EquipmentSlot.Earpiece);
@@ -578,7 +578,7 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
 
     private (Item item, string path, float score)? ResolveBestGearForEmptySlot(List<(Item item, string path)> candidates, EquipmentSlot slotKind)
     {
-        if (candidates.Count == 0 || LootConfig.ArmorSwapEnabled?.Value != true) return null;
+        if (candidates.Count == 0) return null;
         var equipment = _bot?.GetPlayer?.Inventory?.Equipment;
         var slot = equipment?.GetSlot(slotKind);
         if (slot == null || slot.ContainedItem != null) return null; // equip-only — slot must already be empty
@@ -770,11 +770,6 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
         var toStrip = new List<(string sourcePath, Weapon weapon)>();
         foreach (var (sourcePath, weaponRoot) in corpseWeapons)
         {
-            if (LootConfig.WeaponSwapEnabled?.Value != true)
-            {
-                toStrip.Add((sourcePath, weaponRoot));
-                continue;
-            }
             var verdict = WeaponSwapper.WouldSwap(_bot, weaponRoot, _currentSourceRoot);
             Log.Info($"OrbitLootHandler.Corpse({Nick}, {corpse.name}): phase2 pre-eval {sourcePath} → {weaponRoot.LocalizedName()} would-swap={verdict.WouldSwap} score={verdict.CandidateScore:F1}");
             if (!verdict.WouldSwap)
@@ -798,35 +793,35 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
         // Same pre-classification for body armor and helmet. Each slot is independent — the bot can swap a
         // better armor and a better helmet in the same session.
         (EquipmentSlot slotKind, Item candidate, float score)? bestArmor = null;
-        if (corpseArmorItem != null && LootConfig.ArmorSwapEnabled?.Value == true)
+        if (corpseArmorItem != null)
         {
             var verdict = ArmorSwapper.WouldSwap(_bot, corpseArmorItem, EquipmentSlot.ArmorVest);
             Log.Info($"OrbitLootHandler.Corpse({Nick}, {corpse.name}): phase2 pre-eval ArmorVest → {corpseArmorItem.LocalizedName()} would-swap={verdict.WouldSwap} score={verdict.CandidateScore:F1}");
             if (verdict.WouldSwap) bestArmor = (EquipmentSlot.ArmorVest, corpseArmorItem, verdict.CandidateScore);
         }
         (EquipmentSlot slotKind, Item candidate, float score)? bestHelmet = null;
-        if (corpseHelmetItem != null && LootConfig.ArmorSwapEnabled?.Value == true)
+        if (corpseHelmetItem != null)
         {
             var verdict = ArmorSwapper.WouldSwap(_bot, corpseHelmetItem, EquipmentSlot.Headwear);
             Log.Info($"OrbitLootHandler.Corpse({Nick}, {corpse.name}): phase2 pre-eval Headwear → {corpseHelmetItem.LocalizedName()} would-swap={verdict.WouldSwap} score={verdict.CandidateScore:F1}");
             if (verdict.WouldSwap) bestHelmet = (EquipmentSlot.Headwear, corpseHelmetItem, verdict.CandidateScore);
         }
         (Item candidate, float score)? bestRig = null;
-        if (corpseRigItem != null && LootConfig.RigSwapEnabled?.Value == true)
+        if (corpseRigItem != null)
         {
             var verdict = RigSwapper.WouldSwap(_bot, corpseRigItem);
             Log.Info($"OrbitLootHandler.Corpse({Nick}, {corpse.name}): phase2 pre-eval TacticalVest → {corpseRigItem.LocalizedName()} would-swap={verdict.WouldSwap} score={verdict.CandidateScore:F1}");
             if (verdict.WouldSwap) bestRig = (corpseRigItem, verdict.CandidateScore);
         }
         (Item candidate, float score)? bestBackpack = null;
-        if (corpseBackpackItem != null && LootConfig.BackpackSwapEnabled?.Value == true)
+        if (corpseBackpackItem != null)
         {
             var verdict = BackpackSwapper.WouldSwap(_bot, corpseBackpackItem);
             Log.Info($"OrbitLootHandler.Corpse({Nick}, {corpse.name}): phase2 pre-eval Backpack → {corpseBackpackItem.LocalizedName()} would-swap={verdict.WouldSwap} score={verdict.CandidateScore:F1}");
             if (verdict.WouldSwap) bestBackpack = (corpseBackpackItem, verdict.CandidateScore);
         }
         (Item candidate, float score)? bestHeadset = null;
-        if (corpseHeadsetItem != null && LootConfig.HeadsetSwapEnabled?.Value == true)
+        if (corpseHeadsetItem != null)
         {
             var verdict = HeadsetSwapper.WouldSwap(_bot, corpseHeadsetItem);
             Log.Info($"OrbitLootHandler.Corpse({Nick}, {corpse.name}): phase2 pre-eval Earpiece → {corpseHeadsetItem.LocalizedName()} would-swap={verdict.WouldSwap} score={verdict.CandidateScore:F1}");
@@ -1083,7 +1078,7 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
         // path is sequenced to make the swap the last BSG op of the session. Container weapons go through
         // equip-only; if no empty slot fits, fall through to the default placement so the weapon lands in the
         // bot's bag instead of being left behind.
-        if (entry.Item is Weapon candidateWeapon && (LootConfig.WeaponSwapEnabled?.Value ?? true))
+        if (entry.Item is Weapon candidateWeapon)
         {
             WeaponSwapper.Outcome outcome;
             if (_allowWeaponSwapPath)
@@ -1480,24 +1475,21 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
     {
         _postSwapWeapons.Clear();
         var displaced = new HashSet<string>();
-        if (LootConfig.WeaponSwapEnabled?.Value == true)
+        if (corpseWeapons != null)
         {
-            if (corpseWeapons != null)
+            foreach (var (_, w) in corpseWeapons)
             {
-                foreach (var (_, w) in corpseWeapons)
-                {
-                    var verdict = WeaponSwapper.WouldSwap(_bot, w, _currentSourceRoot);
-                    if (!verdict.WouldSwap) continue;
-                    _postSwapWeapons.Add(w);
-                    if (verdict.DisplacedWeapon != null) displaced.Add(verdict.DisplacedWeapon.Id);
-                }
+                var verdict = WeaponSwapper.WouldSwap(_bot, w, _currentSourceRoot);
+                if (!verdict.WouldSwap) continue;
+                _postSwapWeapons.Add(w);
+                if (verdict.DisplacedWeapon != null) displaced.Add(verdict.DisplacedWeapon.Id);
             }
-            if (containerWeapons != null)
+        }
+        if (containerWeapons != null)
+        {
+            foreach (var (w, _) in containerWeapons)
             {
-                foreach (var (w, _) in containerWeapons)
-                {
-                    if (CanEquipWeaponIntoEmptySlot(w)) _postSwapWeapons.Add(w);
-                }
+                if (CanEquipWeaponIntoEmptySlot(w)) _postSwapWeapons.Add(w);
             }
         }
         var equipment = _bot?.GetPlayer?.Inventory?.Equipment;

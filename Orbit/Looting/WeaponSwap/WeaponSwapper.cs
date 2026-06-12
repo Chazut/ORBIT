@@ -96,7 +96,7 @@ public static class WeaponSwapper
             return WouldSwapResult.No;
         }
 
-        var margin = LootConfig.WeaponSwapMargin?.Value ?? 1.10f;
+        const float margin = LootConfig.SwapMargin;
 
         var candidateAmmo = WeaponScorer.CollectUsableAmmo(candidate, candidatePool);
         if (candidateAmmo.BestPenetration < 20 && BotHasGoodPenWeapon(bot, inventoryItems))
@@ -217,7 +217,7 @@ public static class WeaponSwapper
 
         var mapId = Singleton<OrbitManager>.Instance?.MapId;
         var weights = MapWeaponWeights.Resolve(mapId);
-        var margin = LootConfig.WeaponSwapMargin?.Value ?? 1.10f;
+        const float margin = LootConfig.SwapMargin;
         Log.Debug($"WeaponSwap({nick}): map={mapId ?? "?"} weights=ergo×{weights.Ergo:F2} recoil×{weights.Recoil:F2} dist×{weights.EffectiveDist:F2} ammoQ×{weights.AmmoQuality:F2}, margin={margin:F2}");
 
         Log.Info($"[TRACE] EvaluateAndPerformAsync({nick}): checking slot compatibilities");

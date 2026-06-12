@@ -57,7 +57,7 @@ public static class ArmorSwapper
         var current = slot.ContainedItem;
         if (current == null) return new WouldSwapResult(true, candidateScore);
 
-        var margin = LootConfig.ArmorSwapMargin?.Value ?? 1.10f;
+        const float margin = LootConfig.SwapMargin;
         var currentScore = ArmorScorer.Score(current);
         var wouldSwap = candidateScore > currentScore * margin;
         return new WouldSwapResult(wouldSwap, candidateScore, wouldSwap ? current : null);
@@ -116,7 +116,7 @@ public static class ArmorSwapper
             return moved ? Outcome.Swapped : Outcome.Skipped;
         }
 
-        var margin = LootConfig.ArmorSwapMargin?.Value ?? 1.10f;
+        const float margin = LootConfig.SwapMargin;
         var currentScore = ArmorScorer.Score(current, $"{nick}:CURRENT");
         if (candidateScore <= currentScore * margin)
         {

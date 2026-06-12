@@ -39,7 +39,7 @@ public static class BackpackSwapper
 
         var candidateScore = BackpackScorer.Score(candidate);
         var currentScore = BackpackScorer.Score(current);
-        var margin = LootConfig.BackpackSwapMargin?.Value ?? 1.10f;
+        const float margin = LootConfig.SwapMargin;
         var wouldSwap = candidateScore > currentScore * margin;
         if (!wouldSwap) return new WouldSwapResult(false, candidateScore);
 
@@ -85,7 +85,7 @@ public static class BackpackSwapper
 
         var candidateScore = BackpackScorer.Score(candidate, $"{nick}:CAND");
         var currentScore = BackpackScorer.Score(current, $"{nick}:CURRENT");
-        var margin = LootConfig.BackpackSwapMargin?.Value ?? 1.10f;
+        const float margin = LootConfig.SwapMargin;
         if (candidateScore <= currentScore * margin)
         {
             Log.Debug($"BackpackSwap({nick}): keep {current.LocalizedName()}({currentScore:F1}) — candidate {candidate.LocalizedName()}({candidateScore:F1}) below margin {margin:F2}");

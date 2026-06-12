@@ -51,6 +51,7 @@ public class Plugin : BaseUnityPlugin
     public static ConfigEntry<bool> VanillaScavs;
     public static ConfigEntry<bool> VanillaGoons;
     public static ConfigEntry<bool> VanillaCultists;
+    public static ConfigEntry<bool> VanillaRaiders;
 
     // 02. POI guard duration
     public static ConfigEntry<Vector2> ObjectiveGuardDuration;
@@ -61,6 +62,8 @@ public class Plugin : BaseUnityPlugin
     public static ConfigEntry<float> AdvectionZoneRadiusScale;
     public static ConfigEntry<float> AdvectionZoneForceScale;
     public static ConfigEntry<float> AdvectionZoneRadiusDecayScale;
+    public static ConfigEntry<float> ConvergenceRadiusScale;
+    public static ConfigEntry<float> ConvergenceForceScale;
 
     // 04. Main objectives — setup
     public static ConfigEntry<bool> MainObjectivesEnabled;
@@ -269,9 +272,11 @@ public class Plugin : BaseUnityPlugin
         OrbitBrainLayer.SetVanillaScavExclusion(VanillaScavs.Value);
         OrbitBrainLayer.SetVanillaGoonExclusion(VanillaGoons.Value);
         OrbitBrainLayer.SetVanillaCultistExclusion(VanillaCultists.Value);
+        OrbitBrainLayer.SetVanillaRaiderExclusion(VanillaRaiders.Value);
         if (VanillaScavs.Value) Logger.LogInfo("Disable ORBIT on scavs ON — bot scavs running on BSG's vanilla brain (PlayerScavs unaffected).");
         if (VanillaGoons.Value) Logger.LogInfo("Disable ORBIT on goons ON — Goons (Knight / Big Pipe / Bird Eye) running on BSG's vanilla brain.");
         if (VanillaCultists.Value) Logger.LogInfo("Disable ORBIT on cultists ON — Cultists (Priest / Warriors / cursed scavs) running on BSG's vanilla brain.");
+        if (VanillaRaiders.Value) Logger.LogInfo("Disable ORBIT on raiders ON — Raiders (pmcBot) and Rogues (exUsec) running on BSG's vanilla brain.");
 
         var brains = new List<string>
         {
@@ -371,12 +376,15 @@ public class Plugin : BaseUnityPlugin
         VanillaCultists = Config.Bind(general, "Vanilla cultists (RESTART)", false, new ConfigDescription(
             "OFF (default): Cultists (Priest + Warriors + cursed scavs) are controlled by ORBIT. ON: Cultists run on BSG's vanilla brain.",
             null, new ConfigurationManagerAttributes { DispName = "Disable ORBIT on cultists (RESTART)", Order = 3 }));
+        VanillaRaiders = Config.Bind(general, "Vanilla raiders (RESTART)", false, new ConfigDescription(
+            "OFF (default): Raiders (pmcBot — Reserve / Labs) and Rogues (exUsec — Lighthouse) are controlled by ORBIT. ON: they run on BSG's vanilla brain.",
+            null, new ConfigurationManagerAttributes { DispName = "Disable ORBIT on raiders (RESTART)", Order = 2 }));
         RoamingScavs = Config.Bind(general, "Roaming Scavs", false, new ConfigDescription(
             "OFF (default): scavs stay near their spawn quartier (current cell + 8 neighbours). ON: scavs roam the whole map like PMCs. Ignored when Vanilla scavs is ON.",
-            null, new ConfigurationManagerAttributes { Order = 2 }));
+            null, new ConfigurationManagerAttributes { Order = 1 }));
         RoamingGoons = Config.Bind(general, "Roaming Goons", true, new ConfigDescription(
             "OFF: Goons stay near their spawn quartier. ON (default): Goons roam the whole map. Ignored when Vanilla goons is ON.",
-            null, new ConfigurationManagerAttributes { Order = 1 }));
+            null, new ConfigurationManagerAttributes { Order = 0 }));
 
         // ── 02. POI guard duration ──────────────────────────────────
         ObjectiveGuardDuration = Config.Bind(poiGuard, "Base guard duration (s, min..max)", new Vector2(60f, 180f), new ConfigDescription(
@@ -404,6 +412,16 @@ public class Plugin : BaseUnityPlugin
             "How fast a zone's force decays with distance. Larger = tighter to the zone. 1.0 = linear-ish.",
             new AcceptableValueRange<float>(0f, 5f), new ConfigurationManagerAttributes { Order = 1 }));
         AdvectionZoneRadiusDecayScale.SettingChanged += AdvectionZoneParametersChanged;
+
+        ConvergenceRadiusScale = Config.Bind(zones, "Convergence radius scale", 1f, new ConfigDescription(
+            "Multiplier on the radius of the convergence pull emitted from living human players (per-map base radius in Maps/Zones JSON). 1.0 = author defaults.",
+            new AcceptableValueRange<float>(0f, 10f), new ConfigurationManagerAttributes { Order = 0 }));
+        ConvergenceRadiusScale.SettingChanged += ConvergenceParametersChanged;
+
+        ConvergenceForceScale = Config.Bind(zones, "Convergence force scale", 1f, new ConfigDescription(
+            "Multiplier on the strength of the convergence pull emitted from living human players. NEGATIVE pushes bots AWAY from players. 0 disables the pull.",
+            new AcceptableValueRange<float>(-10f, 10f), new ConfigurationManagerAttributes { Order = -1 }));
+        ConvergenceForceScale.SettingChanged += ConvergenceParametersChanged;
 
         // ── 04. Main objectives - setup ─────────────────────────────
         MainObjectivesEnabled = Config.Bind(mainSetup, "Enabled", true, new ConfigDescription(
@@ -647,5 +665,10 @@ public class Plugin : BaseUnityPlugin
     {
         // Phase 7 wires this to OrbitManager so live F12 edits propagate into the waypoint system's force
         // field. Until then it's a no-op.
+    }
+
+    private static void ConvergenceParametersChanged(object sender, EventArgs args)
+    {
+        Comfort.Common.Singleton<Core.OrbitManager>.Instance?.WaypointSystem?.CalculateConvergence();
     }
 }

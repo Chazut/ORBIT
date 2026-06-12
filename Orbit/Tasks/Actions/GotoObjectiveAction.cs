@@ -34,6 +34,13 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
     private const float NavSnapArrivalRadius = 4f;
     private const float NavSnapArrivalRadiusSqr = NavSnapArrivalRadius * NavSnapArrivalRadius;
 
+    // Corpses get a tighter nav-snap cap: the loot session kneels the bot wherever it stands, and
+    // looting a body from 4m away reads as telekinesis. 2.5m = the upper bound of BSG's nav-snap
+    // drift AND roughly "at the body's feet" for a sprawled corpse — close enough that the kneel
+    // looks like a search.
+    private const float CorpseNavSnapArrivalRadius = 2.5f;
+    private const float CorpseNavSnapArrivalRadiusSqr = CorpseNavSnapArrivalRadius * CorpseNavSnapArrivalRadius;
+
     /// <summary>
     /// Grace window after dispatch before any "stopped outside arrival radius" failure can fire. BSG's
     /// BotMover takes a frame or two to begin the new move; if the agent was Stopped (Guard / loot
@@ -224,7 +231,9 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                         }
                     }
                     else if (agent.Movement.Status == MovementStatus.Stopped
-                             && distanceSqr <= NavSnapArrivalRadiusSqr
+                             && distanceSqr <= (objective.Location.Category == WaypointCategory.Corpse
+                                 ? CorpseNavSnapArrivalRadiusSqr
+                                 : NavSnapArrivalRadiusSqr)
                              && RequiresArrivalLoSCheck(objective.Location.Category)
                              && HasArrivalLineOfSight(agent, objective.Location.Position))
                     {

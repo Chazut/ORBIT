@@ -51,6 +51,16 @@ public class WaypointSystem
     private readonly Vector2[,] _advectionField;
     private readonly string _mapId;
 
+    // Player convergence: a per-cell pull toward the living human player(s), refreshed every 30s as
+    // they move. Folded into RequestNear's preferred-direction sum alongside advection / home / main.
+    private readonly List<Player> _humanPlayers;
+    private readonly Vector2[,] _convergenceField;
+    private readonly List<Vector2Int> _convergencePlayerCoords = [];
+    private readonly TimePacing _convergenceUpdatePacing = new(30f);
+    private WaypointConfig.Convergence _convergence;
+    private float _convergenceRadius;
+    private float _convergenceForce;
+
     private readonly List<Vector2Int> _tempCoordsBuffer = [];
     private readonly WaypointGatherer _waypointGatherer;
 
@@ -94,13 +104,15 @@ public class WaypointSystem
     public Vector2 WorldMin => _worldMin;
     public float CellSize => _cellSize;
     public Vector2[,] AdvectionField => _advectionField;
+    public Vector2[,] ConvergenceField => _convergenceField;
     public List<Zone> Zones => _zones;
 
-    public WaypointSystem(string mapId, WaypointConfig waypointConfig, BotsController botsController)
+    public WaypointSystem(string mapId, WaypointConfig waypointConfig, BotsController botsController, List<Player> humanPlayers)
     {
         _mapId = mapId;
         _zoneConfig = waypointConfig.MapZones[mapId];
         _botsController = botsController;
+        _humanPlayers = humanPlayers;
 
         // _cellSize must be set before WaypointGatherer is constructed — the gatherer scales synthetic/exfil
         // radii from it.
@@ -198,12 +210,97 @@ public class WaypointSystem
         _advectionField = new Vector2[_gridSize.x, _gridSize.y];
         CalculateAdvectionZones();
 
+        // Convergence — null in the zone JSON (file predates the restore) falls back to the compiled-in
+        // per-map default; radius/force are sampled once per raid from their ranges.
+        _convergence = _zoneConfig.Value.Convergence ?? WaypointConfig.DefaultConvergenceFor(mapId);
+        _convergenceRadius = _convergence.Radius.SampleUniform();
+        _convergenceForce = _convergence.Force.SampleUniform();
+        _convergenceField = new Vector2[_gridSize.x, _gridSize.y];
+        CalculateConvergence();
+        Log.Info($"Convergence enabled={_convergence.Enabled} radius: {_convergenceRadius:F0} force: {_convergenceForce:F2}");
+
         Log.Info($"Waypoint grid size: {_gridSize}, cell size: {_cellSize:F1}, waypoints: {builtinWaypoints.Count}");
         Log.Info($"Waypoint grid world bounds: [{_worldMin.x:F0},{_worldMin.y:F0}] -> [{worldMax.x:F0},{worldMax.y:F0}]");
         Log.Info($"Waypoint grid world size: {worldWidth:F0}x{worldHeight:F0} search radius: {searchRadius}");
     }
 
-    public void ReloadConfig() => _zoneConfig.Reload();
+    public void ReloadConfig()
+    {
+        _zoneConfig.Reload();
+        _convergence = _zoneConfig.Value.Convergence ?? WaypointConfig.DefaultConvergenceFor(_mapId);
+        _convergenceRadius = _convergence.Radius.SampleUniform();
+        _convergenceForce = _convergence.Force.SampleUniform();
+        CalculateConvergence();
+        Log.Info($"Convergence reloaded: enabled={_convergence.Enabled} radius: {_convergenceRadius:F0} force: {_convergenceForce:F2}");
+    }
+
+    /// <summary>Per-frame tick. Only refreshes the player-convergence field, on a 30s pacing — players
+    /// move, the pull follows them.</summary>
+    public void Update()
+    {
+        if (_convergenceUpdatePacing.Blocked())
+            return;
+        CalculateConvergence();
+    }
+
+    public void CalculateConvergence()
+    {
+        if (!_convergence.Enabled)
+        {
+            for (var x = 0; x < _gridSize.x; x++)
+                for (var y = 0; y < _gridSize.y; y++)
+                    _convergenceField[x, y] = Vector2.zero;
+            return;
+        }
+
+        // Collect the unique player cells — players are often stacked in one cell, no point summing
+        // duplicate contributions.
+        _convergencePlayerCoords.Clear();
+        for (var i = 0; i < _humanPlayers.Count; i++)
+        {
+            var player = _humanPlayers[i];
+            if (player?.HealthController is not { IsAlive: true })
+                continue;
+            var playerCoords = WorldToCell(player.Position);
+            if (_convergencePlayerCoords.Contains(playerCoords))
+                continue;
+            _convergencePlayerCoords.Add(playerCoords);
+        }
+
+        if (_convergencePlayerCoords.Count == 0)
+        {
+            // Everyone dead / extracted — fade the pull instead of leaving a stale field behind.
+            for (var x = 0; x < _gridSize.x; x++)
+                for (var y = 0; y < _gridSize.y; y++)
+                    _convergenceField[x, y] = Vector2.zero;
+            return;
+        }
+
+        var normRadius = Plugin.ConvergenceRadiusScale.Value * _convergenceRadius;
+        var forceScale = Plugin.ConvergenceForceScale.Value * _convergenceForce;
+
+        for (var x = 0; x < _gridSize.x; x++)
+        {
+            for (var y = 0; y < _gridSize.y; y++)
+            {
+                var cellCoords = new Vector2(x, y);
+                var convergenceVector = Vector2.zero;
+
+                for (var i = 0; i < _convergencePlayerCoords.Count; i++)
+                {
+                    Vector2 playerVector = _convergencePlayerCoords[i] - new Vector2Int(x, y);
+                    var inverseDistSqrFactor = 1 - Mathf.Min(playerVector.magnitude * _cellSize / normRadius, 1f);
+                    playerVector.Normalize();
+                    playerVector *= Mathf.Sqrt(inverseDistSqrFactor);
+                    convergenceVector += playerVector;
+                }
+                convergenceVector /= _convergencePlayerCoords.Count;
+                convergenceVector *= forceScale;
+
+                _convergenceField[x, y] = convergenceVector;
+            }
+        }
+    }
 
     public void CalculateAdvectionZones()
     {
@@ -360,6 +457,7 @@ public class WaypointSystem
         }
 
         var advectionVector = _advectionField[requestCoords.x, requestCoords.y];
+        var convergenceVector = _convergenceField[requestCoords.x, requestCoords.y];
         var randomization = Random.insideUnitCircle;
         randomization *= 0.5f;
         var momentumVector = (Vector2)(requestCoords - previousCoords);
@@ -368,10 +466,10 @@ public class WaypointSystem
         var homeVector = ComputeHomeAttraction(entity, requestCoords);
         var mainObjectiveVector = ComputeMainObjectiveAttraction(entity, requestCoords);
 
-        var prefDirection = momentumVector + advectionVector + randomization + homeVector + mainObjectiveVector;
+        var prefDirection = momentumVector + advectionVector + convergenceVector + randomization + homeVector + mainObjectiveVector;
 
         Log.Debug(
-            $"Waypoint search from {requestCoords} direction: {prefDirection} mom: {momentumVector} adv: {advectionVector} rand: {randomization} home: {homeVector} main: {mainObjectiveVector}"
+            $"Waypoint search from {requestCoords} direction: {prefDirection} mom: {momentumVector} adv: {advectionVector} conv: {convergenceVector} rand: {randomization} home: {homeVector} main: {mainObjectiveVector}"
         );
 
         if (_tempCoordsBuffer.Count == 0 || prefDirection == Vector2.zero)

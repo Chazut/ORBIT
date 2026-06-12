@@ -43,7 +43,7 @@ public static class RigSwapper
 
         var candidateScore = RigScorer.Score(candidate);
         var currentScore = RigScorer.Score(current);
-        var margin = LootConfig.RigSwapMargin?.Value ?? 1.10f;
+        const float margin = LootConfig.SwapMargin;
         var wouldSwap = candidateScore > currentScore * margin;
         if (!wouldSwap) return new WouldSwapResult(false, candidateScore);
 
@@ -99,7 +99,7 @@ public static class RigSwapper
 
         var candidateScore = RigScorer.Score(candidate, $"{nick}:CAND");
         var currentScore = RigScorer.Score(current, $"{nick}:CURRENT");
-        var margin = LootConfig.RigSwapMargin?.Value ?? 1.10f;
+        const float margin = LootConfig.SwapMargin;
         if (candidateScore <= currentScore * margin)
         {
             Log.Debug($"RigSwap({nick}): keep {current.LocalizedName()}({currentScore:F1}) — candidate {candidate.LocalizedName()}({candidateScore:F1}) below margin {margin:F2}");

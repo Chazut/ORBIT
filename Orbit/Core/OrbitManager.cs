@@ -80,7 +80,7 @@ public class OrbitManager
 
         MovementSystem = new MovementSystem(NavJobExecutor, humanPlayers);
         LookSystem = new LookSystem();
-        WaypointSystem = new WaypointSystem(MapId, Waypoints, botsController);
+        WaypointSystem = new WaypointSystem(MapId, Waypoints, botsController, humanPlayers);
         DoorSystem = new DoorSystem();
 
         RegisterComponents();
@@ -116,6 +116,7 @@ public class OrbitManager
         ActionManager.Update();
         MovementSystem.Update(_liveAgents);
         LookSystem.Update(_liveAgents);
+        WaypointSystem.Update();
 
         NavJobExecutor.Update();
     }

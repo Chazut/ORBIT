@@ -160,6 +160,13 @@ public static class BotTypeUtils
             or WildSpawnType.sectantWarrior
             or WildSpawnType.cursedAssault;
 
+    /// <summary>
+    /// Raiders (pmcBot — Reserve / Labs) and Rogues (exUsec — Lighthouse). Grouped together, mirroring
+    /// the HasRaider flag mapping above.
+    /// </summary>
+    public static bool IsRaider(this WildSpawnType wildSpawnType)
+        => wildSpawnType is WildSpawnType.pmcBot or WildSpawnType.exUsec;
+
     public static bool IsBoss(WildSpawnType wildSpawnType)
     {
         switch (wildSpawnType)

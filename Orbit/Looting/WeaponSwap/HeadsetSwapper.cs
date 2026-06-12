@@ -39,7 +39,7 @@ public static class HeadsetSwapper
         var current = slot.ContainedItem;
         if (current == null) return new WouldSwapResult(true, candidateScore);
 
-        var margin = LootConfig.HeadsetSwapMargin?.Value ?? 1.10f;
+        const float margin = LootConfig.SwapMargin;
         var currentScore = HeadsetScorer.Score(current);
         var wouldSwap = candidateScore > currentScore * margin;
         return new WouldSwapResult(wouldSwap, candidateScore, wouldSwap ? current : null);
@@ -82,7 +82,7 @@ public static class HeadsetSwapper
             return moved ? Outcome.Swapped : Outcome.Skipped;
         }
 
-        var margin = LootConfig.HeadsetSwapMargin?.Value ?? 1.10f;
+        const float margin = LootConfig.SwapMargin;
         var currentScore = HeadsetScorer.Score(current, $"{nick}:CURRENT");
         if (candidateScore <= currentScore * margin)
         {

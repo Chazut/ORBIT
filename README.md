@@ -373,6 +373,7 @@ No ETA, no promises, but on the list:
 - HasItem (RedRebel-style - bot must own a Red Rebel in inventory, but don't consume it; ignore the paracord and WearsItem gear constraints entirely)
 - Fallback to next-closest exfil if the chosen one is unreachable
 - Chance roll on whether a squad will use the car / V-Ex (SharedTimer) exfil
+- Emergency extract: a member who is bleeding or low on HP with no heals left heads for the nearest exfil alone - the rest of the squad keeps playing its objectives
 
 **Looting (post-MVP)**
 - In-raid weapon swap when bots find something strictly better (gun +
