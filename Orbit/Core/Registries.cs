@@ -178,8 +178,8 @@ public class SquadRegistry(SquadData squadData, StrategyManager strategyManager,
         if (isPmc && (Plugin.SainPersonalityEnabled?.Value ?? false))
         {
             squad.SainResolutionPending = true;
-            squad.SainResolveDeadline = UnityEngine.Time.time + 5f;
-            Log.Info($"{squad} PMC personality resolution deferred — strategy will retry every tick for 5s before locking to Average");
+            squad.SainResolveDeadline = UnityEngine.Time.time + SainResolveTimeoutSeconds;
+            Log.Info($"{squad} PMC personality resolution deferred — strategy retries every tick, {SainResolveTimeoutSeconds:F0}s from first member activation before locking to Average");
             return squad; // skip MainObjectiveBuilder until resolved (see TryResolvePersonality)
         }
 
@@ -191,10 +191,20 @@ public class SquadRegistry(SquadData squadData, StrategyManager strategyManager,
     }
 
     /// <summary>
+    /// How long SAIN gets to attach its BotComponent and answer the brain lookup before the squad locks
+    /// to Average. Counted from the first member's ACTIVATION, not from squad registration — squads
+    /// register during the load/warm-up phase, and SAIN only starts attaching once the bot is live in
+    /// the world (its own component gates on EBotState.Active). Shoreline's warm-up burned the old 5 s
+    /// before any bot was even active and all six PMC squads locked '(none)' → Average on the same tick.
+    /// </summary>
+    private const float SainResolveTimeoutSeconds = 30f;
+
+    /// <summary>
     /// Strategy-tick callback for PMC squads with deferred personality resolution. Retries the SAIN brain
-    /// lookup; once resolved (or the 5 s deadline elapses, locking to Average), rolls the PersonalityProfile
+    /// lookup; once resolved (or the deadline elapses, locking to Average), rolls the PersonalityProfile
     /// and generates the squad's main objectives using the resolved archetype's mix weights. Safe to call
-    /// every tick — early-returns if the squad isn't pending.
+    /// every tick — early-returns if the squad isn't pending. The deadline slides while no member is
+    /// active yet, so it only ever measures "SAIN had a live bot for N seconds", never loading time.
     /// </summary>
     public void TryResolvePersonality(Squad squad)
     {
@@ -202,6 +212,11 @@ public class SquadRegistry(SquadData squadData, StrategyManager strategyManager,
 
         var brainName = SainPersonality.GetBrainName(squad.Leader.Bot);
         var resolved = !string.IsNullOrEmpty(brainName);
+        if (!resolved && !AnyMemberActive(squad))
+        {
+            squad.SainResolveDeadline = UnityEngine.Time.time + SainResolveTimeoutSeconds;
+            return;
+        }
         var timedOut = UnityEngine.Time.time >= squad.SainResolveDeadline;
         if (!resolved && !timedOut) return; // still waiting for SAIN
 
@@ -213,6 +228,16 @@ public class SquadRegistry(SquadData squadData, StrategyManager strategyManager,
 
         // Now that the archetype is known, generate the main objectives using the locked mix weights.
         MainObjectiveBuilder.Generate(squad, waypointSystem);
+    }
+
+    private static bool AnyMemberActive(Squad squad)
+    {
+        for (var i = 0; i < squad.Size; i++)
+        {
+            var bot = squad.Members[i]?.Bot;
+            if (bot != null && bot.BotState == EBotState.Active) return true;
+        }
+        return false;
     }
 
     // Inlined PMC check — full BotTypeUtils helper lands in Phase 5.
