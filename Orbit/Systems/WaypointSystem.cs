@@ -799,7 +799,18 @@ public class WaypointSystem
         //
         // Self-exclusion: any waypoint within ~3m of memberPos is treated as "current location" and skipped,
         // otherwise the random pick still has a non-zero chance of returning the bot's exact spot.
+        //
+        // Same-floor preference (mirrors FindNearbySweepTarget): a parallel reservoir restricted to
+        // candidates within the floor tolerance of the MEMBER's current Y (not the anchor's — anchors sit
+        // at Y=0) wins over the any-floor reservoir whenever it has at least one candidate. The radius
+        // filter below is deliberately XZ-only, so without this preference every floor of a building is
+        // equally likely on each re-dispatch and bots yo-yo up and down the staircases for the whole
+        // LootValue phase (user repro: Jical + Manathy, Shoreline Sanatorium).
         const float selfExclusionDistSqr = 3f * 3f;
+        var yTolerance = Plugin.SameFloorLootYTolerance?.Value ?? 0f;
+        var preferSameFloor = yTolerance > 0f;
+        Waypoint bestSameFloor = null;
+        var sameFloorCandidates = 0;
         Waypoint best = null;
         var candidates = 0;
         for (var dx = -cellWindow; dx <= cellWindow; dx++)
@@ -835,9 +846,17 @@ public class WaypointSystem
                     if (distSqrMember <= selfExclusionDistSqr) continue;
                     candidates++;
                     if (Random.Range(0, candidates) == 0) best = loc;
+                    if (preferSameFloor && Mathf.Abs(loc.Position.y - memberPos.y) <= yTolerance)
+                    {
+                        sameFloorCandidates++;
+                        if (Random.Range(0, sameFloorCandidates) == 0) bestSameFloor = loc;
+                    }
                 }
             }
         }
+        if (bestSameFloor != null) return bestSameFloor;
+        if (preferSameFloor && best != null)
+            Log.Debug($"FindRoamSplinterForMember: no same-floor splinter in radius (member Y={memberPos.y:F1}) — cross-floor pick {best} (Y={best.Position.y:F1})");
         return best;
     }
 
