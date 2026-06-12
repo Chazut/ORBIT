@@ -62,6 +62,7 @@ public class Plugin : BaseUnityPlugin
     public static ConfigEntry<float> AdvectionZoneRadiusScale;
     public static ConfigEntry<float> AdvectionZoneForceScale;
     public static ConfigEntry<float> AdvectionZoneRadiusDecayScale;
+    public static ConfigEntry<bool> ConvergenceEnabled;
     public static ConfigEntry<float> ConvergenceRadiusScale;
     public static ConfigEntry<float> ConvergenceForceScale;
 
@@ -376,7 +377,7 @@ public class Plugin : BaseUnityPlugin
         VanillaCultists = Config.Bind(general, "Vanilla cultists (RESTART)", false, new ConfigDescription(
             "OFF (default): Cultists (Priest + Warriors + cursed scavs) are controlled by ORBIT. ON: Cultists run on BSG's vanilla brain.",
             null, new ConfigurationManagerAttributes { DispName = "Disable ORBIT on cultists (RESTART)", Order = 3 }));
-        VanillaRaiders = Config.Bind(general, "Vanilla raiders (RESTART)", false, new ConfigDescription(
+        VanillaRaiders = Config.Bind(general, "Vanilla raiders (RESTART)", true, new ConfigDescription(
             "OFF (default): Raiders (pmcBot — Reserve / Labs) and Rogues (exUsec — Lighthouse) are controlled by ORBIT. ON: they run on BSG's vanilla brain.",
             null, new ConfigurationManagerAttributes { DispName = "Disable ORBIT on raiders (RESTART)", Order = 2 }));
         RoamingScavs = Config.Bind(general, "Roaming Scavs", false, new ConfigDescription(
@@ -413,14 +414,19 @@ public class Plugin : BaseUnityPlugin
             new AcceptableValueRange<float>(0f, 5f), new ConfigurationManagerAttributes { Order = 1 }));
         AdvectionZoneRadiusDecayScale.SettingChanged += AdvectionZoneParametersChanged;
 
+        ConvergenceEnabled = Config.Bind(zones, "Player convergence", false, new ConfigDescription(
+            "Master toggle for the player-convergence pull: every cell of the dispatch grid receives a vector toward the living human player(s), so the world drifts toward where the action is. OFF (default): the field stays zero everywhere, regardless of the per-map JSON settings.",
+            null, new ConfigurationManagerAttributes { Order = 0 }));
+        ConvergenceEnabled.SettingChanged += ConvergenceParametersChanged;
+
         ConvergenceRadiusScale = Config.Bind(zones, "Convergence radius scale", 1f, new ConfigDescription(
             "Multiplier on the radius of the convergence pull emitted from living human players (per-map base radius in Maps/Zones JSON). 1.0 = author defaults.",
-            new AcceptableValueRange<float>(0f, 10f), new ConfigurationManagerAttributes { Order = 0 }));
+            new AcceptableValueRange<float>(0f, 10f), new ConfigurationManagerAttributes { Order = -1 }));
         ConvergenceRadiusScale.SettingChanged += ConvergenceParametersChanged;
 
         ConvergenceForceScale = Config.Bind(zones, "Convergence force scale", 1f, new ConfigDescription(
             "Multiplier on the strength of the convergence pull emitted from living human players. NEGATIVE pushes bots AWAY from players. 0 disables the pull.",
-            new AcceptableValueRange<float>(-10f, 10f), new ConfigurationManagerAttributes { Order = -1 }));
+            new AcceptableValueRange<float>(-10f, 10f), new ConfigurationManagerAttributes { Order = -2 }));
         ConvergenceForceScale.SettingChanged += ConvergenceParametersChanged;
 
         // ── 04. Main objectives - setup ─────────────────────────────

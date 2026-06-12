@@ -217,7 +217,7 @@ public class WaypointSystem
         _convergenceForce = _convergence.Force.SampleUniform();
         _convergenceField = new Vector2[_gridSize.x, _gridSize.y];
         CalculateConvergence();
-        Log.Info($"Convergence enabled={_convergence.Enabled} radius: {_convergenceRadius:F0} force: {_convergenceForce:F2}");
+        Log.Info($"Convergence enabled={ConvergenceActive} radius: {_convergenceRadius:F0} force: {_convergenceForce:F2}");
 
         Log.Info($"Waypoint grid size: {_gridSize}, cell size: {_cellSize:F1}, waypoints: {builtinWaypoints.Count}");
         Log.Info($"Waypoint grid world bounds: [{_worldMin.x:F0},{_worldMin.y:F0}] -> [{worldMax.x:F0},{worldMax.y:F0}]");
@@ -231,7 +231,7 @@ public class WaypointSystem
         _convergenceRadius = _convergence.Radius.SampleUniform();
         _convergenceForce = _convergence.Force.SampleUniform();
         CalculateConvergence();
-        Log.Info($"Convergence reloaded: enabled={_convergence.Enabled} radius: {_convergenceRadius:F0} force: {_convergenceForce:F2}");
+        Log.Info($"Convergence reloaded: enabled={ConvergenceActive} radius: {_convergenceRadius:F0} force: {_convergenceForce:F2}");
     }
 
     /// <summary>Per-frame tick. Only refreshes the player-convergence field, on a 30s pacing — players
@@ -243,9 +243,13 @@ public class WaypointSystem
         CalculateConvergence();
     }
 
+    /// <summary>Effective on/off: the F12 master toggle (default OFF) AND the per-map JSON Enabled flag
+    /// both have to agree.</summary>
+    private bool ConvergenceActive => (Plugin.ConvergenceEnabled?.Value ?? false) && _convergence.Enabled;
+
     public void CalculateConvergence()
     {
-        if (!_convergence.Enabled)
+        if (!ConvergenceActive)
         {
             for (var x = 0; x < _gridSize.x; x++)
                 for (var y = 0; y < _gridSize.y; y++)
