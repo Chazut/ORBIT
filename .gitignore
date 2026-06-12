@@ -16,3 +16,4 @@ dashboard/
 scripts/
 dist/
 notes/
+.claude/
