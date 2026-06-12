@@ -323,6 +323,15 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
             var agent = squad.Members[i];
             var agentObjective = agent.Objective;
 
+            // Skip the combat caller. The squad's objective during a combat-caller window is a virtual
+            // CombatCaller waypoint AT the caller's own position — re-allocated fresh every tick so
+            // reference-equality alignment fails and the dispatch reassigns the caller to a waypoint at
+            // their own feet, which "reaches" immediately, gets reassigned next tick, ad infinitum. The
+            // caller is engaging with the BSG combat layer; their objective field should be left alone so
+            // it doesn't churn. Other members continue to converge on the caller's position via the normal
+            // alignment path.
+            if (squad.CombatCallerMemberIdx == i) continue;
+
             // An agent is "aligned" with the squad if their location IS the squad's main objective, OR if
             // they're working a splinter that was picked around the squad's current main objective. Without
             // the SplinterParent check, followers on a splinter would look misaligned every tick and get

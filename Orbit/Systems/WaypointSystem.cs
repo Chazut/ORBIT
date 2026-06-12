@@ -578,6 +578,30 @@ public class WaypointSystem
     private bool WasCorpseKilledBySquad(int waypointId, int squadId)
         => _corpseKillerSquadId.TryGetValue(waypointId, out var owner) && owner == squadId;
 
+    /// <summary>
+    /// Drop every per-squad cache entry keyed by this squad id. Called from Registries.RemoveAgent when
+    /// the last member leaves and the squad is about to be torn down. Squad ids get RECYCLED when a new
+    /// BotsGroup joins after an empty squad gets removed (canonical case: Disturbing's Squad 1 wiped at
+    /// F311490 → Илья Приезжий took Squad 1 at F311876, inheriting the corpse-kill credit and bee-lining
+    /// 215 m across walls to a body he never killed). Without this clear-step, the corpse-LoS gate gets
+    /// bypassed for every reused id.
+    /// </summary>
+    public void ClearSquadCorpseCredits(int squadId)
+    {
+        // Iterate by copying keys so we can mutate the dict while removing.
+        var toRemove = _corpseKillerCreditScratch;
+        toRemove.Clear();
+        foreach (var kv in _corpseKillerSquadId)
+            if (kv.Value == squadId) toRemove.Add(kv.Key);
+        for (var i = 0; i < toRemove.Count; i++) _corpseKillerSquadId.Remove(toRemove[i]);
+        _lastLoggedOwnKillCorpse.Remove(squadId);
+        _squadUnreachable.Remove(squadId);
+        if (toRemove.Count > 0)
+            Log.Debug($"ClearSquadCorpseCredits: cleared {toRemove.Count} corpse-kill credit(s) for now-removed squadId={squadId}");
+    }
+
+    private readonly List<int> _corpseKillerCreditScratch = new();
+
     // Max cell-distance from the leader within which an own-kill corpse still trips the bee-line. Beyond
     // this, the kill is considered stale — the squad has drifted too far for the bee-line to make sense.
     private const int OwnKillCorpseMaxCellDistance = 3;
@@ -2125,6 +2149,23 @@ public class WaypointSystem
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private bool SquadCanUseWaypoint(Squad squad, bool? squadIsPmc, Waypoint loc)
     {
+        // Loot categories (corpse / container / loose) are off-limits for Goons / bosses / cultists /
+        // raiders / bloodhounds. They don't have a loot routine that knows what to do with the dispatch
+        // — they just pin the squad on a body they'll never actually loot, and the followers (Big Pipe
+        // / Birdeye) get splinter-dispatched around it and loop forever on arrival-check failures. Same
+        // gate as the own-kill bee-line skip in CorpseRegistrationPatch: PMC + PlayerScav + bot scav
+        // are allowed, everyone else gets filtered out at the dispatch source.
+        if (IsLootCategory(loc.Category))
+        {
+            var leaderRole = squad?.Leader?.Bot?.Profile?.Info?.Settings?.Role;
+            if (leaderRole.HasValue)
+            {
+                var leaderIsPmc = leaderRole.Value.IsPMC();
+                var leaderIsPlayerScav = squad?.Leader?.Bot?.Profile != null && squad.Leader.Bot.Profile.WillBeAPlayerScav();
+                var leaderIsBotScav = leaderRole.Value.IsScav() && !leaderIsPlayerScav;
+                if (!leaderIsPmc && !leaderIsPlayerScav && !leaderIsBotScav) return false;
+            }
+        }
         if (loc.Category != WaypointCategory.Exfil) return true;
         if (loc.Target is not ExfiltrationPoint exfil) return true;
 

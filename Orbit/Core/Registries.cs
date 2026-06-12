@@ -139,6 +139,10 @@ public class SquadRegistry(SquadData squadData, StrategyManager strategyManager,
         }
 
         Log.Debug($"Removing empty {squad}");
+        // Squad ids get recycled when a new BotsGroup joins later — drop every per-squad cache entry
+        // keyed by this id so the next squad doesn't inherit stale state (canonical case: corpse-kill
+        // credits transferring to a brand-new squad that never killed anyone, bypassing the LoS gate).
+        waypointSystem?.ClearSquadCorpseCredits(squad.Id);
         _squadIdMap.Remove(agent.Bot.BotsGroup.Id);
         squadData.Entities.Remove(squad);
         strategyManager.RemoveEntity(squad);
