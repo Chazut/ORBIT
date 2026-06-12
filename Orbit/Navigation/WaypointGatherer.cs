@@ -139,17 +139,23 @@ public class WaypointGatherer(float cellSize, BotsController botsController)
 
     public Waypoint CreateSyntheticWaypoint(Vector3 position)
     {
-        var radius = Mathf.Clamp(cellSize / 2f, 10f, 25f);
-        var radiusSqr = radius * radius;
+        // Cover scan stays wide (half a cell, 10-25m) — guards want sightline candidates around the
+        // whole patrol area. The ARRIVAL radius is decoupled and tight: with the old shared radius a
+        // bot "arrived" at a patrol point from up to 25m away, which made patrol legs evaporate (picks
+        // completed the moment the bot clipped the radius edge) and parked guards far from the actual
+        // point. 5m = the bot visibly walks TO the patrol point; BSG's nav-snap drift (1.5-2.5m) still
+        // fits comfortably inside.
+        var coverScanRadius = Mathf.Clamp(cellSize / 2f, 10f, 25f);
+        const float arrivalRadius = 5f;
         var name = $"Synthetic_{_idCounter}";
         const WaypointCategory category = WaypointCategory.Synthetic;
 
-        var coverData = CollectBuiltinCoverData(position, radius);
+        var coverData = CollectBuiltinCoverData(position, coverScanRadius);
 
         if (coverData.CoverPoints.Count < 16)
         {
             var extraPoints = 16 - coverData.CoverPoints.Count;
-            CollectSyntheticCoverData(coverData.CoverPoints, position, radius, extraPoints);
+            CollectSyntheticCoverData(coverData.CoverPoints, position, coverScanRadius, extraPoints);
         }
 
         if (coverData.CoverPoints.Count == 0)
@@ -157,7 +163,7 @@ public class WaypointGatherer(float cellSize, BotsController botsController)
             Log.Debug($"Waypoint {category}:{name} has 0 cover points in proximity");
         }
 
-        var waypoint = new Waypoint(_idCounter, category, name, position, radiusSqr, coverData.Doors, coverData.CoverPoints, target: null);
+        var waypoint = new Waypoint(_idCounter, category, name, position, arrivalRadius * arrivalRadius, coverData.Doors, coverData.CoverPoints, target: null);
         _idCounter++;
         return waypoint;
     }
