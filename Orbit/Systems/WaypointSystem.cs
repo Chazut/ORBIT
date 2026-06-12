@@ -104,7 +104,8 @@ public class WaypointSystem
 
         // _cellSize must be set before WaypointGatherer is constructed — the gatherer scales synthetic/exfil
         // radii from it.
-        Log.Info("Calculating world geometry");
+        // map= is parsed by dashboard/parse_log.py for the per-raid index — keep the format in sync.
+        Log.Info($"Calculating world geometry (map={mapId})");
         var geometryConfig = waypointConfig.MapGeometries.Value[mapId];
         _cellSize = geometryConfig.CellSize;
         _cellSubSize = _cellSize / 2f;
