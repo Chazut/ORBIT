@@ -81,7 +81,8 @@ room 100%, like a real player who missed a few items.
 The looting layer is custom, built straight on top of BSG's vanilla bot
 pickup APIs. It handles containers, corpses and loose world items, with a
 focus on making the bots feel like real players rather than vacuum
-cleaners.
+cleaners - and bots don't just hoard, they **upgrade their own gear**
+with what they find (see the swap layer below).
 
 **Per-bot value gate (PMCs and PlayerScavs)**
 - Each PMC has its own loot threshold rolled from its SAIN personality:
@@ -144,6 +145,29 @@ cleaners.
 - PMC corpses keep their melee weapon (Scabbard slot) on the body, same
   as live EFT. Scav corpses are fully lootable.
 - Secured containers are never touched, on any corpse.
+
+**In-raid gear upgrades (the swap layer)**
+- Bots upgrade what they wear and carry mid-raid: weapons, body armour,
+  helmets, rigs, backpacks and headsets all compete against what the bot
+  already has. Corpse gear can **displace** the bot's current piece when
+  it's clearly better (a real upgrade, not a sidegrade); containers and
+  ground loot only ever fill empty slots.
+- Weapons aren't judged on price. The scorer weighs ergonomics, recoil,
+  effective range and ammo quality, with per-map weights (a CQB build
+  rates differently on Factory than on Woods) - and it only counts mags
+  and ammo the bot can actually use. A sniper rifle with no compatible
+  ammo in reach scores like the paperweight it is.
+- A no-downgrade guard stops bots from trading a good armour-piercing
+  rifle for an expensive shotgun just because the price tag says so.
+- The displaced weapon goes to the corpse - but not before the bot strips
+  the expensive mods (scope, suppressor, grip...) into its bag and keeps
+  the mags that fit its new gun. Kill the bot later and you'll find the
+  old weapon on the body, picked clean.
+- Rig and backpack swaps move the bot's **entire carry into the new
+  piece first** - if a single item wouldn't fit, the swap is cancelled
+  rather than dropping anything. Armoured rigs only compete with
+  armoured rigs.
+- Scavs never swap - they only fill empty slots, vanilla style.
 
 **Chain-loot sweep**
 - After successfully looting a POI, the bot looks for nearby loose items
@@ -376,16 +400,8 @@ No ETA, no promises, but on the list:
 - Emergency extract: a member who is bleeding or low on HP with no heals left heads for the nearest exfil alone - the rest of the squad keeps playing its objectives
 
 **Looting (post-MVP)**
-- In-raid weapon swap when bots find something strictly better (gun +
-  mods + matching mags + ammo carried together)
-- In-raid armour / helmet / rig / headwear swap, with item transfer from
-  the old rig into the new one
-- Magazine compatibility check (caliber vs the bot's current weapon)
-  before considering a mag worth taking
 - Spare ammo preload to the secure container instead of crowding the
   main inventory
-- Strip-then-throw on a weapon the bot is about to discard - keep the
-  scope / silencer / grip / laser, drop the rest
 - Post-loot inventory sort so the grid stays usable as the bot fills up
 - Teammates can grab a dead squadmate's spawn gear and stash it
   somewhere quiet - simulates a real squad taking care of their
@@ -395,7 +411,6 @@ No ETA, no promises, but on the list:
 
 **Tuning**
 - Faction takeover split: patrols → ORBIT, checkpoints → vanilla (RUAF / UNTAR / BlackDivision)
-- F12 toggle to opt Raiders out of ORBIT entirely (they currently get the brain layer with no main objectives or loot, just patrol idle)
 - Flip the faction-control model to opt-IN instead of opt-OUT — ORBIT only controls explicitly enabled bot types, safer for future custom-bot mods
 
 **Animations / polish**
