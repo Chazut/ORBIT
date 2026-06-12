@@ -344,6 +344,17 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
             var splinterAlreadyDone = agentObjective.SplinterParent != null
                                       && (agentObjective.Status == ObjectiveStatus.Finished
                                           || agentObjective.Status == ObjectiveStatus.Failed);
+            // Roam continuation for the leader: anchor-first parks i=0 on the squad anchor, and
+            // "Location == squad objective" keeps them aligned forever once Finished — the leader stood
+            // guarding beside his completed patrol point for a minute while followers walked out their
+            // splinters (user repro: Blackleaf420, Shoreline Kills roam). During roam, a leader who has
+            // FINISHED the anchor is treated as misaligned so he falls into the splinter branches like
+            // everyone else; followers' targets are untouched.
+            var leaderFinishedAnchorInRoam = i == 0 && useRoam
+                                             && agentObjective.SplinterParent == null
+                                             && agentObjective.Location != null
+                                             && agentObjective.Location == squadObjective.Location
+                                             && agentObjective.Status == ObjectiveStatus.Finished;
             // Cross-anchor sticky: when the squad anchor flips (current main completed, leader switched
             // targets, etc.), keep every member on their CURRENT splinter until they physically reach it or it
             // gets blacklisted. The previous radius gate (only sticky if the splinter sits within
@@ -357,11 +368,13 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                                              && squadObjective.Location != null
                                              && agentObjective.SplinterParent != squadObjective.Location
                                              && !squad.CompletedPoiIds.Contains(agentObjective.Location.Id);
-            var aligned = !splinterAlreadyDone
+            var aligned = !splinterAlreadyDone && !leaderFinishedAnchorInRoam
                           && (agentObjective.Location == squadObjective.Location
                               || (agentObjective.SplinterParent != null
                                   && agentObjective.SplinterParent == squadObjective.Location)
                               || splinterStickyAcrossAnchor);
+            if (leaderFinishedAnchorInRoam)
+                Log.Debug($"{agent} leader roam continuation: finished anchor {agentObjective.Location}, picking a splinter instead of guarding");
 
             if (aligned && agentObjective.Location != null)
             {
@@ -416,7 +429,14 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                          && !anchorReservedForOwnKill
                          && squadObjective.Location != null
                          && !squad.CompletedPoiIds.Contains(squadObjective.Location.Id)
-                         && !agent.ValueSkippedPoiIds.Contains(squadObjective.Location.Id))
+                         && !agent.ValueSkippedPoiIds.Contains(squadObjective.Location.Id)
+                         // A synthetic anchor still under its visit cooldown was just patrolled (by this
+                         // leader, typically — the roam-continuation path lands here right after his
+                         // Finished). Re-taking it would ping-pong anchor ↔ splinter every other pick;
+                         // roam a splinter instead until the cooldown lapses.
+                         && !(squadObjective.Location.Category == WaypointCategory.Synthetic
+                              && squad.RecentlyVisitedPoiCooldowns.TryGetValue(squadObjective.Location.Id, out var anchorVisitExpiry)
+                              && Time.time < anchorVisitExpiry))
                 {
                     // Leader takes the anchor itself. Falls through to the splinter branches when the anchor
                     // is squad-blacklisted or in the leader's personal value-skip set.

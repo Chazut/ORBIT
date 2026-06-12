@@ -787,6 +787,7 @@ public class WaypointSystem
         // swapped to the main's anchor position when the bot has drifted further than `radius` from the
         // anchor — a leash that lets the bot wander up to ~50m organically but snaps the next pick back into
         // the main's zone if they've strayed too far). Self-exclusion below still uses memberPos.
+        const float MinSyntheticHopMeters = 10f;
         var center = WorldToCell(searchCenter);
         // Convert radius to cell window. 50m / 75m cell ≈ 1 cell window → search the 3×3 around member. 75m /
         // 50m cell ≈ 2 cell window for tighter cells.
@@ -845,6 +846,23 @@ public class WaypointSystem
                     if (distSqrCentre > radSqr) continue;
                     var distSqrMember = (loc.Position - memberPos).sqrMagnitude;
                     if (distSqrMember <= selfExclusionDistSqr) continue;
+                    if (loc.Category == WaypointCategory.Synthetic)
+                    {
+                        // Patrol points have big arrival radii (10-15m). A candidate the bot already
+                        // stands inside of — or barely outside — completes the instant it's picked:
+                        // Finished → re-pick → next neighbour, 2-5s per hop in dense clusters, which
+                        // reads from the outside as "bots switch POIs without ever reaching them"
+                        // (user repro: Randek's squad, Shoreline village, Synthetic_925/928/929/933/935
+                        // chains). Require a real patrol leg: the pick must sit at least
+                        // MinSyntheticHopMeters beyond its own arrival radius.
+                        var minHop = Mathf.Sqrt(loc.RadiusSqr) + MinSyntheticHopMeters;
+                        if (distSqrMember < minHop * minHop) continue;
+                        // Rotate the cluster: a patrol point any member visited recently is off the
+                        // menu until its cooldown lapses (same map PickFromCell already consults).
+                        if (squad != null
+                            && squad.RecentlyVisitedPoiCooldowns.TryGetValue(loc.Id, out var visitExpiry)
+                            && Time.time < visitExpiry) continue;
+                    }
                     candidates++;
                     if (Random.Range(0, candidates) == 0) best = loc;
                     if (preferSameFloor && Mathf.Abs(loc.Position.y - memberPos.y) <= yTolerance)
@@ -1570,7 +1588,18 @@ public class WaypointSystem
             if (proba >= 1f || Random.value < proba)
             {
                 squad.ForceUnlockDoorIds.Add(doorId);
-                Log.Info($"{squad} granted force-unlock on door {door.Id} (instance {doorId}) for {pick} — {(isMainAnchor ? "MAIN anchor (100%)" : $"intermediate ({proba:F2})")}");
+                // Unlock world-side immediately: the grant alone reroutes nothing — the locked door's
+                // navmesh link stays closed, so the dispatch path computed right after this pick routes
+                // AROUND the building to the exterior point nearest the target, and the proximity-
+                // triggered unlock in HandleDoors never fires because the path never passes the door.
+                // User repro: ANIME, Customs dorms marked room — pathed to the window side, stopped
+                // 3.2m from the loot through the wall, 3-fail blacklisted the POI. With the door
+                // flipped to Shut before the move order's path calc, the route goes through the
+                // corridor and the door opens on approach like any other. World-state flip also means
+                // the door stays unlocked for everyone for the rest of the raid (lock was "picked").
+                try { door.Unlock(); }
+                catch (System.Exception e) { Log.Debug($"{squad} world-side unlock of {door.Id} threw: {e.Message}"); }
+                Log.Info($"{squad} granted force-unlock on door {door.Id} (instance {doorId}) for {pick} — {(isMainAnchor ? "MAIN anchor (100%)" : $"intermediate ({proba:F2})")} — unlocked world-side");
             }
             else
             {

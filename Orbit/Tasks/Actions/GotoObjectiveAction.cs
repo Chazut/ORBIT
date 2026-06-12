@@ -118,6 +118,12 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
             {
                 case ObjectiveStatus.None:
                     Log.Debug($"{agent} received new objective {agent.Objective.Location}, submitting move order");
+                    // DispatchTime is stamped HERE, at the single funnel every dispatch passes through,
+                    // not at the assignment sites — UpdateAgents' splinter branch stamped it but the
+                    // anchor-first / own-kill / sweep paths didn't, so the arrival-failure grace window
+                    // never applied to those dispatches (ANIME on Customs: 3 "stopped outside" fails in
+                    // 0.7s on a re-dispatched main anchor, blacklisted before BSG even started moving).
+                    objective.DispatchTime = Time.time;
                     var startDistSqr = (objective.Location.Position - agent.Position).sqrMagnitude;
                     var shouldSprint = ShouldSprintToObjective(agent, startDistSqr);
                     movementSystem.MoveToByPath(agent, objective.Location.Position, sprint: shouldSprint);
@@ -306,6 +312,13 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                         else
                         {
                             objective.Status = ObjectiveStatus.Finished;
+                            // Stamp the per-squad visit cooldown at MEMBER arrival too — AssignNewObjective
+                            // only stamps squad-level synthetic anchors, so roam splinters never entered the
+                            // cooldown map and the splinter picker could hand a just-patrolled point straight
+                            // back to the squad.
+                            if (objective.Location.Category == WaypointCategory.Synthetic && agent.Squad != null)
+                                agent.Squad.RecentlyVisitedPoiCooldowns[objective.Location.Id] =
+                                    Time.time + Plugin.SyntheticVisitCooldownSeconds.Value;
                             Log.Debug($"{agent} arrived at non-lootable {objective.Location} → Finished");
                         }
                         break;
