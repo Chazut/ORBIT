@@ -372,6 +372,7 @@ No ETA, no promises, but on the list:
 - "Drop backpack" exfils (Empty / EmptyOrSize) - usable when bot has no backpack, OR wounded bots drop the bag and use them anyway
 - HasItem (RedRebel-style - bot must own a Red Rebel in inventory, but don't consume it; ignore the paracord and WearsItem gear constraints entirely)
 - Fallback to next-closest exfil if the chosen one is unreachable
+- Chance roll on whether a squad will use the car / V-Ex (SharedTimer) exfil
 
 **Looting (post-MVP)**
 - In-raid weapon swap when bots find something strictly better (gun +
