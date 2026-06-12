@@ -474,6 +474,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
 
                 agentObjective.Location = targetLoc;
                 agentObjective.SplinterParent = splinterParent;
+                agentObjective.DispatchTime = Time.time;
 
                 // Distance check / already-in-radius short-circuit is per- AGENT (against their splinter or
                 // the squad anchor — whichever they got), not per-squad. Without this followers with a

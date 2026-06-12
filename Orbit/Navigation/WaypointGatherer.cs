@@ -111,7 +111,23 @@ public class WaypointGatherer(float cellSize, BotsController botsController)
             // EligibleEntryPoints is empty here because BSG hasn't finished LoadSettings yet (we run before
             // it). Real entries surface at runtime via the OnStatusChanged log.
             Log.Info($"Exfil {exfil.Point.name} [{access}{coop}] status={exfil.Point.Status}");
-            ValidateAndAddWaypoint(collection, WaypointCategory.Exfil, exfil.Point.name, exfil.Point.transform.position, 5f, target: exfil.Point);
+            // Bias the navmesh sample toward the inside of the trigger volume: transform.position can be
+            // anywhere relative to the volume (Customs bunker-style hatches have transforms at the
+            // surface marker while the actual trigger goes underground). Use bounds.center, then snap
+            // toward the floor for tall verticals so the sample lands INSIDE the volume — bots end up
+            // navigating into the trigger rather than stopping at the surface and despawning above it.
+            var pos = exfil.Point.transform.position;
+            var maxNavDist = 5f;
+            var exfilCollider = exfil.Point.GetComponent<Collider>();
+            if (exfilCollider != null)
+            {
+                var bounds = exfilCollider.bounds;
+                pos = bounds.center;
+                if (bounds.extents.y > 1.5f)
+                    pos.y = bounds.min.y + 0.75f;
+                if (bounds.size.sqrMagnitude > 100f) maxNavDist = 10f;
+            }
+            ValidateAndAddWaypoint(collection, WaypointCategory.Exfil, exfil.Point.name, pos, maxNavDist, target: exfil.Point);
         }
 
         Log.Debug($"Collected {collection.Count} points of interest");

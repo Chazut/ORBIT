@@ -35,8 +35,13 @@ public class GuardAction(AgentData dataset, MovementSystem movementSystem, float
             var agent = agents[i];
             var location = agent.Objective.Location;
 
-            // No objective or no cover-point → no Guard.
-            if (location == null || agent.Guard.CoverPoint == null)
+            // No objective or no cover-point → no Guard. Exfil objectives never Guard either: there
+            // is no post-arrival idle at an exfil (inside trigger → ExtractAction owns it, outside
+            // trigger → Goto must stay active to run the force-extract timer). With Guard allowed to
+            // bid, its in-radius 0.65 + active-task hysteresis could lock a bot into guarding beside
+            // its own extract until raid end.
+            if (location == null || agent.Guard.CoverPoint == null
+                || location.Category == WaypointCategory.Exfil)
             {
                 agent.TaskScores[ordinal] = 0;
                 continue;
@@ -99,6 +104,10 @@ public class GuardAction(AgentData dataset, MovementSystem movementSystem, float
                     agent.Objective.Status = ObjectiveStatus.None;
                     agent.GuardOnLootPoiSinceTime = -1f;
                     Log.Info($"{agent} guard-on-loot-POI watchdog: blacklisting {locForLog} for {agent.Squad} after {GuardOnLootPoiTimeoutSeconds:F0}s in Guard without Looting (arrival check probably failed — radius / LoS raycast) — cleared agent + squad target to force re-dispatch");
+                    // Same churn-detection feed as the 3-fail arrival blacklist: a flurry of these
+                    // across DIFFERENT POIs means the bot can't path anywhere and might be wedged on a
+                    // door they previously opened.
+                    movementSystem.RegisterPoiBlacklistAndMaybeCloseDoors(agent);
                     continue;
                 }
             }

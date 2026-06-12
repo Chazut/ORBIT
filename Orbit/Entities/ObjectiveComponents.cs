@@ -30,6 +30,26 @@ public class Objective
     /// </summary>
     public Waypoint SplinterParent;
 
+    /// <summary>
+    /// Time.time when this objective was assigned. The arrival-failure check needs a grace window after
+    /// dispatch — without it, an agent transitioning from Guard (Movement.Status == Stopped) directly into
+    /// Goto fails arrival on the FIRST tick because BSG's BotMover hasn't begun the new move yet, the
+    /// Stopped state lingers from Guard, and our check fires "stopped outside arrival radius" before the
+    /// bot has moved a single metre. Field repro: HARDcore on Customs, F324942 → F324945 = 3 frames (0.05s)
+    /// from assignment to "failing objective", reach failed without leaving Guard. Goto's stuck-at-destination
+    /// branch reads this and skips the failure trigger until the bot has had time to actually start moving.
+    /// </summary>
+    public float DispatchTime;
+
+    /// <summary>
+    /// Time.time when the agent first entered the loose 15 m arrival radius of an Exfil objective AND was
+    /// outside the actual trigger collider. Used by the exfil force-extract timer — if the agent stays
+    /// in this "within radius, outside trigger" state for <c>ExfilOutsideTriggerForceExtractSeconds</c>,
+    /// we despawn from current position anyway rather than make them wander forever. -1 = not in that
+    /// state. Reset when the agent exits the radius or actually enters the trigger.
+    /// </summary>
+    public float ExfilOutsideTriggerSince = -1f;
+
     public override string ToString() => $"Objective({Location}, status: {Status})";
 }
 

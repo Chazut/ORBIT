@@ -34,6 +34,23 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
     private const float NavSnapArrivalRadius = 4f;
     private const float NavSnapArrivalRadiusSqr = NavSnapArrivalRadius * NavSnapArrivalRadius;
 
+    /// <summary>
+    /// Grace window after dispatch before any "stopped outside arrival radius" failure can fire. BSG's
+    /// BotMover takes a frame or two to begin the new move; if the agent was Stopped (Guard / loot
+    /// session / etc.) right before dispatch, our Status==Stopped check would fire immediately and
+    /// register a fail count without the bot having moved at all. 2 s is generous enough to give BotMover
+    /// time to start moving, conservative enough that a genuinely-failed path still fails quickly.
+    /// </summary>
+    private const float DispatchGraceSeconds = 2f;
+
+    /// <summary>
+    /// Seconds an agent can spend "within the loose 15 m exfil radius but outside the actual trigger
+    /// collider" before we force the despawn from their current position. 15 s gives the bot plenty of
+    /// chances to descend a hatch / walk around the entry, but caps the worst case (Илюха Травмат on
+    /// Customs stood 2 m 30 s before SAIN combat took over).
+    /// </summary>
+    private const float ExfilOutsideTriggerForceExtractSeconds = 15f;
+
     // Per-agent stuck watchdog on Exfil objectives: if the bot's position barely moves for this duration
     // while targeting an exfil, blacklist the exfil and re-pick. Walking from across the map is fine — only
     // genuinely stationary bots trip the watchdog.
@@ -72,7 +89,17 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
             var distSqr = (location.Position - agent.Position).sqrMagnitude;
 
             var utilityBoostFactor = Mathf.InverseLerp(UtilityBoostMaxDistSqr, location.RadiusSqr, distSqr);
-            var utilityDecay = Mathf.InverseLerp(0f, location.RadiusSqr, distSqr);
+            // Exfil keeps full score inside the arrival radius. The proximity decay exists so the
+            // arrival handover (Loot / Guard) can outbid Goto, but an exfil has no handover: either
+            // the bot gets inside the trigger (status flips to Extracting → score 0 above) or it must
+            // keep pushing in while the outside-trigger force-extract timer runs — and that timer
+            // ticks in Update(), ActiveEntities only. With decay, entering the generous 15 m radius
+            // collapsed the score under GuardAction's in-radius 0.65, Goto deactivated, and the timer
+            // froze forever. User-reported case: rodentmessiah armed the timer at
+            // exit_var2_constant_tunnel then guard-swept beside the exfil until raid end.
+            var utilityDecay = location.Category == WaypointCategory.Exfil
+                ? 1f
+                : Mathf.InverseLerp(0f, location.RadiusSqr, distSqr);
 
             agent.TaskScores[ordinal] = utilityDecay * (UtilityBase + utilityBoostFactor * UtilityBoost);
         }
@@ -158,6 +185,16 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                     //
                     // Lootables only — Synthetic / Exfil still use the wide radius without LoS (those don't
                     // suffer from through-wall validation).
+                    // Exfil stuck timer hygiene: if the bot has walked OUT of the exfil radius (combat
+                    // pulled them away, etc.) clear the outside-trigger timer so the next re-entry gets
+                    // a fresh 15 s window. Only the Exfil category uses the timer; other categories' field
+                    // stays at -1 forever.
+                    if (objective.Location.Category == WaypointCategory.Exfil
+                        && distanceSqr > objective.Location.RadiusSqr)
+                    {
+                        objective.ExfilOutsideTriggerSince = -1f;
+                    }
+
                     var inRadius = false;
                     if (distanceSqr <= objective.Location.RadiusSqr)
                     {
@@ -220,6 +257,45 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                         else if (objective.Location.Category == WaypointCategory.Exfil
                                  && objective.Location.Target is ExfiltrationPoint exfil)
                         {
+                            // The 15 m exfil radius is generous on purpose (BSG nav-snap drift, large
+                            // trigger volumes), but it lets bots "extract" while standing at the surface
+                            // above an underground exfil whose registered transform.position is at the
+                            // hatch but whose actual trigger volume goes below ground. Add a collider-
+                            // contains check so the bot has to be PHYSICALLY inside the trigger volume,
+                            // not just XZ-close. If the bot is outside the volume, keep walking — the
+                            // arrival radius still bounded re-dispatch via TrackArrivalFailure when the
+                            // BSG nav can't get them in (3-fail blacklist still applies, the squad picks
+                            // a different exfil).
+                            if (!IsAgentInsideExfilTrigger(agent, exfil))
+                            {
+                                // Bot is within the loose arrival radius but outside the actual trigger
+                                // volume. The TrackArrivalFailure path is fragile here — if the agent
+                                // happens to re-dispatch between misses (sweep, splinter, anything that
+                                // touches LastFailedPoiId) the consecutive counter resets to 1 and never
+                                // reaches the 3-fail force-extract trigger; field repro: Илюха Травмат
+                                // on Customs, 1 arrival miss logged, then bot stood at the exfil for 2 m
+                                // 30 s before SAIN combat took over. Replace with a dedicated stuck
+                                // timer: start counting on first miss, force-extract after N s of being
+                                // continuously "within radius + outside trigger". Resets only when the
+                                // agent actually exits the radius or enters the trigger.
+                                if (objective.ExfilOutsideTriggerSince < 0f)
+                                {
+                                    objective.ExfilOutsideTriggerSince = Time.time;
+                                    Log.Debug($"{agent} within {Mathf.Sqrt(distanceSqr):F1}m of {objective.Location} but outside the trigger collider — counting as arrival miss (force-extract timer armed)");
+                                }
+                                else if (Time.time - objective.ExfilOutsideTriggerSince >= ExfilOutsideTriggerForceExtractSeconds)
+                                {
+                                    ActivateExfilForBot(exfil, agent);
+                                    objective.Status = ObjectiveStatus.Extracting;
+                                    objective.ExfilOutsideTriggerSince = -1f;
+                                    Log.Info($"{agent} couldn't reach inside of {objective.Location} after {ExfilOutsideTriggerForceExtractSeconds:F0}s outside trigger — forcing extract from current position (exfil status={exfil.Status})");
+                                    break;
+                                }
+                                break;
+                            }
+                            // Bot actually inside the trigger — reset the stuck timer if it was armed
+                            // from a previous bounce-around-the-edge attempt.
+                            objective.ExfilOutsideTriggerSince = -1f;
                             // Activate the exfil if still gated behind requirements (V-Ex / pay-to-leave),
                             // then hand off to ExtractAction which waits the countdown and despawns the bot.
                             ActivateExfilForBot(exfil, agent);
@@ -246,8 +322,14 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                     // Stuck-at-destination guard: BSG's BotMover reports Reached but our euclidean radius
                     // check above failed (bot stopped just outside the arrival radius). If the bot stays in
                     // this in-between state too long it would never advance — fail the agent objective so the
-                    // wait-timer / re-dispatch path kicks in immediately.
-                    else if (agent.Movement.Status == MovementStatus.Stopped)
+                    // wait-timer / re-dispatch path kicks in immediately. Grace window: skip the failure
+                    // trigger if the agent was dispatched less than DispatchGraceSeconds ago — Movement.Status
+                    // == Stopped lingers from a prior Guard or other paused state on the first tick after
+                    // dispatch, and we'd otherwise fail arrival before the bot has even started moving toward
+                    // the new POI (HARDcore on Customs: 3 frames from assignment to "failing arrival",
+                    // triggering 3 fail counts in 0.7s and blacklisting the POI before the bot got 1 m closer).
+                    else if (agent.Movement.Status == MovementStatus.Stopped
+                             && Time.time - objective.DispatchTime > DispatchGraceSeconds)
                     {
                         objective.Status = ObjectiveStatus.Failed;
                         Log.Debug($"{agent} stopped outside {objective.Location} arrival radius ({Mathf.Sqrt(distanceSqr):F1}m / {Mathf.Sqrt(objective.Location.RadiusSqr):F1}m) — failing objective to unblock re-dispatch");
@@ -335,7 +417,7 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
     // ConsecutiveFailedDispatches only fires when ALL members fail at once; a single member stuck on an
     // unreachable splinter while squadmates loot fine never triggers it. Two failure modes feed in: "stopped
     // outside arrival radius" (navmesh sample lands 4m+ off) AND HardStuck "giving up" (bot jammed en-route).
-    private static void TrackArrivalFailure(Agent agent, Waypoint location)
+    private void TrackArrivalFailure(Agent agent, Waypoint location)
     {
         if (location == null || agent?.Squad == null) return;
         var locId = location.Id;
@@ -350,6 +432,24 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
         }
         if (agent.ConsecutiveSamePoiFailures >= 3)
         {
+            // Exfil special case: the squad has already committed to extracting (ExtractRequested set,
+            // bee-line in progress). If the bot can't physically enter the trigger volume after 3
+            // attempts (locked door, blocked hatch, nav path can't descend), force the despawn from
+            // wherever the bot is standing rather than blacklisting + re-dispatching to a different
+            // exfil — at that point the bot is essentially camping the entry, sending them off to
+            // wander to another exfil halfway across the map is worse UX than just letting them leave.
+            if (location.Category == WaypointCategory.Exfil
+                && location.Target is ExfiltrationPoint exfil
+                && agent.Squad.ExtractRequested)
+            {
+                ActivateExfilForBot(exfil, agent);
+                agent.Objective.Status = ObjectiveStatus.Extracting;
+                Log.Info($"{agent} couldn't reach inside of {location} after 3 attempts — forcing extract from current position ({agent.Position}, exfil status={exfil.Status})");
+                agent.ConsecutiveSamePoiFailures = 0;
+                agent.LastFailedPoiId = -1;
+                return;
+            }
+
             agent.Squad.CompletedPoiIds.Add(locId);
             // Adding to CompletedPoiIds only filters FUTURE picks; the current dispatch still has
             // agent.Objective.Location pinned at the bad POI (set by AssignNewObjective, by a follower
@@ -365,10 +465,31 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
             agent.Objective.Location = null;
             agent.Objective.SplinterParent = null;
             agent.Objective.Status = ObjectiveStatus.None;
+            // Record the blacklist firing so the rapid-POI-churn detector can fire the close-doors
+            // remediation when this agent is bouncing across MULTIPLE POIs (the per-POI 3-fail counter
+            // alone never catches that pattern — it resets when the agent switches POIs).
+            movementSystem.RegisterPoiBlacklistAndMaybeCloseDoors(agent);
             Log.Info($"{agent} blacklisting {location} for {agent.Squad} after 3 consecutive arrival failures (cleared agent + squad target to force re-dispatch)");
             agent.ConsecutiveSamePoiFailures = 0;
             agent.LastFailedPoiId = -1;
         }
+    }
+
+    /// <summary>
+    /// True when the agent is physically inside the exfil's trigger collider bounds (or no collider is
+    /// available, in which case we fall back to the existing radius check upstream). Catches the case
+    /// where the registered transform.position is at the surface but the actual trigger volume is below
+    /// ground (or vice versa): the bot would otherwise extract from outside the real zone.
+    /// </summary>
+    private static bool IsAgentInsideExfilTrigger(Agent agent, ExfiltrationPoint exfil)
+    {
+        var collider = exfil?.GetComponent<Collider>();
+        if (collider == null) return true; // can't verify → defer to the existing radius check
+        var pos = agent.Position;
+        // Bounds.Contains is AABB which is loose for rotated colliders, but exfil triggers are usually
+        // axis-aligned BoxColliders so this is exact enough. Closer-point would be more precise but
+        // costs more and isn't worth it for ~5-15 m volumes.
+        return collider.bounds.Contains(pos);
     }
 
     // Mirrors BSG's ActivateExfil flow: forces a still-gated exfil into a usable state right when the bot
