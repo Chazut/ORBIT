@@ -106,6 +106,7 @@ public class Plugin : BaseUnityPlugin
     public static ConfigEntry<bool> HijackUntar;
     public static ConfigEntry<bool> HijackRuaf;
     public static ConfigEntry<bool> HijackBlackDivision;
+    public static ConfigEntry<bool> HijackIsb;
 
     // 07.0 SAIN personality — general
     public static ConfigEntry<bool> SainPersonalityEnabled;
@@ -195,6 +196,10 @@ public class Plugin : BaseUnityPlugin
     private const string UntarPluginGuid = "com.untargh.tacticaltoaster";
     private const string RuafPluginGuid = "com.ruafcomehome.tacticaltoaster";
     private const string BlackDivPluginGuid = "com.blackdiv.tacticaltoaster";
+    // ISB's BepInEx entry is ISBNotify.dll ("ISB SOF Notifier") — the spawn-patch + role-detection
+    // core, present whenever ISB bots are. The companion ISBSpecialForcesPlugin.dll is a plain library
+    // (no BepInPlugin), so this is the GUID to detect.
+    private const string IsbPluginGuid = "samc137.ISBinfo";
 
     private void Awake()
     {
@@ -269,6 +274,10 @@ public class Plugin : BaseUnityPlugin
         // roles (remnant*). Both belong to the same mod, so the toggle must exclude both substrings.
         ApplyFactionTakeoverToggle(RuafPluginGuid,     "RUAF",          HijackRuaf,         "ruaf", "remnant");
         ApplyFactionTakeoverToggle(BlackDivPluginGuid, "BlackDivision", HijackBlackDivision, "blackDiv");
+        // ISB's WildSpawnType members all begin with "ISB" (ISBSpecialForces, ISBTeamLeader,
+        // ISBFirefly*, …), so the single substring covers the whole faction (match is case-insensitive
+        // and no vanilla role name contains "isb").
+        ApplyFactionTakeoverToggle(IsbPluginGuid,      "ISB",           HijackIsb,           "ISB");
 
         OrbitBrainLayer.SetVanillaScavExclusion(VanillaScavs.Value);
         OrbitBrainLayer.SetVanillaGoonExclusion(VanillaGoons.Value);
@@ -539,6 +548,9 @@ public class Plugin : BaseUnityPlugin
         HijackBlackDivision = Config.Bind(takeover, "Take over Black Division bots", false, new ConfigDescription(
             "OFF (default): Black Division bots run on their own behaviour. ON: ORBIT routes them like PMCs.",
             null, new ConfigurationManagerAttributes { Order = 1 }));
+        HijackIsb = Config.Bind(takeover, "Take over ISB bots", false, new ConfigDescription(
+            "OFF (default): ISB bots run on their own behaviour. ON: ORBIT routes them like PMCs.",
+            null, new ConfigurationManagerAttributes { Order = 0 }));
 
         // ── 07.x SAIN personality ───────────────────────────────────
         BindSainPersonalityConfigs();

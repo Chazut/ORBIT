@@ -49,7 +49,7 @@ public class OrbitBrainLayer : CustomLayer
     private float _lastIsActiveDiagAt;
 
     // Substrings (case-insensitive) of WildSpawnType names whose bots should NOT be hijacked. Populated at
-    // boot by Plugin when the user toggles OFF a faction-mod takeover (UNTAR / RUAF / BlackDiv).
+    // boot by Plugin when the user toggles OFF a faction-mod takeover (UNTAR / RUAF / BlackDiv / ISB).
     private static readonly HashSet<string> _excludedRoleSubstrings = new(StringComparer.OrdinalIgnoreCase);
 
     // Vanilla-behaviour opt-outs. PlayerScavs share WildSpawnType.assault with bot scavs but are NEVER
