@@ -23,6 +23,7 @@ public static class SainPersonality
     private static PropertyInfo _botsProperty;
     private static PropertyInfo _instanceProperty;
     private static object _cachedBotManager;
+    private static GameWorld _cachedBotManagerWorld;
 
     public static bool IsSainAvailable => _typesResolved;
 
@@ -59,20 +60,34 @@ public static class SainPersonality
 
     private static object ResolveBotManager()
     {
+        GameWorld gameWorld = null;
+        try { gameWorld = Singleton<GameWorld>.Instance; }
+        catch (Exception ex) { Log.Debug($"SainPersonality.ResolveBotManager: GameWorld.Instance threw: {ex.Message}"); }
+
+        // SainPersonality is a STATIC class, so _cachedBotManager outlives the raid. It holds a plain
+        // `object`, so a `!= null` check never trips Unity's destroyed-object "fake null" — at the 2nd
+        // raid of a session we'd hand back the PREVIOUS raid's BotManagerComponent, whose Bots dict is
+        // keyed by last raid's profileIds → every current bot reads as (none) → Average → timeout. Tie
+        // the cache to the GameWorld it came from and drop it the moment the raid changes. (raid-review
+        // re-resolves from a fresh GameWorld every call, which is why it never hit this.)
+        if (!ReferenceEquals(gameWorld, _cachedBotManagerWorld))
+        {
+            _cachedBotManager = null;
+            _cachedBotManagerWorld = gameWorld;
+        }
+
         if (_cachedBotManager != null) return _cachedBotManager;
+        if (gameWorld == null) return null;
+
         // Prefer GameWorld.GetComponent (the canonical way SAIN attaches the manager). Fall back to the
         // static Instance property if present.
         try
         {
-            var gameWorld = Singleton<GameWorld>.Instance;
-            if (gameWorld != null)
+            var component = gameWorld.GetComponent(_botManagerComponentType);
+            if (component != null)
             {
-                var component = gameWorld.GetComponent(_botManagerComponentType);
-                if (component != null)
-                {
-                    _cachedBotManager = component;
-                    return _cachedBotManager;
-                }
+                _cachedBotManager = component;
+                return _cachedBotManager;
             }
         }
         catch (Exception ex)
