@@ -54,7 +54,14 @@ public class OrbitTickPatch : ModulePatch
         if (!__instance.Bool_0)
             return;
 
-        Singleton<OrbitManager>.Instance.Update();
+        // The singleton can be absent here: released at raid end while a queued AICoreController tick
+        // still fires, or a raid where ORBIT never initialised (FIKA host/client timing). Skip instead
+        // of NRE-ing every frame.
+        var orbit = Singleton<OrbitManager>.Instance;
+        if (orbit == null)
+            return;
+
+        orbit.Update();
     }
 }
 
@@ -72,9 +79,27 @@ public class OrbitDisposePatch : ModulePatch
     [PatchPostfix]
     public static void Postfix()
     {
-        Plugin.LogSource.LogInfo("Disposing ORBIT static + long-lived state");
-        Singleton<OrbitManager>.Release(Singleton<OrbitManager>.Instance);
-        Singleton<BotRoster>.Release(Singleton<BotRoster>.Instance);
-        Plugin.LogSource.LogInfo("Dispose complete");
+        // This runs from GameWorld.Dispose at raid end and MUST NOT throw. Under FIKA, an exception
+        // escaping here aborts the host's lobby/raid teardown and leaves FIKA in an undefined state
+        // (issue #6: "ORBIT is unable to complete its dispose operation... Object reference not set").
+        // The singletons may already be gone — a raid where ORBIT never initialised, a double dispose,
+        // or FIKA timing — so null-guard each release and swallow anything that still slips through.
+        // A failed cleanup is harmless (the next raid re-creates the singletons); a thrown one is not.
+        try
+        {
+            Plugin.LogSource.LogInfo("Disposing ORBIT static + long-lived state");
+
+            var orbit = Singleton<OrbitManager>.Instance;
+            if (orbit != null) Singleton<OrbitManager>.Release(orbit);
+
+            var roster = Singleton<BotRoster>.Instance;
+            if (roster != null) Singleton<BotRoster>.Release(roster);
+
+            Plugin.LogSource.LogInfo("Dispose complete");
+        }
+        catch (System.Exception e)
+        {
+            Plugin.LogSource.LogWarning($"ORBIT dispose hit an error (swallowed to protect raid/FIKA teardown): {e}");
+        }
     }
 }
