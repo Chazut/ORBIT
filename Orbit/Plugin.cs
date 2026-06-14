@@ -554,8 +554,8 @@ public class Plugin : BaseUnityPlugin
         HijackBlackDivision = Config.Bind(takeover, "Take over Black Division bots", false, new ConfigDescription(
             "OFF (default): Black Division bots run on their own behaviour. ON: ORBIT routes them like PMCs.",
             null, new ConfigurationManagerAttributes { Order = 1 }));
-        HijackIsb = Config.Bind(takeover, "Take over ISB bots", false, new ConfigDescription(
-            "OFF (default): ISB bots run on their own behaviour. ON: ORBIT routes them like PMCs.",
+        HijackIsb = Config.Bind(takeover, "Take over ISB bots", true, new ConfigDescription(
+            "ON (default): ORBIT routes ISB bots like PMCs. OFF: ISB bots run on their own behaviour.",
             null, new ConfigurationManagerAttributes { Order = 0 }));
 
         // ── 07.x SAIN personality ───────────────────────────────────
