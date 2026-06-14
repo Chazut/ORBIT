@@ -35,9 +35,9 @@ public class Objective
     /// dispatch — without it, an agent transitioning from Guard (Movement.Status == Stopped) directly into
     /// Goto fails arrival on the FIRST tick because BSG's BotMover hasn't begun the new move yet, the
     /// Stopped state lingers from Guard, and our check fires "stopped outside arrival radius" before the
-    /// bot has moved a single metre. Field repro: HARDcore on Customs, F324942 → F324945 = 3 frames (0.05s)
-    /// from assignment to "failing objective", reach failed without leaving Guard. Goto's stuck-at-destination
-    /// branch reads this and skips the failure trigger until the bot has had time to actually start moving.
+    /// bot has moved a single metre — a Guard→Goto transition can otherwise register a failure within a
+    /// few frames of dispatch, before the bot has left its Guard spot. Goto's stuck-at-destination branch
+    /// reads this and skips the failure trigger until the bot has had time to actually start moving.
     /// </summary>
     public float DispatchTime;
 

@@ -488,10 +488,10 @@ public class LootContainerAction(AgentData dataset, WaypointSystem waypointSyste
             }
             // SAIN couldn't resolve this agent's brain. If the squad has already given up on SAIN resolution
             // and locked to a fallback archetype (Average by default), use that — otherwise the agent's
-            // threshold stays at 0 forever and CheckExtractTrigger never fires for this bot. Canonical case:
-            // yerrrr looted a 4.5M Mona Lisa, SquadId 0 had locked to Average via SAIN timeout, but the
-            // per-agent threshold lookup stayed unresolved → no extract request despite the squad-total
-            // dwarfing the Average range.
+            // threshold stays at 0 forever and CheckExtractTrigger never fires for this bot. Without it:
+            // a bot loots a very high-value item and the squad has locked to a fallback archetype via SAIN
+            // timeout, but the per-agent threshold lookup stays unresolved, so no extract request fires
+            // despite the squad total dwarfing the threshold.
             if (agent.Squad != null && !agent.Squad.SainResolutionPending)
             {
                 agent.OwnExtractLootThreshold = PersonalityProfile.RollExtractThresholdFor(agent.Squad.Archetype);

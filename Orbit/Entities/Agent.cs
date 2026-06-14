@@ -85,8 +85,8 @@ public class Agent(int id, BotOwner bot, float[] taskScores) : Entity(id, taskSc
     /// Time.time of the last few per-agent POI blacklist firings (3-fail arrival blacklist or
     /// guard-on-loot-POI watchdog). Used by the close-doors-behind remediation to detect "rapid
     /// switching across MULTIPLE different POIs" — the per-POI 3-fail counter resets between POIs, so
-    /// the Exillius pattern (blacklist POI A, switch to POI B, blacklist B, etc.) never piles up on
-    /// any one counter and the door-close never triggers. This timestamp ring lets us see the
+    /// the rapid cross-POI pattern (blacklist POI A, switch to POI B, blacklist B, etc.) never piles up
+    /// on any one counter and the door-close never triggers. This timestamp ring lets us see the
     /// across-POI churn explicitly.
     /// </summary>
     public readonly List<float> RecentPoiBlacklistTimes = new();

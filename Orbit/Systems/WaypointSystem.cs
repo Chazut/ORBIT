@@ -684,9 +684,9 @@ public class WaypointSystem
     /// <summary>
     /// Drop every per-squad cache entry keyed by this squad id. Called from Registries.RemoveAgent when
     /// the last member leaves and the squad is about to be torn down. Squad ids get RECYCLED when a new
-    /// BotsGroup joins after an empty squad gets removed (canonical case: Disturbing's Squad 1 wiped at
-    /// F311490 → Илья Приезжий took Squad 1 at F311876, inheriting the corpse-kill credit and bee-lining
-    /// 215 m across walls to a body he never killed). Without this clear-step, the corpse-LoS gate gets
+    /// BotsGroup joins after an empty squad gets removed (observed: a squad is wiped, a new BotsGroup
+    /// reuses its squad id, and the new squad inherits the old corpse-kill credit, bee-lining across
+    /// walls to a body it never killed). Without this clear-step, the corpse-LoS gate gets
     /// bypassed for every reused id.
     /// </summary>
     public void ClearSquadCorpseCredits(int squadId)
@@ -909,7 +909,7 @@ public class WaypointSystem
         // at Y=0) wins over the any-floor reservoir whenever it has at least one candidate. The radius
         // filter below is deliberately XZ-only, so without this preference every floor of a building is
         // equally likely on each re-dispatch and bots yo-yo up and down the staircases for the whole
-        // LootValue phase (user repro: Jical + Manathy, Shoreline Sanatorium).
+        // LootValue phase (seen in multi-floor buildings).
         const float selfExclusionDistSqr = 3f * 3f;
         var yTolerance = Plugin.SameFloorLootYTolerance?.Value ?? 0f;
         var preferSameFloor = yTolerance > 0f;
@@ -954,8 +954,8 @@ public class WaypointSystem
                         // stands inside of — or barely outside — completes the instant it's picked:
                         // Finished → re-pick → next neighbour, 2-5s per hop in dense clusters, which
                         // reads from the outside as "bots switch POIs without ever reaching them"
-                        // (user repro: Randek's squad, Shoreline village, Synthetic_925/928/929/933/935
-                        // chains). Require a real patrol leg: the pick must sit at least
+                        // (seen in dense patrol-point clusters where neighbours sit inside each other's
+                        // arrival radius). Require a real patrol leg: the pick must sit at least
                         // MinSyntheticHopMeters beyond its own arrival radius.
                         var minHop = Mathf.Sqrt(loc.RadiusSqr) + MinSyntheticHopMeters;
                         if (distSqrMember < minHop * minHop) continue;
@@ -1695,8 +1695,8 @@ public class WaypointSystem
                 // navmesh link stays closed, so the dispatch path computed right after this pick routes
                 // AROUND the building to the exterior point nearest the target, and the proximity-
                 // triggered unlock in HandleDoors never fires because the path never passes the door.
-                // User repro: ANIME, Customs dorms marked room — pathed to the window side, stopped
-                // 3.2m from the loot through the wall, 3-fail blacklisted the POI. With the door
+                // Observed: a bot pathed to the exterior side of a locked-room loot point and stopped a
+                // few metres short through the wall, then 3-fail blacklisted the POI. With the door
                 // flipped to Shut before the move order's path calc, the route goes through the
                 // corridor and the door opens on approach like any other. World-state flip also means
                 // the door stays unlocked for everyone for the rest of the raid (lock was "picked").

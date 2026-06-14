@@ -59,9 +59,9 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
     /// on every successful pickup, on every drain-entry evaluation (TAKE / SKIP / SWAP), and on every
     /// async-tx completion. If the loot session is alive (<see cref="LootTaskRunning"/> true) and no
     /// activity has been observed for more than <see cref="LootSessionInactivityTimeoutSeconds"/>, the
-    /// Unity Update loop cancels the session — covers the "loose loot stuck for 210s" hang pattern
-    /// (RussiaYpa on Woods: PickupLooseAsync hung silently after a 0.5s Task.Delay, bot stayed pinned
-    /// crouched). Container / corpse sessions can run for minutes legitimately as long as the drain
+    /// Unity Update loop cancels the session — covers the loose-loot hang pattern (observed when
+    /// PickupLooseAsync hangs silently after a Task.Delay, leaving the bot pinned crouched for
+    /// minutes). Container / corpse sessions can run for minutes legitimately as long as the drain
     /// loop keeps making forward progress; this watchdog ONLY fires when there's no progress at all.
     /// </summary>
     private float _lastLootActivityTime;

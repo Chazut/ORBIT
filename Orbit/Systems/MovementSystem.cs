@@ -203,9 +203,9 @@ public class MovementSystem
         // While a door interaction is in flight, the open animation only plays if the bot stops pushing
         // forward through the doorway — the interact state is silently cancelled by movement input, the
         // door stays stuck in Interacting and the bot phantom-walks. Back off toward the previous path
-        // corner for the animation window instead of advancing. User-reported case: CaptainShady on
-        // Shoreline, 6 doors followed in freecam — the only door that visually opened was the one where
-        // the bot happened to slow down; every full-speed pass phased.
+        // corner for the animation window instead of advancing. Observed in testing: at full walking
+        // speed the door never finishes opening and the bot phases through; the only passes that opened
+        // it were the ones where the bot happened to slow down.
         if (Time.time < movement.DoorInteractHoldUntil)
         {
             HoldForDoorInteraction(agent);
@@ -470,8 +470,8 @@ public class MovementSystem
 
             // Only open doors the bot is actively heading toward — distance + forward-cone check.
             // Without this gate, every bot in a hallway would pop every door they brush past just because
-            // the door is within voxel range. See IsBotApproachingDoor for the rationale (Dipcor field
-            // repro: segment-intersection missed ~80 % of doors).
+            // the door is within voxel range. See IsBotApproachingDoor for the rationale (the old
+            // segment-intersection test missed ~80 % of doors in practice).
             if (!IsBotApproachingDoor(agent, doorLink)) continue;
 
             // Locked doors: only PMCs may attempt to unlock. Scavs/bosses/ raiders don't carry door keys in
@@ -529,8 +529,8 @@ public class MovementSystem
         // Per-door cooldown: HandleDoors runs every frame, but BSG's vmethod_1 takes a few frames to
         // transition the door from Shut → Interacting → Open. If we re-fire vmethod_1 each frame in
         // that window, BSG silently no-ops the duplicate calls and the door may never finish opening
-        // (canonical case: Customs dorm doors, 148 vmethod_1 fires in a row across multiple frames, 0
-        // confirmed transitions to Open). 1.5 s is enough to cover the open / unlock animation window
+        // (observed: re-firing vmethod_1 every frame produced well over a hundred calls in a row with
+        // zero confirmed transitions to Open). 1.5 s is enough to cover the open / unlock animation window
         // and matches SAIN's _doorInteractionEndTime.
         var doorId = door.GetInstanceID();
         if (_doorInteractCooldown.TryGetValue(doorId, out var lastTime)
@@ -613,9 +613,9 @@ public class MovementSystem
 
     /// <summary>
     /// Window (in seconds) over which we count distinct per-agent blacklist firings to detect the
-    /// "rapid POI churn" pattern. The Exillius case on Customs saw POI 349 blacklisted at F102866 then
-    /// POI 371 blacklisted at F103041 — different POIs ~4 s apart, but the per-POI 3-fail counter never
-    /// catches across-POI switching. Tracking distinct fires in a sliding window does.
+    /// "rapid POI churn" pattern. A bot can blacklist one POI, switch to another, then blacklist that
+    /// one too a few seconds later — different POIs, so the per-POI 3-fail counter never catches the
+    /// across-POI switching. Tracking distinct fires in a sliding window does.
     /// </summary>
     private const float RapidChurnWindowSeconds = 10f;
 
@@ -737,8 +737,8 @@ public class MovementSystem
     /// the bot's forward direction (path next-corner or velocity) sweeps through the doorway frame
     /// segment (Close1 ↔ Close2_Normal projected onto XZ). Replaces the previous segment-intersection
     /// test against pre-computed path segments: that test failed when the path was stale or short, and
-    /// missed bots driven by BSG nav directly (Movement.Path null). Field repro: Dipcor on Shoreline
-    /// walked through ~10 doors but only fired 2 DoorWatch entries.
+    /// missed bots driven by BSG nav directly (Movement.Path null). In practice the old test let bots
+    /// walk through most doors while only registering a couple of DoorWatch entries.
     ///
     /// Why forward-ray instead of cone-around-door-position: a cone catches doors that are slightly to
     /// the side (bot walking down a narrow corridor with doors on the wall would pop them all). The
@@ -790,8 +790,8 @@ public class MovementSystem
 
         // Fallback: ray the door's own collider. The threshold segment is a thin line at the frame's
         // base — an off-axis approach can have the forward ray pass over the panel without crossing
-        // that segment in XZ (user repro: CaptainShady phased through 2 doors he reached diagonally,
-        // zero DoorWatch entries). "About to physically touch the door panel" is approach evidence
+        // that segment in XZ (observed: bots phased through doors reached diagonally, with zero
+        // DoorWatch entries). "About to physically touch the door panel" is approach evidence
         // regardless of angle, and Collider.Raycast tests just this one collider, not the scene.
         var doorCollider = door.Collider;
         if (doorCollider != null)

@@ -347,7 +347,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
             // Roam continuation for the leader: anchor-first parks i=0 on the squad anchor, and
             // "Location == squad objective" keeps them aligned forever once Finished — the leader stood
             // guarding beside his completed patrol point for a minute while followers walked out their
-            // splinters (user repro: Blackleaf420, Shoreline Kills roam). During roam, a leader who has
+            // splinters (observed during Kills roam). During roam, a leader who has
             // FINISHED the anchor is treated as misaligned so he falls into the splinter branches like
             // everyone else; followers' targets are untouched.
             var leaderFinishedAnchorInRoam = i == 0 && useRoam

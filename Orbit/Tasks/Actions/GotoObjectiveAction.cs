@@ -53,8 +53,8 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
     /// <summary>
     /// Seconds an agent can spend "within the loose 15 m exfil radius but outside the actual trigger
     /// collider" before we force the despawn from their current position. 15 s gives the bot plenty of
-    /// chances to descend a hatch / walk around the entry, but caps the worst case (Илюха Травмат on
-    /// Customs stood 2 m 30 s before SAIN combat took over).
+    /// chances to descend a hatch / walk around the entry, but caps the worst case (without it a bot can
+    /// sit at the exfil edge for minutes until SAIN combat takes over).
     /// </summary>
     private const float ExfilOutsideTriggerForceExtractSeconds = 15f;
 
@@ -102,8 +102,8 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
             // keep pushing in while the outside-trigger force-extract timer runs — and that timer
             // ticks in Update(), ActiveEntities only. With decay, entering the generous 15 m radius
             // collapsed the score under GuardAction's in-radius 0.65, Goto deactivated, and the timer
-            // froze forever. User-reported case: rodentmessiah armed the timer at
-            // exit_var2_constant_tunnel then guard-swept beside the exfil until raid end.
+            // froze forever: a bot would arm the timer at an exfil it couldn't enter, then guard-sweep
+            // beside it until raid end.
             var utilityDecay = location.Category == WaypointCategory.Exfil
                 ? 1f
                 : Mathf.InverseLerp(0f, location.RadiusSqr, distSqr);
@@ -128,8 +128,8 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                     // DispatchTime is stamped HERE, at the single funnel every dispatch passes through,
                     // not at the assignment sites — UpdateAgents' splinter branch stamped it but the
                     // anchor-first / own-kill / sweep paths didn't, so the arrival-failure grace window
-                    // never applied to those dispatches (ANIME on Customs: 3 "stopped outside" fails in
-                    // 0.7s on a re-dispatched main anchor, blacklisted before BSG even started moving).
+                    // never applied to those dispatches — a re-dispatched anchor could otherwise rack up
+                    // 3 "stopped outside" fails within a second, blacklisted before BSG even started moving.
                     objective.DispatchTime = Time.time;
                     var startDistSqr = (objective.Location.Position - agent.Position).sqrMagnitude;
                     var shouldSprint = ShouldSprintToObjective(agent, startDistSqr);
@@ -287,9 +287,9 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                                 // volume. The TrackArrivalFailure path is fragile here — if the agent
                                 // happens to re-dispatch between misses (sweep, splinter, anything that
                                 // touches LastFailedPoiId) the consecutive counter resets to 1 and never
-                                // reaches the 3-fail force-extract trigger; field repro: Илюха Травмат
-                                // on Customs, 1 arrival miss logged, then bot stood at the exfil for 2 m
-                                // 30 s before SAIN combat took over. Replace with a dedicated stuck
+                                // reaches the 3-fail force-extract trigger; in practice only 1 arrival
+                                // miss would log, then the bot would stand at the exfil for minutes until
+                                // SAIN combat took over. Replace with a dedicated stuck
                                 // timer: start counting on first miss, force-extract after N s of being
                                 // continuously "within radius + outside trigger". Resets only when the
                                 // agent actually exits the radius or enters the trigger.
