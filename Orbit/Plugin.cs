@@ -198,7 +198,8 @@ public class Plugin : BaseUnityPlugin
     private const string BlackDivPluginGuid = "com.blackdiv.tacticaltoaster";
     // ISB's BepInEx entry is ISBNotify.dll ("ISB SOF Notifier") — the spawn-patch + role-detection
     // core, present whenever ISB bots are. The companion ISBSpecialForcesPlugin.dll is a plain library
-    // (no BepInPlugin), so this is the GUID to detect.
+    // (no BepInPlugin), so this is the GUID to detect. Matched as a substring (see
+    // ApplyFactionTakeoverToggle) so a future com.-prefixed variant ("com.samc137.ISBinfo") still registers.
     private const string IsbPluginGuid = "samc137.ISBinfo";
 
     private void Awake()
@@ -340,7 +341,16 @@ public class Plugin : BaseUnityPlugin
     /// </summary>
     private static void ApplyFactionTakeoverToggle(string pluginGuid, string label, ConfigEntry<bool> toggle, params string[] roleSubstrings)
     {
+        // Exact GUID match first, then a case-insensitive substring fallback so a faction whose
+        // plugin GUID gains/loses a prefix (e.g. a "com." on ISB's notifier) is still detected.
         var detected = Chainloader.PluginInfos.ContainsKey(pluginGuid);
+        if (!detected)
+        {
+            foreach (var key in Chainloader.PluginInfos.Keys)
+            {
+                if (key.IndexOf(pluginGuid, StringComparison.OrdinalIgnoreCase) >= 0) { detected = true; break; }
+            }
+        }
         if (!detected)
         {
             LogSource.LogDebug($"{label}: plugin '{pluginGuid}' not present — toggle inert");
