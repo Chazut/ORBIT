@@ -380,6 +380,7 @@ No ETA, no promises, but on the list:
 - "Marked-key loot rush" for high-tier squads
 - "Spawn rush" for the most aggressive personalities
 - "Boss hunting"
+- Faction-vs-faction "hunt" objective — a squad actively seeks out another faction's bots instead of just roaming, biasing dispatch toward where the target faction is (same mechanic as player-convergence, different target). Enables rivalries like cultists hunting PMCs, UNTAR hunting scavs, or ISB ↔ Black Division hunting each other. Doubles as a robustness win for custom/vanilla bots whose stock SAIN/BSG nodes sometimes freeze and stop moving (suggested by Firefly on Discord)
 - Airdrop / helicopter crash / BTR objectives — squads slow-approach the drop zone, hold position at a nearby vantage for a few minutes (ambush window), then close in and loot. Mimics how players treat airdrops in live — nobody walks straight to the smoke.
 - Multi-step objectives (activate → loot/extract):
   - Interchange Kiba (disable alarm → loot)
