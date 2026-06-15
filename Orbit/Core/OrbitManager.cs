@@ -96,6 +96,20 @@ public class OrbitManager
 
     public Agent AddAgent(BotOwner bot)
     {
+        // Dedup by BSG bot id. MoreBotsAPI swaps a custom bot's brain at runtime (e.g. ISB types), which makes
+        // BigBrain tear down and rebuild the brain — re-instantiating our OrbitBrainLayer and re-entering here
+        // for a BotOwner that already has an Agent. Without this guard each swap leaves an ORPHAN agent: it
+        // keeps a squad slot and gets dispatched objectives, but its layer is dead so it never physically
+        // moves. A 7-bot ISB group balloons to 14 "members" (7 movers + 7 frozen orphans), which breaks
+        // per-member dispatch and stalls the squad on the "all members arrived" gate (orphans never arrive).
+        // Reuse the live agent instead — the newly-active layer drives the same Agent.
+        var existing = _botRoster.GetAgent(bot);
+        if (existing != null)
+        {
+            Log.Debug($"AddAgent: reusing {existing} (brain re-instantiation, no duplicate agent created)");
+            return existing;
+        }
+
         var agent = AgentData.AddEntity(bot, ActionManager.Tasks.Length);
         SquadRegistry.AddAgent(agent);
         _botRoster.AddAgent(agent);
@@ -104,6 +118,13 @@ public class OrbitManager
 
     public void RemoveAgent(Agent agent)
     {
+        // Every brain layer instantiated for this bot wires its own OnPlayerDead handler (the player outlives
+        // brain swaps), so death fires RemoveAgent once per layer — all referencing the same deduped Agent.
+        // The squad/entity teardown below is NOT idempotent (id slots get recycled), so bail unless this agent
+        // is still the live registration for its bot. The first pass tears down and nulls the roster slot; any
+        // further passes find GetAgent != agent and no-op.
+        if (_botRoster.GetAgent(agent.Bot) != agent) return;
+
         AgentData.RemoveEntity(agent);
         SquadRegistry.RemoveAgent(agent);
         ActionManager.RemoveEntity(agent);
