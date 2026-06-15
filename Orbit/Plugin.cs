@@ -310,11 +310,15 @@ public class Plugin : BaseUnityPlugin
         // and must stay 100% vanilla, so their LootPatrol is left intact.
         BrainManager.RemoveLayer("LootPatrol", brains);
 
-        // ExUsec (Rogue) brain — registered so ORBIT can drive custom factions that borrow brain type 24
-        // (e.g. ISB, whose WildSpawnType is built on the Rogue brain). The vanilla exUsec Rogues that share
-        // this brain are excluded unconditionally in OrbitBrainLayer.IsExcludedRole, so the layer is built
-        // inert for them (no Agent, no mover override, never active) and Lighthouse Rogues stay untouched.
+        // Vanilla brains that custom factions borrow. ISB (per its author) spreads its bots across the
+        // Rogue (exUsec), Glukhar (bossGluhar) and Glukhar-Scout (followerGluharScout) brains, on top of the
+        // Goon brains already covered above. Register the layer on them so ORBIT can drive those custom bots.
+        // The real vanilla bots sharing these brains (exUsec Rogues, Reserve Glukhar + his Scout guard) are
+        // excluded unconditionally in OrbitBrainLayer.IsExcludedRole, so the layer is inert for them, and
+        // their LootPatrol is left intact (not stripped above) so they stay 100% vanilla.
         brains.Add(nameof(BsgBrain.ExUsec));
+        brains.Add(nameof(BsgBrain.BossGluhar));
+        brains.Add(nameof(BsgBrain.FollowerGluharScout));
         BrainManager.AddCustomLayer(typeof(OrbitBrainLayer), brains, 19);
 
         Log.Info($"ORBIT {OrbitVersion} fully loaded — BrainManager wired");

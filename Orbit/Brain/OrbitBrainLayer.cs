@@ -74,11 +74,18 @@ public class OrbitBrainLayer : CustomLayer
         var role = botOwner?.Profile?.Info?.Settings?.Role;
         if (!role.HasValue) return false;
 
-        // Vanilla Lighthouse Rogues share the ExUsec brain that ORBIT registers on for custom factions
-        // borrowing brain type 24 (e.g. ISB). Never take over the real Rogues: exclude the vanilla exUsec
-        // WildSpawnType unconditionally. Custom faction types (ISBSpecialForces etc.) are a different
-        // WildSpawnType and fall through to the normal toggle logic below.
-        if (role.Value == EFT.WildSpawnType.exUsec) return true;
+        // Custom factions (e.g. ISB) borrow several vanilla brains that ORBIT registers on so it can drive
+        // the custom bots: Rogue (exUsec), Glukhar (bossGluhar) and Glukhar-Scout (followerGluharScout).
+        // Never take over the REAL vanilla bots sharing those brains, so exclude their WildSpawnTypes
+        // unconditionally. Custom faction types (ISBSpecialForces / ISBTeamLeader etc.) are different
+        // WildSpawnTypes and fall through to the normal toggle logic below.
+        switch (role.Value)
+        {
+            case EFT.WildSpawnType.exUsec:
+            case EFT.WildSpawnType.bossGluhar:
+            case EFT.WildSpawnType.followerGluharScout:
+                return true;
+        }
 
         if (_excludedRoleSubstrings.Count > 0)
         {
