@@ -4,12 +4,10 @@ using Random = UnityEngine.Random;
 namespace Orbit.Sain;
 
 /// <summary>
-/// Per-squad bundle of values rolled once at squad creation from the
-/// leader's archetype tables. PMC squads with SAIN personality
-/// resolution active read these; scavs / PlayerScavs ignore the bundle
-/// entirely and use the global knobs. Vector2 source ranges are rolled
-/// to single floats (or ints) here so dispatch reads are cheap and
-/// behaviour is deterministic across the raid.
+/// Per-squad bundle of values rolled once at squad creation from the leader's archetype tables. PMC squads
+/// with SAIN personality resolution active read these; scavs / PlayerScavs ignore the bundle entirely and use
+/// the global knobs. Vector2 source ranges are rolled to single floats (or ints) here so dispatch reads are
+/// cheap and behaviour is deterministic across the raid.
 /// </summary>
 public sealed class PersonalityProfile
 {
@@ -31,8 +29,8 @@ public sealed class PersonalityProfile
     public readonly int MiniLootValueThreshold;
     public readonly float LockedDoorUnlockProba;
 
-    // Per-member (stored on the squad — every member reads the squad's
-    // profile rather than rolling per-Agent for cost reasons).
+    // Per-member (stored on the squad — every member reads the squad's profile rather than rolling per-Agent
+    // for cost reasons).
     public readonly float SprintPropensity;
 
     private PersonalityProfile(
@@ -66,10 +64,9 @@ public sealed class PersonalityProfile
     }
 
     /// <summary>
-    /// Roll just the extract-loot threshold for the given archetype.
-    /// Used by per-agent threshold resolution: each squad member rolls
-    /// their own threshold based on their own SAIN brain so a mixed
-    /// squad of Rat + Chad sums to Rat-range + Chad-range, not 2× one.
+    /// Roll just the extract-loot threshold for the given archetype. Used by per-agent threshold resolution:
+    /// each squad member rolls their own threshold based on their own SAIN brain so a mixed squad of Rat +
+    /// Chad sums to Rat-range + Chad-range, not 2× one.
     /// </summary>
     public static float RollExtractThresholdFor(PersonalityArchetype archetype)
     {
@@ -78,8 +75,7 @@ public sealed class PersonalityProfile
     }
 
     /// <summary>
-    /// Returns the configured per-archetype mini-loot value threshold.
-    /// Scalar — no per-roll sampling.
+    /// Returns the configured per-archetype mini-loot value threshold. Scalar — no per-roll sampling.
     /// </summary>
     public static int GetMiniLootThresholdFor(PersonalityArchetype archetype)
     {
@@ -87,9 +83,8 @@ public sealed class PersonalityProfile
     }
 
     /// <summary>
-    /// Roll a profile for the given archetype using the F12 tables. Each
-    /// Vector2 range is sampled once; scalars are passed through. Called
-    /// at squad registration when the leader is PMC and SAIN personality
+    /// Roll a profile for the given archetype using the F12 tables. Each Vector2 range is sampled once;
+    /// scalars are passed through. Called at squad registration when the leader is PMC and SAIN personality
     /// resolution is enabled.
     /// </summary>
     public static PersonalityProfile Roll(PersonalityArchetype archetype)
@@ -173,10 +168,8 @@ public sealed class PersonalityProfile
             miniLootValueThreshold: Plugin.SainVeryAggressiveMiniLootThreshold.Value,
             lockedDoorUnlockProba: Plugin.SainVeryAggressiveLockedDoorProba.Value,
             sprintPropensity: Plugin.SainVeryAggressiveSprintPropensity.Value),
-        // Average uses globally-tuned values routed through the same
-        // bundle so call sites can read uniformly. Turning the master
-        // toggle OFF has the same effect as resolving Average for every
-        // PMC.
+        // Average uses globally-tuned values routed through the same bundle so call sites can read uniformly.
+        // Turning the master toggle OFF has the same effect as resolving Average for every PMC.
         _ => new ArchetypeTable(
             mainMixQ: Plugin.SainAverageMainMixQ.Value,
             mainMixK: Plugin.SainAverageMainMixK.Value,

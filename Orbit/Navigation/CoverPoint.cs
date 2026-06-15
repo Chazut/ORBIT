@@ -11,9 +11,8 @@ public enum CoverCategory
 }
 
 /// <summary>
-/// A precomputed cover hint attached to a waypoint — used by Guard to
-/// pick a stance when the bot reaches the POI. Two constructors: one for
-/// internal <see cref="CoverCategory"/> values, one that maps BSG's
+/// A precomputed cover hint attached to a waypoint — used by Guard to pick a stance when the bot reaches the
+/// POI. Two constructors: one for internal <see cref="CoverCategory"/> values, one that maps BSG's
 /// <c>CoverType</c> (Wall / Foliage / Other) into the simpler 3-state
 /// category we care about.
 /// </summary>

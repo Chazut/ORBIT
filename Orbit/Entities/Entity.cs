@@ -4,11 +4,9 @@ using Orbit.Tasks;
 namespace Orbit.Entities;
 
 /// <summary>
-/// Base class for everything the task system schedules. Each entity owns
-/// a per-task <see cref="TaskScores"/> array (one float per registered
-/// task) and an <see cref="TaskAssignment"/> describing what it's
-/// currently running. Equality is purely id-based — two entities are the
-/// same iff their <see cref="Id"/>s match.
+/// Base class for everything the task system schedules. Each entity owns a per-task <see cref="TaskScores"/>
+/// array (one float per registered task) and an <see cref="TaskAssignment"/> describing what it's currently
+/// running. Equality is purely id-based — two entities are the same iff their <see cref="Id"/>s match.
 /// </summary>
 public class Entity(int id, float[] taskScores) : IEquatable<Entity>
 {

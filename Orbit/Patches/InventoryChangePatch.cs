@@ -8,14 +8,13 @@ using SPT.Reflection.Patching;
 namespace Orbit.Patches;
 
 /// <summary>
-/// Fires whenever any Player (human OR bot) picks up an item. We use this
-/// to prune the matching LooseLoot waypoint from WaypointSystem so other
-/// bots don't path to an empty spot. Covers three cases the dispatcher
+/// Fires whenever any Player (human OR bot) picks up an item. We use this to prune the matching LooseLoot
+/// waypoint from WaypointSystem so other bots don't path to an empty spot. Covers three cases the dispatcher
 /// can't see on its own:
 ///   1. Human player grabs a loose item.
 ///   2. Another mod (or vanilla AI) moves an item out of the world.
 ///   3. A bot loots via our pipeline — the hook still fires, but
-///      RemoveLooseLootByItemId is idempotent so the duplicate is cheap.
+/// RemoveLooseLootByItemId is idempotent so the duplicate is cheap.
 /// </summary>
 public class InventoryChangePatch : ModulePatch
 {

@@ -12,15 +12,14 @@ namespace Orbit.Patches;
 /// <summary>
 /// BSG has two BotMover teleport methods. We intercept the "hard" rescue —
 /// <c>BotMover.method_10(posiblePos)</c> — which snaps a stuck bot back to
-/// its last good cast point. The public <c>Teleport</c> overload is a soft
-/// in-bounds correction we don't care about.
+/// its last good cast point. The public <c>Teleport</c> overload is a soft in-bounds correction we don't care
+/// about.
 ///
-/// When a bot was chasing a waypoint in an unreachable spot (Quest behind
-/// a locked door, Corpse on a roof, etc.) the rescue fires over and over.
-/// Reacting here: drop the waypoint from WaypointSystem so the squad gets a
-/// fresh objective, and park the squad in a Wait state for 15s so BSG's
-/// mover can re-anchor on the navmesh before the strategy hands it another
-/// target. Ignore short teleports (less than 10m) — routine corrections.
+/// When a bot was chasing a waypoint in an unreachable spot (Quest behind a locked door, Corpse on a roof,
+/// etc.) the rescue fires over and over. Reacting here: drop the waypoint from WaypointSystem so the squad
+/// gets a fresh objective, and park the squad in a Wait state for 15s so BSG's mover can re-anchor on the
+/// navmesh before the strategy hands it another target. Ignore short teleports (less than 10m) — routine
+/// corrections.
 /// </summary>
 public class RescueInterceptPatch : ModulePatch
 {
@@ -58,9 +57,8 @@ public class RescueInterceptPatch : ModulePatch
         var loc = matchedAgent.Objective?.Location;
         if (loc == null) return;
 
-        // Synthetic / Exfil waypoints aren't lootable and shouldn't be
-        // pruned on a teleport — unreachable exfils get filtered upstream by
-        // status / faction checks.
+        // Synthetic / Exfil waypoints aren't lootable and shouldn't be pruned on a teleport — unreachable
+        // exfils get filtered upstream by status / faction checks.
         switch (loc.Category)
         {
             case WaypointCategory.Quest:

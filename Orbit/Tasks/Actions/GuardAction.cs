@@ -12,11 +12,9 @@ using Random = UnityEngine.Random;
 namespace Orbit.Tasks.Actions;
 
 /// <summary>
-/// Steady-state "hold this objective" behaviour: walk to the assigned
-/// cover point, crouch, raycast-sweep nearby directions for the longest
-/// sightlines, then cycle the bot's gaze across them while holding the
-/// position. Activates once the bot has arrived at a POI and there's
-/// nothing to loot or path away to.
+/// Steady-state "hold this objective" behaviour: walk to the assigned cover point, crouch, raycast-sweep
+/// nearby directions for the longest sightlines, then cycle the bot's gaze across them while holding the
+/// position. Activates once the bot has arrived at a POI and there's nothing to loot or path away to.
 /// </summary>
 public class GuardAction(AgentData dataset, MovementSystem movementSystem, float hysteresis) : Task<Agent>(hysteresis)
 {
@@ -37,8 +35,13 @@ public class GuardAction(AgentData dataset, MovementSystem movementSystem, float
             var agent = agents[i];
             var location = agent.Objective.Location;
 
-            // No objective or no cover-point → no Guard.
-            if (location == null || agent.Guard.CoverPoint == null)
+            // No objective or no cover-point → no Guard. Exfil objectives never Guard either: there
+            // is no post-arrival idle at an exfil (inside trigger → ExtractAction owns it, outside
+            // trigger → Goto must stay active to run the force-extract timer). With Guard allowed to
+            // bid, its in-radius 0.65 + active-task hysteresis could lock a bot into guarding beside
+            // its own extract until raid end.
+            if (location == null || agent.Guard.CoverPoint == null
+                || location.Category == WaypointCategory.Exfil)
             {
                 agent.TaskScores[ordinal] = 0;
                 continue;
@@ -51,6 +54,15 @@ public class GuardAction(AgentData dataset, MovementSystem movementSystem, float
         }
     }
 
+    /// <summary>
+    /// Seconds an agent can sit in GuardAction with a loot POI as their objective WITHOUT having entered
+    /// Looting status before the watchdog assumes the arrival check failed (radius / LoS raycast) and
+    /// blacklists the chain target. 5s is generous — the bot has already finished moving (otherwise it'd
+    /// be in GotoObjectiveAction, not Guard), so the only thing left to wait for is the arrival ack +
+    /// LootContainerAction takeover, both of which fire within ~1s when nothing is wrong.
+    /// </summary>
+    private const float GuardOnLootPoiTimeoutSeconds = 5f;
+
     public override void Update()
     {
         for (var i = 0; i < ActiveEntities.Count; i++)
@@ -59,15 +71,58 @@ public class GuardAction(AgentData dataset, MovementSystem movementSystem, float
             var guard = agent.Guard;
 
             if (agent.Objective.Location == null || guard.CoverPoint == null)
+            {
+                agent.GuardOnLootPoiSinceTime = -1f;
                 continue;
+            }
+
+            // Stuck-on-loot-POI watchdog. Scavenge sweeps chain to a nearby POI, the bot walks the 0-2m,
+            // movement-destination-reached fires, BUT the arrival check (1m radius + Physics raycast LoS)
+            // sometimes returns false (slight overshoot, vertical mismatch, wall corner blocking LoS) — the
+            // bot doesn't flip Status=Looting and falls into GuardAction by default. The squad keeps its
+            // anchor on this POI, alignment check sees agent.Objective matches squad anchor, no re-dispatch
+            // fires, agent stays guarding indefinitely. Detect by tracking how long the agent has been in
+            // Guard while the objective is a loot category AND status hasn't transitioned through Looting.
+            // Bot in GotoObjectiveAction (still walking) won't tick this branch — Guard isn't active there.
+            var loc = agent.Objective.Location;
+            var stuckCandidate = (loc.Category == WaypointCategory.ContainerLoot
+                                  || loc.Category == WaypointCategory.LooseLoot
+                                  || loc.Category == WaypointCategory.Corpse)
+                                 && agent.Objective.Status != ObjectiveStatus.Looting
+                                 && agent.Objective.Status != ObjectiveStatus.Finished;
+            if (stuckCandidate)
+            {
+                if (agent.GuardOnLootPoiSinceTime < 0f) agent.GuardOnLootPoiSinceTime = Time.time;
+                if (Time.time - agent.GuardOnLootPoiSinceTime >= GuardOnLootPoiTimeoutSeconds)
+                {
+                    agent.Squad?.CompletedPoiIds.Add(loc.Id);
+                    if (agent.Squad?.Objective.Location != null && agent.Squad.Objective.Location.Id == loc.Id)
+                        agent.Squad.Objective.Location = null;
+                    var locForLog = loc;
+                    agent.Objective.Location = null;
+                    agent.Objective.SplinterParent = null;
+                    agent.Objective.Status = ObjectiveStatus.None;
+                    agent.GuardOnLootPoiSinceTime = -1f;
+                    Log.Info($"{agent} guard-on-loot-POI watchdog: blacklisting {locForLog} for {agent.Squad} after {GuardOnLootPoiTimeoutSeconds:F0}s in Guard without Looting (arrival check probably failed — radius / LoS raycast) — cleared agent + squad target to force re-dispatch");
+                    // Same churn-detection feed as the 3-fail arrival blacklist: a flurry of these
+                    // across DIFFERENT POIs means the bot can't path anywhere and might be wedged on a
+                    // door they previously opened.
+                    movementSystem.RegisterPoiBlacklistAndMaybeCloseDoors(agent);
+                    continue;
+                }
+            }
+            else
+            {
+                agent.GuardOnLootPoiSinceTime = -1f;
+            }
 
             var coverPoint = guard.CoverPoint.Value;
 
             switch (agent.Guard.Status)
             {
                 case GuardStatus.None:
-                    // Sprint to cover honours the same faction / personality
-                    // gate as objective dispatch (scavs and Timmy never sprint).
+                    // Sprint to cover honours the same faction / personality gate as objective dispatch
+                    // (scavs and Timmy never sprint).
                     var sprintAllowed = SprintGate.IsAllowedByFaction(agent);
                     movementSystem.MoveToByPath(agent, coverPoint.Position, sprint: sprintAllowed, urgency: MovementUrgency.Low);
                     guard.Status = GuardStatus.Moving;
@@ -134,8 +189,8 @@ public class GuardAction(AgentData dataset, MovementSystem movementSystem, float
                 _candidateBuffer.Add(coverPoint.Direction);
         }
 
-        // The objective's Y can produce odd directions relative to the bot's
-        // head. Force it into the same elevation for the direction maths.
+        // The objective's Y can produce odd directions relative to the bot's head. Force it into the same
+        // elevation for the direction maths.
         var coplanarObjective = new Vector3(agent.Objective.Location.Position.x, origin.y, agent.Objective.Location.Position.z);
         var objectiveVector = coplanarObjective - origin;
         objectiveVector.Normalize();
@@ -234,8 +289,7 @@ public class GuardAction(AgentData dataset, MovementSystem movementSystem, float
 
         _sortBuffer.Sort(Comparer.Instance);
 
-        // Keep the 5 longest-distance directions — those are the most
-        // worthwhile to watch (open sightlines).
+        // Keep the 5 longest-distance directions — those are the most worthwhile to watch (open sightlines).
         var limit = Math.Min(_sortBuffer.Count, 5) + 1;
 
         for (var i = 1; i < limit; i++)

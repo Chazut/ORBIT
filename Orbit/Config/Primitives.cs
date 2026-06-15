@@ -5,9 +5,8 @@ using UnityEngine;
 namespace Orbit.Config;
 
 /// <summary>
-/// Inclusive [Min..Max] range with sample helpers — used widely across
-/// config (loot thresholds, roam durations, etc.). Gaussian sampling
-/// targets ~99.7% of values in-range via 6-sigma scaling, then clamps to
+/// Inclusive [Min..Max] range with sample helpers — used widely across config (loot thresholds, roam
+/// durations, etc.). Gaussian sampling targets ~99.7% of values in-range via 6-sigma scaling, then clamps to
 /// be safe.
 /// </summary>
 public struct Range(float min, float max)

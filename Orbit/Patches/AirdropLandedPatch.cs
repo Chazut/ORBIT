@@ -6,9 +6,8 @@ using SPT.Reflection.Patching;
 namespace Orbit.Patches;
 
 /// <summary>
-/// Fires when an airdrop's landing animation completes — we surface the
-/// fresh LootableContainer so the waypoint system can register it as a
-/// runtime POI mid-raid.
+/// Fires when an airdrop's landing animation completes — we surface the fresh LootableContainer so the
+/// waypoint system can register it as a runtime POI mid-raid.
 /// </summary>
 public class AirdropLandedPatch : ModulePatch
 {

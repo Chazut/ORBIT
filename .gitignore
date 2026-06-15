@@ -10,3 +10,10 @@ obj/
 # IDE
 .idea/
 *.suo
+
+# Local-only dev folders
+dashboard/
+scripts/
+dist/
+notes/
+.claude/

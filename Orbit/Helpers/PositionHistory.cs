@@ -4,11 +4,10 @@ using UnityEngine;
 namespace Orbit.Helpers;
 
 /// <summary>
-/// Circular buffer recording recent world positions. <see cref="GetDistanceSqr"/>
-/// returns the squared distance between the oldest and most-recent samples,
-/// projected to the full window when the buffer is still warming up — used
-/// by the stuck-detection heuristics to decide whether a bot has actually
-/// moved over the recent past.
+/// Circular buffer recording recent world positions. <see cref="GetDistanceSqr"/> returns the squared
+/// distance between the oldest and most-recent samples, projected to the full window when the buffer is still
+/// warming up — used by the stuck-detection heuristics to decide whether a bot has actually moved over the
+/// recent past.
 /// </summary>
 public class PositionHistory
 {
@@ -47,8 +46,8 @@ public class PositionHistory
 
         if (_validCount >= _bufferSize) return observedDistSqr;
 
-        // Warmup: project the partial window velocity to the full buffer length
-        // so the value is comparable across all buffer fill states.
+        // Warmup: project the partial window velocity to the full buffer length so the value is comparable
+        // across all buffer fill states.
         var scaleFactor = (_bufferSize - 1f) / (_validCount - 1);
         return observedDistSqr * scaleFactor * scaleFactor;
     }

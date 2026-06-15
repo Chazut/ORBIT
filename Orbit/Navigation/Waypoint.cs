@@ -16,9 +16,8 @@ public enum WaypointCategory
 }
 
 /// <summary>
-/// A point of interest in the world — a container, a corpse, a quest
-/// trigger, an exfil, etc. The dispatch strategy treats waypoints as the
-/// atomic unit of "place a squad can be sent to". Equality is id-based.
+/// A point of interest in the world — a container, a corpse, a quest trigger, an exfil, etc. The dispatch
+/// strategy treats waypoints as the atomic unit of "place a squad can be sent to". Equality is id-based.
 /// </summary>
 public class Waypoint(
     int id,
@@ -42,21 +41,18 @@ public class Waypoint(
     public readonly List<Door> Doors = doors;
     public readonly List<CoverPoint> CoverPoints = coverPoints;
     /// <summary>
-    /// The EFT interactable this POI refers to, when applicable. For
-    /// lootable categories the target is an InteractableObject
-    /// (LootableContainer / LootItem / Corpse). For Exfil it's an
-    /// ExfiltrationPoint (a MonoBehaviour, not an InteractableObject —
-    /// that's why this field is typed at the common base). For Quest /
-    /// Synthetic it's null.
+    /// The EFT interactable this POI refers to, when applicable. For lootable categories the target is an
+    /// InteractableObject (LootableContainer / LootItem / Corpse). For Exfil it's an ExfiltrationPoint (a
+    /// MonoBehaviour, not an InteractableObject — that's why this field is typed at the common base). For
+    /// Quest / Synthetic it's null.
     /// </summary>
     public readonly MonoBehaviour Target = target;
 
     /// <summary>
-    /// Locked doors detected on the natural navmesh route to this POI.
-    /// Populated lazily the first time a PMC squad tries to dispatch and
-    /// finds <c>NavMesh.CalculatePath</c> returning anything other than
-    /// PathComplete. When non-null and non-empty, the POI is treated as
-    /// reachable *if* the squad force-unlocks the door(s) on arrival.
+    /// Locked doors detected on the natural navmesh route to this POI. Populated lazily the first time a PMC
+    /// squad tries to dispatch and finds <c>NavMesh.CalculatePath</c> returning anything other than
+    /// PathComplete. When non-null and non-empty, the POI is treated as reachable *if* the squad
+    /// force-unlocks the door(s) on arrival.
     /// <see langword="null"/> means "never checked" or "no locked door
     /// nearby"; the distinction is purely diagnostic.
     /// </summary>

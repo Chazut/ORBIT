@@ -4,8 +4,7 @@ namespace Orbit.Interop;
 /// String-backed enum mirroring the BSG brain names used as keys in
 /// <c>BrainManager.AddCustomLayer</c> / <c>RemoveLayer</c>. Using
 /// <c>nameof(BsgBrain.PMC)</c> at call sites instead of raw strings means
-/// a typo or rename surfaces as a compile error rather than a silent
-/// no-op at runtime.
+/// a typo or rename surfaces as a compile error rather than a silent no-op at runtime.
 /// </summary>
 public enum BsgBrain
 {

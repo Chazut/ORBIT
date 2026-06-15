@@ -10,9 +10,8 @@ using UnityEngine;
 namespace Orbit.Patches;
 
 /// <summary>
-/// Logs the small "soft" rescue teleport BSG fires via BotMover.Teleport.
-/// Strictly for diagnosing pathing pathologies — production builds noop
-/// this via Log.Debug being [Conditional("DEBUG")].
+/// Logs the small "soft" rescue teleport BSG fires via BotMover.Teleport. Strictly for diagnosing pathing
+/// pathologies — production builds noop this via Log.Debug being [Conditional("DEBUG")].
 /// </summary>
 public class SoftTeleportTracePatch : ModulePatch
 {
@@ -46,8 +45,8 @@ public class SoftTeleportTracePatch : ModulePatch
 }
 
 /// <summary>
-/// Logs the "hard" rescue teleport BSG fires via BotMover.method_10 — the
-/// large recovery snap fired when a bot is hopelessly stuck. Paired with
+/// Logs the "hard" rescue teleport BSG fires via BotMover.method_10 — the large recovery snap fired when a
+/// bot is hopelessly stuck. Paired with
 /// <see cref="RescueInterceptPatch"/> which actually reacts to it.
 /// </summary>
 public class HardTeleportTracePatch : ModulePatch
@@ -101,8 +100,8 @@ public class MovementContextHumanizePatch : ModulePatch
 }
 
 /// <summary>
-/// Skips BSG's BotMover.ManualFixedUpdate for ORBIT bots — the vanilla
-/// mover would fight our own movement system and cause jitter.
+/// Skips BSG's BotMover.ManualFixedUpdate for ORBIT bots — the vanilla mover would fight our own movement
+/// system and cause jitter.
 /// </summary>
 public class ManualFixedUpdateSkipPatch : ModulePatch
 {
@@ -119,10 +118,9 @@ public class ManualFixedUpdateSkipPatch : ModulePatch
 }
 
 /// <summary>
-/// Enables the human vaulting component for bots so they can actually
-/// climb low obstacles instead of getting stuck on every windowsill.
-/// Skips bots running the simplified skeleton (offscreen LOD bots have no
-/// vaulting rig — the component would null-deref).
+/// Enables the human vaulting component for bots so they can actually climb low obstacles instead of getting
+/// stuck on every windowsill. Skips bots running the simplified skeleton (offscreen LOD bots have no vaulting
+/// rig — the component would null-deref).
 /// </summary>
 public class BotVaultingPatch : ModulePatch
 {

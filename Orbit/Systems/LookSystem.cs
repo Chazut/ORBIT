@@ -7,11 +7,10 @@ using UnityEngine;
 namespace Orbit.Systems;
 
 /// <summary>
-/// Drives the bot's head-look direction. By default it points the bot's
-/// gaze at a look-ahead point along its current path, so the head turns
-/// into corners ahead of the body. Tasks that need a specific look target
-/// (loot inspection, watching a cover sector) set <c>agent.Look.Target</c>
-/// directly and this system honours that override.
+/// Drives the bot's head-look direction. By default it points the bot's gaze at a look-ahead point along its
+/// current path, so the head turns into corners ahead of the body. Tasks that need a specific look target
+/// (loot inspection, watching a cover sector) set <c>agent.Look.Target</c> directly and this system honours
+/// that override.
 /// </summary>
 public class LookSystem
 {

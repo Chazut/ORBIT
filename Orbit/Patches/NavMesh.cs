@@ -6,10 +6,9 @@ using SPT.Reflection.Patching;
 namespace Orbit.Patches;
 
 /// <summary>
-/// Shrink the open-state navmesh carvers BSG attaches to every door so an
-/// opened door doesn't block its entire hallway from the navmesh. The
-/// vanilla carvers are sized for the door frame; we keep ~37% of that and
-/// rely on physics for the rest.
+/// Shrink the open-state navmesh carvers BSG attaches to every door so an opened door doesn't block its
+/// entire hallway from the navmesh. The vanilla carvers are sized for the door frame; we keep ~37% of that
+/// and rely on physics for the rest.
 /// </summary>
 public class DoorCarverShrinkPatch : ModulePatch
 {

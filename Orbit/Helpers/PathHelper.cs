@@ -3,8 +3,8 @@ using UnityEngine;
 namespace Orbit.Helpers;
 
 /// <summary>
-/// Geometry helpers operating on navmesh-style polyline paths and 2D
-/// segment intersections. All pure functions, no state.
+/// Geometry helpers operating on navmesh-style polyline paths and 2D segment intersections. All pure
+/// functions, no state.
 /// </summary>
 public static class PathHelper
 {
@@ -65,14 +65,12 @@ public static class PathHelper
     /// Walks the path from <paramref name="position"/> at corner
     /// <paramref name="cornerIndex"/> and returns the point exactly
     /// <paramref name="targetDistanceSqr"/> ahead along the polyline.
-    /// Returns the path's final corner if the requested distance exceeds
-    /// the remaining length.
+    /// Returns the path's final corner if the requested distance exceeds the remaining length.
     /// </summary>
     /// <remarks>
-    /// Squared distances aren't telescoping so this implementation
-    /// double-counts slightly across corner boundaries. Good enough for
-    /// the look-ahead heuristic that consumes it; if precise distances
-    /// ever matter, switch to linear sqrt accumulation.
+    /// Squared distances aren't telescoping so this implementation double-counts slightly across corner
+    /// boundaries. Good enough for the look-ahead heuristic that consumes it; if precise distances ever
+    /// matter, switch to linear sqrt accumulation.
     /// </remarks>
     public static Vector3 CalcForwardPoint(Vector3[] corners, Vector3 position, int cornerIndex, float targetDistanceSqr)
     {
@@ -88,8 +86,7 @@ public static class PathHelper
             var toCorner = corners[currentIndex] - currentPoint;
             var distanceToCornerSqr = toCorner.sqrMagnitude;
 
-            // If the next corner is far enough, our target point sits along
-            // the current segment.
+            // If the next corner is far enough, our target point sits along the current segment.
             if (distanceToCornerSqr >= remainingDistanceSqr)
             {
                 var remainingDistance = Mathf.Sqrt(remainingDistanceSqr);
@@ -106,9 +103,8 @@ public static class PathHelper
     }
 
     /// <summary>
-    /// 2D segment-segment intersection test in the XZ plane. Returns true
-    /// if the segments [a1-a2] and [b1-b2] cross (proper or endpoint
-    /// touching). Uses the standard cross-product orientation test.
+    /// 2D segment-segment intersection test in the XZ plane. Returns true if the segments [a1-a2] and [b1-b2]
+    /// cross (proper or endpoint touching). Uses the standard cross-product orientation test.
     /// </summary>
     public static bool Segments2dIntersectXZ(Vector3 a1, Vector3 a2, Vector3 b1, Vector3 b2)
     {
@@ -129,9 +125,8 @@ public static class PathHelper
     }
 
     /// <summary>
-    /// Maximum angular jitter (in degrees) between consecutive corners
-    /// along the next <paramref name="lookAheadDistance"/> metres of the
-    /// path starting at <paramref name="startIndex"/>. Used by the
+    /// Maximum angular jitter (in degrees) between consecutive corners along the next <paramref
+    /// name="lookAheadDistance"/> metres of the path starting at <paramref name="startIndex"/>. Used by the
     /// movement system to slow down ahead of sharp turns.
     /// </summary>
     public static float CalculatePathAngleJitter(Vector3[] path, int startIndex, float lookAheadDistance)

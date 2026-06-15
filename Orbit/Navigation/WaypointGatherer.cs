@@ -12,12 +12,10 @@ using Random = UnityEngine.Random;
 namespace Orbit.Navigation;
 
 /// <summary>
-/// Boot-time scrape of every interesting world object on the map into the
-/// initial waypoint set: quest triggers, lootable containers, loose loot
-/// items, exfiltration points. Each candidate is sampled against the
-/// navmesh and dropped if the bot can't physically stand near it.
-/// Corpses are added at runtime (see CorpseRegistrationPatch), so this
-/// gatherer doesn't touch them.
+/// Boot-time scrape of every interesting world object on the map into the initial waypoint set: quest
+/// triggers, lootable containers, loose loot items, exfiltration points. Each candidate is sampled against
+/// the navmesh and dropped if the bot can't physically stand near it. Corpses are added at runtime (see
+/// CorpseRegistrationPatch), so this gatherer doesn't touch them.
 /// </summary>
 public class WaypointGatherer(float cellSize, BotsController botsController)
 {
@@ -37,13 +35,11 @@ public class WaypointGatherer(float cellSize, BotsController botsController)
             if (trigger.transform == null)
                 continue;
 
-            // trigger.transform.position is often in mid-air or off-mesh
-            // (the anchor point of a tall trigger volume), which makes the
-            // 2 m navmesh sample fail. Prefer the collider's bounds.center,
-            // biased toward the floor for tall volumes (the floor inside is
-            // where a bot would actually stand), and widen the sample
-            // radius for big volumes so long quest zones (Customs office
-            // building, Streets sectors…) stay usable.
+            // trigger.transform.position is often in mid-air or off-mesh (the anchor point of a tall trigger
+            // volume), which makes the 2 m navmesh sample fail. Prefer the collider's bounds.center, biased
+            // toward the floor for tall volumes (the floor inside is where a bot would actually stand), and
+            // widen the sample radius for big volumes so long quest zones (Customs office building, Streets
+            // sectors…) stay usable.
             var position = trigger.transform.position;
             var maxNavDist = 2f;
             var triggerCollider = trigger.GetComponent<Collider>();
@@ -93,9 +89,8 @@ public class WaypointGatherer(float cellSize, BotsController botsController)
 
         Log.Debug("Collecting exfil POIs");
 
-        // Collect every ExfiltrationPoint regardless of faction — we want both
-        // PMC and Scav extracts available in the POI grid. PickFromCell does
-        // the faction filtering at assignment time.
+        // Collect every ExfiltrationPoint regardless of faction — we want both PMC and Scav extracts
+        // available in the POI grid. PickFromCell does the faction filtering at assignment time.
         var uniqueExfils = new HashSet<Exfil>();
 
         foreach (var point in LocationScene.GetAllObjects<ExfiltrationPoint>())
@@ -113,11 +108,26 @@ public class WaypointGatherer(float cellSize, BotsController botsController)
                     ? "scav-only"
                     : "pmc-only";
             var coop = HasScavCoopRequirement(exfil.Point) ? " co-op" : "";
-            // EligibleEntryPoints is empty here because BSG hasn't finished
-            // LoadSettings yet (we run before it). Real entries surface at
-            // runtime via the OnStatusChanged log.
+            // EligibleEntryPoints is empty here because BSG hasn't finished LoadSettings yet (we run before
+            // it). Real entries surface at runtime via the OnStatusChanged log.
             Log.Info($"Exfil {exfil.Point.name} [{access}{coop}] status={exfil.Point.Status}");
-            ValidateAndAddWaypoint(collection, WaypointCategory.Exfil, exfil.Point.name, exfil.Point.transform.position, 5f, target: exfil.Point);
+            // Bias the navmesh sample toward the inside of the trigger volume: transform.position can be
+            // anywhere relative to the volume (Customs bunker-style hatches have transforms at the
+            // surface marker while the actual trigger goes underground). Use bounds.center, then snap
+            // toward the floor for tall verticals so the sample lands INSIDE the volume — bots end up
+            // navigating into the trigger rather than stopping at the surface and despawning above it.
+            var pos = exfil.Point.transform.position;
+            var maxNavDist = 5f;
+            var exfilCollider = exfil.Point.GetComponent<Collider>();
+            if (exfilCollider != null)
+            {
+                var bounds = exfilCollider.bounds;
+                pos = bounds.center;
+                if (bounds.extents.y > 1.5f)
+                    pos.y = bounds.min.y + 0.75f;
+                if (bounds.size.sqrMagnitude > 100f) maxNavDist = 10f;
+            }
+            ValidateAndAddWaypoint(collection, WaypointCategory.Exfil, exfil.Point.name, pos, maxNavDist, target: exfil.Point);
         }
 
         Log.Debug($"Collected {collection.Count} points of interest");
@@ -129,17 +139,23 @@ public class WaypointGatherer(float cellSize, BotsController botsController)
 
     public Waypoint CreateSyntheticWaypoint(Vector3 position)
     {
-        var radius = Mathf.Clamp(cellSize / 2f, 10f, 25f);
-        var radiusSqr = radius * radius;
+        // Cover scan stays wide (half a cell, 10-25m) — guards want sightline candidates around the
+        // whole patrol area. The ARRIVAL radius is decoupled and tight: with the old shared radius a
+        // bot "arrived" at a patrol point from up to 25m away, which made patrol legs evaporate (picks
+        // completed the moment the bot clipped the radius edge) and parked guards far from the actual
+        // point. 5m = the bot visibly walks TO the patrol point; BSG's nav-snap drift (1.5-2.5m) still
+        // fits comfortably inside.
+        var coverScanRadius = Mathf.Clamp(cellSize / 2f, 10f, 25f);
+        const float arrivalRadius = 5f;
         var name = $"Synthetic_{_idCounter}";
         const WaypointCategory category = WaypointCategory.Synthetic;
 
-        var coverData = CollectBuiltinCoverData(position, radius);
+        var coverData = CollectBuiltinCoverData(position, coverScanRadius);
 
         if (coverData.CoverPoints.Count < 16)
         {
             var extraPoints = 16 - coverData.CoverPoints.Count;
-            CollectSyntheticCoverData(coverData.CoverPoints, position, radius, extraPoints);
+            CollectSyntheticCoverData(coverData.CoverPoints, position, coverScanRadius, extraPoints);
         }
 
         if (coverData.CoverPoints.Count == 0)
@@ -147,25 +163,21 @@ public class WaypointGatherer(float cellSize, BotsController botsController)
             Log.Debug($"Waypoint {category}:{name} has 0 cover points in proximity");
         }
 
-        var waypoint = new Waypoint(_idCounter, category, name, position, radiusSqr, coverData.Doors, coverData.CoverPoints, target: null);
+        var waypoint = new Waypoint(_idCounter, category, name, position, arrivalRadius * arrivalRadius, coverData.Doors, coverData.CoverPoints, target: null);
         _idCounter++;
         return waypoint;
     }
 
     private Waypoint CreateBuiltinWaypoint(WaypointCategory category, string name, Vector3 position, MonoBehaviour target)
     {
-        // Arrival radii for "real" targets. 1m euclidean — matches BSG's
-        // native interaction range. Wall-through false-arrivals are
-        // prevented by the 3D Physics.Raycast (vs.
-        // LayerMaskClass.HighPolyWithTerrainMask) gate in
-        // GotoObjectiveAction, same raycast BSG uses for cover/vision.
-        // BSG's BotMover nav-snap drift (1.5-2.5m off Waypoint.Position)
-        // is absorbed by GotoObjectiveAction's nav-snap rescue path
-        // (Stopped + ≤4m + raycast clear → accept arrival).
+        // Arrival radii for "real" targets. 1m euclidean — matches BSG's native interaction range.
+        // Wall-through false-arrivals are prevented by the 3D Physics.Raycast (vs.
+        // LayerMaskClass.HighPolyWithTerrainMask) gate in GotoObjectiveAction, same raycast BSG uses for
+        // cover/vision. BSG's BotMover nav-snap drift (1.5-2.5m off Waypoint.Position) is absorbed by
+        // GotoObjectiveAction's nav-snap rescue path (Stopped + ≤4m + raycast clear → accept arrival).
         //
-        // Synthetic (patrol filler) keeps its wider radius — it's not a
-        // specific target, just a navmesh point in a cell. Exfil radius
-        // also stays — EFT's own extract zone gates the actual transition.
+        // Synthetic (patrol filler) keeps its wider radius — it's not a specific target, just a navmesh point
+        // in a cell. Exfil radius also stays — EFT's own extract zone gates the actual transition.
         var radius = category switch
         {
             WaypointCategory.ContainerLoot => 1f,
@@ -332,10 +344,9 @@ public class WaypointGatherer(float cellSize, BotsController botsController)
     {
         public readonly ExfiltrationPoint Point = point;
 
-        // ExfiltrationPoint.Id is empty in SPT 4.0 (BSG API change), so the
-        // original MongoID-based equality would collapse every exfil on the
-        // map into a single deduped entry. Dedupe on the component reference
-        // instead — each ExfiltrationPoint is a unique MonoBehaviour.
+        // ExfiltrationPoint.Id is empty in SPT 4.0 (BSG API change), so the original MongoID-based equality
+        // would collapse every exfil on the map into a single deduped entry. Dedupe on the component
+        // reference instead — each ExfiltrationPoint is a unique MonoBehaviour.
         public bool Equals(Exfil other) => ReferenceEquals(Point, other.Point);
 
         public override bool Equals(object obj) => obj is Exfil other && Equals(other);

@@ -12,9 +12,9 @@ using UnityEngine;
 namespace Orbit.Brain;
 
 /// <summary>
-/// Inert no-op BigBrain action. Registered as the layer's "next action" so
-/// BSG's brain machinery stays satisfied — actual movement / look / loot
-/// behaviour is driven by our own systems, not by CustomLogic ticks.
+/// Inert no-op BigBrain action. Registered as the layer's "next action" so BSG's brain machinery stays
+/// satisfied — actual movement / look / loot behaviour is driven by our own systems, not by CustomLogic
+/// ticks.
 /// </summary>
 internal class IdleAction(BotOwner botOwner) : CustomLogic(botOwner)
 {
@@ -24,13 +24,11 @@ internal class IdleAction(BotOwner botOwner) : CustomLogic(botOwner)
 }
 
 /// <summary>
-/// BigBrain layer registered against every non-combat brain we care about.
-/// Priority 19 sits below SAIN Combat (20) so an enemy contact preempts it,
-/// and above PatrolAssault (0) so it owns idle/loot/quest behaviour.
+/// BigBrain layer registered against every non-combat brain we care about. Priority 19 sits below SAIN Combat
+/// (20) so an enemy contact preempts it, and above PatrolAssault (0) so it owns idle/loot/quest behaviour.
 ///
-/// Per-bot construction either attaches an Agent (and overrides BSG's
-/// mover + door-collision) or stays inert when the bot's role is excluded
-/// by the faction-mod takeover / vanilla-scavs / vanilla-goons toggles.
+/// Per-bot construction either attaches an Agent (and overrides BSG's mover + door-collision) or stays inert
+/// when the bot's role is excluded by the faction-mod takeover / vanilla-scavs / vanilla-goons toggles.
 /// </summary>
 public class OrbitBrainLayer : CustomLayer
 {
@@ -40,9 +38,8 @@ public class OrbitBrainLayer : CustomLayer
     private readonly Agent _agent;
     private readonly bool _excluded;
 
-    // Tracks SAIN combat layer state from OnLayerChanged. Replaces
-    // BotOwner.Memory.LastEnemyTimeSeen which SAIN keeps fresh long
-    // past actual combat (sticky enemy memory), trapping ORBIT off.
+    // Tracks SAIN combat layer state from OnLayerChanged. Replaces BotOwner.Memory.LastEnemyTimeSeen which
+    // SAIN keeps fresh long past actual combat (sticky enemy memory), trapping ORBIT off.
     private const string SainCombatLayerName = "SAIN : Combat Layer";
     private bool _sainCombatActive;
     private float _sainCombatEndedAt = float.NegativeInfinity;
@@ -51,17 +48,16 @@ public class OrbitBrainLayer : CustomLayer
     private bool _lastIsActive = true;
     private float _lastIsActiveDiagAt;
 
-    // Substrings (case-insensitive) of WildSpawnType names whose bots
-    // should NOT be hijacked. Populated at boot by Plugin when the user
-    // toggles OFF a faction-mod takeover (UNTAR / RUAF / BlackDiv).
+    // Substrings (case-insensitive) of WildSpawnType names whose bots should NOT be hijacked. Populated at
+    // boot by Plugin when the user toggles OFF a faction-mod takeover (UNTAR / RUAF / BlackDiv / ISB).
     private static readonly HashSet<string> _excludedRoleSubstrings = new(StringComparer.OrdinalIgnoreCase);
 
-    // Vanilla-behaviour opt-outs. PlayerScavs share WildSpawnType.assault
-    // with bot scavs but are NEVER excluded by VanillaScavs (explicit
-    // Profile.WillBeAPlayerScav check inside IsExcludedRole).
+    // Vanilla-behaviour opt-outs. PlayerScavs share WildSpawnType.assault with bot scavs but are NEVER
+    // excluded by VanillaScavs (explicit Profile.WillBeAPlayerScav check inside IsExcludedRole).
     private static bool _vanillaScavs;
     private static bool _vanillaGoons;
     private static bool _vanillaCultists;
+    private static bool _vanillaRaiders;
 
     public static void AddExcludedRoleSubstring(string sub)
     {
@@ -71,6 +67,7 @@ public class OrbitBrainLayer : CustomLayer
     public static void SetVanillaScavExclusion(bool excluded) => _vanillaScavs = excluded;
     public static void SetVanillaGoonExclusion(bool excluded) => _vanillaGoons = excluded;
     public static void SetVanillaCultistExclusion(bool excluded) => _vanillaCultists = excluded;
+    public static void SetVanillaRaiderExclusion(bool excluded) => _vanillaRaiders = excluded;
 
     private static bool IsExcludedRole(BotOwner botOwner)
     {
@@ -102,6 +99,11 @@ public class OrbitBrainLayer : CustomLayer
             return true;
         }
 
+        if (_vanillaRaiders && role.Value.IsRaider())
+        {
+            return true;
+        }
+
         return false;
     }
 
@@ -123,8 +125,8 @@ public class OrbitBrainLayer : CustomLayer
         botOwner.Brain.BaseBrain.OnLayerChangedTo += OnLayerChanged;
         botOwner.GetPlayer.OnPlayerDead += OnDead;
 
-        // Make doors invisible to bot colliders — bots open them via our
-        // DoorSystem and shouldn't physically push them.
+        // Make doors invisible to bot colliders — bots open them via our DoorSystem and shouldn't physically
+        // push them.
         var botCollider = _agent.Bot.GetPlayer.CharacterController.GetCollider();
         var pomCollider = _agent.Bot.GetPlayer.POM.Collider;
 
@@ -143,8 +145,8 @@ public class OrbitBrainLayer : CustomLayer
         _agent.IsActive = false;
         var squad = _agent.Squad;
         _orbit.RemoveAgent(_agent);
-        // Re-evaluate the cumulative extract threshold without the dead
-        // member's contribution, in case survivors already sum above it.
+        // Re-evaluate the cumulative extract threshold without the dead member's contribution, in case
+        // survivors already sum above it.
         if (squad != null && squad.Members.Count > 0)
         {
             Orbit.Tasks.Actions.LootContainerAction.ReevaluateExtractForSquad(squad);
@@ -167,9 +169,8 @@ public class OrbitBrainLayer : CustomLayer
             if (_agent.IsActive)
             {
                 Log.Debug($"{_agent} setting player to navmesh");
-                // Make every mover state variable reflect the current position
-                // so SetPlayerToNavMesh doesn't snap the bot back to a stale
-                // target after our layer hands the brain back to BSG.
+                // Make every mover state variable reflect the current position so SetPlayerToNavMesh doesn't
+                // snap the bot back to a stale target after our layer hands the brain back to BSG.
                 mover.LastGoodCastPoint = mover.PrevSuccessLinkedFrom_1 = mover.PrevLinkPos = mover.PositionOnWayInner = _agent.Position;
                 mover.LastGoodCastPointTime = Time.time;
                 mover.PrevPosLinkedTime_1 = 0f;

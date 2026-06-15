@@ -5,11 +5,10 @@ using UnityEngine;
 namespace Orbit.Config;
 
 /// <summary>
-/// Per-map navigation tuning: the grid geometry (origin, extent, cell
-/// size) that drives waypoint binning, plus the advection zones (positive
-/// attractors / negative repellers) that bias squad pull. Backed by JSON
-/// files under <c>Config/Maps/</c>; defaults shipped inline so first-run
-/// users have a sensible baseline for every supported map.
+/// Per-map navigation tuning: the grid geometry (origin, extent, cell size) that drives waypoint binning,
+/// plus the advection zones (positive attractors / negative repellers) that bias squad pull. Backed by JSON
+/// files under <c>Config/Maps/</c>; defaults shipped inline so first-run users have a sensible baseline for
+/// every supported map.
 /// </summary>
 public class WaypointConfig
 {
@@ -34,11 +33,38 @@ public class WaypointConfig
         [JsonRequired] public float CellSize { get; set; } = cellSize;
     }
 
-    public class MapZone(Dictionary<string, BuiltinZone> builtinZones, List<CustomZone> customZones)
+    public class MapZone(Dictionary<string, BuiltinZone> builtinZones, List<CustomZone> customZones, Convergence convergence = null)
     {
         [JsonRequired] public Dictionary<string, BuiltinZone> BuiltinZones { get; set; } = builtinZones;
         [JsonRequired] public List<CustomZone> CustomZones { get; set; } = customZones;
+        // Deliberately NOT JsonRequired: zone JSONs written before the player-convergence restore lack
+        // this key. Null means "use the compiled-in default for this map" (resolved in WaypointSystem)
+        // so pre-existing files don't fail to load or silently disable the feature.
+        public Convergence Convergence { get; set; } = convergence;
     }
+
+    /// <summary>
+    /// Player-convergence force: every cell of the grid receives a pull toward the living human
+    /// player(s), scaled by inverse distance within Radius. Keeps the world drifting toward where the
+    /// action actually is without scripting anything. Radius/Force are sampled once per raid.
+    /// </summary>
+    public class Convergence(Range? radius = null, Range? force = null, bool enabled = true)
+    {
+        [JsonRequired] public Range Radius { get; set; } = radius ?? new Range(0f, 0f);
+        [JsonRequired] public Range Force { get; set; } = force ?? new Range(0f, 0f);
+        [JsonRequired] public bool Enabled { get; set; } = enabled;
+
+        public Convergence() : this(enabled: false)
+        {
+        }
+    }
+
+    /// <summary>Compiled-in convergence default for a map — the fallback when a zone JSON predates the
+    /// convergence key. Unknown map ids resolve to disabled.</summary>
+    public static Convergence DefaultConvergenceFor(string mapId)
+        => Defaults.MapZones.TryGetValue(mapId, out var zone) && zone.Convergence != null
+            ? zone.Convergence
+            : new Convergence();
 
     /// <summary>Zone keyed on a BSG-defined trigger name (e.g. ZoneDormitory).
     /// Position comes from the BSG trigger; we just tune radius/force/decay.</summary>
@@ -92,24 +118,26 @@ public class WaypointConfig
                     [
                         new CustomZone(new Vector2(-200, -100), new Range(350, 400), new Range(-0.25f, 0.5f)),
                         new CustomZone(new Vector2(550, 125), new Range(150, 200), new Range(-0.25f, 0.5f))
-                    ]
+                    ],
+                    new Convergence(new Range(200, 400), new Range(0f, 0.5f))
                 )
             },
-            { "factory4_day", new MapZone([], []) },
-            { "factory4_night", new MapZone([], []) },
-            { "Sandbox", new MapZone([], []) },
-            { "Sandbox_high", new MapZone([], []) },
+            { "factory4_day", new MapZone([], [], new Convergence()) },
+            { "factory4_night", new MapZone([], [], new Convergence()) },
+            { "Sandbox", new MapZone([], [], new Convergence()) },
+            { "Sandbox_high", new MapZone([], [], new Convergence()) },
             {
                 "Interchange", new MapZone(
                     new()
                     {
                         { "ZoneCenter", new BuiltinZone(new Range(500, 650), new Range(-0.25f, 1.0f), decay: 0.75f) }
                     },
-                    []
+                    [],
+                    new Convergence(new Range(300, 500), new Range(0f, 0.5f))
                 )
             },
-            { "laboratory", new MapZone([], []) },
-            { "Labyrinth", new MapZone([], []) },
+            { "laboratory", new MapZone([], [], new Convergence()) },
+            { "Labyrinth", new MapZone([], [], new Convergence()) },
             {
                 "Lighthouse", new MapZone(
                     new()
@@ -120,7 +148,8 @@ public class WaypointConfig
                     [
                         new CustomZone(new Vector2(0, 475), new Range(500, 600), new Range(-0.25f, 0.75f)),
                         new CustomZone(new Vector2(-55, -775), new Range(400, 450), new Range(-0.25f, 0.75f))
-                    ]
+                    ],
+                    new Convergence(new Range(250, 1000), new Range(0.25f, 0.75f))
                 )
             },
             {
@@ -130,7 +159,8 @@ public class WaypointConfig
                         { "ZoneSubStorage", new BuiltinZone(new Range(300, 350), new Range(-0.25f, 0.5f)) },
                         { "ZoneBarrack", new BuiltinZone(new Range(300, 350), new Range(-0.25f, 0.5f)) }
                     },
-                    []
+                    [],
+                    new Convergence()
                 )
             },
             {
@@ -141,10 +171,11 @@ public class WaypointConfig
                         new CustomZone(new Vector2(160, -270), new Range(500, 600), new Range(0f, 0.25f)),
                         new CustomZone(new Vector2(-345, 455), new Range(500, 600), new Range(-0.25f, 0.75f)),
                         new CustomZone(new Vector2(-925, 275), new Range(500, 600), new Range(-0.25f, 0.75f))
-                    ]
+                    ],
+                    new Convergence(new Range(750, 1500), new Range(0.25f, 0.75f))
                 )
             },
-            { "TarkovStreets", new MapZone([], []) },
+            { "TarkovStreets", new MapZone([], [], new Convergence(new Range(150, 300), new Range(0f, 0.5f))) },
             {
                 "Woods", new MapZone(
                     [],
@@ -153,7 +184,8 @@ public class WaypointConfig
                         new CustomZone(new Vector2(0, 0), new Range(700, 800), new Range(-0.35f, 1.25f)),       // New Sawmill
                         new CustomZone(new Vector2(400, 250), new Range(600, 700), new Range(-0.25f, 0.5f)),    // Outskirts
                         new CustomZone(new Vector2(135, -750), new Range(800, 1000), new Range(-0.35f, 1.0f))   // Friendship Bridge
-                    ]
+                    ],
+                    new Convergence(new Range(500, 1250), new Range(0.25f, 0.75f))
                 )
             },
         };

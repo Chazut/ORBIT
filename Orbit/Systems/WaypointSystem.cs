@@ -31,9 +31,8 @@ public struct Cell()
 /// <summary>
 /// The dispatch core. Owns the 2D cell grid covering the map, every
 /// <see cref="Waypoint"/> on it (loot / quest / exfil / synthetic /
-/// corpse), and the per-squad reachability + claim + cooldown state
-/// that <c>RequestNear</c> consults to assign objectives. Heavy file —
-/// most of the routing intelligence lives here.
+/// corpse), and the per-squad reachability + claim + cooldown state that <c>RequestNear</c> consults to
+/// assign objectives. Heavy file — most of the routing intelligence lives here.
 /// </summary>
 public class WaypointSystem
 {
@@ -52,50 +51,52 @@ public class WaypointSystem
     private readonly Vector2[,] _advectionField;
     private readonly string _mapId;
 
+    // Player convergence: a per-cell pull toward the living human player(s), refreshed every 30s as
+    // they move. Folded into RequestNear's preferred-direction sum alongside advection / home / main.
+    private readonly List<Player> _humanPlayers;
+    private readonly Vector2[,] _convergenceField;
+    private readonly List<Vector2Int> _convergencePlayerCoords = [];
+    private readonly TimePacing _convergenceUpdatePacing = new(30f);
+    private WaypointConfig.Convergence _convergence;
+    private float _convergenceRadius;
+    private float _convergenceForce;
+
     private readonly List<Vector2Int> _tempCoordsBuffer = [];
     private readonly WaypointGatherer _waypointGatherer;
 
-    // id → cell coords for fast removal. Populated by RegisterWaypointInCell
-    // regardless of whether the waypoint came from CollectBuiltinWaypoints,
-    // synthetic cell fill, or AddRuntimeWaypoint.
+    // id → cell coords for fast removal. Populated by RegisterWaypointInCell regardless of whether the
+    // waypoint came from CollectBuiltinWaypoints, synthetic cell fill, or AddRuntimeWaypoint.
     private readonly Dictionary<int, Vector2Int> _waypointCells = new();
 
-    // Per-waypoint reservation: while a bot is actively looting a waypoint,
-    // other bots (same squad or different) cannot start a second loot on it.
-    // Cleared by ReleaseClaim or automatically on RemoveWaypoint.
+    // Per-waypoint reservation: while a bot is actively looting a waypoint, other bots (same squad or
+    // different) cannot start a second loot on it. Cleared by ReleaseClaim or automatically on
+    // RemoveWaypoint.
     private readonly Dictionary<int, int> _claims = new();
 
-    // Reverse index: Item.Id (string MongoID) → Waypoint.Id (int), populated
-    // only for LooseLoot waypoints whose Target is a LootItem. Lets the
-    // inventory-change hook find and prune the matching waypoint when a
+    // Reverse index: Item.Id (string MongoID) → Waypoint.Id (int), populated only for LooseLoot waypoints
+    // whose Target is a LootItem. Lets the inventory-change hook find and prune the matching waypoint when a
     // player or vanilla-AI bot picks up an item outside of our routine.
     private readonly Dictionary<string, int> _lootItemIdToWaypointId = new();
 
-    // Lazy navmesh-reachability cache for waypoints. SPT can RNG-spawn loot
-    // items inside disconnected navmesh islands (locked interiors, rooftops
-    // accessible only via leaked navmesh). Each is path-checked the first
-    // time PickFromCell considers it, from the requesting squad leader's
-    // position (bots are navmesh-bound by BSG spawn). Results are cached so
-    // every waypoint is at most one NavMesh.CalculatePath per raid.
+    // Lazy navmesh-reachability cache for waypoints. SPT can RNG-spawn loot items inside disconnected navmesh
+    // islands (locked interiors, rooftops accessible only via leaked navmesh). Each is path-checked the first
+    // time PickFromCell considers it, from the requesting squad leader's position (bots are navmesh-bound by
+    // BSG spawn). Results are cached so every waypoint is at most one NavMesh.CalculatePath per raid.
     private readonly HashSet<int> _pathReachable = new();
-    // Per-squad negative cache. KEY = squad.Id, VALUE = set of waypoint ids
-    // that CalculatePath failed from that squad's leader position. Used to
-    // be a single global HashSet but that was a real bug source: a squad
-    // whose leader spawned on a disconnected navmesh fragment would poison
-    // the cache for every other squad. Per-squad means each squad re-
-    // evaluates from its OWN leader position. Positive cache stays global —
-    // if any squad reached a waypoint, the navmesh genuinely connects.
+    // Per-squad negative cache. KEY = squad.Id, VALUE = set of waypoint ids that CalculatePath failed from
+    // that squad's leader position. Used to be a single global HashSet but that was a real bug source: a
+    // squad whose leader spawned on a disconnected navmesh fragment would poison the cache for every other
+    // squad. Per-squad means each squad re- evaluates from its OWN leader position. Positive cache stays
+    // global — if any squad reached a waypoint, the navmesh genuinely connects.
     private readonly Dictionary<int, HashSet<int>> _squadUnreachable = new();
-    // Cached list of every door that started the raid Locked. Built lazily
-    // on first call to IsWaypointReachable when a PathPartial is detected,
-    // so PMC squads can still be dispatched on waypoints behind locked doors
-    // (marked rooms etc.) — they roll for a force-unlock at arrival. Null
-    // until the first miss; never cleared (door state can change at runtime
-    // but the candidate set is fixed by what was locked at raid start).
+    // Cached list of every door that started the raid Locked. Built lazily on first call to
+    // IsWaypointReachable when a PathPartial is detected, so PMC squads can still be dispatched on waypoints
+    // behind locked doors (marked rooms etc.) — they roll for a force-unlock at arrival. Null until the first
+    // miss; never cleared (door state can change at runtime but the candidate set is fixed by what was locked
+    // at raid start).
     private List<Door> _rawLockedDoors;
-    // Removal queue for unreachable waypoints detected during PickFromCell
-    // iteration. We can't mutate cell.Waypoints mid-iteration so we drain
-    // this at the start of each PickFromCell call instead.
+    // Removal queue for unreachable waypoints detected during PickFromCell iteration. We can't mutate
+    // cell.Waypoints mid-iteration so we drain this at the start of each PickFromCell call instead.
     private readonly Queue<int> _pendingRemoval = new();
 
     public Cell[,] Cells => _cells;
@@ -103,17 +104,20 @@ public class WaypointSystem
     public Vector2 WorldMin => _worldMin;
     public float CellSize => _cellSize;
     public Vector2[,] AdvectionField => _advectionField;
+    public Vector2[,] ConvergenceField => _convergenceField;
     public List<Zone> Zones => _zones;
 
-    public WaypointSystem(string mapId, WaypointConfig waypointConfig, BotsController botsController)
+    public WaypointSystem(string mapId, WaypointConfig waypointConfig, BotsController botsController, List<Player> humanPlayers)
     {
         _mapId = mapId;
         _zoneConfig = waypointConfig.MapZones[mapId];
         _botsController = botsController;
+        _humanPlayers = humanPlayers;
 
-        // _cellSize must be set before WaypointGatherer is constructed
-        // — the gatherer scales synthetic/exfil radii from it.
-        Log.Info("Calculating world geometry");
+        // _cellSize must be set before WaypointGatherer is constructed — the gatherer scales synthetic/exfil
+        // radii from it.
+        // map= is parsed by dashboard/parse_log.py for the per-raid index — keep the format in sync.
+        Log.Info($"Calculating world geometry (map={mapId})");
         var geometryConfig = waypointConfig.MapGeometries.Value[mapId];
         _cellSize = geometryConfig.CellSize;
         _cellSubSize = _cellSize / 2f;
@@ -177,11 +181,9 @@ public class WaypointSystem
                 var cellCoords = new Vector2Int(x, y);
                 ref var cell = ref _cells[cellCoords.x, cellCoords.y];
 
-                // Always run PopulateCell, even when builtin waypoints
-                // already live in the cell. Skipping left cells with a
-                // single Container surrounded by huge dead zones in the
-                // synthetic patrol mesh — the dispatcher then had no
-                // Synthetic options to pick when the Container was claimed.
+                // Always run PopulateCell, even when builtin waypoints already live in the cell. Skipping
+                // left cells with a single Container surrounded by huge dead zones in the synthetic patrol
+                // mesh — the dispatcher then had no Synthetic options to pick when the Container was claimed.
                 if (cell.HasWaypoints)
                     _validCellQueue.Enqueue(cellCoords);
 
@@ -208,12 +210,101 @@ public class WaypointSystem
         _advectionField = new Vector2[_gridSize.x, _gridSize.y];
         CalculateAdvectionZones();
 
+        // Convergence — null in the zone JSON (file predates the restore) falls back to the compiled-in
+        // per-map default; radius/force are sampled once per raid from their ranges.
+        _convergence = _zoneConfig.Value.Convergence ?? WaypointConfig.DefaultConvergenceFor(mapId);
+        _convergenceRadius = _convergence.Radius.SampleUniform();
+        _convergenceForce = _convergence.Force.SampleUniform();
+        _convergenceField = new Vector2[_gridSize.x, _gridSize.y];
+        CalculateConvergence();
+        Log.Info($"Convergence enabled={ConvergenceActive} radius: {_convergenceRadius:F0} force: {_convergenceForce:F2}");
+
         Log.Info($"Waypoint grid size: {_gridSize}, cell size: {_cellSize:F1}, waypoints: {builtinWaypoints.Count}");
         Log.Info($"Waypoint grid world bounds: [{_worldMin.x:F0},{_worldMin.y:F0}] -> [{worldMax.x:F0},{worldMax.y:F0}]");
         Log.Info($"Waypoint grid world size: {worldWidth:F0}x{worldHeight:F0} search radius: {searchRadius}");
     }
 
-    public void ReloadConfig() => _zoneConfig.Reload();
+    public void ReloadConfig()
+    {
+        _zoneConfig.Reload();
+        _convergence = _zoneConfig.Value.Convergence ?? WaypointConfig.DefaultConvergenceFor(_mapId);
+        _convergenceRadius = _convergence.Radius.SampleUniform();
+        _convergenceForce = _convergence.Force.SampleUniform();
+        CalculateConvergence();
+        Log.Info($"Convergence reloaded: enabled={ConvergenceActive} radius: {_convergenceRadius:F0} force: {_convergenceForce:F2}");
+    }
+
+    /// <summary>Per-frame tick. Only refreshes the player-convergence field, on a 30s pacing — players
+    /// move, the pull follows them.</summary>
+    public void Update()
+    {
+        if (_convergenceUpdatePacing.Blocked())
+            return;
+        CalculateConvergence();
+    }
+
+    /// <summary>Effective on/off: the F12 master toggle (default OFF) AND the per-map JSON Enabled flag
+    /// both have to agree.</summary>
+    private bool ConvergenceActive => (Plugin.ConvergenceEnabled?.Value ?? false) && _convergence.Enabled;
+
+    public void CalculateConvergence()
+    {
+        if (!ConvergenceActive)
+        {
+            for (var x = 0; x < _gridSize.x; x++)
+                for (var y = 0; y < _gridSize.y; y++)
+                    _convergenceField[x, y] = Vector2.zero;
+            return;
+        }
+
+        // Collect the unique player cells — players are often stacked in one cell, no point summing
+        // duplicate contributions.
+        _convergencePlayerCoords.Clear();
+        for (var i = 0; i < _humanPlayers.Count; i++)
+        {
+            var player = _humanPlayers[i];
+            if (player?.HealthController is not { IsAlive: true })
+                continue;
+            var playerCoords = WorldToCell(player.Position);
+            if (_convergencePlayerCoords.Contains(playerCoords))
+                continue;
+            _convergencePlayerCoords.Add(playerCoords);
+        }
+
+        if (_convergencePlayerCoords.Count == 0)
+        {
+            // Everyone dead / extracted — fade the pull instead of leaving a stale field behind.
+            for (var x = 0; x < _gridSize.x; x++)
+                for (var y = 0; y < _gridSize.y; y++)
+                    _convergenceField[x, y] = Vector2.zero;
+            return;
+        }
+
+        var normRadius = Plugin.ConvergenceRadiusScale.Value * _convergenceRadius;
+        var forceScale = Plugin.ConvergenceForceScale.Value * _convergenceForce;
+
+        for (var x = 0; x < _gridSize.x; x++)
+        {
+            for (var y = 0; y < _gridSize.y; y++)
+            {
+                var cellCoords = new Vector2(x, y);
+                var convergenceVector = Vector2.zero;
+
+                for (var i = 0; i < _convergencePlayerCoords.Count; i++)
+                {
+                    Vector2 playerVector = _convergencePlayerCoords[i] - new Vector2Int(x, y);
+                    var inverseDistSqrFactor = 1 - Mathf.Min(playerVector.magnitude * _cellSize / normRadius, 1f);
+                    playerVector.Normalize();
+                    playerVector *= Mathf.Sqrt(inverseDistSqrFactor);
+                    convergenceVector += playerVector;
+                }
+                convergenceVector /= _convergencePlayerCoords.Count;
+                convergenceVector *= forceScale;
+
+                _convergenceField[x, y] = convergenceVector;
+            }
+        }
+    }
 
     public void CalculateAdvectionZones()
     {
@@ -291,23 +382,19 @@ public class WaypointSystem
             PropagateForce(coords, 1f);
     }
 
-    // Threshold for the islanded-pin: after this many consecutive null
-    // returns from RequestNear/RequestFar, the squad is treated as
-    // stranded and locked to local cell only.
+    // Threshold for the islanded-pin: after this many consecutive null returns from RequestNear/RequestFar,
+    // the squad is treated as stranded and locked to local cell only.
     private const int IslandedFailureThreshold = 3;
 
     public Waypoint RequestNear(Entity entity, Vector3 worldPos, Waypoint previous)
     {
-        // Always try and return assignments first to avoid counting our own
-        // influence into the decision.
+        // Always try and return assignments first to avoid counting our own influence into the decision.
         Return(entity);
 
-        // Pre-scan: if this squad has any tagged own-kill Corpse waypoint
-        // still alive (not claimed, not blacklisted, reachable), bee-line
-        // to it before the normal neighbour scan runs. The neighbour scan
-        // returns the first cell that yields any pick, so a fresh
-        // Synthetic in a closer-to-prefDir neighbour could beat an own-
-        // kill Corpse two cells away.
+        // Pre-scan: if this squad has any tagged own-kill Corpse waypoint still alive (not claimed, not
+        // blacklisted, reachable), bee-line to it before the normal neighbour scan runs. The neighbour scan
+        // returns the first cell that yields any pick, so a fresh Synthetic in a closer-to-prefDir neighbour
+        // could beat an own- kill Corpse two cells away.
         if (entity is Squad squadForKill)
         {
             var killPick = TryPickOwnKillCorpse(squadForKill);
@@ -319,12 +406,10 @@ public class WaypointSystem
         if (!IsValidCell(requestCoords))
             return ScavOrIslandedLocalOnly(entity) ? null : RequestFar(entity);
 
-        // Closeness short-circuit: if the squad is currently in the anchor
-        // cell of any pending main objective, pick from THIS cell instead
-        // of scanning neighbours. Without this, the inverse-distance force
-        // pulls the squad into the anchor cell but the standard neighbour
-        // scan keeps picking waypoints in surrounding cells — the squad
-        // orbits the objective without draining it.
+        // Closeness short-circuit: if the squad is currently in the anchor cell of any pending main
+        // objective, pick from THIS cell instead of scanning neighbours. Without this, the inverse-distance
+        // force pulls the squad into the anchor cell but the standard neighbour scan keeps picking waypoints
+        // in surrounding cells — the squad orbits the objective without draining it.
         if (entity is Squad squadInAnchorCell
             && squadInAnchorCell.MainObjectives != null
             && IsCurrentCellAnchorOfPendingMain(squadInAnchorCell, requestCoords))
@@ -335,16 +420,14 @@ public class WaypointSystem
                 var localPick = AssignWaypoint(entity, requestCoords);
                 if (localPick != null) return localPick;
             }
-            // No pick in the anchor cell (all claimed, all blacklisted,
-            // Quest reserved for a different squad) — fall through.
+            // No pick in the anchor cell (all claimed, all blacklisted, Quest reserved for a different squad)
+            // — fall through.
         }
 
-        // If this squad has been failing to find anything reachable for a
-        // while (scavs spawned on an island, PMC trapped behind a closed
-        // door), don't let the dispatcher keep handing them neighbour/
-        // map-wide cells they can't reach either. Pin them to their own
-        // cell only — they'll wait there until a member naturally drifts
-        // or the failure counter resets.
+        // If this squad has been failing to find anything reachable for a while (scavs spawned on an island,
+        // PMC trapped behind a closed door), don't let the dispatcher keep handing them neighbour/ map-wide
+        // cells they can't reach either. Pin them to their own cell only — they'll wait there until a member
+        // naturally drifts or the failure counter resets.
         if (IsSquadIslanded(entity))
         {
             var currentCell = _cells[requestCoords.x, requestCoords.y];
@@ -378,6 +461,7 @@ public class WaypointSystem
         }
 
         var advectionVector = _advectionField[requestCoords.x, requestCoords.y];
+        var convergenceVector = _convergenceField[requestCoords.x, requestCoords.y];
         var randomization = Random.insideUnitCircle;
         randomization *= 0.5f;
         var momentumVector = (Vector2)(requestCoords - previousCoords);
@@ -386,10 +470,10 @@ public class WaypointSystem
         var homeVector = ComputeHomeAttraction(entity, requestCoords);
         var mainObjectiveVector = ComputeMainObjectiveAttraction(entity, requestCoords);
 
-        var prefDirection = momentumVector + advectionVector + randomization + homeVector + mainObjectiveVector;
+        var prefDirection = momentumVector + advectionVector + convergenceVector + randomization + homeVector + mainObjectiveVector;
 
         Log.Debug(
-            $"Waypoint search from {requestCoords} direction: {prefDirection} mom: {momentumVector} adv: {advectionVector} rand: {randomization} home: {homeVector} main: {mainObjectiveVector}"
+            $"Waypoint search from {requestCoords} direction: {prefDirection} mom: {momentumVector} adv: {advectionVector} conv: {convergenceVector} rand: {randomization} home: {homeVector} main: {mainObjectiveVector}"
         );
 
         if (_tempCoordsBuffer.Count == 0 || prefDirection == Vector2.zero)
@@ -406,11 +490,9 @@ public class WaypointSystem
 
         prefDirection.Normalize();
 
-        // Sort candidate neighbours by closeness to the preferred direction
-        // (lowest angle first). Iterating in priority order lets us try the
-        // next-best neighbour when the first pick's waypoints are all
-        // filtered — instead of jumping straight to RequestFar across the
-        // map.
+        // Sort candidate neighbours by closeness to the preferred direction (lowest angle first). Iterating
+        // in priority order lets us try the next-best neighbour when the first pick's waypoints are all
+        // filtered — instead of jumping straight to RequestFar across the map.
         _tempCoordsBuffer.Sort((a, b) =>
             Vector2.Angle(a, prefDirection).CompareTo(Vector2.Angle(b, prefDirection)));
 
@@ -419,15 +501,13 @@ public class WaypointSystem
             var neighbor = requestCoords + _tempCoordsBuffer[i];
             var pick = AssignWaypoint(entity, neighbor);
             if (pick != null) return pick;
-            // Every waypoint in this neighbour was filtered (unreachable from
-            // current leader nav position, ineligible exfil, blacklisted)
-            // — try the next-best neighbour before giving up on the local
+            // Every waypoint in this neighbour was filtered (unreachable from current leader nav position,
+            // ineligible exfil, blacklisted) — try the next-best neighbour before giving up on the local
             // area.
         }
 
-        // Local area genuinely exhausted: also try the current cell itself
-        // (the neighbour-scan loop skipped it), and only if that also fails
-        // do we escalate to the map-wide RequestFar.
+        // Local area genuinely exhausted: also try the current cell itself (the neighbour-scan loop skipped
+        // it), and only if that also fails do we escalate to the map-wide RequestFar.
         var localCellFinal = _cells[requestCoords.x, requestCoords.y];
         if (localCellFinal.HasWaypoints)
         {
@@ -437,19 +517,16 @@ public class WaypointSystem
         return ScavOrIslandedLocalOnly(entity) ? null : RequestFar(entity);
     }
 
-    // Tuning for the per-scav home-attraction force. 3.0 keeps the home
-    // vector decisively above momentum (0.5) + randomization (0.5) so
-    // scavs that drift via neighbour-hopping get pulled back to their
-    // spawn quartier. Distance-for-full-strength left at 5 cells; we want
-    // a strong pull only once the squad has already drifted, not from the
-    // first step away from spawn.
+    // Tuning for the per-scav home-attraction force. 3.0 keeps the home vector decisively above momentum
+    // (0.5) + randomization (0.5) so scavs that drift via neighbour-hopping get pulled back to their spawn
+    // quartier. Distance-for-full-strength left at 5 cells; we want a strong pull only once the squad has
+    // already drifted, not from the first step away from spawn.
     private const float HomeAttractionMaxMagnitude = 3.0f;
     private const float HomeAttractionDistanceForFullStrength = 5f; // in cells
 
     /// <summary>
-    /// Per-squad pull back toward the squad leader's spawn cell, for scavs
-    /// only (and only when Roaming Scavs is OFF). Without this, scavs that
-    /// stay 'local' via the 3x3 neighbour restriction still chain neighbour
+    /// Per-squad pull back toward the squad leader's spawn cell, for scavs only (and only when Roaming Scavs
+    /// is OFF). Without this, scavs that stay 'local' via the 3x3 neighbour restriction still chain neighbour
     /// hops indefinitely and end up far from their spawn quartier.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -459,16 +536,13 @@ public class WaypointSystem
         var leaderBot = squad.Leader?.Bot;
         var role = leaderBot?.Profile?.Info?.Settings?.Role;
         if (!role.HasValue || !role.Value.IsScav()) return Vector2.zero;
-        // PlayerScavs share WildSpawnType.assault with bot scavs so IsScav()
-        // returns true for them too — but the intent is PlayerScavs follow
-        // their main objectives like PMCs, not the bot-scav home-pinning.
-        // Without this exclusion the home pull (up to magnitude 3.0)
-        // competes with the main-objective pull (max 4.0) and PlayerScavs
-        // drift around their spawn quartier instead of biasing toward
-        // their assigned mains.
+        // PlayerScavs share WildSpawnType.assault with bot scavs so IsScav() returns true for them too — but
+        // the intent is PlayerScavs follow their main objectives like PMCs, not the bot-scav home-pinning.
+        // Without this exclusion the home pull (up to magnitude 3.0) competes with the main-objective pull
+        // (max 4.0) and PlayerScavs drift around their spawn quartier instead of biasing toward their
+        // assigned mains.
         if (leaderBot?.Profile != null && leaderBot.Profile.WillBeAPlayerScav()) return Vector2.zero;
-        // When RoamingScavs is ON, scavs are free to wander like PMCs and
-        // the home pull is silenced.
+        // When RoamingScavs is ON, scavs are free to wander like PMCs and the home pull is silenced.
         if (Plugin.RoamingScavs.Value) return Vector2.zero;
 
         if (!squad.SpawnCell.HasValue) squad.SpawnCell = currentCoords;
@@ -484,21 +558,18 @@ public class WaypointSystem
 
     // ── Main-objective force attraction ──────────────────────────────
     //
-    // Sums inverse-distance-weighted unit vectors toward every pending
-    // (non-Completed) main objective. Closest pending naturally dominates
-    // (1/d weighting) but distant ones contribute a small bias so the
-    // squad doesn't ignore them entirely. Special case: Kills mains in
-    // roam phase contribute a constant-magnitude force toward the exact
-    // anchor point (no inverse-distance) so the squad oscillates around
-    // it for the rolled duration.
+    // Sums inverse-distance-weighted unit vectors toward every pending (non-Completed) main objective.
+    // Closest pending naturally dominates (1/d weighting) but distant ones contribute a small bias so the
+    // squad doesn't ignore them entirely. Special case: Kills mains in roam phase contribute a
+    // constant-magnitude force toward the exact anchor point (no inverse-distance) so the squad oscillates
+    // around it for the rolled duration.
 
     /// <summary>
-    /// True iff <paramref name="cellCoords"/> matches the anchor cell of
-    /// any pending (non-Completed) main objective on the squad. Used by
+    /// True iff <paramref name="cellCoords"/> matches the anchor cell of any pending (non-Completed) main
+    /// objective on the squad. Used by
     /// <see cref="RequestNear"/> to short-circuit the neighbour scan and
-    /// force a local pick when the squad is already in the anchor cell —
-    /// prevents the "orbit around objective" pattern where the force
-    /// attraction pulls the squad in but the dispatch keeps scanning
+    /// force a local pick when the squad is already in the anchor cell — prevents the "orbit around
+    /// objective" pattern where the force attraction pulls the squad in but the dispatch keeps scanning
     /// surrounding cells.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -543,12 +614,10 @@ public class WaypointSystem
     }
 
     /// <summary>
-    /// Decides whether this entity should be denied RequestFar (the map-
-    /// wide dispatch fallback). Scavs are pinned by default
-    /// (Plugin.RoamingScavs OFF) — keeps them in their spawn quartier.
-    /// Goons are NOT pinned by default (Plugin.RoamingGoons ON, since
-    /// vanilla Tarkov has them roaming across the map). Everyone else
-    /// (PMCs, raiders, bosses, cultists, bloodhounds) roams freely.
+    /// Decides whether this entity should be denied RequestFar (the map- wide dispatch fallback). Scavs are
+    /// pinned by default (Plugin.RoamingScavs OFF) — keeps them in their spawn quartier. Goons are NOT pinned
+    /// by default (Plugin.RoamingGoons ON, since vanilla Tarkov has them roaming across the map). Everyone
+    /// else (PMCs, raiders, bosses, cultists, bloodhounds) roams freely.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static bool ScavOrIslandedLocalOnly(Entity entity)
@@ -557,9 +626,8 @@ public class WaypointSystem
         var leaderBot = squad.Leader?.Bot;
         var role = leaderBot?.Profile?.Info?.Settings?.Role;
         if (!role.HasValue) return false;
-        // PlayerScavs share WildSpawnType.assault with bot scavs but are NOT
-        // pinned — they follow the same main-objective dispatch as PMCs and
-        // need RequestFar to reach mains anywhere on the map.
+        // PlayerScavs share WildSpawnType.assault with bot scavs but are NOT pinned — they follow the same
+        // main-objective dispatch as PMCs and need RequestFar to reach mains anywhere on the map.
         var isPlayerScav = leaderBot?.Profile != null && leaderBot.Profile.WillBeAPlayerScav();
         if (role.Value.IsScav() && !isPlayerScav && !Plugin.RoamingScavs.Value) return true;
         if (role.Value.IsGoon() && !Plugin.RoamingGoons.Value) return true;
@@ -572,16 +640,14 @@ public class WaypointSystem
         if (entity is not Squad squad) return false;
         if (squad.ConsecutiveDispatchFailures < IslandedFailureThreshold) return false;
         var role = squad.Leader?.Bot?.Profile?.Info?.Settings?.Role;
-        // Scav-only: the failure-counter pin is intentionally restricted to
-        // scavs because PMCs benefit more from continuing to retry distant
-        // cells (they have quest/extract goals across the map).
+        // Scav-only: the failure-counter pin is intentionally restricted to scavs because PMCs benefit more
+        // from continuing to retry distant cells (they have quest/extract goals across the map).
         return role.HasValue && role.Value.IsScav();
     }
 
     /// <summary>
-    /// Adds a runtime-created Waypoint (e.g. a freshly killed bot's
-    /// corpse) to the cell covering its position. No advection recalc —
-    /// the waypoint only affects bots that scan a neighbouring cell.
+    /// Adds a runtime-created Waypoint (e.g. a freshly killed bot's corpse) to the cell covering its
+    /// position. No advection recalc — the waypoint only affects bots that scan a neighbouring cell.
     /// </summary>
     public bool AddRuntimeWaypoint(Waypoint waypoint)
     {
@@ -597,18 +663,15 @@ public class WaypointSystem
         return true;
     }
 
-    // Runtime-allocated Waypoint.Ids start high enough to never collide
-    // with the WaypointGatherer's monotonic counter (which produces a few
-    // thousand builtin waypoints at most).
+    // Runtime-allocated Waypoint.Ids start high enough to never collide with the WaypointGatherer's monotonic
+    // counter (which produces a few thousand builtin waypoints at most).
     private int _runtimeIdCounter = 1_000_000;
     public int NewRuntimeWaypointId() => System.Threading.Interlocked.Increment(ref _runtimeIdCounter);
 
-    // Records which squad killed each runtime Corpse waypoint (if any).
-    // Populated by the corpse-registration patch when it can resolve the
-    // dying player's LastAggressor to an ORBIT-managed bot. Consumed by
-    // PickFromCell to satisfy the "corpse requires sight or squad kill"
-    // config — a squad always retains the right to loot a body they
-    // dropped, regardless of LoS.
+    // Records which squad killed each runtime Corpse waypoint (if any). Populated by the corpse-registration
+    // patch when it can resolve the dying player's LastAggressor to an ORBIT-managed bot. Consumed by
+    // PickFromCell to satisfy the "corpse requires sight or squad kill" config — a squad always retains the
+    // right to loot a body they dropped, regardless of LoS.
     private readonly Dictionary<int, int> _corpseKillerSquadId = new();
 
     public void TagCorpseKillerSquad(int waypointId, int squadId)
@@ -618,15 +681,42 @@ public class WaypointSystem
     private bool WasCorpseKilledBySquad(int waypointId, int squadId)
         => _corpseKillerSquadId.TryGetValue(waypointId, out var owner) && owner == squadId;
 
-    // Max cell-distance from the leader within which an own-kill corpse
-    // still trips the bee-line. Beyond this, the kill is considered stale
-    // — the squad has drifted too far for the bee-line to make sense.
+    /// <summary>
+    /// Drop every per-squad cache entry keyed by this squad id. Called from Registries.RemoveAgent when
+    /// the last member leaves and the squad is about to be torn down. Squad ids get RECYCLED when a new
+    /// BotsGroup joins after an empty squad gets removed (observed: a squad is wiped, a new BotsGroup
+    /// reuses its squad id, and the new squad inherits the old corpse-kill credit, bee-lining across
+    /// walls to a body it never killed). Without this clear-step, the corpse-LoS gate gets
+    /// bypassed for every reused id.
+    /// </summary>
+    public void ClearSquadCorpseCredits(int squadId)
+    {
+        // Iterate by copying keys so we can mutate the dict while removing.
+        var toRemove = _corpseKillerCreditScratch;
+        toRemove.Clear();
+        foreach (var kv in _corpseKillerSquadId)
+            if (kv.Value == squadId) toRemove.Add(kv.Key);
+        for (var i = 0; i < toRemove.Count; i++) _corpseKillerSquadId.Remove(toRemove[i]);
+        _lastLoggedOwnKillCorpse.Remove(squadId);
+        _squadUnreachable.Remove(squadId);
+        if (toRemove.Count > 0)
+            Log.Debug($"ClearSquadCorpseCredits: cleared {toRemove.Count} corpse-kill credit(s) for now-removed squadId={squadId}");
+    }
+
+    private readonly List<int> _corpseKillerCreditScratch = new();
+
+    // Max cell-distance from the leader within which an own-kill corpse still trips the bee-line. Beyond
+    // this, the kill is considered stale — the squad has drifted too far for the bee-line to make sense.
     private const int OwnKillCorpseMaxCellDistance = 3;
 
+    // Per-squad last own-kill corpse id we already announced, so the bee-line log fires once per pick rather
+    // than once per dispatch tick (the function is called every tick and returns the same corpse until it's
+    // looted or claimed elsewhere).
+    private readonly Dictionary<int, int> _lastLoggedOwnKillCorpse = new();
+
     /// <summary>
-    /// Returns the first reachable, unclaimed, non-blacklisted runtime
-    /// Corpse waypoint that this squad is credited with the kill on, or
-    /// null if none exist.
+    /// Returns the first reachable, unclaimed, non-blacklisted runtime Corpse waypoint that this squad is
+    /// credited with the kill on, or null if none exist.
     /// </summary>
     private Waypoint TryPickOwnKillCorpse(Squad squad)
     {
@@ -639,8 +729,8 @@ public class WaypointSystem
             if (squad.CompletedPoiIds.Contains(locId)) continue;
             if (_claims.ContainsKey(locId)) continue;
             if (!_waypointCells.TryGetValue(locId, out var coords)) continue;
-            // Stale-kill gate: if the corpse is too far from the leader,
-            // skip the bee-line and let normal dispatch handle it.
+            // Stale-kill gate: if the corpse is too far from the leader, skip the bee-line and let normal
+            // dispatch handle it.
             var cellDelta = coords - leaderCell;
             if (Mathf.Abs(cellDelta.x) > OwnKillCorpseMaxCellDistance
                 || Mathf.Abs(cellDelta.y) > OwnKillCorpseMaxCellDistance)
@@ -660,16 +750,19 @@ public class WaypointSystem
             if (corpse == null) continue;
             if (corpse.Category != WaypointCategory.Corpse) continue;
             if (!IsWaypointReachable(corpse, squad)) continue;
-            Log.Info($"RequestNear: {squad} bee-lining to own-kill corpse {corpse} (in cell {coords})");
+            if (!_lastLoggedOwnKillCorpse.TryGetValue(squad.Id, out var lastLogged) || lastLogged != corpse.Id)
+            {
+                Log.Info($"RequestNear: {squad} bee-lining to own-kill corpse {corpse} (in cell {coords})");
+                _lastLoggedOwnKillCorpse[squad.Id] = corpse.Id;
+            }
             return corpse;
         }
         return null;
     }
 
     /// <summary>
-    /// Raycast from the squad leader's eye position to the corpse, using
-    /// the same HighPolyWithTerrainMask BSG bots use for cover/vision
-    /// checks. Returns true if nothing blocks the line.
+    /// Raycast from the squad leader's eye position to the corpse, using the same HighPolyWithTerrainMask BSG
+    /// bots use for cover/vision checks. Returns true if nothing blocks the line.
     /// </summary>
     private static bool HasLineOfSightToCorpse(Squad squad, Waypoint corpse)
     {
@@ -684,9 +777,8 @@ public class WaypointSystem
     /// <summary>
     /// True iff this squad has a Quest-type main objective whose
     /// <c>QuestTriggerId</c> matches the waypoint's <c>Name</c>. Quest
-    /// waypoints are reserved EXCLUSIVELY for main objectives; bots
-    /// passing through a quest cell on an unrelated errand never pick
-    /// the Quest as a target.
+    /// waypoints are reserved EXCLUSIVELY for main objectives; bots passing through a quest cell on an
+    /// unrelated errand never pick the Quest as a target.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static bool SquadOwnsQuest(Squad squad, Waypoint loc)
@@ -706,9 +798,9 @@ public class WaypointSystem
         => LootConfig.CorpseRequiresSightOrSquadKill?.Value ?? false;
 
     /// <summary>
-    /// Looks for an unlooted Corpse waypoint any squad member can see
-    /// within <see cref="LootConfig.DetectDistance"/>. Returns the
-    /// first match or null if no opportunistic loot target exists.
+    /// Looks for an unlooted Corpse waypoint any squad member can see within <see
+    /// cref="LootConfig.DetectDistance"/>. Returns the first match or null if no opportunistic loot target
+    /// exists.
     /// </summary>
     public Waypoint TryFindOpportunisticCorpse(Squad squad)
     {
@@ -777,12 +869,10 @@ public class WaypointSystem
     }
 
     /// <summary>
-    /// Roam-mode helper: searches a configurable cell window around the
-    /// squad's current main-objective anchor for an unclaimed waypoint
-    /// matching the supplied category mask. Used during Kills roam /
-    /// LootValue active phases to spread squad members across the area
-    /// instead of all converging on a single anchor. Each member calls
-    /// this from their own position so picks are spatially diverse.
+    /// Roam-mode helper: searches a configurable cell window around the squad's current main-objective anchor
+    /// for an unclaimed waypoint matching the supplied category mask. Used during Kills roam / LootValue
+    /// active phases to spread squad members across the area instead of all converging on a single anchor.
+    /// Each member calls this from their own position so picks are spatially diverse.
     /// </summary>
     public Waypoint FindRoamSplinterForMember(
         Vector3 memberPos,
@@ -795,31 +885,36 @@ public class WaypointSystem
         bool allowCorpse,
         bool allowSynthetic)
     {
-        // Search radius is anchored on `searchCenter` (caller decides:
-        // normally memberPos for natural drift, swapped to the main's
-        // anchor position when the bot has drifted further than `radius`
-        // from the anchor — a leash that lets the bot wander up to ~50m
-        // organically but snaps the next pick back into the main's zone
-        // if they've strayed too far). Self-exclusion below still uses
-        // memberPos.
+        // Search radius is anchored on `searchCenter` (caller decides: normally memberPos for natural drift,
+        // swapped to the main's anchor position when the bot has drifted further than `radius` from the
+        // anchor — a leash that lets the bot wander up to ~50m organically but snaps the next pick back into
+        // the main's zone if they've strayed too far). Self-exclusion below still uses memberPos.
+        const float MinSyntheticHopMeters = 10f;
         var center = WorldToCell(searchCenter);
-        // Convert radius to cell window. 50m / 75m cell ≈ 1 cell window
-        // → search the 3×3 around member. 75m / 50m cell ≈ 2 cell window
-        // for tighter cells.
+        // Convert radius to cell window. 50m / 75m cell ≈ 1 cell window → search the 3×3 around member. 75m /
+        // 50m cell ≈ 2 cell window for tighter cells.
         var cellWindow = Mathf.Max(1, Mathf.CeilToInt(radius / _cellSize));
         var radSqr = radius * radius;
 
-        // Reservoir-sample uniformly random among ALL eligible waypoints
-        // in the radius. Previous version returned the NEAREST — that
-        // locked solo bots in place during Kills/LootValue roam: the
-        // nearest waypoint was almost always THEMSELVES (or the splinter
-        // they just arrived at), so each re-dispatch handed them back the
-        // same target. Random picking forces actual roaming.
+        // Reservoir-sample uniformly random among ALL eligible waypoints in the radius. Previous version
+        // returned the NEAREST — that locked solo bots in place during Kills/LootValue roam: the nearest
+        // waypoint was almost always THEMSELVES (or the splinter they just arrived at), so each re-dispatch
+        // handed them back the same target. Random picking forces actual roaming.
         //
-        // Self-exclusion: any waypoint within ~3m of memberPos is treated
-        // as "current location" and skipped, otherwise the random pick
-        // still has a non-zero chance of returning the bot's exact spot.
+        // Self-exclusion: any waypoint within ~3m of memberPos is treated as "current location" and skipped,
+        // otherwise the random pick still has a non-zero chance of returning the bot's exact spot.
+        //
+        // Same-floor preference (mirrors FindNearbySweepTarget): a parallel reservoir restricted to
+        // candidates within the floor tolerance of the MEMBER's current Y (not the anchor's — anchors sit
+        // at Y=0) wins over the any-floor reservoir whenever it has at least one candidate. The radius
+        // filter below is deliberately XZ-only, so without this preference every floor of a building is
+        // equally likely on each re-dispatch and bots yo-yo up and down the staircases for the whole
+        // LootValue phase (seen in multi-floor buildings).
         const float selfExclusionDistSqr = 3f * 3f;
+        var yTolerance = Plugin.SameFloorLootYTolerance?.Value ?? 0f;
+        var preferSameFloor = yTolerance > 0f;
+        Waypoint bestSameFloor = null;
+        var sameFloorCandidates = 0;
         Waypoint best = null;
         var candidates = 0;
         for (var dx = -cellWindow; dx <= cellWindow; dx++)
@@ -845,29 +940,60 @@ public class WaypointSystem
                     if (squad != null && squad.CompletedPoiIds.Contains(loc.Id)) continue;
                     if (_claims.ContainsKey(loc.Id)) continue;
                     if (IsSquadKnownUnreachable(squad, loc.Id)) continue;
-                    // XZ-only distance: the main anchor is Y=0 (CellToWorld
-                    // / custom zones) while waypoints sit at their real
-                    // ground Y, so a 3D check would systematically over-
-                    // filter when the search centre is the anchor. Self-
-                    // exclusion still uses memberPos in 3D since both
-                    // ends are real ground points.
+                    // XZ-only distance: the main anchor is Y=0 (CellToWorld / custom zones) while waypoints
+                    // sit at their real ground Y, so a 3D check would systematically over- filter when the
+                    // search centre is the anchor. Self- exclusion still uses memberPos in 3D since both ends
+                    // are real ground points.
                     var distSqrCentre = XzDistanceSqr(loc.Position, searchCenter);
                     if (distSqrCentre > radSqr) continue;
                     var distSqrMember = (loc.Position - memberPos).sqrMagnitude;
                     if (distSqrMember <= selfExclusionDistSqr) continue;
+                    if (loc.Category == WaypointCategory.Synthetic)
+                    {
+                        // Patrol points have big arrival radii (10-15m). A candidate the bot already
+                        // stands inside of — or barely outside — completes the instant it's picked:
+                        // Finished → re-pick → next neighbour, 2-5s per hop in dense clusters, which
+                        // reads from the outside as "bots switch POIs without ever reaching them"
+                        // (seen in dense patrol-point clusters where neighbours sit inside each other's
+                        // arrival radius). Require a real patrol leg: the pick must sit at least
+                        // MinSyntheticHopMeters beyond its own arrival radius.
+                        var minHop = Mathf.Sqrt(loc.RadiusSqr) + MinSyntheticHopMeters;
+                        if (distSqrMember < minHop * minHop) continue;
+                        // Rotate the cluster: a patrol point any member visited recently is off the
+                        // menu until its cooldown lapses (same map PickFromCell already consults).
+                        if (squad != null
+                            && squad.RecentlyVisitedPoiCooldowns.TryGetValue(loc.Id, out var visitExpiry)
+                            && Time.time < visitExpiry) continue;
+                    }
                     candidates++;
                     if (Random.Range(0, candidates) == 0) best = loc;
+                    if (preferSameFloor && Mathf.Abs(loc.Position.y - memberPos.y) <= yTolerance)
+                    {
+                        sameFloorCandidates++;
+                        if (Random.Range(0, sameFloorCandidates) == 0) bestSameFloor = loc;
+                    }
                 }
             }
         }
+        // Escape valve: an absolute same-floor preference would park the bot on a dense floor until
+        // it's vacuumed clean before ever touching a staircase. A small per-pick chance ignores the
+        // preference for this ONE pick (uniform across all floors in radius) — bots loot some of the
+        // current floor, then drift up or down naturally. Floor exhaustion still forces the change.
+        if (bestSameFloor != null && Random.value < (Plugin.CrossFloorSplinterChance?.Value ?? 0f))
+        {
+            Log.Debug($"FindRoamSplinterForMember: cross-floor roll — picking floor-blind {best} (member Y={memberPos.y:F1}, pick Y={best.Position.y:F1})");
+            return best;
+        }
+        if (bestSameFloor != null) return bestSameFloor;
+        if (preferSameFloor && best != null)
+            Log.Debug($"FindRoamSplinterForMember: no same-floor splinter in radius (member Y={memberPos.y:F1}) — cross-floor pick {best} (Y={best.Position.y:F1})");
         return best;
     }
 
     /// <summary>
-    /// Build a transient <see cref="Waypoint"/> at the given world
-    /// position, intended as a one-shot dispatch target (used by the
-    /// combat-convergence override to redirect every squad member to the
-    /// in-combat member's position).
+    /// Build a transient <see cref="Waypoint"/> at the given world position, intended as a one-shot dispatch
+    /// target (used by the combat-convergence override to redirect every squad member to the in-combat
+    /// member's position).
     /// </summary>
     public Waypoint CreateVirtualWaypoint(Vector3 worldPos, string nameTag)
     {
@@ -885,14 +1011,13 @@ public class WaypointSystem
     public Waypoint FindLootSplinterForFollower(Waypoint mainObjective, Squad squad, HashSet<int> excludeIds, float radius)
     {
         if (mainObjective == null) return null;
-        // Splinter-spread only makes sense when the squad's anchor is loot.
-        // For Quest/Synthetic/Exfil the whole squad needs to converge.
+        // Splinter-spread only makes sense when the squad's anchor is loot. For Quest/Synthetic/Exfil the
+        // whole squad needs to converge.
         if (!IsLootCategory(mainObjective.Category)) return null;
         var center = WorldToCell(mainObjective.Position);
         var radSqr = radius * radius;
-        // Two parallel best-picks so we prefer a different loot category
-        // from the squad's anchor when possible — gives a 4-PMC squad with
-        // a ContainerLoot anchor the chance to spread across container +
+        // Two parallel best-picks so we prefer a different loot category from the squad's anchor when
+        // possible — gives a 4-PMC squad with a ContainerLoot anchor the chance to spread across container +
         // loose loot + corpse.
         Waypoint bestDiff = null;
         var bestDiffDist = float.MaxValue;
@@ -932,18 +1057,15 @@ public class WaypointSystem
                 }
             }
         }
-        // Prefer different category if available; else fall back to same
-        // category so we always return SOMETHING when there's eligible
-        // loot around.
+        // Prefer different category if available; else fall back to same category so we always return
+        // SOMETHING when there's eligible loot around.
         return bestDiff ?? bestSame;
     }
 
     /// <summary>
-    /// Map-wide search for the nearest Exfil waypoint the squad is
-    /// eligible to use. Two-pass: pass 1 applies the full filter
-    /// (faction + status + spawn-side entry); pass 2 drops the entry
-    /// check so a squad that derived their EntryPoint wrong (or for
-    /// whom no SpawnPointMarker could be resolved) still extracts.
+    /// Map-wide search for the nearest Exfil waypoint the squad is eligible to use. Two-pass: pass 1 applies
+    /// the full filter (faction + status + spawn-side entry); pass 2 drops the entry check so a squad that
+    /// derived their EntryPoint wrong (or for whom no SpawnPointMarker could be resolved) still extracts.
     /// </summary>
     public Waypoint FindNearestEligibleExfil(Squad squad)
     {
@@ -984,8 +1106,7 @@ public class WaypointSystem
         }
         if (best != null) return best;
 
-        // Pass 2: faction-only fallback. Skip MatchesBotSpawnEntry so a
-        // stuck squad still gets a route out.
+        // Pass 2: faction-only fallback. Skip MatchesBotSpawnEntry so a stuck squad still gets a route out.
         for (var cx = 0; cx < _gridSize.x; cx++)
         {
             for (var cy = 0; cy < _gridSize.y; cy++)
@@ -1020,7 +1141,8 @@ public class WaypointSystem
         if (string.IsNullOrEmpty(entry))
             entry = ResolveDerivedEntryPoint(squad);
         if (string.IsNullOrEmpty(entry)) entry = "(none)";
-        Log.Info($"{squad} eligible exfils (leader entry='{entry}', isPmc={squadIsPmc}):");
+        // Re-fires on every AssignNewObjective tick while ExtractRequested — Debug, not Info.
+        Log.Debug($"{squad} eligible exfils (leader entry='{entry}', isPmc={squadIsPmc}):");
         for (var cx = 0; cx < _gridSize.x; cx++)
         {
             for (var cy = 0; cy < _gridSize.y; cy++)
@@ -1041,21 +1163,28 @@ public class WaypointSystem
                     var entries = exfil.EligibleEntryPoints != null && exfil.EligibleEntryPoints.Length > 0
                         ? string.Join("/", exfil.EligibleEntryPoints)
                         : "<any>";
-                    Log.Info($"  - {exfil.name} dist={dist:F0}m status={exfil.Status} entries={entries} → {verdict}");
+                    var reqs = "<none>";
+                    if (exfil.Requirements != null && exfil.Requirements.Length > 0)
+                    {
+                        var reqList = new List<string>(exfil.Requirements.Length);
+                        for (var r = 0; r < exfil.Requirements.Length; r++)
+                            if (exfil.Requirements[r] != null) reqList.Add(exfil.Requirements[r].Requirement.ToString());
+                        if (reqList.Count > 0) reqs = string.Join("+", reqList);
+                    }
+                    var kind = exfil is SharedExfiltrationPoint ? "Shared" : exfil is ScavExfiltrationPoint ? "ScavExfil" : "Exfil";
+                    Log.Debug($"  - {exfil.name} dist={dist:F0}m kind={kind} status={exfil.Status} entries={entries} reqs={reqs} → {verdict}");
                 }
             }
         }
     }
 
     /// <summary>
-    /// Rolls <see cref="Plugin.LootCoveragePct"/> against every loot
-    /// waypoint in <paramref name="cellCoords"/> for the given squad.
-    /// Each waypoint that loses the roll is added to
+    /// Rolls <see cref="Plugin.LootCoveragePct"/> against every loot waypoint in <paramref
+    /// name="cellCoords"/> for the given squad. Each waypoint that loses the roll is added to
     /// <c>squad.CompletedPoiIds</c> so the dispatcher never sends a
-    /// member to it. Simulates a real player walking past loot they
-    /// didn't notice. Excludes already-blacklisted / claimed waypoints.
-    /// Guarantees at least one waypoint survives so a small cell with
-    /// bad luck doesn't auto-complete on entry.
+    /// member to it. Simulates a real player walking past loot they didn't notice. Excludes
+    /// already-blacklisted / claimed waypoints. Guarantees at least one waypoint survives so a small cell
+    /// with bad luck doesn't auto-complete on entry.
     /// </summary>
     public void ApplyLootCoverageRollForCell(Squad squad, Vector2Int cellCoords)
     {
@@ -1093,9 +1222,8 @@ public class WaypointSystem
                 kept++;
             }
         }
-        // Safety net: if the roll blacklisted everything (small cells with
-        // bad luck), restore one so cell-clean completion doesn't fire on
-        // the same tick the squad arrives.
+        // Safety net: if the roll blacklisted everything (small cells with bad luck), restore one so
+        // cell-clean completion doesn't fire on the same tick the squad arrives.
         if (kept == 0 && keepOneFallback != null)
         {
             squad.CompletedPoiIds.Remove(keepOneFallback.Id);
@@ -1110,12 +1238,10 @@ public class WaypointSystem
     }
 
     /// <summary>
-    /// Clears the per-squad unreachability cache for every waypoint in
-    /// the given cell. Called when a main objective transitions to "in
-    /// progress" (LootValue cell entered / Kills roam phase armed) — at
-    /// that point the squad's leader has physically reached the cell, so
-    /// the old reachability verdict (computed from the spawn position via
-    /// NavMesh.CalculatePath) is stale.
+    /// Clears the per-squad unreachability cache for every waypoint in the given cell. Called when a main
+    /// objective transitions to "in progress" (LootValue cell entered / Kills roam phase armed) — at that
+    /// point the squad's leader has physically reached the cell, so the old reachability verdict (computed
+    /// from the spawn position via NavMesh.CalculatePath) is stale.
     /// </summary>
     public void ClearSquadUnreachabilityForCell(Squad squad, Vector2Int cellCoords)
     {
@@ -1143,10 +1269,9 @@ public class WaypointSystem
         var agentSkips = agent?.ValueSkippedPoiIds;
         var center = WorldToCell(botPos);
         var radSqr = radius * radius;
-        // Same-floor preference: track nearest same-floor and nearest
-        // overall in parallel, return same-floor when present. Without
-        // this, Resort sweeps yo-yo across floors because a basement
-        // candidate at low XZ but high Y delta wins on 3D distance.
+        // Same-floor preference: track nearest same-floor and nearest overall in parallel, return same-floor
+        // when present. Without this, Resort sweeps yo-yo across floors because a basement candidate at low
+        // XZ but high Y delta wins on 3D distance.
         var yTolerance = Plugin.SameFloorLootYTolerance?.Value ?? 0f;
         var preferSameFloor = yTolerance > 0f;
         Waypoint bestSame = null;
@@ -1163,9 +1288,8 @@ public class WaypointSystem
                 for (var i = 0; i < locs.Count; i++)
                 {
                     var loc = locs[i];
-                    // All loot categories chain through sweep — excluding
-                    // containers broke the chain and zigzagged the bot to
-                    // a cell-wide random pick after each container loot.
+                    // All loot categories chain through sweep — excluding containers broke the chain and
+                    // zigzagged the bot to a cell-wide random pick after each container loot.
                     if (!IsLootCategory(loc.Category)) continue;
                     if (squad != null && squad.CompletedPoiIds.Contains(loc.Id)) continue;
                     if (agentSkips != null && agentSkips.Contains(loc.Id)) continue;
@@ -1191,11 +1315,9 @@ public class WaypointSystem
     }
 
     /// <summary>
-    /// Permanently removes a waypoint by id from its cell. Used to
-    /// consume LooseLoot waypoints once they've been looted (the
-    /// physical item is gone). Containers and corpses are NOT consumed
-    /// this way — a second bot is allowed to walk to an emptied
-    /// container and find nothing.
+    /// Permanently removes a waypoint by id from its cell. Used to consume LooseLoot waypoints once they've
+    /// been looted (the physical item is gone). Containers and corpses are NOT consumed this way — a second
+    /// bot is allowed to walk to an emptied container and find nothing.
     /// </summary>
     public bool RemoveWaypoint(int waypointId)
     {
@@ -1230,8 +1352,7 @@ public class WaypointSystem
     }
 
     /// <summary>
-    /// Looks up the LooseLoot waypoint whose Target item has the given
-    /// inventory Item.Id and removes it.
+    /// Looks up the LooseLoot waypoint whose Target item has the given inventory Item.Id and removes it.
     /// </summary>
     public bool RemoveLooseLootByItemId(string itemId)
     {
@@ -1241,9 +1362,8 @@ public class WaypointSystem
     }
 
     /// <summary>
-    /// Attempts to reserve a waypoint for an agent. Returns true if the
-    /// claim was granted, false if another agent already holds it. Same
-    /// agent re-claiming is idempotent.
+    /// Attempts to reserve a waypoint for an agent. Returns true if the claim was granted, false if another
+    /// agent already holds it. Same agent re-claiming is idempotent.
     /// </summary>
     public bool TryClaim(int waypointId, int agentId)
     {
@@ -1280,12 +1400,11 @@ public class WaypointSystem
             _lootItemIdToWaypointId[li.Item.Id] = loc.Id;
         }
         if (loc.Category == WaypointCategory.Corpse) _cells[coords.x, coords.y].CorpseCount++;
-        // Subscribe to ExfiltrationPoint status changes so V-Ex (and other
-        // one-shot exits) are pruned from the grid the moment they become
-        // unusable. Also useful for logging the "real" exfil settings once
-        // BSG has finished LoadSettings — our WaypointGatherer runs before
-        // that, so at collection time Status=Pending and EligibleEntryPoints
-        // is empty. The first non-Pending transition gives us the truth.
+        // Subscribe to ExfiltrationPoint status changes so V-Ex (and other one-shot exits) are pruned from
+        // the grid the moment they become unusable. Also useful for logging the "real" exfil settings once
+        // BSG has finished LoadSettings — our WaypointGatherer runs before that, so at collection time
+        // Status=Pending and EligibleEntryPoints is empty. The first non-Pending transition gives us the
+        // truth.
         if (loc.Category == WaypointCategory.Exfil && loc.Target is ExfiltrationPoint exfil)
         {
             var locId = loc.Id;
@@ -1337,20 +1456,17 @@ public class WaypointSystem
                || category == WaypointCategory.Corpse;
     }
 
-    // Runtime IDs come from NewRuntimeWaypointId (counter starts at 1M).
-    // Currently only the corpse-registration patch issues them — i.e.
-    // corpses created from a kill during the raid.
+    // Runtime IDs come from NewRuntimeWaypointId (counter starts at 1M). Currently only the
+    // corpse-registration patch issues them — i.e. corpses created from a kill during the raid.
     private const int RuntimeWaypointIdStart = 1_000_000;
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static bool IsRuntimeWaypoint(Waypoint loc) => loc.Id >= RuntimeWaypointIdStart;
 
     /// <summary>
-    /// True if this cell has at least one runtime loot waypoint (i.e. a
-    /// fresh kill happened here). When a squad kills someone in a cooled
-    /// cell we want them to be able to loot the body AND grab the nearby
-    /// static loose loot — a player would, the cell is now "interesting
-    /// again". Once the runtime waypoint is consumed and aged out, the
-    /// static-loot cooldown kicks back in.
+    /// True if this cell has at least one runtime loot waypoint (i.e. a fresh kill happened here). When a
+    /// squad kills someone in a cooled cell we want them to be able to loot the body AND grab the nearby
+    /// static loose loot — a player would, the cell is now "interesting again". Once the runtime waypoint is
+    /// consumed and aged out, the static-loot cooldown kicks back in.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static bool CellHasRuntimeLootPoi(in Cell cell)
@@ -1365,10 +1481,9 @@ public class WaypointSystem
     }
 
     /// <summary>
-    /// True if the squad currently has at least one Kills main in roam
-    /// phase. Used to suppress the PMC loot-cell-cooldown arming so a
-    /// squad hunting around a Kills anchor doesn't lock themselves out
-    /// of half their zone after picking up one item.
+    /// True if the squad currently has at least one Kills main in roam phase. Used to suppress the PMC
+    /// loot-cell-cooldown arming so a squad hunting around a Kills anchor doesn't lock themselves out of half
+    /// their zone after picking up one item.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static bool HasActiveKillsRoamMain(Squad squad)
@@ -1405,9 +1520,8 @@ public class WaypointSystem
         return new Vector2Int(x, y);
     }
 
-    // Timmy "wrong cell" wander probability + forget-blacklist probability.
-    // Hard-coded magnitudes (the F12 toggle controls whether they fire at
-    // all; the magnitudes themselves aren't tuneable).
+    // Timmy "wrong cell" wander probability + forget-blacklist probability. Hard-coded magnitudes (the F12
+    // toggle controls whether they fire at all; the magnitudes themselves aren't tuneable).
     private const float TimmyWrongCellProba = 0.20f;
     private const float TimmyForgetBlacklistProba = 0.05f;
 
@@ -1420,9 +1534,8 @@ public class WaypointSystem
 
     private Vector2Int? PickRandomAdjacentValidCell(Vector2Int center)
     {
-        // Walk the 8 neighbours in random order and return the first
-        // in-bounds non-empty one. Skips empty cells because handing
-        // Timmy a cell with nothing to do would mostly cause a stall.
+        // Walk the 8 neighbours in random order and return the first in-bounds non-empty one. Skips empty
+        // cells because handing Timmy a cell with nothing to do would mostly cause a stall.
         var indices = new int[_adjacentOffsets.Length];
         for (var i = 0; i < indices.Length; i++) indices[i] = i;
         for (var i = indices.Length - 1; i > 0; i--)
@@ -1458,12 +1571,10 @@ public class WaypointSystem
     }
 
     /// <summary>
-    /// Horizontal (XZ) squared distance between two world positions. Use
-    /// this whenever you're comparing leader/agent against a main anchor
-    /// — anchors come from <see cref="CellToWorld"/> or custom zones with
+    /// Horizontal (XZ) squared distance between two world positions. Use this whenever you're comparing
+    /// leader/agent against a main anchor — anchors come from <see cref="CellToWorld"/> or custom zones with
     /// <c>Y=0</c>, so a vanilla <c>Vector3.sqrMagnitude</c> inflates the
-    /// result by the vertical offset. Cells are conceptually 2D so
-    /// horizontal-only is the right semantic.
+    /// result by the vertical offset. Cells are conceptually 2D so horizontal-only is the right semantic.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static float XzDistanceSqr(Vector3 a, Vector3 b)
@@ -1479,10 +1590,9 @@ public class WaypointSystem
 
     private Waypoint RequestFar(Entity entity)
     {
-        // Walk the round-robin queue past cells whose waypoints are all
-        // filtered for this entity (e.g. dead-end cells that only contain
-        // an ineligible exfil). Capped at queue length so the squad
-        // doesn't burn a full pass if literally every cell is unusable.
+        // Walk the round-robin queue past cells whose waypoints are all filtered for this entity (e.g.
+        // dead-end cells that only contain an ineligible exfil). Capped at queue length so the squad doesn't
+        // burn a full pass if literally every cell is unusable.
         var attempts = _validCellQueue.Count;
         Waypoint waypoint = null;
         Vector2Int pick = default;
@@ -1500,9 +1610,8 @@ public class WaypointSystem
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private Waypoint AssignWaypoint(Entity entity, Vector2Int coords)
     {
-        // Timmy extra: 20% chance to wander into a random adjacent cell
-        // instead of the requested one. Simulates a noob bot getting
-        // confused about which way they meant to go. PMC-only.
+        // Timmy extra: 20% chance to wander into a random adjacent cell instead of the requested one.
+        // Simulates a noob bot getting confused about which way they meant to go. PMC-only.
         if (entity is Squad sqWander
             && sqWander.Archetype == PersonalityArchetype.Timmy
             && (Plugin.SainTimmyExtrasEnabled?.Value ?? false)
@@ -1523,15 +1632,12 @@ public class WaypointSystem
         var pick = PickFromCell(cell, entity, coords);
         if (pick != null && entity is Squad squad && IsSquadPmc(squad))
         {
-            // The squad has left its previous loot cell behind — arm the
-            // cooldown on it now so they don't get pulled back next
-            // dispatch. While they remain in the same cell, loot picks
-            // chain freely.
+            // The squad has left its previous loot cell behind — arm the cooldown on it now so they don't get
+            // pulled back next dispatch. While they remain in the same cell, loot picks chain freely.
             //
-            // EXCEPTION: while a Kills main is in roam phase, the squad is
-            // supposed to oscillate around the anchor and may dip into the
-            // same cell repeatedly. Arming a 10-min cooldown every time
-            // they loot would lock them out of half their hunting ground.
+            // EXCEPTION: while a Kills main is in roam phase, the squad is supposed to oscillate around the
+            // anchor and may dip into the same cell repeatedly. Arming a 10-min cooldown every time they loot
+            // would lock them out of half their hunting ground.
             if (squad.LastLootCell.HasValue && squad.LastLootCell.Value != coords
                 && !HasActiveKillsRoamMain(squad))
             {
@@ -1542,9 +1648,8 @@ public class WaypointSystem
             {
                 squad.LastLootCell = coords;
             }
-            // If the picked waypoint sits behind one or more Locked doors,
-            // roll for each door whether this squad is going to force it
-            // open on arrival.
+            // If the picked waypoint sits behind one or more Locked doors, roll for each door whether this
+            // squad is going to force it open on arrival.
             RollForceUnlockForPick(squad, pick);
         }
         return pick;
@@ -1566,10 +1671,9 @@ public class WaypointSystem
         {
             var door = doors[i];
             if (door == null) continue;
-            // Door may have been unlocked since the LockedDoorsOnPath list
-            // was built (e.g. by another squad's successful roll —
-            // door.Unlock() flips world state for everyone). Skip silently:
-            // no roll needed, HandleDoors takes the normal Open path.
+            // Door may have been unlocked since the LockedDoorsOnPath list was built (e.g. by another squad's
+            // successful roll — door.Unlock() flips world state for everyone). Skip silently: no roll needed,
+            // HandleDoors takes the normal Open path.
             if (door.DoorState != EDoorState.Locked) continue;
             var doorId = door.GetInstanceID();
             if (squad.ForceUnlockDoorIds.Contains(doorId)) continue; // already rolled & granted
@@ -1587,7 +1691,18 @@ public class WaypointSystem
             if (proba >= 1f || Random.value < proba)
             {
                 squad.ForceUnlockDoorIds.Add(doorId);
-                Log.Info($"{squad} granted force-unlock on door {door.Id} (instance {doorId}) for {pick} — {(isMainAnchor ? "MAIN anchor (100%)" : $"intermediate ({proba:F2})")}");
+                // Unlock world-side immediately: the grant alone reroutes nothing — the locked door's
+                // navmesh link stays closed, so the dispatch path computed right after this pick routes
+                // AROUND the building to the exterior point nearest the target, and the proximity-
+                // triggered unlock in HandleDoors never fires because the path never passes the door.
+                // Observed: a bot pathed to the exterior side of a locked-room loot point and stopped a
+                // few metres short through the wall, then 3-fail blacklisted the POI. With the door
+                // flipped to Shut before the move order's path calc, the route goes through the
+                // corridor and the door opens on approach like any other. World-state flip also means
+                // the door stays unlocked for everyone for the rest of the raid (lock was "picked").
+                try { door.Unlock(); }
+                catch (System.Exception e) { Log.Debug($"{squad} world-side unlock of {door.Id} threw: {e.Message}"); }
+                Log.Info($"{squad} granted force-unlock on door {door.Id} (instance {doorId}) for {pick} — {(isMainAnchor ? "MAIN anchor (100%)" : $"intermediate ({proba:F2})")} — unlocked world-side");
             }
             else
             {
@@ -1599,9 +1714,8 @@ public class WaypointSystem
         }
     }
 
-    // Waypoint is filtered out if any door on its path is in the squad's
-    // FailedDoorUnlockIds AND still in Locked state. A door that another
-    // squad has since unlocked no longer counts.
+    // Waypoint is filtered out if any door on its path is in the squad's FailedDoorUnlockIds AND still in
+    // Locked state. A door that another squad has since unlocked no longer counts.
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static bool HasFailedDoorOnPath(Squad squad, Waypoint loc)
     {
@@ -1618,10 +1732,9 @@ public class WaypointSystem
         return false;
     }
 
-    // Waypoint is the "main anchor" of the squad iff the squad has an
-    // active (not Completed) main objective whose Position is very close
-    // to the waypoint's. 5m tolerance for Quest (precise trigger), full
-    // cell match for LootValue + Kills (loot anywhere in the cell counts).
+    // Waypoint is the "main anchor" of the squad iff the squad has an active (not Completed) main objective
+    // whose Position is very close to the waypoint's. 5m tolerance for Quest (precise trigger), full cell
+    // match for LootValue + Kills (loot anywhere in the cell counts).
     private const float MainAnchorTolerance = 5f;
     private static readonly float MainAnchorToleranceSqr = MainAnchorTolerance * MainAnchorTolerance;
 
@@ -1635,11 +1748,9 @@ public class WaypointSystem
         {
             var m = mains[i];
             if (m == null || m.Completed) continue;
-            // LootValue mains: any loot waypoint in the cell is an
-            // "anchor" worth priority-picking. The 5m euclidean test
-            // wasn't enough because m.Position = cell-center; waypoints
-            // at the edge can be 30m+ from center and would lose the
-            // priority pick.
+            // LootValue mains: any loot waypoint in the cell is an "anchor" worth priority-picking. The 5m
+            // euclidean test wasn't enough because m.Position = cell-center; waypoints at the edge can be
+            // 30m+ from center and would lose the priority pick.
             if (m.Type == MainObjectiveType.LootValue)
             {
                 if (locCell == m.CellCoords
@@ -1651,14 +1762,11 @@ public class WaypointSystem
                 }
                 continue;
             }
-            // Kills mains: roam phase triggers on cell entry. Priority
-            // pick is restricted to LOOT waypoints — the bot biases toward
-            // "actionable" targets in the cell. Synthetic patrol points
-            // are intentionally NOT priority-picked: the priority path
-            // bypasses RecentlyVisitedPoiCooldowns, so without this
-            // restriction the same Synthetic gets re-picked every wait
-            // tick. Synthetics still get picked via the reservoir-sample
-            // path which respects the cooldown.
+            // Kills mains: roam phase triggers on cell entry. Priority pick is restricted to LOOT waypoints —
+            // the bot biases toward "actionable" targets in the cell. Synthetic patrol points are
+            // intentionally NOT priority-picked: the priority path bypasses RecentlyVisitedPoiCooldowns, so
+            // without this restriction the same Synthetic gets re-picked every wait tick. Synthetics still
+            // get picked via the reservoir-sample path which respects the cooldown.
             if (m.Type == MainObjectiveType.Kills)
             {
                 if (locCell == m.CellCoords
@@ -1670,33 +1778,134 @@ public class WaypointSystem
                 }
                 continue;
             }
-            // Quest: m.Position is the precise trigger nav-point — 5m
-            // gate keeps us pointed at the actual trigger, not a random
-            // waypoint that happens to be in the same cell.
+            // Quest: m.Position is the precise trigger nav-point — 5m gate keeps us pointed at the actual
+            // trigger, not a random waypoint that happens to be in the same cell.
             if (XzDistanceSqr(m.Position, loc.Position) <= MainAnchorToleranceSqr) return true;
         }
         return false;
     }
 
-    // Picks a Waypoint from the cell respecting per-squad filters
-    // (blacklist, unreachable waypoint, detour cap, exfil eligibility,
-    // PMC loot-cell cooldown). If everything is filtered, falls back to
-    // a re-pick with only the *hard* constraints. Returns null only when
-    // even the hard-constraint pass finds nothing.
+    // Picks a Waypoint from the cell respecting per-squad filters (blacklist, unreachable waypoint, detour
+    // cap, exfil eligibility, PMC loot-cell cooldown). If everything is filtered, falls back to a re-pick
+    // with only the *hard* constraints. Returns null only when even the hard-constraint pass finds nothing.
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private Waypoint PickFromCell(in Cell cell, Entity entity, Vector2Int coords)
+    /// <summary>
+    /// Resolve which floor Y this squad should clean in <paramref name="coords"/>. If an assignment already
+    /// exists for the cell, returns it. Otherwise checks whether the cell spans multiple floor clusters; if it
+    /// does, picks one cluster at random (weighted uniformly across distinct floor groups) and stores it on
+    /// the squad. Returns null when the cell is single-floor or floor filtering is disabled.
+    /// </summary>
+    private float? ResolveSquadFloor(Squad squad, Vector2Int coords, List<Waypoint> waypoints, float tolerance)
     {
-        // Drain unreachable-waypoint removals queued by the previous
-        // PickFromCell. We can't RemoveWaypoint mid-iteration (it mutates
-        // cell.Waypoints), so detection enqueues and the next call cleans up.
+        if (tolerance <= 0f) return null;
+        if (squad.CellFloorAssignments.TryGetValue(coords, out var existing)) return existing;
+        var floors = _floorScratch;
+        floors.Clear();
+        for (var i = 0; i < waypoints.Count; i++)
+        {
+            var y = waypoints[i].Position.y;
+            var matched = false;
+            for (var f = 0; f < floors.Count; f++)
+            {
+                if (Mathf.Abs(floors[f] - y) <= tolerance) { matched = true; break; }
+            }
+            if (!matched) floors.Add(y);
+        }
+        if (floors.Count <= 1) return floors.Count == 1 ? floors[0] : (float?)null;
+        var chosen = floors[Random.Range(0, floors.Count)];
+        squad.CellFloorAssignments[coords] = chosen;
+        Log.Debug($"PickFromCell: {squad} entered multi-floor cell {coords} (floors=[{string.Join(",", floors)}]) — committed to floor Y={chosen:F1}");
+        return chosen;
+    }
+
+    /// <summary>
+    /// Called when the current-floor pass found no eligible candidate. Looks for a different floor in the
+    /// cell that has at least one passing candidate (using the same filter set as the reservoir sample) and
+    /// assigns it to the squad. Returns true and outputs the new floor Y when re-rolled, false otherwise.
+    /// </summary>
+    private bool RerollFloorIfExhausted(Squad squad, Vector2Int coords, List<Waypoint> waypoints,
+        bool? squadIsPmc, bool hasBlacklist, bool lootCooldownActive, bool corpseGate,
+        float tolerance, HashSet<float> exhaustedFloors, out float newFloorY)
+    {
+        newFloorY = 0f;
+        var candidatesPerFloor = _floorScratch;
+        candidatesPerFloor.Clear();
+        var nowForVisitCheck = Time.time;
+        for (var i = 0; i < waypoints.Count; i++)
+        {
+            var loc = waypoints[i];
+            var alreadyExhausted = false;
+            foreach (var ex in exhaustedFloors)
+                if (Mathf.Abs(loc.Position.y - ex) <= tolerance) { alreadyExhausted = true; break; }
+            if (alreadyExhausted) continue;
+            if (loc.Category == WaypointCategory.Exfil && !squad.ExtractRequested) continue;
+            if (loc.Category == WaypointCategory.Quest && !SquadOwnsQuest(squad, loc)) continue;
+            if (hasBlacklist && squad.CompletedPoiIds.Contains(loc.Id)) continue;
+            if (squad.RecentlyVisitedPoiCooldowns.TryGetValue(loc.Id, out var visitExpiry) && nowForVisitCheck < visitExpiry) continue;
+            if (lootCooldownActive && IsLootCategory(loc.Category)) continue;
+            if (corpseGate && loc.Category == WaypointCategory.Corpse
+                && !WasCorpseKilledBySquad(loc.Id, squad.Id)
+                && !HasLineOfSightToCorpse(squad, loc)) continue;
+            if (RequiresReachabilityCheck(loc.Category) && !IsWaypointReachable(loc, squad)) continue;
+            if (loc.LockedDoorsOnPath != null && loc.LockedDoorsOnPath.Count > 0 && squadIsPmc != true) continue;
+            if (HasFailedDoorOnPath(squad, loc)) continue;
+            if (!WithinLootDetourRange(loc, squad)) continue;
+            if (!SquadCanUseWaypoint(squad, squadIsPmc, loc)) continue;
+
+            var matched = false;
+            for (var f = 0; f < candidatesPerFloor.Count; f++)
+            {
+                if (Mathf.Abs(candidatesPerFloor[f] - loc.Position.y) <= tolerance) { matched = true; break; }
+            }
+            if (!matched) candidatesPerFloor.Add(loc.Position.y);
+        }
+        if (candidatesPerFloor.Count == 0) return false;
+        newFloorY = candidatesPerFloor[Random.Range(0, candidatesPerFloor.Count)];
+        squad.CellFloorAssignments[coords] = newFloorY;
+        Log.Debug($"PickFromCell: {squad} exhausted {exhaustedFloors.Count} floor(s) in cell {coords} — re-rolled to floor Y={newFloorY:F1} (remaining floors with candidates: {candidatesPerFloor.Count})");
+        return true;
+    }
+
+    private readonly List<float> _floorScratch = new(4);
+
+    /// <summary>
+    /// True when every alive member of the squad has the POI in their personal <see
+    /// cref="Agent.ValueSkippedPoiIds"/>. In that case the POI is effectively dead for this squad — no one is
+    /// willing to take it — and the priority / reservoir picks should treat it the same as a
+    /// CompletedPoiIds entry. Solo squads collapse to "this single bot personally skipped it" which is exactly
+    /// what we want to avoid the priority-pick loop on a value-skipped Main anchor.
+    /// </summary>
+    private static bool AllAliveMembersValueSkipped(Squad squad, int locId)
+    {
+        if (squad?.Members == null || squad.Members.Count == 0) return false;
+        var any = false;
+        for (var i = 0; i < squad.Members.Count; i++)
+        {
+            var m = squad.Members[i];
+            if (m == null || m.Bot == null || m.Bot.IsDead) continue;
+            any = true;
+            if (!m.ValueSkippedPoiIds.Contains(locId)) return false;
+        }
+        return any;
+    }
+
+    private Waypoint PickFromCell(in Cell cell, Entity entity, Vector2Int coords)
+        => PickFromCell(in cell, entity, coords, null);
+
+    private readonly HashSet<float> _exhaustedFloorsScratch = new();
+
+    private Waypoint PickFromCell(in Cell cell, Entity entity, Vector2Int coords, HashSet<float> exhaustedFloors)
+    {
+        // Drain unreachable-waypoint removals queued by the previous PickFromCell. We can't RemoveWaypoint
+        // mid-iteration (it mutates cell.Waypoints), so detection enqueues and the next call cleans up.
         while (_pendingRemoval.Count > 0)
             RemoveWaypoint(_pendingRemoval.Dequeue());
 
         if (entity is Squad squad)
         {
             var hasBlacklist = squad.CompletedPoiIds.Count > 0;
-            // Timmy extra: 5% chance to "forget" the blacklist for one
-            // pick — re-considers waypoints the squad already cleared.
+            // Timmy extra: 5% chance to "forget" the blacklist for one pick — re-considers waypoints the
+            // squad already cleared.
             if (hasBlacklist
                 && squad.Archetype == PersonalityArchetype.Timmy
                 && (Plugin.SainTimmyExtrasEnabled?.Value ?? false)
@@ -1709,16 +1918,23 @@ public class WaypointSystem
             var role = squad.Leader?.Bot?.Profile?.Info?.Settings?.Role;
             if (role.HasValue) squadIsPmc = role.Value.IsPMC();
 
-            // Fresh kill in this cell lifts the loot-cooldown entirely (the
-            // body AND nearby static loot both become valid again).
+            // Fresh kill in this cell lifts the loot-cooldown entirely (the body AND nearby static loot both
+            // become valid again).
             var lootCooldownActive = IsLootCooldownActive(entity, coords)
                                      && !CellHasRuntimeLootPoi(cell);
             var corpseGate = CorpseRequiresSightOrSquadKillForSquad(squad);
             var waypoints = cell.Waypoints;
 
-            // Strong bias toward "the body I dropped" — if this cell
-            // contains a runtime corpse this squad is credited with the
-            // kill on, pick it first.
+            // Multi-floor cell handling. If this cell has POIs spread across multiple Y clusters and the squad
+            // hasn't already committed to a floor, pick one at random — keeps cleaning order varied between
+            // bots/raids. Once committed, all picks below filter to that floor. When that floor is exhausted
+            // (no eligible candidate left within tolerance) the next call re-rolls a new floor.
+            var floorTolerance = Plugin.SameFloorLootYTolerance?.Value ?? 0f;
+            var floorY = ResolveSquadFloor(squad, coords, waypoints, floorTolerance);
+            var floorFilterActive = floorTolerance > 0f && floorY.HasValue;
+
+            // Strong bias toward "the body I dropped" — if this cell contains a runtime corpse this squad is
+            // credited with the kill on, pick it first.
             for (var i = 0; i < waypoints.Count; i++)
             {
                 var loc = waypoints[i];
@@ -1732,9 +1948,8 @@ public class WaypointSystem
                 return loc;
             }
 
-            // Main-anchor priority pick. If a waypoint in this cell is the
-            // anchor of one of the squad's pending Main objectives, pick
-            // THAT before falling back to the random reservoir sample.
+            // Main-anchor priority pick. If a waypoint in this cell is the anchor of one of the squad's
+            // pending Main objectives, pick THAT before falling back to the random reservoir sample.
             for (var i = 0; i < waypoints.Count; i++)
             {
                 var loc = waypoints[i];
@@ -1748,6 +1963,16 @@ public class WaypointSystem
                 if (HasFailedDoorOnPath(squad, loc)) continue;
                 if (RequiresReachabilityCheck(loc.Category) && !IsWaypointReachable(loc, squad)) continue;
                 if (!SquadCanUseWaypoint(squad, squadIsPmc, loc)) continue;
+                // Quest waypoints are exempt from the floor filter — they're precise trigger points the
+                // squad MUST reach, and the squad's mains generation already pre-flighted reachability
+                // from spawn. When the squad commits to floor Y=A but the Quest sits on floor Y=B (e.g.
+                // pr_scout_col at Y=12.21 on a squad whose ResolveSquadFloor picked Y=7.4), the filter
+                // would otherwise reject the Quest forever and the bot just circles its mains cell on
+                // Synthetics. Other loot / synthetic POIs stay under the floor filter for the standard
+                // "don't dispatch across floors" logic; only Quest gets the bypass.
+                if (floorFilterActive && loc.Category != WaypointCategory.Quest
+                    && Mathf.Abs(loc.Position.y - floorY.Value) > floorTolerance) continue;
+                if (AllAliveMembersValueSkipped(squad, loc.Id)) continue;
                 Log.Debug($"PickFromCell: {squad} priority-picked Main anchor {loc} (within 5m of an active Main)");
                 return loc;
             }
@@ -1778,6 +2003,11 @@ public class WaypointSystem
                     continue;
                 }
                 if (hasBlacklist && squad.CompletedPoiIds.Contains(loc.Id))
+                {
+                    skippedBlacklist++;
+                    continue;
+                }
+                if (AllAliveMembersValueSkipped(squad, loc.Id))
                 {
                     skippedBlacklist++;
                     continue;
@@ -1829,6 +2059,8 @@ public class WaypointSystem
                     skippedExfil++;
                     continue;
                 }
+                if (floorFilterActive && loc.Category != WaypointCategory.Quest
+                    && Mathf.Abs(loc.Position.y - floorY.Value) > floorTolerance) continue;
                 candidates++;
                 if (Random.Range(0, candidates) == 0)
                     pick = loc;
@@ -1841,14 +2073,31 @@ public class WaypointSystem
                 }
                 return pick;
             }
+            // Current floor is exhausted for this squad in this cell: re-roll a different floor (one with
+            // remaining eligible POIs) and retry. Without this the squad would fall into the looser
+            // cross-cell fallback and potentially skip cleaning the rest of the building floor by floor.
+            //
+            // Track every floor we've already tried this dispatch tick — without that, two-floor cells where
+            // BOTH floors are exhausted ping-pong between A → B → A → B forever in a single frame, the main
+            // thread locks up, the process freezes. Seen in cell (5, 7) Y={-64.6, -59.8} on a Streets raid.
+            if (floorFilterActive)
+            {
+                var tracker = exhaustedFloors ?? _exhaustedFloorsScratch;
+                if (exhaustedFloors == null) tracker.Clear();
+                tracker.Add(floorY.Value);
+                if (RerollFloorIfExhausted(squad, coords, waypoints, squadIsPmc, hasBlacklist, lootCooldownActive, corpseGate, floorTolerance, tracker, out var newFloorY))
+                {
+                    floorY = newFloorY;
+                    return PickFromCell(in cell, entity, coords, tracker);
+                }
+            }
             if (skippedBlacklist + skippedExfil + skippedUnreachable + skippedTooFar + skippedLootCooldown + skippedCorpseHidden + skippedRecentVisit + skippedQuestNotMine > 0)
             {
                 Log.Debug($"PickFromCell: {squad} no eligible waypoint in cell ({skippedBlacklist} blacklisted, {skippedExfil} ineligible exfil, {skippedUnreachable} unreachable, {skippedTooFar} too far, {skippedLootCooldown} loot-cooldown, {skippedCorpseHidden} corpse-hidden, {skippedRecentVisit} recent-visit, {skippedQuestNotMine} quest-not-mine), falling back to hard-constraint pick");
             }
 
-            // Fallback: re-pick relaxing ONLY the detour-distance cap.
-            // Every other filter stays in effect to avoid sending bots to
-            // genuinely unreachable / immersion-breaking targets.
+            // Fallback: re-pick relaxing ONLY the detour-distance cap. Every other filter stays in effect to
+            // avoid sending bots to genuinely unreachable / immersion-breaking targets.
             var fallbackCandidates = 0;
             Waypoint fallbackPick = null;
             for (var i = 0; i < waypoints.Count; i++)
@@ -1879,13 +2128,11 @@ public class WaypointSystem
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static bool RequiresReachabilityCheck(WaypointCategory category)
     {
-        // Every category where a bot has to physically reach the waypoint.
-        // Exfil is excluded — exfils sit at well-known navmesh-anchored
-        // points and have their own status/faction/entry filtering.
-        // Synthetic is included: PopulateCell over-generates synthetic
-        // candidates without a BFS pathing gate, so we rely on the per-
-        // squad reachability cache to prune the ones that can't actually
-        // be pathed to from the requesting bot's island.
+        // Every category where a bot has to physically reach the waypoint. Exfil is excluded — exfils sit at
+        // well-known navmesh-anchored points and have their own status/faction/entry filtering. Synthetic is
+        // included: PopulateCell over-generates synthetic candidates without a BFS pathing gate, so we rely
+        // on the per- squad reachability cache to prune the ones that can't actually be pathed to from the
+        // requesting bot's island.
         switch (category)
         {
             case WaypointCategory.LooseLoot:
@@ -1900,11 +2147,9 @@ public class WaypointSystem
     }
 
     /// <summary>
-    /// Path-completeness check between two arbitrary world positions
-    /// using the navmesh. Used by main-objective generation at squad
-    /// creation to skip Quest anchors that aren't reachable from the
-    /// squad's spawn position (bot can't ever reach the trigger, ends up
-    /// roaming the map forever).
+    /// Path-completeness check between two arbitrary world positions using the navmesh. Used by
+    /// main-objective generation at squad creation to skip Quest anchors that aren't reachable from the
+    /// squad's spawn position (bot can't ever reach the trigger, ends up roaming the map forever).
     /// </summary>
     public bool IsReachableFromPosition(Vector3 from, Vector3 to)
     {
@@ -1938,9 +2183,8 @@ public class WaypointSystem
             return true;
         }
 
-        // PathPartial / PathInvalid: the natural route is blocked. Before
-        // giving up, check whether the waypoint is sitting behind one (or
-        // several) Locked doors. Detection is squad-agnostic; per-squad
+        // PathPartial / PathInvalid: the natural route is blocked. Before giving up, check whether the
+        // waypoint is sitting behind one (or several) Locked doors. Detection is squad-agnostic; per-squad
         // filtering happens later in PickFromCell.
         if (loc.LockedDoorsOnPath == null && CategoryAllowsLockedDoorBypass(loc.Category))
         {
@@ -1954,9 +2198,8 @@ public class WaypointSystem
             }
         }
 
-        // No global removal: mark for THIS squad only. The old code queued
-        // the waypoint for global removal here, which meant a single squad
-        // with a bad spawn leader could purge waypoints that were perfectly
+        // No global removal: mark for THIS squad only. The old code queued the waypoint for global removal
+        // here, which meant a single squad with a bad spawn leader could purge waypoints that were perfectly
         // reachable from every other squad.
         if (squadId >= 0)
         {
@@ -1971,9 +2214,8 @@ public class WaypointSystem
         return false;
     }
 
-    // How wide to look for Locked doors around an unreachable waypoint.
-    // Bigger than the 3m loot-arrival radius because a marked-room loot
-    // pile can sit several metres inside the room, away from the door.
+    // How wide to look for Locked doors around an unreachable waypoint. Bigger than the 3m loot-arrival
+    // radius because a marked-room loot pile can sit several metres inside the room, away from the door.
     // Empirically 12m covers any reasonable Tarkov room.
     private const float LockedDoorDetectionRadius = 12f;
 
@@ -1987,9 +2229,8 @@ public class WaypointSystem
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static bool CategoryAllowsLockedDoorBypass(WaypointCategory category)
     {
-        // Lock-bypass currently only applies to loot/quest categories —
-        // corpses and synthetics behind locked doors are corner cases not
-        // worth widening the surface for. Squad-faction filtering happens
+        // Lock-bypass currently only applies to loot/quest categories — corpses and synthetics behind locked
+        // doors are corner cases not worth widening the surface for. Squad-faction filtering happens
         // separately in PickFromCell.
         return category == WaypointCategory.ContainerLoot
             || category == WaypointCategory.LooseLoot
@@ -1999,9 +2240,8 @@ public class WaypointSystem
     /// <summary>
     /// Returns every Locked door within <paramref name="radius"/> of
     /// <paramref name="position"/>. Scene scan is cached after the first
-    /// call (door instance set is fixed at raid start, locked state can
-    /// change at runtime but the *candidate* list is bounded by what was
-    /// Locked at raid start).
+    /// call (door instance set is fixed at raid start, locked state can change at runtime but the *candidate*
+    /// list is bounded by what was Locked at raid start).
     /// </summary>
     private List<Door> CollectNearbyLockedDoors(Vector3 position, float radius)
     {
@@ -2032,11 +2272,10 @@ public class WaypointSystem
     }
 
     /// <summary>
-    /// Caps how far a squad will detour for a lootable waypoint. Without
-    /// this gate the dispatcher can send a bot 300m+ across the map for a
-    /// single magazine, which is both immersion-breaking and a frequent
-    /// stuck/teleport trigger. Distances come from F12 config (default
-    /// ~80m). Non-loot categories pass through.
+    /// Caps how far a squad will detour for a lootable waypoint. Without this gate the dispatcher can send a
+    /// bot 300m+ across the map for a single magazine, which is both immersion-breaking and a frequent
+    /// stuck/teleport trigger. Distances come from F12 config (default ~80m). Non-loot categories pass
+    /// through.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static bool WithinLootDetourRange(Waypoint loc, Squad squad)
@@ -2071,20 +2310,45 @@ public class WaypointSystem
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private bool SquadCanUseWaypoint(Squad squad, bool? squadIsPmc, Waypoint loc)
     {
+        // Loot categories (corpse / container / loose) are off-limits for Goons / bosses / cultists /
+        // raiders / bloodhounds. They don't have a loot routine that knows what to do with the dispatch
+        // — they just pin the squad on a body they'll never actually loot, and the followers (Big Pipe
+        // / Birdeye) get splinter-dispatched around it and loop forever on arrival-check failures. Same
+        // gate as the own-kill bee-line skip in CorpseRegistrationPatch: PMC + PlayerScav + bot scav
+        // are allowed, everyone else gets filtered out at the dispatch source.
+        if (IsLootCategory(loc.Category))
+        {
+            var leaderRole = squad?.Leader?.Bot?.Profile?.Info?.Settings?.Role;
+            if (leaderRole.HasValue)
+            {
+                var leaderIsPmc = leaderRole.Value.IsPMC();
+                var leaderIsPlayerScav = squad?.Leader?.Bot?.Profile != null && squad.Leader.Bot.Profile.WillBeAPlayerScav();
+                var leaderIsBotScav = leaderRole.Value.IsScav() && !leaderIsPlayerScav;
+                if (!leaderIsPmc && !leaderIsPlayerScav && !leaderIsBotScav) return false;
+            }
+        }
         if (loc.Category != WaypointCategory.Exfil) return true;
         if (loc.Target is not ExfiltrationPoint exfil) return true;
 
-        // Faction-level extract gate. Scavs / bloodhounds / raiders / bosses
-        // / Goons normally don't extract in Tarkov — they despawn, stay on
-        // the map, or leave on a script.
-        var role = squad?.Leader?.Bot?.Profile?.Info?.Settings?.Role;
+        // Faction-level extract gate. Scavs / bloodhounds / raiders / bosses / Goons normally don't extract
+        // in Tarkov — they despawn, stay on the map, or leave on a script. PlayerScavs share WildSpawnType
+        // .assault with bot scavs so IsBotEnabled (BotType resolver) collapses them onto the Scav flag, which
+        // ExtractFaction doesn't expose — both get filtered out without this carve-out. Detect PlayerScav via
+        // WillBeAPlayerScav and route to the PlayerScav flag explicitly.
+        var leaderBot = squad?.Leader?.Bot;
+        var role = leaderBot?.Profile?.Info?.Settings?.Role;
         if (!role.HasValue) return false;
-        if (!(LootConfig.ExtractAllowedFor?.Value ?? ExtractFaction.All).IsBotEnabled(role.Value)) return false;
+        var allowedFactions = LootConfig.ExtractAllowedFor?.Value ?? ExtractFaction.All;
+        var isPlayerScavLeader = leaderBot?.Profile != null && leaderBot.Profile.WillBeAPlayerScav();
+        if (isPlayerScavLeader)
+        {
+            if ((allowedFactions & ExtractFaction.PlayerScav) == 0) return false;
+        }
+        else if (!allowedFactions.IsBotEnabled(role.Value)) return false;
 
-        // Reserve blanket-block: every exfil on this map is conditional
-        // (D-2 power+key, Hermetic Door power+key, Train timed, Sewer
-        // Manhole, Cliff Descent w/ Paracord+Red Rebel...). Bots can't
-        // satisfy any of them.
+        // Reserve blanket-block: every exfil on this map is conditional (D-2 power+key, Hermetic Door
+        // power+key, Train timed, Sewer Manhole, Cliff Descent w/ Paracord+Red Rebel...). Bots can't satisfy
+        // any of them.
         if (string.Equals(_mapId, "RezervBase", StringComparison.OrdinalIgnoreCase))
             return false;
 
@@ -2094,10 +2358,9 @@ public class WaypointSystem
             || exfil.Status == EExfiltrationStatus.AwaitsManualActivation)
             return false;
 
-        // UncompleteRequirements is BSG's initial status for SharedTimer
-        // exfils (V-Ex / BTR — legitimate, the extract routine has a
-        // dedicated wait+countdown flow for them) AND for some requirement-
-        // gated exfils. Allow it only when the type is SharedTimer.
+        // UncompleteRequirements is BSG's initial status for SharedTimer exfils (V-Ex / BTR — legitimate, the
+        // extract routine has a dedicated wait+countdown flow for them) AND for some requirement- gated
+        // exfils. Allow it only when the type is SharedTimer.
         if (exfil.Status == EExfiltrationStatus.UncompleteRequirements
             && exfil.Settings.ExfiltrationType != EExfiltrationType.SharedTimer)
             return false;
@@ -2106,14 +2369,13 @@ public class WaypointSystem
         if (HasBotUnreachableRequirement(exfil))
             return false;
 
-        // Mirror BSG's player-side extract filter: an exfil only matches an
-        // agent whose spawn EntryPoint is in the exfil's EligibleEntryPoints.
+        // Mirror BSG's player-side extract filter: an exfil only matches an agent whose spawn EntryPoint is
+        // in the exfil's EligibleEntryPoints.
         if (!MatchesBotSpawnEntry(squad, exfil))
             return false;
 
-        // Strict on unknown faction: rejecting here costs at worst a brief
-        // window where new squads can't be assigned exfils — they fall back
-        // to loot/quest/synthetic and pick up exfils on the next dispatch
+        // Strict on unknown faction: rejecting here costs at worst a brief window where new squads can't be
+        // assigned exfils — they fall back to loot/quest/synthetic and pick up exfils on the next dispatch
         // once Role is available.
         if (!squadIsPmc.HasValue) return false;
 
@@ -2124,11 +2386,9 @@ public class WaypointSystem
     }
 
     /// <summary>
-    /// True if the exfil carries any <see cref="ERequirementState"/> that
-    /// a bot can't satisfy autonomously (item handover, world-event
-    /// switch, keycard, train, co-op). Backpack-state requirements
-    /// (Empty / NotEmpty / EmptyOrSize) are tolerated — trivial gates a
-    /// bot might satisfy by accident.
+    /// True if the exfil carries any <see cref="ERequirementState"/> that a bot can't satisfy autonomously
+    /// (item handover, world-event switch, keycard, train, co-op). Backpack-state requirements (Empty /
+    /// NotEmpty / EmptyOrSize) are tolerated — trivial gates a bot might satisfy by accident.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static bool HasBotUnreachableRequirement(ExfiltrationPoint exfil)
@@ -2157,18 +2417,24 @@ public class WaypointSystem
         return false;
     }
 
-    // Same gates as SquadCanUseWaypoint but skips MatchesBotSpawnEntry.
-    // Used by FindNearestEligibleExfil's Pass 2 fallback when the full
-    // spawn-side filter returned no exfil — better to extract on the
-    // wrong side than stay stuck forever.
+    // Same gates as SquadCanUseWaypoint but skips MatchesBotSpawnEntry. Used by FindNearestEligibleExfil's
+    // Pass 2 fallback when the full spawn-side filter returned no exfil — better to extract on the wrong side
+    // than stay stuck forever.
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private bool SquadCanUseWaypointIgnoringEntry(Squad squad, bool? squadIsPmc, Waypoint loc)
     {
         if (loc.Category != WaypointCategory.Exfil) return true;
         if (loc.Target is not ExfiltrationPoint exfil) return true;
-        var role = squad?.Leader?.Bot?.Profile?.Info?.Settings?.Role;
+        var leaderBot = squad?.Leader?.Bot;
+        var role = leaderBot?.Profile?.Info?.Settings?.Role;
         if (!role.HasValue) return false;
-        if (!(LootConfig.ExtractAllowedFor?.Value ?? ExtractFaction.All).IsBotEnabled(role.Value)) return false;
+        var allowedFactions = LootConfig.ExtractAllowedFor?.Value ?? ExtractFaction.All;
+        var isPlayerScavLeader = leaderBot?.Profile != null && leaderBot.Profile.WillBeAPlayerScav();
+        if (isPlayerScavLeader)
+        {
+            if ((allowedFactions & ExtractFaction.PlayerScav) == 0) return false;
+        }
+        else if (!allowedFactions.IsBotEnabled(role.Value)) return false;
         if (string.Equals(_mapId, "RezervBase", StringComparison.OrdinalIgnoreCase)) return false;
         if (exfil.Status == EExfiltrationStatus.NotPresent
             || exfil.Status == EExfiltrationStatus.Hidden
@@ -2197,16 +2463,14 @@ public class WaypointSystem
         var entry = leader.Profile?.Info?.EntryPoint;
         if (string.IsNullOrEmpty(entry))
         {
-            // PMC bots spawned by mods (Legion / UNTAR / RUAF) and special-
-            // spawn vanilla bots (Labs-Guard-XX) often have an empty
-            // Profile.Info.EntryPoint. Derive the closest SpawnPointMarker's
-            // Infiltration from the squad's captured spawn position.
+            // PMC bots spawned by mods (Legion / UNTAR / RUAF) and special- spawn vanilla bots
+            // (Labs-Guard-XX) often have an empty Profile.Info.EntryPoint. Derive the closest
+            // SpawnPointMarker's Infiltration from the squad's captured spawn position.
             entry = ResolveDerivedEntryPoint(squad);
             if (string.IsNullOrEmpty(entry))
             {
-                // No marker resolved — reject restricted exfils so a bot
-                // with truly no spawn data doesn't walk into the wrong-
-                // side exfil.
+                // No marker resolved — reject restricted exfils so a bot with truly no spawn data doesn't
+                // walk into the wrong- side exfil.
                 return false;
             }
         }
@@ -2250,23 +2514,20 @@ public class WaypointSystem
 
         var derived = bestMarker?.SpawnPoint?.Infiltration ?? string.Empty;
         squad.DerivedEntryPoint = derived;
-        Log.Info($"{squad} derived EntryPoint='{derived}' from spawn pos {spawnPos} (closest SpawnPointMarker {Mathf.Sqrt(bestDistSqr):F1}m away)");
+        Log.Debug($"{squad} derived EntryPoint='{derived}' from spawn pos {spawnPos} (closest SpawnPointMarker {Mathf.Sqrt(bestDistSqr):F1}m away)");
         return derived;
     }
 
     // ── Main-objective anchor selection helpers ──────────────────────
     //
-    // When generating a squad's main objectives, the anchor for a Kills
-    // main comes from a positive-Force zone in the current map's Config;
-    // the anchor for a LootValue main comes from a top-quartile cell by
-    // total Container + LooseLoot value. Both helpers are called from the
-    // main objective builder.
+    // When generating a squad's main objectives, the anchor for a Kills main comes from a positive-Force zone
+    // in the current map's Config; the anchor for a LootValue main comes from a top-quartile cell by total
+    // Container + LooseLoot value. Both helpers are called from the main objective builder.
 
     /// <summary>
-    /// World positions of every map zone with a positive Force (max > 0).
-    /// Builtin zones resolve through BSG's BotSpawner.AllBotZones by name;
-    /// custom zones come from the explicit Position in Config. Returns
-    /// an empty list when the map has no PvP zones configured.
+    /// World positions of every map zone with a positive Force (max > 0). Builtin zones resolve through BSG's
+    /// BotSpawner.AllBotZones by name; custom zones come from the explicit Position in Config. Returns an
+    /// empty list when the map has no PvP zones configured.
     /// </summary>
     public List<Vector3> GetPositiveForceZoneAnchors()
     {
@@ -2287,9 +2548,8 @@ public class WaypointSystem
         {
             var customZone = _zoneConfig.Value.CustomZones[i];
             if (customZone.Force.Max <= 0f) continue;
-            // CustomZone.Position is (x, z) in world coords; y unused
-            // (NavMesh-sample at consumption time if needed). Force
-            // attraction is purely 2D anyway.
+            // CustomZone.Position is (x, z) in world coords; y unused (NavMesh-sample at consumption time if
+            // needed). Force attraction is purely 2D anyway.
             result.Add(new Vector3(customZone.Position.x, 0f, customZone.Position.y));
         }
         return result;
@@ -2298,11 +2558,10 @@ public class WaypointSystem
     private List<Vector2Int> _topLootCellsCache;
 
     /// <summary>
-    /// Up to <c>Plugin.MainObjectivesTopLootCellsMaxCount</c> cells ranked
-    /// by total rouble value of their ContainerLoot + LooseLoot waypoints
-    /// (real handbook prices via <see cref="SumCellLootValue"/>). Lazy on
-    /// first call; cached for the raid. No mutual exclusion: multiple
-    /// squads can roll the same cell, which concentrates PvP at hotspots.
+    /// Up to <c>Plugin.MainObjectivesTopLootCellsMaxCount</c> cells ranked by total rouble value of their
+    /// ContainerLoot + LooseLoot waypoints (real handbook prices via <see cref="SumCellLootValue"/>). Lazy on
+    /// first call; cached for the raid. No mutual exclusion: multiple squads can roll the same cell, which
+    /// concentrates PvP at hotspots.
     /// </summary>
     public List<Vector2Int> GetTopLootCells()
     {
@@ -2341,15 +2600,13 @@ public class WaypointSystem
             if (i > 0) summary.Append(", ");
             summary.Append($"{cellValues[i].Key}=₽{cellValues[i].Value:F0}");
         }
-        Log.Info($"GetTopLootCells: ranked {cellValues.Count} loot-bearing cells, kept top {keep} — [{summary}]");
+        Log.Debug($"GetTopLootCells: ranked {cellValues.Count} loot-bearing cells, kept top {keep} — [{summary}]");
         return _topLootCellsCache;
     }
 
     /// <summary>
-    /// Sum of handbook prices for every item
-    /// in every Container + LooseLoot waypoint of the cell. Returns 0 if
-    /// the valuator isn't initialised yet (raid still loading) or the
-    /// cell has no loot waypoints.
+    /// Sum of handbook prices for every item in every Container + LooseLoot waypoint of the cell. Returns 0
+    /// if the valuator isn't initialised yet (raid still loading) or the cell has no loot waypoints.
     /// </summary>
     public float SumCellLootValue(Vector2Int cell)
     {
@@ -2404,9 +2661,8 @@ public class WaypointSystem
         return 0f;
     }
 
-    // Cell-ranking proxy used by GetTopLootCells — keeps the cheap item-
-    // count heuristic so we don't run the valuator N times per cell during
-    // the top-quartile sort when prices aren't ready.
+    // Cell-ranking proxy used by GetTopLootCells — keeps the cheap item- count heuristic so we don't run the
+    // valuator N times per cell during the top-quartile sort when prices aren't ready.
     private static float EstimateWaypointValue(Waypoint loc)
     {
         if (loc.Target == null) return 0f;
@@ -2462,22 +2718,18 @@ public class WaypointSystem
     {
         var pointsFound = 0;
 
-        // 5×5 grid (25 candidates) spread across the FULL cell. cellSize/4
-        // spacing matches the density of inner-quarter sampling while
-        // covering the full cell area (corners and edges get coverage).
+        // 5×5 grid (25 candidates) spread across the FULL cell. cellSize/4 spacing matches the density of
+        // inner-quarter sampling while covering the full cell area (corners and edges get coverage).
         const float resolution = 5;
         var spacing = _cellSize / (resolution - 1);
         var halfSize = _cellSize / 2f;
-        // Sample radius scaled to spacing: each candidate "owns" a patch
-        // of roughly spacing × spacing.
+        // Sample radius scaled to spacing: each candidate "owns" a patch of roughly spacing × spacing.
         var sampleRadius = spacing;
         var maxHitDistanceSqr = spacing * spacing;
-        // Spatial exclusion radius around existing builtin waypoints
-        // (ContainerLoot, LooseLoot, Quest, Exfil). Synthetic candidates
-        // that fall closer than this to any builtin are skipped —
-        // otherwise the cell ends up with so many synthetic patrol points
-        // that PickFromCell's reservoir sample drowns out the real loot/
-        // quest target.
+        // Spatial exclusion radius around existing builtin waypoints (ContainerLoot, LooseLoot, Quest,
+        // Exfil). Synthetic candidates that fall closer than this to any builtin are skipped — otherwise the
+        // cell ends up with so many synthetic patrol points that PickFromCell's reservoir sample drowns out
+        // the real loot/ quest target.
         const float poiExclusionRadius = 20f;
         var poiExclusionRadiusSqr = poiExclusionRadius * poiExclusionRadius;
 
@@ -2496,8 +2748,8 @@ public class WaypointSystem
                 if (WorldToCell(hit.position) != cellCoords)
                     continue;
 
-                // Reject hits that snapped far from the candidate — those
-                // are the navmesh-extends-past-map-edge artefacts.
+                // Reject hits that snapped far from the candidate — those are the
+                // navmesh-extends-past-map-edge artefacts.
                 if ((hit.position - candidatePoint).sqrMagnitude > maxHitDistanceSqr)
                     continue;
 

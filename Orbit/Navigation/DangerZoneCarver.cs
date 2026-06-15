@@ -5,10 +5,9 @@ using UnityEngine.AI;
 namespace Orbit.Navigation;
 
 /// <summary>
-/// Drops NavMeshObstacles on every minefield + sniper firing zone so bot
-/// pathing avoids them entirely. Called once per raid from the BotsController
-/// init hook. Without this bots happily wander through map boundaries and
-/// die instantly to a script that the navmesh wouldn't otherwise see.
+/// Drops NavMeshObstacles on every minefield + sniper firing zone so bot pathing avoids them entirely. Called
+/// once per raid from the BotsController init hook. Without this bots happily wander through map boundaries
+/// and die instantly to a script that the navmesh wouldn't otherwise see.
 /// </summary>
 public static class DangerZoneCarver
 {

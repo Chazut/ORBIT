@@ -5,9 +5,8 @@ using Orbit.Helpers;
 namespace Orbit.Tasks;
 
 /// <summary>
-/// One half of a Task↔Entity binding. <see cref="Ordinal"/> is the index
-/// of the task in the entity's score array, so an entity can re-find its
-/// active task in O(1).
+/// One half of a Task↔Entity binding. <see cref="Ordinal"/> is the index of the task in the entity's score
+/// array, so an entity can re-find its active task in O(1).
 /// </summary>
 public readonly struct TaskAssignment(BaseTask task, int ordinal)
 {
@@ -16,8 +15,8 @@ public readonly struct TaskAssignment(BaseTask task, int ordinal)
 }
 
 /// <summary>
-/// Untyped base — used by the runtime when an entity needs to talk about
-/// "whatever task it's running" without knowing the concrete entity type.
+/// Untyped base — used by the runtime when an entity needs to talk about "whatever task it's running" without
+/// knowing the concrete entity type.
 /// </summary>
 public abstract class BaseTask(float hysteresis)
 {
@@ -29,10 +28,9 @@ public abstract class BaseTask(float hysteresis)
 }
 
 /// <summary>
-/// Typed task that operates on a specific entity subtype (Agent or Squad).
-/// Subclasses provide <see cref="UpdateScore"/> (scoring per entity each
-/// tick) and <see cref="Update"/> (the actual work for currently-active
-/// entities).
+/// Typed task that operates on a specific entity subtype (Agent or Squad). Subclasses provide <see
+/// cref="UpdateScore"/> (scoring per entity each tick) and <see cref="Update"/> (the actual work for
+/// currently-active entities).
 /// </summary>
 public abstract class Task<T>(float hysteresis) : BaseTask(hysteresis) where T : Entity
 {

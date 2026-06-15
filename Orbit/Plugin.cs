@@ -22,22 +22,22 @@ using UnityEngine;
 namespace Orbit;
 
 /// <summary>
-/// BepInEx entry point. Owns the F12 configuration surface for every
-/// tunable knob the dispatcher / looting / SAIN integration reads at
-/// runtime. <see cref="LogSource"/> exposes the BepInEx ManualLogSource
-/// consumed by <see cref="Log"/> — named <c>LogSource</c> rather than
+/// BepInEx entry point. Owns the F12 configuration surface for every tunable knob the dispatcher / looting /
+/// SAIN integration reads at runtime. <see cref="LogSource"/> exposes the BepInEx ManualLogSource consumed by
+/// <see cref="Log"/> — named <c>LogSource</c> rather than
 /// <c>Log</c> so the static <see cref="Orbit.Log"/> helper class doesn't
 /// collide.
 /// </summary>
 [BepInPlugin(PluginGuid, PluginName, OrbitVersion)]
 [BepInDependency("xyz.drakia.bigbrain")]
+[BepInDependency("xyz.drakia.waypoints")]
 [BepInDependency("me.sol.sain")]
 [SuppressMessage("ReSharper", "MemberCanBePrivate.Global")]
 public class Plugin : BaseUnityPlugin
 {
     public const string PluginGuid = "com.chazut.orbit";
     public const string PluginName = "ORBIT";
-    public const string OrbitVersion = "1.0.0";
+    public const string OrbitVersion = "1.1.0";
 
     public static ManualLogSource LogSource;
 
@@ -51,6 +51,7 @@ public class Plugin : BaseUnityPlugin
     public static ConfigEntry<bool> VanillaScavs;
     public static ConfigEntry<bool> VanillaGoons;
     public static ConfigEntry<bool> VanillaCultists;
+    public static ConfigEntry<bool> VanillaRaiders;
 
     // 02. POI guard duration
     public static ConfigEntry<Vector2> ObjectiveGuardDuration;
@@ -61,6 +62,9 @@ public class Plugin : BaseUnityPlugin
     public static ConfigEntry<float> AdvectionZoneRadiusScale;
     public static ConfigEntry<float> AdvectionZoneForceScale;
     public static ConfigEntry<float> AdvectionZoneRadiusDecayScale;
+    public static ConfigEntry<bool> ConvergenceEnabled;
+    public static ConfigEntry<float> ConvergenceRadiusScale;
+    public static ConfigEntry<float> ConvergenceForceScale;
 
     // 04. Main objectives — setup
     public static ConfigEntry<bool> MainObjectivesEnabled;
@@ -96,11 +100,13 @@ public class Plugin : BaseUnityPlugin
     public static ConfigEntry<float> SplinterSearchRadius;
     public static ConfigEntry<float> ScavengeSweepRadius;
     public static ConfigEntry<float> SameFloorLootYTolerance;
+    public static ConfigEntry<float> CrossFloorSplinterChance;
 
     // 06. Faction-mod takeover (consumers wired in Phase 7)
     public static ConfigEntry<bool> HijackUntar;
     public static ConfigEntry<bool> HijackRuaf;
     public static ConfigEntry<bool> HijackBlackDivision;
+    public static ConfigEntry<bool> HijackIsb;
 
     // 07.0 SAIN personality — general
     public static ConfigEntry<bool> SainPersonalityEnabled;
@@ -190,15 +196,19 @@ public class Plugin : BaseUnityPlugin
     private const string UntarPluginGuid = "com.untargh.tacticaltoaster";
     private const string RuafPluginGuid = "com.ruafcomehome.tacticaltoaster";
     private const string BlackDivPluginGuid = "com.blackdiv.tacticaltoaster";
+    // ISB's BepInEx entry is ISBNotify.dll ("ISB SOF Notifier") — the spawn-patch + role-detection
+    // core, present whenever ISB bots are. The companion ISBSpecialForcesPlugin.dll is a plain library
+    // (no BepInPlugin), so this is the GUID to detect. Matched as a substring (see
+    // ApplyFactionTakeoverToggle) so a future com.-prefixed variant ("com.samc137.ISBinfo") still registers.
+    private const string IsbPluginGuid = "samc137.ISBinfo";
 
     private void Awake()
     {
         LogSource = Logger;
 
-        // The version-label patch must run BEFORE the delayed coroutine —
-        // EFT calls PreloaderUI.method_6 during early scene init, well
-        // before our 5s delay completes. SAIN registers it immediately at
-        // boot for the same reason.
+        // The version-label patch must run BEFORE the delayed coroutine — EFT calls PreloaderUI.method_6
+        // during early scene init, well before our 5s delay completes. SAIN registers it immediately at boot
+        // for the same reason.
         EnableSafe(new VersionLabelPatch());
 
         StartCoroutine(DelayedLoad());
@@ -206,9 +216,8 @@ public class Plugin : BaseUnityPlugin
 
     private IEnumerator DelayedLoad()
     {
-        // Wait for the user's other 500 mods to settle before binding config
-        // and registering patches — early-boot races against handlers other
-        // mods install in Awake are otherwise too easy to lose.
+        // Wait for the user's other 500 mods to settle before binding config and registering patches —
+        // early-boot races against handlers other mods install in Awake are otherwise too easy to lose.
         yield return new WaitForSeconds(5);
 
         try
@@ -218,22 +227,22 @@ public class Plugin : BaseUnityPlugin
         }
         catch (Exception ex)
         {
-            // Config binding errors must not crash boot — they'd block the
-            // entire plugin from registering. Log and continue with defaults.
+            // Config binding errors must not crash boot — they'd block the entire plugin from registering.
+            // Log and continue with defaults.
             Log.Error($"ORBIT config bind failed (sub-systems will degrade to defaults): {ex}");
         }
 
-        // HandbookClass becomes available once GameWorld is up. ItemPriceLookup
-        // reads it lazily per query — no upfront preload needed.
+        // Item pricing: ItemPriceLookup prefers EFT's Singleton<HandbookClass> when present, else the
+        // server-fetched price cache below. HandbookClass is built by the main-menu/profile flow, which a
+        // FIKA headless client skips, so we can't depend on it (issue #5).
         StartCoroutine(WaitForHandbook());
 
         Log.Info($"ORBIT {OrbitVersion} initialised");
 
-        // Patches — wrap each in EnableSafe so one bad patch (wrong Harmony
-        // parameter name, missing target method after a game update) can't
-        // collapse the rest of init. Without the guard a single failure
-        // skips every subsequent .Enable() AND the BrainManager.AddCustomLayer
-        // call, leaving bots stranded on BSG's vanilla brain.
+        // Patches — wrap each in EnableSafe so one bad patch (wrong Harmony parameter name, missing target
+        // method after a game update) can't collapse the rest of init. Without the guard a single failure
+        // skips every subsequent .Enable() AND the BrainManager.AddCustomLayer call, leaving bots stranded on
+        // BSG's vanilla brain.
         EnableSafe(new OrbitInitPatch());
         EnableSafe(new OrbitTickPatch());
         EnableSafe(new OrbitDisposePatch());
@@ -257,26 +266,29 @@ public class Plugin : BaseUnityPlugin
         EnableSafe(new ExfilLayerBypassPatch());       // high-priority layer (79) that strands bots near exfils
         EnableSafe(new PtrlBirdEyeBypassPatch());      // splits Bird Eye away from the Goons
 
-        // Faction-mod takeover toggles. OrbitBrainLayer always registers
-        // against the standard PMC / Scav / Goon brain names, so mods like
-        // UNTAR / RUAF / BlackDiv whose bots use BaseBrain="PMC" are
-        // hijacked by default. When a toggle is OFF we publish the mod's
-        // WildSpawnType-name substring to OrbitBrainLayer's exclusion list,
-        // and the layer stays inert for matching bots so their own custom
+        // Faction-mod takeover toggles. OrbitBrainLayer always registers against the standard PMC / Scav /
+        // Goon brain names, so mods like UNTAR / RUAF / BlackDiv whose bots use BaseBrain="PMC" are hijacked
+        // by default. When a toggle is OFF we publish the mod's WildSpawnType-name substring to
+        // OrbitBrainLayer's exclusion list, and the layer stays inert for matching bots so their own custom
         // layers (GoToCheckpoint / HuntTarget / …) win instead.
         ApplyFactionTakeoverToggle(UntarPluginGuid,    "UNTAR",         HijackUntar,        "untar");
-        // RUAF Come Home ships two factions: the base RUAF roles (ruaf*) and
-        // the RUAF Hardcore "Remnant" roles (remnant*). Both belong to the
-        // same mod, so the toggle must exclude both substrings.
+        // RUAF Come Home ships two factions: the base RUAF roles (ruaf*) and the RUAF Hardcore "Remnant"
+        // roles (remnant*). Both belong to the same mod, so the toggle must exclude both substrings.
         ApplyFactionTakeoverToggle(RuafPluginGuid,     "RUAF",          HijackRuaf,         "ruaf", "remnant");
         ApplyFactionTakeoverToggle(BlackDivPluginGuid, "BlackDivision", HijackBlackDivision, "blackDiv");
+        // ISB's WildSpawnType members all begin with "ISB" (ISBSpecialForces, ISBTeamLeader,
+        // ISBFirefly*, …), so the single substring covers the whole faction (match is case-insensitive
+        // and no vanilla role name contains "isb").
+        ApplyFactionTakeoverToggle(IsbPluginGuid,      "ISB",           HijackIsb,           "ISB");
 
         OrbitBrainLayer.SetVanillaScavExclusion(VanillaScavs.Value);
         OrbitBrainLayer.SetVanillaGoonExclusion(VanillaGoons.Value);
         OrbitBrainLayer.SetVanillaCultistExclusion(VanillaCultists.Value);
-        if (VanillaScavs.Value) Logger.LogInfo("Vanilla scavs ON — ORBIT will not attach to bot scavs (PlayerScavs unaffected).");
-        if (VanillaGoons.Value) Logger.LogInfo("Vanilla goons ON — ORBIT will not attach to Goons (Knight / Big Pipe / Bird Eye).");
-        if (VanillaCultists.Value) Logger.LogInfo("Vanilla cultists ON — ORBIT will not attach to Cultists (Priest / Warriors / cursed scavs).");
+        OrbitBrainLayer.SetVanillaRaiderExclusion(VanillaRaiders.Value);
+        if (VanillaScavs.Value) Logger.LogInfo("Disable ORBIT on scavs ON — bot scavs running on BSG's vanilla brain (PlayerScavs unaffected).");
+        if (VanillaGoons.Value) Logger.LogInfo("Disable ORBIT on goons ON — Goons (Knight / Big Pipe / Bird Eye) running on BSG's vanilla brain.");
+        if (VanillaCultists.Value) Logger.LogInfo("Disable ORBIT on cultists ON — Cultists (Priest / Warriors / cursed scavs) running on BSG's vanilla brain.");
+        if (VanillaRaiders.Value) Logger.LogInfo("Disable ORBIT on raiders ON — Raiders (pmcBot) and Rogues (exUsec) running on BSG's vanilla brain.");
 
         var brains = new List<string>
         {
@@ -293,11 +305,9 @@ public class Plugin : BaseUnityPlugin
 
         BrainManager.AddCustomLayer(typeof(OrbitBrainLayer), brains, 19);
 
-        // BSG's native LootPatrol layer (priority 3) steals control from
-        // OrbitBrainLayer whenever we briefly go inactive in post-combat,
-        // leaving bots stuck in vanilla loot wandering — which would prevent
-        // LootContainerAction from ever winning the utility roll. Strip it
-        // for every brain we route.
+        // BSG's native LootPatrol layer (priority 3) steals control from OrbitBrainLayer whenever we briefly
+        // go inactive in post-combat, leaving bots stuck in vanilla loot wandering — which would prevent
+        // LootContainerAction from ever winning the utility roll. Strip it for every brain we route.
         BrainManager.RemoveLayer("LootPatrol", brains);
 
         Log.Info($"ORBIT {OrbitVersion} fully loaded — BrainManager wired");
@@ -305,28 +315,42 @@ public class Plugin : BaseUnityPlugin
 
     private IEnumerator WaitForHandbook()
     {
+        // Populate the server-backed price cache up front so headless clients (where HandbookClass never
+        // appears) still have loot values. The SPT HTTP backend is up well before any raid; if the fetch
+        // somehow fails it falls back to the on-disk handbook.json (see HandbookPriceCache).
+        Looting.HandbookPriceCache.Init();
+
+        // Normal clients also get Singleton<HandbookClass> once the menu builds it; ItemPriceLookup uses it
+        // directly when present. This is just a log — pricing already works via the cache either way, so we
+        // don't block on it forever like before (headless would never satisfy the old loop).
         var attempts = 0;
-        while (Singleton<HandbookClass>.Instance == null)
+        while (Singleton<HandbookClass>.Instance == null && attempts < 60)
         {
             attempts++;
-            if (attempts > 60)
-            {
-                Log.Error("HandbookClass never became available; ItemPriceLookup will return 0 (bots treat all loot as worthless)");
-                yield break;
-            }
             yield return new WaitForSeconds(1f);
         }
-        Log.Info($"HandbookClass ready after {attempts}s — ItemPriceLookup is live");
+        Log.Info(Singleton<HandbookClass>.Instance != null
+            ? $"HandbookClass ready after {attempts}s — ItemPriceLookup using it directly"
+            : "HandbookClass absent (headless client?) — ItemPriceLookup using the server price cache");
     }
 
     /// <summary>
-    /// Detects a faction-mod by BepInEx plugin GUID. When OFF AND the mod is
-    /// present, the role-name substring is registered with OrbitBrainLayer's
-    /// exclusion list so matching bots stay on their mod's behaviour layers.
+    /// Detects a faction-mod by BepInEx plugin GUID. When OFF AND the mod is present, the role-name substring
+    /// is registered with OrbitBrainLayer's exclusion list so matching bots stay on their mod's behaviour
+    /// layers.
     /// </summary>
     private static void ApplyFactionTakeoverToggle(string pluginGuid, string label, ConfigEntry<bool> toggle, params string[] roleSubstrings)
     {
+        // Exact GUID match first, then a case-insensitive substring fallback so a faction whose
+        // plugin GUID gains/loses a prefix (e.g. a "com." on ISB's notifier) is still detected.
         var detected = Chainloader.PluginInfos.ContainsKey(pluginGuid);
+        if (!detected)
+        {
+            foreach (var key in Chainloader.PluginInfos.Keys)
+            {
+                if (key.IndexOf(pluginGuid, StringComparison.OrdinalIgnoreCase) >= 0) { detected = true; break; }
+            }
+        }
         if (!detected)
         {
             LogSource.LogDebug($"{label}: plugin '{pluginGuid}' not present — toggle inert");
@@ -366,21 +390,27 @@ public class Plugin : BaseUnityPlugin
         const string takeover = "06. Faction-mod takeover (RESTART)";
 
         // ── 01. General ─────────────────────────────────────────────
+        // Underlying keys kept as "Vanilla X" so 1.0.x configs aren't broken. F12 displays use DispName
+        // to surface the clearer "Disable ORBIT on X" wording without flipping polarity (ON still means
+        // detach ORBIT → vanilla brain).
         VanillaScavs = Config.Bind(general, "Vanilla scavs (RESTART)", false, new ConfigDescription(
             "OFF (default): bot scavs are controlled by ORBIT (cell dispatch, home pull, loot routing). ON: bot scavs run on BSG's vanilla brain — ORBIT doesn't attach to them, so 'Roaming Scavs' below has no effect. PlayerScavs always stay on ORBIT regardless of this toggle.",
-            null, new ConfigurationManagerAttributes { Order = 5 }));
+            null, new ConfigurationManagerAttributes { DispName = "Disable ORBIT on scavs (RESTART)", Order = 5 }));
         VanillaGoons = Config.Bind(general, "Vanilla goons (RESTART)", false, new ConfigDescription(
             "OFF (default): Goons (Knight + Big Pipe + Bird Eye) are controlled by ORBIT. ON: Goons run on BSG's vanilla brain.",
-            null, new ConfigurationManagerAttributes { Order = 4 }));
+            null, new ConfigurationManagerAttributes { DispName = "Disable ORBIT on goons (RESTART)", Order = 4 }));
         VanillaCultists = Config.Bind(general, "Vanilla cultists (RESTART)", false, new ConfigDescription(
             "OFF (default): Cultists (Priest + Warriors + cursed scavs) are controlled by ORBIT. ON: Cultists run on BSG's vanilla brain.",
-            null, new ConfigurationManagerAttributes { Order = 3 }));
+            null, new ConfigurationManagerAttributes { DispName = "Disable ORBIT on cultists (RESTART)", Order = 3 }));
+        VanillaRaiders = Config.Bind(general, "Vanilla raiders (RESTART)", true, new ConfigDescription(
+            "OFF (default): Raiders (pmcBot — Reserve / Labs) and Rogues (exUsec — Lighthouse) are controlled by ORBIT. ON: they run on BSG's vanilla brain.",
+            null, new ConfigurationManagerAttributes { DispName = "Disable ORBIT on raiders (RESTART)", Order = 2 }));
         RoamingScavs = Config.Bind(general, "Roaming Scavs", false, new ConfigDescription(
             "OFF (default): scavs stay near their spawn quartier (current cell + 8 neighbours). ON: scavs roam the whole map like PMCs. Ignored when Vanilla scavs is ON.",
-            null, new ConfigurationManagerAttributes { Order = 2 }));
+            null, new ConfigurationManagerAttributes { Order = 1 }));
         RoamingGoons = Config.Bind(general, "Roaming Goons", true, new ConfigDescription(
             "OFF: Goons stay near their spawn quartier. ON (default): Goons roam the whole map. Ignored when Vanilla goons is ON.",
-            null, new ConfigurationManagerAttributes { Order = 1 }));
+            null, new ConfigurationManagerAttributes { Order = 0 }));
 
         // ── 02. POI guard duration ──────────────────────────────────
         ObjectiveGuardDuration = Config.Bind(poiGuard, "Base guard duration (s, min..max)", new Vector2(60f, 180f), new ConfigDescription(
@@ -408,6 +438,21 @@ public class Plugin : BaseUnityPlugin
             "How fast a zone's force decays with distance. Larger = tighter to the zone. 1.0 = linear-ish.",
             new AcceptableValueRange<float>(0f, 5f), new ConfigurationManagerAttributes { Order = 1 }));
         AdvectionZoneRadiusDecayScale.SettingChanged += AdvectionZoneParametersChanged;
+
+        ConvergenceEnabled = Config.Bind(zones, "Player convergence", false, new ConfigDescription(
+            "Master toggle for the player-convergence pull: every cell of the dispatch grid receives a vector toward the living human player(s), so the world drifts toward where the action is. OFF (default): the field stays zero everywhere, regardless of the per-map JSON settings.",
+            null, new ConfigurationManagerAttributes { Order = 0 }));
+        ConvergenceEnabled.SettingChanged += ConvergenceParametersChanged;
+
+        ConvergenceRadiusScale = Config.Bind(zones, "Convergence radius scale", 1f, new ConfigDescription(
+            "Multiplier on the radius of the convergence pull emitted from living human players (per-map base radius in Maps/Zones JSON). 1.0 = author defaults.",
+            new AcceptableValueRange<float>(0f, 10f), new ConfigurationManagerAttributes { Order = -1 }));
+        ConvergenceRadiusScale.SettingChanged += ConvergenceParametersChanged;
+
+        ConvergenceForceScale = Config.Bind(zones, "Convergence force scale", 1f, new ConfigDescription(
+            "Multiplier on the strength of the convergence pull emitted from living human players. NEGATIVE pushes bots AWAY from players. 0 disables the pull.",
+            new AcceptableValueRange<float>(-10f, 10f), new ConfigurationManagerAttributes { Order = -2 }));
+        ConvergenceForceScale.SettingChanged += ConvergenceParametersChanged;
 
         // ── 04. Main objectives - setup ─────────────────────────────
         MainObjectivesEnabled = Config.Bind(mainSetup, "Enabled", true, new ConfigDescription(
@@ -490,6 +535,9 @@ public class Plugin : BaseUnityPlugin
         SameFloorLootYTolerance = Config.Bind(mainTune, "Same-floor sweep tolerance (m)", 2.5f, new ConfigDescription(
             "During chain-loot sweeps, candidates within this vertical Y delta of the bot are treated as 'same floor' and preferred over cross-floor candidates. Two-pass: same-floor first, cross-floor only if nothing same-floor is in range. 0 disables the bias (chain-loot ignores floors). Stops the elevator yo-yo on Resort.",
             new AcceptableValueRange<float>(0f, 10f), new ConfigurationManagerAttributes { Order = 65 }));
+        CrossFloorSplinterChance = Config.Bind(mainTune, "Cross-floor splinter chance", 0.2f, new ConfigDescription(
+            "Per-pick probability that a roam splinter ignores the same-floor preference and picks floor-blind. Keeps bots from vacuuming an entire floor before ever touching a staircase: they loot some of the current floor, then naturally drift up or down. 0 = never change floor until the current one is exhausted; 1 = floor-blind picking (the old staircase yo-yo).",
+            new AcceptableValueRange<float>(0f, 1f), new ConfigurationManagerAttributes { Order = 64 }));
         TimeExtractWindowPmc = Config.Bind(mainTune, "Time extract window — PMC (%)", new Vector2(5f, 30f), new ConfigDescription(
             "Per-squad random window (% of total raid duration remaining) at which ExtractRequested flips. Rolled once per squad. Matches SAIN's default range.",
             null, new ConfigurationManagerAttributes { Order = 60 }));
@@ -516,6 +564,9 @@ public class Plugin : BaseUnityPlugin
         HijackBlackDivision = Config.Bind(takeover, "Take over Black Division bots", false, new ConfigDescription(
             "OFF (default): Black Division bots run on their own behaviour. ON: ORBIT routes them like PMCs.",
             null, new ConfigurationManagerAttributes { Order = 1 }));
+        HijackIsb = Config.Bind(takeover, "Take over ISB bots", true, new ConfigDescription(
+            "ON (default): ORBIT routes ISB bots like PMCs. OFF: ISB bots run on their own behaviour.",
+            null, new ConfigurationManagerAttributes { Order = 0 }));
 
         // ── 07.x SAIN personality ───────────────────────────────────
         BindSainPersonalityConfigs();
@@ -614,11 +665,9 @@ public class Plugin : BaseUnityPlugin
     }
 
     /// <summary>
-    /// Generic per-archetype binder. Takes the section name, all 13
-    /// default values, and 13 assignment lambdas to land the resulting
-    /// ConfigEntries on the right Plugin static fields. Pulled out
-    /// because hand-writing 5 × 13 = 65 Config.Bind calls inline was
-    /// unreadable.
+    /// Generic per-archetype binder. Takes the section name, all 13 default values, and 13 assignment lambdas
+    /// to land the resulting ConfigEntries on the right Plugin static fields. Pulled out because hand-writing
+    /// 5 × 13 = 65 Config.Bind calls inline was unreadable.
     /// </summary>
     private void BindArchetype(string section,
         float mixQ, float mixK, float mixL,
@@ -648,7 +697,12 @@ public class Plugin : BaseUnityPlugin
 
     private static void AdvectionZoneParametersChanged(object sender, EventArgs args)
     {
-        // Phase 7 wires this to OrbitManager so live F12 edits propagate
-        // into the waypoint system's force field. Until then it's a no-op.
+        // Phase 7 wires this to OrbitManager so live F12 edits propagate into the waypoint system's force
+        // field. Until then it's a no-op.
+    }
+
+    private static void ConvergenceParametersChanged(object sender, EventArgs args)
+    {
+        Comfort.Common.Singleton<Core.OrbitManager>.Instance?.WaypointSystem?.CalculateConvergence();
     }
 }
