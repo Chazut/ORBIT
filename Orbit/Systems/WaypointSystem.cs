@@ -1941,6 +1941,12 @@ public class WaypointSystem
                 if (loc.Category != WaypointCategory.Corpse) continue;
                 if (!IsRuntimeWaypoint(loc)) continue;
                 if (!WasCorpseKilledBySquad(loc.Id, squad.Id)) continue;
+                // Loot-faction gate (mirrors SquadCanUseWaypoint in the main candidate loop and the own-kill
+                // bee-line skip in CorpseRegistrationPatch): non-loot factions (Goons / bosses / ISB-style
+                // faction bots) have no loot routine, so they must NOT priority-pick a corpse they can't
+                // actually loot. IsLootableForAgent rejects it on arrival and the squad pins on the body
+                // forever. This "body I dropped" priority block previously bypassed that gate.
+                if (!SquadCanUseWaypoint(squad, squadIsPmc, loc)) continue;
                 if (hasBlacklist && squad.CompletedPoiIds.Contains(loc.Id)) continue;
                 if (_claims.ContainsKey(loc.Id)) continue;
                 if (HasFailedDoorOnPath(squad, loc)) continue;
