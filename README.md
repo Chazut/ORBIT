@@ -368,19 +368,17 @@ No ETA, no promises, but on the list:
 - Squad splitting with radio comms
 - New personalities
 - Detect bots spawned on isolated navmesh islands (e.g. near Streets transits, Factory silo) and teleport them once to a valid spot nearby so they stay in the raid instead of standing still until raid end. TP destination must respect a safety radius from the player (and other bots) so the rescue can't drop a bot right in front of someone
-- Optional **player-attraction toggle** (Phobos style) - pulls bots toward the player for more action, off by default. Useful for "kill X scavs in an area" quests, viewership runs, etc.
 - Prone or crouch when looting a body in the open to minimise silhouette (a bot lying flat on a corpse in a field is way harder to spot than one standing over it)
 - Weapon-type → behaviour archetype hint (CQB-leaning loadout pushes harder, sniper loadout stays back) driven by MOA + RPM + scope presence, biasing POI selection so a Mosin squad doesn't get routed into Resort interiors
 - Cross-raid player-movement heatmap — aggregate the player positions raid-review already logs into a per-map occurrence map, then weight squad dispatch toward those hotspots so the side routes a player habitually rats through stop being safe over time (suggested by Fiodor on Discord)
 - Built-in degraded-tickrate mode for off-screen / far-from-player squads — runs the dispatch / loot / extract loops at a lower frequency (e.g. once every 5-10s instead of every tick) to reclaim CPU on lower-end machines without flat-out deactivating bots the way external AI-limiter mods do. Goal: keep the "full lifecycle" guarantee while trying to help out low-end PCs
-- Permanent door unlocks after a bot picks the lock — currently unlocks are passage-only and the door relocks behind the bot, which means a player chasing a bot through a high-value-loot door still needs their own key. Once a force-unlock roll succeeds, the door should stay open for the whole raid (or unlock the lock and leave it shut, depending on door state) so everyone benefits from that bot's pick (suggested by AliceDeRussell on Discord)
 - Investigate why extended raid duration breaks bot behaviour — users running SVM / RaidOverhaul / Custom Raid Times with longer-than-vanilla raid lengths consistently report bots going inert, freezing, or behaving erratically (multiple Discord reports — Chern's terrain clipping, others). Currently in Troubleshooting as a "test with vanilla raid times first" recommendation, but the underlying cause isn't understood. Worth tracing what state ORBIT (or a dependency) accumulates over time that fails past the vanilla window
 
 **Objectives**
 - "Marked-key loot rush" for high-tier squads
 - "Spawn rush" for the most aggressive personalities
 - "Boss hunting"
-- Faction-vs-faction "hunt" objective — a squad actively seeks out another faction's bots instead of just roaming, biasing dispatch toward where the target faction is (same mechanic as player-convergence, different target). Enables rivalries like cultists hunting PMCs, UNTAR hunting scavs, or ISB ↔ Black Division hunting each other. Doubles as a robustness win for custom/vanilla bots whose stock SAIN/BSG nodes sometimes freeze and stop moving (suggested by Firefly on Discord)
+- Faction-vs-faction "hunt" objective: a squad actively seeks out another faction's bots instead of just roaming. Enables rivalries like cultists hunting PMCs, UNTAR hunting scavs, or ISB ↔ Black Division hunting each other. Doubles as a robustness win for custom/vanilla bots whose stock SAIN/BSG nodes sometimes freeze and stop moving (suggested by Firefly on Discord - ISB author)
 - Airdrop / helicopter crash / BTR objectives — squads slow-approach the drop zone, hold position at a nearby vantage for a few minutes (ambush window), then close in and loot. Mimics how players treat airdrops in live — nobody walks straight to the smoke.
 - Multi-step objectives (activate → loot/extract):
   - Interchange Kiba (disable alarm → loot)
@@ -396,17 +394,11 @@ No ETA, no promises, but on the list:
 - Train exfil (Armored Train availability window)
 - "Drop backpack" exfils (Empty / EmptyOrSize) - usable when bot has no backpack, OR wounded bots drop the bag and use them anyway
 - HasItem (RedRebel-style - bot must own a Red Rebel in inventory, but don't consume it; ignore the paracord and WearsItem gear constraints entirely)
-- Fallback to next-closest exfil if the chosen one is unreachable
 - Chance roll on whether a squad will use the car / V-Ex (SharedTimer) exfil
 - Emergency extract: a member who is bleeding or low on HP with no heals left heads for the nearest exfil alone - the rest of the squad keeps playing its objectives
 
-**Looting (post-MVP)**
-- Spare ammo preload to the secure container instead of crowding the
-  main inventory
+**Looting**
 - Post-loot inventory sort so the grid stays usable as the bot fills up
-- Teammates can grab a dead squadmate's spawn gear and stash it
-  somewhere quiet - simulates a real squad taking care of their
-  fallen friends' stuff
 - Stack-aware pricing (currency / ammo stacks evaluated as bulk value,
   not single-unit)
 
@@ -417,14 +409,10 @@ No ETA, no promises, but on the list:
 **Animations / polish**
 - Keycard / key swipe animation for PMC bots opening locked rooms (currently they call the Unlock function instantly with no anim — should walk to the reader and play the swipe like a player)
 
-**Bugs to fix**
-- Bots phantom-walking through closed doors instead of triggering the open animation (door-open condition misfires in some cases)
-
 ### Known Issues
 
 - **1.0.0 is the first public release** - a few rough edges are expected. Bug reports and feedback on the [Discord thread](https://discord.com/channels/875684761291599922/1509314495019745451) are very welcome.
 - **Most Reserve exfils require switches ORBIT doesn't operate yet** - bots there mostly stay until killed or raid end.
-- **Bots phantom-walk through closed doors** - in some cases the door-open trigger doesn't fire and the bot passes straight through without animating the open. Reported on Customs three-story side door so far. Investigating.
 - **Bots walk into the Lighthouse minefield** - the rebuilt POI generation doesn't exclude minefield zones yet, so bots can be routed straight into them. Fix planned for 1.0.1.
 - **Possible interaction with CactusPie's "Transfer Loot Into Container Automatically" mod** - reported symptom: items a bot loots end up in YOUR tagged containers (SICC case, etc.). Best theory at the moment is that ORBIT routes pickups through BSG vanilla APIs (same path as the player), so a mod hooking those APIs may end up applying its logic to bot pickups too. Investigating.
 - **Bots stuck at spawn on isolated navmesh** - vanilla SPT quirk where a spawn point lands a bot on a tiny chunk of navmesh disconnected from the rest of the map (Streets near transits, Factory inside the silo, etc.). Shows up more often with ORBIT than pure vanilla because vanilla's built-in TP rescue is disabled (it was teleporting bots constantly on every unreachable pick). Fix planned: targeted TP rescue that fires only when a bot is genuinely stuck for X seconds.
