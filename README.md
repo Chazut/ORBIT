@@ -372,7 +372,6 @@ No ETA, no promises, but on the list:
 - Weapon-type → behaviour archetype hint (CQB-leaning loadout pushes harder, sniper loadout stays back) driven by MOA + RPM + scope presence, biasing POI selection so a Mosin squad doesn't get routed into Resort interiors
 - Cross-raid player-movement heatmap — aggregate the player positions raid-review already logs into a per-map occurrence map, then weight squad dispatch toward those hotspots so the side routes a player habitually rats through stop being safe over time (suggested by Fiodor on Discord)
 - Built-in degraded-tickrate mode for off-screen / far-from-player squads — runs the dispatch / loot / extract loops at a lower frequency (e.g. once every 5-10s instead of every tick) to reclaim CPU on lower-end machines without flat-out deactivating bots the way external AI-limiter mods do. Goal: keep the "full lifecycle" guarantee while trying to help out low-end PCs
-- Permanent door unlocks after a bot picks the lock — currently unlocks are passage-only and the door relocks behind the bot, which means a player chasing a bot through a high-value-loot door still needs their own key. Once a force-unlock roll succeeds, the door should stay open for the whole raid (or unlock the lock and leave it shut, depending on door state) so everyone benefits from that bot's pick (suggested by AliceDeRussell on Discord)
 - Investigate why extended raid duration breaks bot behaviour — users running SVM / RaidOverhaul / Custom Raid Times with longer-than-vanilla raid lengths consistently report bots going inert, freezing, or behaving erratically (multiple Discord reports — Chern's terrain clipping, others). Currently in Troubleshooting as a "test with vanilla raid times first" recommendation, but the underlying cause isn't understood. Worth tracing what state ORBIT (or a dependency) accumulates over time that fails past the vanilla window
 
 **Objectives**
@@ -395,13 +394,10 @@ No ETA, no promises, but on the list:
 - Train exfil (Armored Train availability window)
 - "Drop backpack" exfils (Empty / EmptyOrSize) - usable when bot has no backpack, OR wounded bots drop the bag and use them anyway
 - HasItem (RedRebel-style - bot must own a Red Rebel in inventory, but don't consume it; ignore the paracord and WearsItem gear constraints entirely)
-- Fallback to next-closest exfil if the chosen one is unreachable
 - Chance roll on whether a squad will use the car / V-Ex (SharedTimer) exfil
 - Emergency extract: a member who is bleeding or low on HP with no heals left heads for the nearest exfil alone - the rest of the squad keeps playing its objectives
 
-**Looting (post-MVP)**
-- Spare ammo preload to the secure container instead of crowding the
-  main inventory
+**Looting**
 - Post-loot inventory sort so the grid stays usable as the bot fills up
 - Stack-aware pricing (currency / ammo stacks evaluated as bulk value,
   not single-unit)
