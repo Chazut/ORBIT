@@ -74,6 +74,12 @@ public class OrbitBrainLayer : CustomLayer
         var role = botOwner?.Profile?.Info?.Settings?.Role;
         if (!role.HasValue) return false;
 
+        // Vanilla Lighthouse Rogues share the ExUsec brain that ORBIT registers on for custom factions
+        // borrowing brain type 24 (e.g. ISB). Never take over the real Rogues: exclude the vanilla exUsec
+        // WildSpawnType unconditionally. Custom faction types (ISBSpecialForces etc.) are a different
+        // WildSpawnType and fall through to the normal toggle logic below.
+        if (role.Value == EFT.WildSpawnType.exUsec) return true;
+
         if (_excludedRoleSubstrings.Count > 0)
         {
             var roleName = role.Value.ToString();

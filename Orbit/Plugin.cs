@@ -303,12 +303,19 @@ public class Plugin : BaseUnityPlugin
             nameof(BsgBrain.SectantWarrior)
         };
 
-        BrainManager.AddCustomLayer(typeof(OrbitBrainLayer), brains, 19);
-
         // BSG's native LootPatrol layer (priority 3) steals control from OrbitBrainLayer whenever we briefly
         // go inactive in post-combat, leaving bots stuck in vanilla loot wandering — which would prevent
-        // LootContainerAction from ever winning the utility roll. Strip it for every brain we route.
+        // LootContainerAction from ever winning the utility roll. Strip it only for the brains ORBIT fully
+        // owns. Deliberately NOT for the ExUsec brain added below: vanilla Lighthouse Rogues share that brain
+        // and must stay 100% vanilla, so their LootPatrol is left intact.
         BrainManager.RemoveLayer("LootPatrol", brains);
+
+        // ExUsec (Rogue) brain — registered so ORBIT can drive custom factions that borrow brain type 24
+        // (e.g. ISB, whose WildSpawnType is built on the Rogue brain). The vanilla exUsec Rogues that share
+        // this brain are excluded unconditionally in OrbitBrainLayer.IsExcludedRole, so the layer is built
+        // inert for them (no Agent, no mover override, never active) and Lighthouse Rogues stay untouched.
+        brains.Add(nameof(BsgBrain.ExUsec));
+        BrainManager.AddCustomLayer(typeof(OrbitBrainLayer), brains, 19);
 
         Log.Info($"ORBIT {OrbitVersion} fully loaded — BrainManager wired");
     }
