@@ -758,6 +758,17 @@ public class MovementSystem
         var distSqr = dx * dx + dz * dz;
         if (distSqr > 9f) return false; // > 3 m XZ — out of reach for this tick
 
+        // Vertical guard. Every distance/cone test in this method is projected onto the ground plane (the XZ
+        // distance above, and forward.y = 0f below), so a door directly ABOVE or BELOW the bot reads as
+        // "right next to me" even though it sits on another floor reached only via stairs. A dorms floor is
+        // ~3 m, so without this a bot near a stairwell on the floor below force-unlocks / opens the marked-
+        // room door through the ceiling before ever climbing up — the door ends up unlocked-but-shut and the
+        // room is never entered. A same-floor approach keeps the bot body within ~1 m of the door pivot in
+        // Y; reject anything past 1.5 m so only same-level doors qualify. Gates BOTH unlock and open, since
+        // every door reaching the Locked/Open branches passes through here first.
+        const float VerticalReachMeters = 1.5f;
+        if (Mathf.Abs(doorPos.y - agentPos.y) > VerticalReachMeters) return false;
+
         // Bot's forward direction — prefer the path's next-corner direction, fall back to live
         // velocity for bots whose nav is driven by BSG directly.
         var movement = agent.Movement;
