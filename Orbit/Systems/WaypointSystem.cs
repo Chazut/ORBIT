@@ -721,6 +721,24 @@ public class WaypointSystem
     private Waypoint TryPickOwnKillCorpse(Squad squad)
     {
         if (squad == null) return null;
+
+        // Loot-faction gate. A Corpse is a loot category, so non-loot factions (Goons / ISB / bosses /
+        // cultists / raiders) must NEVER bee-line to their own kills: they have no loot routine to consume
+        // the dispatch, so the squad pins on a body it can't loot and loops forever on arrival, while the
+        // followers get container/loose splinters dispatched around it. The per-agent registration path
+        // (CorpseRegistrationPatch) already skips the IMMEDIATE bee-line for these factions, and the normal
+        // candidate scan is gated by SquadCanUseWaypoint — but this squad-level re-pick from RequestNear was
+        // bypassing both. Mirror the exact same gate here (PMC + PlayerScav + bot scav only; lenient on an
+        // unknown role like SquadCanUseWaypoint, since ISB/Goons always have a known non-loot role).
+        var leaderRole = squad.Leader?.Bot?.Profile?.Info?.Settings?.Role;
+        if (leaderRole.HasValue)
+        {
+            var leaderIsPmc = leaderRole.Value.IsPMC();
+            var leaderIsPlayerScav = squad.Leader?.Bot?.Profile != null && squad.Leader.Bot.Profile.WillBeAPlayerScav();
+            var leaderIsBotScav = leaderRole.Value.IsScav() && !leaderIsPlayerScav;
+            if (!leaderIsPmc && !leaderIsPlayerScav && !leaderIsBotScav) return null;
+        }
+
         var leaderCell = WorldToCell(squad.Leader?.Bot?.Position ?? Vector3.zero);
         foreach (var kvp in _corpseKillerSquadId)
         {
