@@ -170,5 +170,13 @@ public class Stuck
     public HardStuck Hard = new();
     public SoftStuck Soft = new();
 
+    // ── Idle-island rescue ────────────────────────────────────────────
+    // A bot spawned on a navmesh chunk disconnected from the rest of the map can never path to its objective,
+    // and the per-agent stuck remediation never sees it (no path → UpdateMovement early-returns). This is a
+    // separate one-shot watchdog tracked on the bot's REAL position, independent of move-speed.
+    public Vector3 IdleRescueAnchor;
+    public float IdleRescueSince = -1f; // -1 = not currently tracking an idle window
+    public bool IdleRescued;            // one-shot per bot lifetime
+
     public override string ToString() => $"Stuck(soft: {Soft} hard: {Hard})";
 }

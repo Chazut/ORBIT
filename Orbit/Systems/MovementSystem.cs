@@ -27,12 +27,15 @@ public class MovementSystem
     private readonly NavJobExecutor _navJobExecutor;
     private readonly Queue<ValueTuple<Agent, NavJob>> _moveJobs;
     private readonly StuckRemediation _stuckRemediation;
+    private readonly List<Player> _humanPlayers;
+    private readonly NavMeshPath _rescuePath = new();
 
     public MovementSystem(NavJobExecutor navJobExecutor, List<Player> humanPlayers)
     {
         _navJobExecutor = navJobExecutor;
         _moveJobs = new Queue<(Agent, NavJob)>(20);
         _stuckRemediation = new StuckRemediation(this, humanPlayers);
+        _humanPlayers = humanPlayers;
     }
 
     public void Update(List<Agent> liveAgents)
@@ -85,6 +88,11 @@ public class MovementSystem
                 mover.PrevLinkPos = pos;
                 mover.PositionOnWayInner = pos;
             }
+
+            // One-shot rescue for bots stranded on a disconnected navmesh chunk. Runs before UpdateMovement
+            // because an islanded bot has no path and UpdateMovement early-returns, so the stuck remediation
+            // never sees it.
+            TryIdleIslandRescue(agent);
 
             UpdateMovement(agent);
         }
@@ -659,7 +667,12 @@ public class MovementSystem
     /// for wedging the bot's nav, and a recalculated path through a clean cross-section often succeeds.
     /// Cheap: only walks the agent's own opened-doors list, only fires under explicit stuck signals.
     /// </summary>
-    public void CloseRecentDoorsBehindAgent(Agent agent)
+    /// <param name="includeNear">When true (hard-stuck path), also close doors within
+    /// <see cref="CloseDoorBehindMinDistance"/>. A bot pinned in place is most likely wedged on the swing
+    /// arc of a door it is standing right next to, so the near door is exactly the one to close — the normal
+    /// 4 m floor (meant to avoid auto-closing a door a bot is calmly looting beside) would skip the real
+    /// culprit and leave the bot stuck behind its own door for the whole raid.</param>
+    public void CloseRecentDoorsBehindAgent(Agent agent, bool includeNear = false)
     {
         var list = agent?.RecentOpenedDoors;
         if (list == null || list.Count == 0) return;
@@ -678,7 +691,7 @@ public class MovementSystem
             // Mid-animation: let the DoorWatch settle the state first, retry on the next fire.
             if (door.DoorState == EDoorState.Interacting) continue;
             var dist = XzDistance(agentPos, door.transform.position);
-            if (dist < CloseDoorBehindMinDistance) continue;
+            if (!includeNear && dist < CloseDoorBehindMinDistance) continue;
             if (dist > CloseDoorBehindMaxDistance)
             {
                 // Door is far away — can't possibly be causing the current stuck. Drop it from the
@@ -702,7 +715,8 @@ public class MovementSystem
                     door.DoorState = EDoorState.Shut;
                     _doorInteractCooldown[door.GetInstanceID()] = Time.time;
                     closed++;
-                    Log.Debug($"{agent} closed previously-opened door {door.Id} (stuck remediation, agent moved away)");
+                    var wedge = dist < CloseDoorBehindMinDistance ? " — wedged in doorway" : "";
+                    Log.Debug($"{agent} closed previously-opened door {door.Id} (stuck remediation, dist {dist:F1}m{wedge})");
                 }
                 else
                 {
@@ -857,6 +871,141 @@ public class MovementSystem
         return isOutside && isAbleToSprint && isFreeLook && isPathSmooth;
     }
 
+    // ── Teleport safety (shared by hard-stuck teleport + idle-island rescue) ──────────────────────────
+
+    private static readonly LayerMask TeleportVisLayerMask = 0b0000_00000_0000_0001_1000_0000_0000;
+
+    private static readonly EBodyPartColliderType[] TeleportVisBodyParts =
+    {
+        EBodyPartColliderType.HeadCommon,
+        EBodyPartColliderType.Pelvis,
+        EBodyPartColliderType.LeftForearm,
+        EBodyPartColliderType.RightForearm,
+        EBodyPartColliderType.LeftCalf,
+        EBodyPartColliderType.RightCalf
+    };
+
+    /// <summary>
+    /// True when it is safe to teleport this agent: no living human player within 10 m, and no human has
+    /// line of sight to any of the agent's tracked body parts. A player watching a bot blink across the map
+    /// is the worst-case visual regression, so every teleport path gates on this.
+    /// </summary>
+    private static bool TeleportSafe(Agent agent, List<Player> humanPlayers)
+    {
+        var agentPos = agent.Position;
+        for (var i = 0; i < humanPlayers.Count; i++)
+        {
+            var player = humanPlayers[i];
+            if (player?.HealthController is not { IsAlive: true }) continue;
+
+            if ((player.Position - agentPos).sqrMagnitude <= 100f)
+            {
+                Log.Debug($"{agent} teleport proximity check failed: {player.Profile.Nickname} too close");
+                return false;
+            }
+
+            var humanHeadPos = player.PlayerBones.Head.Original.position;
+            var agentBodyParts = agent.Player.PlayerBones.BodyPartCollidersDictionary;
+            for (var j = 0; j < TeleportVisBodyParts.Length; j++)
+            {
+                var bodyPart = agentBodyParts[TeleportVisBodyParts[j]];
+                // Linecast returns true when something blocks the view → that body part isn't visible.
+                if (Physics.Linecast(humanHeadPos, bodyPart.transform.position, out _, TeleportVisLayerMask.value)) continue;
+                // Nothing blocked → the player can see this body part → not safe.
+                Log.Debug($"{agent} teleport vis check failed: {player.Profile.Nickname} can see {bodyPart.BodyPartColliderType}");
+                return false;
+            }
+        }
+        return true;
+    }
+
+    // ── Idle-island rescue ────────────────────────────────────────────────────────────────────────────
+    // A bot spawned on a navmesh chunk disconnected from the rest of the map (Streets near transits, Factory
+    // silo, etc.) can never path to its objective, so it stands still until raid end. The per-agent stuck
+    // remediation never sees it (UpdateMovement early-returns when there is no path). This one-shot watchdog
+    // runs for every active agent regardless of path state: if the bot has a squad objective it is FAR from
+    // and has not moved for a sustained window, teleport it once to the nearest navmesh point actually
+    // connected to that objective. Same proximity + LoS safety as the hard-stuck teleport. One-shot per bot
+    // so it can't fall into the constant-teleport loop that made us disable vanilla's built-in rescue.
+
+    private const float IdleRescueNoMoveRadiusSqr = 3f * 3f;
+    private const float IdleRescueThresholdSeconds = 25f;
+    private const float IdleRescueMinObjectiveDistSqr = 12f * 12f;
+    private static readonly float[] IdleRescueRingRadii = { 4f, 8f, 16f, 28f, 45f };
+
+    private void TryIdleIslandRescue(Agent agent)
+    {
+        var stuck = agent.Stuck;
+        if (stuck.IdleRescued) return; // one-shot per bot lifetime
+
+        // Needs somewhere it is actually trying to get to. Use the AGENT's own objective, not the squad
+        // anchor — a follower legitimately holding a splinter position can be >12 m from the squad anchor,
+        // and gating on the squad anchor would teleport it mid-guard.
+        var objLoc = agent.Objective?.Location;
+        if (objLoc == null)
+        {
+            stuck.IdleRescueSince = -1f;
+            return;
+        }
+
+        var pos = agent.Position;
+
+        // If it is already at/near the objective it isn't islanded — it arrived and is looting/guarding.
+        if ((objLoc.Position - pos).sqrMagnitude < IdleRescueMinObjectiveDistSqr)
+        {
+            stuck.IdleRescueSince = -1f;
+            return;
+        }
+
+        // Reset the window on first sight or whenever the bot makes real progress.
+        if (stuck.IdleRescueSince < 0f || (pos - stuck.IdleRescueAnchor).sqrMagnitude > IdleRescueNoMoveRadiusSqr)
+        {
+            stuck.IdleRescueAnchor = pos;
+            stuck.IdleRescueSince = Time.time;
+            return;
+        }
+
+        if (Time.time - stuck.IdleRescueSince < IdleRescueThresholdSeconds) return;
+
+        // Stranded far from the objective for the whole window → attempt the one-shot rescue.
+        if (RescueTeleportToConnectedPoint(agent, objLoc.Position))
+            stuck.IdleRescued = true;
+
+        // Re-arm the window either way: on success the one-shot flag stops further attempts; on failure we
+        // retry after another full window instead of hammering CalculatePath every frame.
+        stuck.IdleRescueSince = Time.time;
+    }
+
+    private bool RescueTeleportToConnectedPoint(Agent agent, Vector3 objectivePos)
+    {
+        if (!TeleportSafe(agent, _humanPlayers)) return false;
+
+        var pos = agent.Position;
+        for (var ri = 0; ri < IdleRescueRingRadii.Length; ri++)
+        {
+            var r = IdleRescueRingRadii[ri];
+            for (var a = 0; a < 8; a++)
+            {
+                var ang = a * (Mathf.PI * 2f / 8f);
+                var candidate = pos + new Vector3(Mathf.Cos(ang) * r, 0f, Mathf.Sin(ang) * r);
+                if (!NavMesh.SamplePosition(candidate, out var hit, 2f, NavMesh.AllAreas)) continue;
+                // Only accept a point genuinely CONNECTED to the objective — that's what gets the bot off the
+                // island. SamplePosition alone could snap straight back onto the disconnected chunk.
+                if (!NavMesh.CalculatePath(hit.position, objectivePos, NavMesh.AllAreas, _rescuePath)) continue;
+                if (_rescuePath.status != NavMeshPathStatus.PathComplete) continue;
+
+                var dest = hit.position;
+                dest.y += 0.25f;
+                agent.Player.Teleport(dest);
+                ResetPath(agent); // re-dispatch from the new position next tick
+                Log.Info($"{agent} idle-island rescue: teleported {Vector3.Distance(pos, dest):F0}m to a navmesh point connected to its objective (stranded {IdleRescueThresholdSeconds:F0}s)");
+                return true;
+            }
+        }
+        Log.Debug($"{agent} idle-island rescue: no connected navmesh point within {IdleRescueRingRadii[^1]:F0}m — staying put");
+        return false;
+    }
+
     private class StuckRemediation(MovementSystem movementSystem, List<Player> humanPlayers)
     {
         private readonly SoftStuckRemediation _softRemediation = new(0.2f);
@@ -959,18 +1108,6 @@ public class MovementSystem
         private const float TeleportDelay = 5f + PathRetryDelay;
         private const float FailedDelay = 5f + TeleportDelay;
 
-        private static readonly LayerMask LayerMaskVisCheck = 0b0000_00000_0000_0001_1000_0000_0000;
-
-        private static readonly EBodyPartColliderType[] VisCheckBodyParts =
-        {
-            EBodyPartColliderType.HeadCommon,
-            EBodyPartColliderType.Pelvis,
-            EBodyPartColliderType.LeftForearm,
-            EBodyPartColliderType.RightForearm,
-            EBodyPartColliderType.LeftCalf,
-            EBodyPartColliderType.RightCalf
-        };
-
         public void Update(Agent agent)
         {
             // If the bot stays within a radius of its position 5 s ago for extended periods of time, treat as
@@ -1021,8 +1158,10 @@ public class MovementSystem
                     stuck.Status = HardStuckStatus.Retrying;
                     // Before retrying, close any doors the agent opened that might be wedging the
                     // corridor — swing-arc geometry is a common cause of HardStuck in interior maps.
-                    // No-op if the agent hasn't opened any doors or all openings are still nearby.
-                    movementSystem.CloseRecentDoorsBehindAgent(agent);
+                    // includeNear: a pinned bot is usually wedged on a door it is standing right next to,
+                    // so close the near door too (the normal 4 m floor would skip the actual culprit and
+                    // leave the bot stuck behind its own door). No-op if it opened no doors.
+                    movementSystem.CloseRecentDoorsBehindAgent(agent, includeNear: true);
                     movementSystem.MoveRetry(agent, agent.Movement.Target);
                     break;
                 case HardStuckStatus.Retrying when stuck.Timer >= TeleportDelay:
@@ -1058,38 +1197,7 @@ public class MovementSystem
 
         private void AttemptTeleport(Agent agent)
         {
-            for (var i = 0; i < humanPlayers.Count; i++)
-            {
-                var player = humanPlayers[i];
-
-                if (player?.HealthController is not { IsAlive: true })
-                    continue;
-
-                // Don't teleport when a human player is closer than 10m.
-                if ((player.Position - agent.Position).sqrMagnitude <= 100f)
-                {
-                    Log.Debug($"{agent} teleport proximity check failed: {player.Profile.Nickname} too close");
-                    return;
-                }
-
-                var humanHeadPos = player.PlayerBones.Head.Original.position;
-                var agentBodyParts = agent.Player.PlayerBones.BodyPartCollidersDictionary;
-
-                for (var j = 0; j < VisCheckBodyParts.Length; j++)
-                {
-                    var bodyPartType = VisCheckBodyParts[j];
-                    var bodyPart = agentBodyParts[bodyPartType];
-
-                    // Anything we don't hit on the way → considered visible.
-                    if (Physics.Linecast(humanHeadPos, bodyPart.transform.position, out _, LayerMaskVisCheck.value)) continue;
-
-                    Log.Debug(
-                        $"{agent} teleport vis check failed: player {player.Profile.Nickname} can see body part {bodyPart.BodyPartColliderType}"
-                    );
-
-                    return;
-                }
-            }
+            if (!TeleportSafe(agent, humanPlayers)) return;
 
             var teleportPos = agent.Movement.Path[agent.Movement.CurrentCorner];
             teleportPos.y += 0.25f;
