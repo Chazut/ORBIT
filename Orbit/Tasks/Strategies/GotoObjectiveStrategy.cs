@@ -94,17 +94,20 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
             // attraction, the dispatch picks tick-level secondary POIs.
             TickMainObjectives(squad);
 
-            // Combat-convergence: when an active main (Kills roam or LootValue) is engaged, scan members for
-            // combat. First detected member becomes "caller" and squad.Objective.Location gets swapped to a
-            // virtual Waypoint at their position so realign converges everyone there. Grace keeps the
-            // override stable through reload pauses.
-            if (ShouldUseIndependentDispatch(squad))
+            // Squad rally: scan members for combat EVERY tick (any squad, any objective, gated only by the
+            // SquadRally toggle). The first member to take fire / engage becomes the "caller" and
+            // squad.Objective.Location is swapped to a virtual Waypoint at their position so realign converges
+            // everyone there to support. No SAIN handoff — ORBIT just routes the supporters toward the
+            // contact; SAIN's combat layer (priority 20 > ORBIT 19) preempts each one as it acquires an enemy.
+            // Grace keeps the override stable through brief LoS breaks; when it lapses the squad picks a fresh
+            // objective and resumes normal play.
+            if (Plugin.SquadRally.Value)
             {
                 DetectAndUpdateCombatCaller(squad);
                 if (squad.CombatCallerMemberIdx >= 0)
                 {
-                    // Refresh the virtual override each tick — cheap, and ensures squad.Objective.Location
-                    // keeps pointing at the caller even if some other code mutated it.
+                    // Refresh the virtual override each tick — cheap, and keeps squad.Objective.Location
+                    // pointing at the (moving) caller even if other code mutated it.
                     squad.Objective.Location = waypointSystem.CreateVirtualWaypoint(
                         squad.CombatCallerPosition, "CombatCaller");
                     squad.Objective.Status = SquadObjectiveState.Active;
@@ -115,8 +118,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
             }
             else if (squad.CombatCallerMemberIdx >= 0)
             {
-                // Squad no longer in an independent-dispatch phase but caller flag was stuck on — clear it
-                // defensively.
+                // Rally toggled off mid-raid — clear any active caller defensively.
                 squad.CombatCallerMemberIdx = -1;
             }
 
@@ -134,6 +136,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
             // When we DO interrupt, we save the current objective only if it's worth resuming — Synthetic
             // patrol fillers get cleared so the post-loot flow runs a fresh AssignNewObjective.
             if (!squad.ExtractRequested
+                && squad.CombatCallerMemberIdx < 0
                 && squad.PreInterruptObjectiveLocation == null
                 && (squadObjective.Location == null || squadObjective.Location.Category != WaypointCategory.Corpse)
                 && Time.time >= squad.LastOpportunisticCorpseScanTime + Plugin.OpportunisticCorpseScanIntervalSeconds.Value)

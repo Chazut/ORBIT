@@ -54,6 +54,7 @@ public class Plugin : BaseUnityPlugin
     public static ConfigEntry<bool> VanillaRaiders;
     public static ConfigEntry<bool> VanillaBloodhounds;
     public static ConfigEntry<bool> RoamingBloodhounds;
+    public static ConfigEntry<bool> SquadRally;
 
     // 02. POI guard duration
     public static ConfigEntry<Vector2> ObjectiveGuardDuration;
@@ -432,6 +433,9 @@ public class Plugin : BaseUnityPlugin
         RoamingBloodhounds = Config.Bind(general, "Roaming Bloodhounds", true, new ConfigDescription(
             "OFF: Bloodhounds stay near their spawn quartier. ON (default): Bloodhounds roam the whole map. Ignored when Vanilla bloodhounds is ON.",
             null, new ConfigurationManagerAttributes { Order = -2 }));
+        SquadRally = Config.Bind(general, "Squad rally", true, new ConfigDescription(
+            "ON (default): when a squad member takes fire or engages an enemy, the rest break from their current objective and converge on the fight to support. ORBIT only routes them toward the contact; SAIN takes over for each one as it gets close. OFF: members fight their own fights, no convergence.",
+            null, new ConfigurationManagerAttributes { Order = -3 }));
 
         // ── 02. POI guard duration ──────────────────────────────────
         ObjectiveGuardDuration = Config.Bind(poiGuard, "Base guard duration (s, min..max)", new Vector2(60f, 180f), new ConfigDescription(
