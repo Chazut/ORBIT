@@ -405,14 +405,24 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
             var agent = squad.Members[i];
             var agentObjective = agent.Objective;
 
-            // Skip the combat caller. The squad's objective during a combat-caller window is a virtual
-            // CombatCaller waypoint AT the caller's own position — re-allocated fresh every tick so
-            // reference-equality alignment fails and the dispatch reassigns the caller to a waypoint at
-            // their own feet, which "reaches" immediately, gets reassigned next tick, ad infinitum. The
-            // caller is engaging with the BSG combat layer; their objective field should be left alone so
-            // it doesn't churn. Other members continue to converge on the caller's position via the normal
-            // alignment path.
+            // During a combat-caller window, skip every member who is themselves engaged — the caller AND
+            // any other in-combat member. Reasons:
+            //  * Caller: squad.Objective is a virtual CombatCaller waypoint AT his own position, refreshed
+            //    every tick. Realigning would assign him a waypoint at his own feet → "reached" immediately
+            //    → reassign next tick, ad infinitum. SAIN's combat layer is driving him; leave his agent
+            //    objective alone.
+            //  * Other in-combat members: each has their own enemy and SAIN sequence in flight. Realigning
+            //    to the caller's position would queue a stale destination behind their SAIN combat — when
+            //    SAIN finally exits, ORBIT would route them to the caller's spot where they may also be
+            //    self-pinned by SAIN's sticky HaveEnemy. Only members NOT in combat are eligible supporters.
             if (squad.CombatCallerMemberIdx == i) continue;
+            var memberBot = agent.Bot;
+            if (squad.CombatCallerMemberIdx >= 0
+                && memberBot?.Memory != null
+                && (memberBot.Memory.HaveEnemy || memberBot.Memory.IsUnderFire))
+            {
+                continue;
+            }
 
             // Solo / emergency extract. EMERGENCY: a wounded member with no usable meds left peels off to
             // extract on its own. (The LOOT-threshold trigger is set elsewhere, in LootContainerAction.) When
@@ -992,6 +1002,23 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
 
     private void DetectAndUpdateCombatCaller(Squad squad)
     {
+        // Solo squads can't rally — no supporters to call. Without this gate, a lone bot whose
+        // Memory.HaveEnemy gets stuck true (SAIN keeps the flag on for an extended window after losing LoS
+        // — Search / SeekCover sub-states) self-registers as caller every tick, which pins squad.Objective
+        // to a virtual CombatCaller waypoint at his own position and resets StartTime so the wait timer
+        // never expires and AssignNewObjective never fires. The bot is then physically stranded once SAIN's
+        // mover stops producing motion (raid trace: AiKunCCTV / Xust1ed frozen 10+ min at the spot SAIN
+        // reached on Search arrival).
+        if (squad.Size <= 1)
+        {
+            if (squad.CombatCallerMemberIdx >= 0)
+            {
+                Log.Info($"{squad} combat caller cleared (squad is solo — nobody to rally)");
+                squad.CombatCallerMemberIdx = -1;
+            }
+            return;
+        }
+
         var now = Time.time;
         var anyInCombat = false;
         var callerIdx = squad.CombatCallerMemberIdx;
