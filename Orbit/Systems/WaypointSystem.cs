@@ -615,9 +615,10 @@ public class WaypointSystem
 
     /// <summary>
     /// Decides whether this entity should be denied RequestFar (the map- wide dispatch fallback). Scavs are
-    /// pinned by default (Plugin.RoamingScavs OFF) — keeps them in their spawn quartier. Goons are NOT pinned
-    /// by default (Plugin.RoamingGoons ON, since vanilla Tarkov has them roaming across the map). Everyone
-    /// else (PMCs, raiders, bosses, cultists, bloodhounds) roams freely.
+    /// pinned by default (Plugin.RoamingScavs OFF) — keeps them in their spawn quartier. Goons and Bloodhounds
+    /// are NOT pinned by default (Plugin.RoamingGoons / RoamingBloodhounds ON, since vanilla Tarkov has them
+    /// roaming across the map) but can be pinned via their toggle. Everyone else (PMCs, raiders, bosses,
+    /// cultists) roams freely.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static bool ScavOrIslandedLocalOnly(Entity entity)
@@ -631,6 +632,7 @@ public class WaypointSystem
         var isPlayerScav = leaderBot?.Profile != null && leaderBot.Profile.WillBeAPlayerScav();
         if (role.Value.IsScav() && !isPlayerScav && !Plugin.RoamingScavs.Value) return true;
         if (role.Value.IsGoon() && !Plugin.RoamingGoons.Value) return true;
+        if (role.Value.IsBloodhound() && !Plugin.RoamingBloodhounds.Value) return true;
         return false;
     }
 

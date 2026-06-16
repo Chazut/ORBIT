@@ -52,6 +52,8 @@ public class Plugin : BaseUnityPlugin
     public static ConfigEntry<bool> VanillaGoons;
     public static ConfigEntry<bool> VanillaCultists;
     public static ConfigEntry<bool> VanillaRaiders;
+    public static ConfigEntry<bool> VanillaBloodhounds;
+    public static ConfigEntry<bool> RoamingBloodhounds;
 
     // 02. POI guard duration
     public static ConfigEntry<Vector2> ObjectiveGuardDuration;
@@ -285,10 +287,12 @@ public class Plugin : BaseUnityPlugin
         OrbitBrainLayer.SetVanillaGoonExclusion(VanillaGoons.Value);
         OrbitBrainLayer.SetVanillaCultistExclusion(VanillaCultists.Value);
         OrbitBrainLayer.SetVanillaRaiderExclusion(VanillaRaiders.Value);
+        OrbitBrainLayer.SetVanillaBloodhoundExclusion(VanillaBloodhounds.Value);
         if (VanillaScavs.Value) Logger.LogInfo("Disable ORBIT on scavs ON — bot scavs running on BSG's vanilla brain (PlayerScavs unaffected).");
         if (VanillaGoons.Value) Logger.LogInfo("Disable ORBIT on goons ON — Goons (Knight / Big Pipe / Bird Eye) running on BSG's vanilla brain.");
         if (VanillaCultists.Value) Logger.LogInfo("Disable ORBIT on cultists ON — Cultists (Priest / Warriors / cursed scavs) running on BSG's vanilla brain.");
         if (VanillaRaiders.Value) Logger.LogInfo("Disable ORBIT on raiders ON — Raiders (pmcBot) and Rogues (exUsec) running on BSG's vanilla brain.");
+        if (VanillaBloodhounds.Value) Logger.LogInfo("Disable ORBIT on bloodhounds ON — Bloodhounds (Smugglers / arena spawns) running on BSG's vanilla brain.");
 
         var brains = new List<string>
         {
@@ -422,6 +426,12 @@ public class Plugin : BaseUnityPlugin
         RoamingGoons = Config.Bind(general, "Roaming Goons", true, new ConfigDescription(
             "OFF: Goons stay near their spawn quartier. ON (default): Goons roam the whole map. Ignored when Vanilla goons is ON.",
             null, new ConfigurationManagerAttributes { Order = 0 }));
+        VanillaBloodhounds = Config.Bind(general, "Vanilla bloodhounds (RESTART)", false, new ConfigDescription(
+            "OFF (default): Bloodhounds (Smugglers / arena spawns) are controlled by ORBIT. ON: they run on BSG's vanilla brain.",
+            null, new ConfigurationManagerAttributes { DispName = "Disable ORBIT on bloodhounds (RESTART)", Order = -1 }));
+        RoamingBloodhounds = Config.Bind(general, "Roaming Bloodhounds", true, new ConfigDescription(
+            "OFF: Bloodhounds stay near their spawn quartier. ON (default): Bloodhounds roam the whole map. Ignored when Vanilla bloodhounds is ON.",
+            null, new ConfigurationManagerAttributes { Order = -2 }));
 
         // ── 02. POI guard duration ──────────────────────────────────
         ObjectiveGuardDuration = Config.Bind(poiGuard, "Base guard duration (s, min..max)", new Vector2(60f, 180f), new ConfigDescription(

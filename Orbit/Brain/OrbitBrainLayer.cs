@@ -58,6 +58,7 @@ public class OrbitBrainLayer : CustomLayer
     private static bool _vanillaGoons;
     private static bool _vanillaCultists;
     private static bool _vanillaRaiders;
+    private static bool _vanillaBloodhounds;
 
     public static void AddExcludedRoleSubstring(string sub)
     {
@@ -68,6 +69,7 @@ public class OrbitBrainLayer : CustomLayer
     public static void SetVanillaGoonExclusion(bool excluded) => _vanillaGoons = excluded;
     public static void SetVanillaCultistExclusion(bool excluded) => _vanillaCultists = excluded;
     public static void SetVanillaRaiderExclusion(bool excluded) => _vanillaRaiders = excluded;
+    public static void SetVanillaBloodhoundExclusion(bool excluded) => _vanillaBloodhounds = excluded;
 
     private static bool IsExcludedRole(BotOwner botOwner)
     {
@@ -113,6 +115,11 @@ public class OrbitBrainLayer : CustomLayer
         }
 
         if (_vanillaRaiders && role.Value.IsRaider())
+        {
+            return true;
+        }
+
+        if (_vanillaBloodhounds && role.Value.IsBloodhound())
         {
             return true;
         }
