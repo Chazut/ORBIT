@@ -417,6 +417,7 @@ No ETA, no promises, but on the list:
 - **Possible interaction with CactusPie's "Transfer Loot Into Container Automatically" mod** - reported symptom: items a bot loots end up in YOUR tagged containers (SICC case, etc.). Best theory at the moment is that ORBIT routes pickups through BSG vanilla APIs (same path as the player), so a mod hooking those APIs may end up applying its logic to bot pickups too. Investigating.
 - **Bots stuck at spawn on isolated navmesh** - vanilla SPT quirk where a spawn point lands a bot on a tiny chunk of navmesh disconnected from the rest of the map (Streets near transits, Factory inside the silo, etc.). Shows up more often with ORBIT than pure vanilla because vanilla's built-in TP rescue is disabled (it was teleporting bots constantly on every unreachable pick). Fix planned: targeted TP rescue that fires only when a bot is genuinely stuck for X seconds.
 - **Rare stuck bots** - usually unstick themselves within a minute. Still iterating.
+- **Faction-mod takeover (RUAF / UNTAR / Black Division) can misbehave** - these mods swap the bot's brain at runtime (via MoreBotsAPI) and ORBIT's handling of that handoff is not fully solid yet, so a controlled squad may rapidly switch goals or get stuck. Workaround: leave the per-faction takeover toggles OFF (their default) so ORBIT leaves those bots vanilla. ISB takeover is handled correctly. Fix in progress.
 - **Mod conflicts** - tested with my own config. Yours may differ. Report anything obviously broken on [GitHub](https://github.com/Chazut/ORBIT/issues).
 
 ### About AI
