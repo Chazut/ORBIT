@@ -73,6 +73,13 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
             var squad = ActiveEntities[i];
             var squadObjective = squad.Objective;
 
+            // Degraded tickrate (opt-in): squads far from every living human re-run their decision loop less
+            // often to reclaim CPU on lower-end machines. MovementSystem (path-follow, look, doors, stuck) runs
+            // every frame regardless, so a throttled squad keeps walking its current path and just defers NEW
+            // decisions (dispatch, rally, extract, objective completion) until the far interval elapses.
+            if (Plugin.DegradedTickrateEnabled.Value && ShouldDeferDecisionTick(squad)) continue;
+            squad.LastDecisionTickTime = Time.time;
+
             // Deferred SAIN personality resolution. PMC squads spawn before SAIN attaches its BotComponent
             // (1-2s delay), so SquadRegistry deferred the lookup + the main-objective roll. Retry here every
             // tick until the brain resolves or the 5 s deadline lapses (then lock to Average and generate
@@ -340,6 +347,31 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
             max += h.Maximum;
         }
         return max > 0f ? cur / max : 1f;
+    }
+
+    /// <summary>
+    /// Degraded-tickrate gate: true when this squad should SKIP its decision loop this strategy tick. A squad
+    /// within DegradedTickrateNearDistance of any living human always runs (keep it crisp where it's visible);
+    /// a squad beyond that re-decides only every DegradedTickrateFarIntervalSeconds. Movement still runs every
+    /// frame in MovementSystem, so a deferred squad keeps executing its current path/objective.
+    /// </summary>
+    private bool ShouldDeferDecisionTick(Squad squad)
+    {
+        var leader = squad.Leader?.Bot;
+        if (leader == null) return false;
+        var near = Plugin.DegradedTickrateNearDistance.Value;
+        var far = waypointSystem.NearestHumanDistanceSqr(leader.Position) > near * near;
+        // Log only the near<->far transition (once each) so the dashboard can confirm throttling engaged,
+        // without spamming a line every deferred tick.
+        if (far != squad.DecisionThrottled)
+        {
+            squad.DecisionThrottled = far;
+            Log.Info(far
+                ? $"{squad} degraded tickrate ON — far from all players, re-deciding every {Plugin.DegradedTickrateFarIntervalSeconds.Value:F0}s"
+                : $"{squad} degraded tickrate OFF — back near a player, full-rate decisions");
+        }
+        if (!far) return false;
+        return Time.time - squad.LastDecisionTickTime < Plugin.DegradedTickrateFarIntervalSeconds.Value;
     }
 
     private int UpdateAgents(Squad squad)

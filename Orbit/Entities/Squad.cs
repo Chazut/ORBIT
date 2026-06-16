@@ -163,6 +163,17 @@ public class Squad(int id, float[] taskScores, int targetMembersCount) : Entity(
     public float LastOpportunisticCorpseScanTime;
 
     /// <summary>
+    /// Time.time of the last time this squad's decision loop (GotoObjectiveStrategy.Update body) actually ran.
+    /// Used by the degraded-tickrate throttle: squads far from every human re-decide only every
+    /// DegradedTickrateFarIntervalSeconds instead of every 0.5 s strategy tick.
+    /// </summary>
+    public float LastDecisionTickTime;
+
+    /// <summary>Whether this squad is currently in degraded-tickrate (far from all players). Tracked only to
+    /// log the near↔far transitions once each (for the dashboard tile), not every throttled tick.</summary>
+    public bool DecisionThrottled;
+
+    /// <summary>
     /// World position where this squad's leader spawned (captured once at squad creation). Used by the
     /// waypoint system to derive an Infiltration name from the closest SpawnPointMarker when the bot's
     /// <c>Profile.Info.EntryPoint</c> is empty — covers PMC bots spawned

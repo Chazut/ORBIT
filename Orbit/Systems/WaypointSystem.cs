@@ -1011,6 +1011,23 @@ public class WaypointSystem
     }
 
     /// <summary>
+    /// Squared distance from <paramref name="pos"/> to the nearest LIVING human player, or float.MaxValue if
+    /// there are none. Cheap (a handful of players); used by the degraded-tickrate decision throttle.
+    /// </summary>
+    public float NearestHumanDistanceSqr(Vector3 pos)
+    {
+        var best = float.MaxValue;
+        for (var i = 0; i < _humanPlayers.Count; i++)
+        {
+            var p = _humanPlayers[i];
+            if (p?.HealthController is not { IsAlive: true }) continue;
+            var d = (p.Position - pos).sqrMagnitude;
+            if (d < best) best = d;
+        }
+        return best;
+    }
+
+    /// <summary>
     /// Build a transient <see cref="Waypoint"/> at the given world position, intended as a one-shot dispatch
     /// target (used by the combat-convergence override to redirect every squad member to the in-combat
     /// member's position).
