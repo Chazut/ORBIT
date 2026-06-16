@@ -292,6 +292,53 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
         return _agentSkipScratch;
     }
 
+    // Body parts summed for the emergency-extract HP check.
+    private static readonly EBodyPart[] _emergencyHpParts =
+    {
+        EBodyPart.Head, EBodyPart.Chest, EBodyPart.Stomach,
+        EBodyPart.LeftArm, EBodyPart.RightArm, EBodyPart.LeftLeg, EBodyPart.RightLeg
+    };
+
+    // Below this overall HP fraction a wounded, med-less bot is treated as an emergency-extract case.
+    private const float EmergencyHpFraction = 0.5f;
+
+    /// <summary>Only PMCs and PlayerScavs extract via exfils in ORBIT; everyone else despawns / leaves on a
+    /// script, so a solo exfil run is meaningless for them. Gates the emergency trigger to avoid churning
+    /// FindNearestEligibleExfil for factions that can never get a result.</summary>
+    private static bool CanSoloExtract(Agent agent)
+    {
+        var profile = agent.Bot?.Profile;
+        var role = profile?.Info?.Settings?.Role;
+        if (!role.HasValue) return false;
+        return role.Value.IsPMC() || profile.WillBeAPlayerScav();
+    }
+
+    /// <summary>Wounded with nothing left to heal with: damaged, no usable med, not currently healing, and
+    /// either bleeding or below the emergency HP fraction.</summary>
+    private static bool IsEmergencyExtract(Agent agent)
+    {
+        var med = agent.Bot?.Medecine;
+        var firstAid = med?.FirstAid;
+        if (med == null || firstAid == null) return false;
+        if (med.Using || firstAid.HaveSmth2Use) return false; // healing now or has a med to use → not stranded
+        if (!firstAid.Damaged) return false;                   // not actually hurt
+        return firstAid.IsBleeding || HpFraction(agent) < EmergencyHpFraction;
+    }
+
+    private static float HpFraction(Agent agent)
+    {
+        var hc = agent.Player?.HealthController;
+        if (hc == null || !hc.IsAlive) return 1f;
+        float cur = 0f, max = 0f;
+        for (var i = 0; i < _emergencyHpParts.Length; i++)
+        {
+            var h = hc.GetBodyPartHealth(_emergencyHpParts[i]);
+            cur += h.Current;
+            max += h.Maximum;
+        }
+        return max > 0f ? cur / max : 1f;
+    }
+
     private int UpdateAgents(Squad squad)
     {
         var squadObjective = squad.Objective;
@@ -331,6 +378,41 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
             // it doesn't churn. Other members continue to converge on the caller's position via the normal
             // alignment path.
             if (squad.CombatCallerMemberIdx == i) continue;
+
+            // Solo / emergency extract. EMERGENCY: a wounded member with no usable meds left peels off to
+            // extract on its own. (The LOOT-threshold trigger is set elsewhere, in LootContainerAction.) When
+            // SoloExtractRequested, route the member straight to its exfil and skip the squad alignment +
+            // splinter logic so the rest of the squad keeps playing. GotoObjectiveAction's exfil-arrival
+            // handler then flips it to Extracting and ExtractAction despawns it — no squad-wide
+            // ExtractRequested needed.
+            if (!agent.SoloExtractRequested && CanSoloExtract(agent) && IsEmergencyExtract(agent))
+            {
+                agent.SoloExtractRequested = true;
+                agent.SoloExtractReason = "emergency (wounded, no meds left)";
+            }
+            if (agent.SoloExtractRequested)
+            {
+                if (agent.SoloExtractTarget == null)
+                    agent.SoloExtractTarget = waypointSystem.FindNearestEligibleExfil(squad);
+                if (agent.SoloExtractTarget != null)
+                {
+                    if (agentObjective.Location != agent.SoloExtractTarget)
+                    {
+                        agentObjective.Location = agent.SoloExtractTarget;
+                        agentObjective.SplinterParent = null;
+                        agentObjective.Status = ObjectiveStatus.None;
+                        agentObjective.DispatchTime = Time.time;
+                        Log.Info($"{agent} solo extract ({agent.SoloExtractReason}) → bee-lining to {agent.SoloExtractTarget}");
+                    }
+                    // Count the departing member as "finished" w.r.t. squad objectives so the squad keeps
+                    // advancing (finishedCount == squad.Size) instead of stalling until this member despawns.
+                    finishedCount++;
+                    continue;
+                }
+                // No eligible exfil for this faction / map → can't solo extract. Drop it and rejoin the squad.
+                agent.SoloExtractRequested = false;
+                agent.SoloExtractReason = null;
+            }
 
             // An agent is "aligned" with the squad if their location IS the squad's main objective, OR if
             // they're working a splinter that was picked around the squad's current main objective. Without

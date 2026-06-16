@@ -102,6 +102,18 @@ public class Agent(int id, BotOwner bot, float[] taskScores) : Entity(id, taskSc
     public float OwnExtractLootThreshold;
 
     /// <summary>
+    /// Solo extract: this member has decided to peel off and extract on its own while the squad keeps playing.
+    /// Two triggers (see GotoObjectiveStrategy / LootContainerAction): an EMERGENCY (wounded with no usable
+    /// meds left) and the per-member LOOT threshold (own loot ≥ own threshold, gated by a one-time 50% roll).
+    /// <see cref="SoloExtractTarget"/> caches the exfil it bee-lines to; <see cref="SoloLootThresholdRolled"/>
+    /// makes the loot-threshold roll happen exactly once.
+    /// </summary>
+    public bool SoloExtractRequested;
+    public string SoloExtractReason;
+    public Orbit.Navigation.Waypoint SoloExtractTarget;
+    public bool SoloLootThresholdRolled;
+
+    /// <summary>
     /// Per-archetype mini-loot value threshold, lazily resolved from the agent's own SAIN brain. 0 until
     /// resolved; falls back to the squad personality (or <see
     /// cref="OrbitLootHandler.DefaultMinPickupPrice"/>) when SAIN attach is pending.

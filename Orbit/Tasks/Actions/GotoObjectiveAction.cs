@@ -462,7 +462,7 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
             // wander to another exfil halfway across the map is worse UX than just letting them leave.
             if (location.Category == WaypointCategory.Exfil
                 && location.Target is ExfiltrationPoint exfil
-                && agent.Squad.ExtractRequested)
+                && (agent.Squad.ExtractRequested || agent.SoloExtractRequested))
             {
                 ActivateExfilForBot(exfil, agent);
                 agent.Objective.Status = ObjectiveStatus.Extracting;

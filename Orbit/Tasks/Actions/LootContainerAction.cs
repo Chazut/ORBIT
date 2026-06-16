@@ -145,6 +145,10 @@ public class LootContainerAction(AgentData dataset, WaypointSystem waypointSyste
             // the whole squad into ExtractRequested mode. From the next dispatch on, the strategy bypasses
             // normal POI selection and routes straight to the nearest eligible exfil. One-way switch.
             CheckExtractTrigger(agent);
+
+            // Per-member solo extract: this bot personally hit its OWN threshold — roll once (50%) to peel it
+            // off to extract alone while the squad keeps playing. Only fires on a real loot by this agent.
+            CheckSoloLootExtract(agent);
         }
         else
         {
@@ -365,6 +369,41 @@ public class LootContainerAction(AgentData dataset, WaypointSystem waypointSyste
         squad.ExtractRequested = true;
         squad.ExtractRequestedReason = $"loot ≥ {sumThreshold / 1000f:F0}k₽";
         Log.Info($"{squad}: {agent} hit extract threshold ({totalLooted:N0}₽ >= {sumThreshold:N0}₽ = {perMemberSummary} from {resolvedCount} resolved + {unresolvedCount} pending members) — squad will bee-line to nearest eligible exfil");
+    }
+
+    /// <summary>
+    /// Per-member solo extract on the LOOT threshold: when this agent's OWN looted value crosses its OWN
+    /// rolled threshold, roll once (50%) — on a win the member peels off to extract alone (routed by
+    /// GotoObjectiveStrategy) while the squad keeps playing. The roll happens exactly once per member
+    /// (<see cref="Agent.SoloLootThresholdRolled"/>) so repeated loots don't compound it into a certainty.
+    /// </summary>
+    private static void CheckSoloLootExtract(Agent agent)
+    {
+        if (agent == null || agent.SoloExtractRequested || agent.SoloLootThresholdRolled) return;
+        // Squad already extracting → the member leaves with the squad anyway, no point peeling off.
+        if (agent.Squad == null || agent.Squad.ExtractRequested) return;
+
+        var chancePct = LootConfig.SoloLootExtractChancePct?.Value ?? 50;
+        if (chancePct <= 0) return; // solo loot-extract disabled in F12
+
+        var ownThreshold = GetOrResolveAgentExtractThreshold(agent);
+        if (ownThreshold <= 0f) return; // not resolved yet / feature disabled — retry on the next loot
+
+        var go = agent.Player?.gameObject;
+        var ownLooted = go != null ? (go.GetComponent<OrbitLootHandler>()?.Stats?.TotalGained ?? 0f) : 0f;
+        if (ownLooted < ownThreshold) return;
+
+        agent.SoloLootThresholdRolled = true; // one-shot, win or lose
+        if (UnityEngine.Random.Range(0, 100) < chancePct)
+        {
+            agent.SoloExtractRequested = true;
+            agent.SoloExtractReason = $"own loot ≥ {ownThreshold / 1000f:F0}k₽ (won {chancePct}% solo roll)";
+            Log.Info($"{agent} hit its OWN extract threshold ({ownLooted:N0}₽ >= {ownThreshold:N0}₽) and won the {chancePct}% solo-extract roll — peeling off to extract alone");
+        }
+        else
+        {
+            Log.Info($"{agent} hit its OWN extract threshold ({ownLooted:N0}₽) but lost the {chancePct}% solo-extract roll — staying with the squad");
+        }
     }
 
     /// <summary>
