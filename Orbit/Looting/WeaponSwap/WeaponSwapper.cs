@@ -513,21 +513,27 @@ public static class WeaponSwapper
     // Bot's full ammo pool: every item across equipment slots, including the secure container (part of
     // Inventory.Equipment).
     /// <summary>
-    /// Phase 5 — strip valuable mods off a weapon about to be discarded by an atomic Swap. A mod is
-    /// stripped when its per-slot handbook price clears <see cref="LootConfig.WeaponStripMinPricePerSlot"/>
-    /// OR it's a magazine whose caliber matches any weapon the bot will keep / acquire post-swap (loose
-    /// rounds inside the mag will be useful for the kept guns). Stripped mods QFAP into the bot's grids
-    /// via the standard guarded tx. After this returns the caller fires the atomic Swap that sends the
-    /// remaining (cheap) weapon skeleton to the corpse.
+    /// Strip valuable mods off a weapon about to be discarded by an atomic Swap. A mod is stripped when its
+    /// per-slot handbook price clears the bot's per-personality mini-loot threshold (the same per-slot bar it
+    /// uses to decide what loose loot is worth picking up) OR it's a magazine whose caliber matches any weapon
+    /// the bot will keep / acquire post-swap (loose rounds inside the mag will be useful for the kept guns).
+    /// Stripped mods QFAP into the bot's grids via the standard guarded tx. After this returns the caller
+    /// fires the atomic Swap that sends the remaining (cheap) weapon skeleton to the corpse.
     /// </summary>
     private static async Task StripValuableModsBeforeDiscardAsync(
         BotOwner bot, Weapon weaponToDiscard, IList<Weapon> postSwapWeapons, string nick, CancellationToken ct)
     {
-        if (LootConfig.WeaponStripEnabled?.Value != true) return;
         if (weaponToDiscard?.Slots == null || weaponToDiscard.Slots.Length == 0) return;
         var ic = bot.GetPlayer?.InventoryController;
         if (ic == null) return;
-        var threshold = LootConfig.WeaponStripMinPricePerSlot?.Value ?? 10000f;
+        // Strip threshold = the bot's own per-personality mini-loot threshold (the same per-slot rouble bar it
+        // uses to decide what loose loot is worth picking up). A mod worth bending down for off the floor is
+        // worth saving off a weapon about to be discarded. Mirrors OrbitLootHandler.GetMinPickupPrice.
+        var agent = Singleton<BotRoster>.Instance?.GetAgent(bot);
+        var resolved = agent != null
+            ? Orbit.Tasks.Actions.LootContainerAction.GetOrResolveAgentMiniLootThreshold(agent)
+            : OrbitLootHandler.DefaultMinPickupPrice;
+        var threshold = resolved > 0f ? resolved : OrbitLootHandler.DefaultMinPickupPrice;
 
         // Build the set of weapon mag-slots the post-swap loadout will have. A mag whose template fits any
         // of these is worth keeping (we can extract its rounds for the matching weapon later).

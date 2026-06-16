@@ -28,9 +28,6 @@ public static class LootConfig
     /// </summary>
     public const float SwapMargin = 1.10f;
 
-    public static ConfigEntry<float> WeaponStripMinPricePerSlot;
-    public static ConfigEntry<bool> WeaponStripEnabled;
-
     private static bool _initialized;
 
     public static void Init(ConfigFile config)
@@ -58,13 +55,6 @@ public static class LootConfig
             new ConfigDescription(
                 "Bot scavs (NOT PlayerScavs) skip the per-archetype loot-value gate entirely and instead roll this chance per item on corpses, containers, and loose loot. Mirrors vanilla scav behaviour — opportunistic pickups, not deliberate searches. PlayerScavs and PMCs are unaffected.",
                 new AcceptableValueRange<int>(0, 100)));
-        WeaponStripMinPricePerSlot = config.Bind(section, "Weapon strip min price/slot (₽)", 10000f,
-            new ConfigDescription(
-                "Phase 5 — when a swap is about to send the bot's old weapon to the corpse, mods on that weapon whose per-slot price exceeds this threshold are stripped into the bot's bag first (so a 300k thermal scope doesn't fall with a beat-up AKM). Mags whose caliber matches a post-swap weapon also strip regardless of price. Set lower to be greedier with stripping, higher to skip cheaper mods.",
-                new AcceptableValueRange<float>(0f, 100000f)));
-        WeaponStripEnabled = config.Bind(section, "Enable weapon strip on discard (Phase 5)", true,
-            "Master toggle for the strip-before-discard layer. When OFF, displaced weapons go to the corpse with all their mods intact (1.0.x behaviour).");
-
         Log.Info($"LootConfig.Init: DONE — looting={LootingEnabled.Value}, detectDist={DetectDistance.Value}m, swapMargin={SwapMargin:F2} (const)");
     }
 }

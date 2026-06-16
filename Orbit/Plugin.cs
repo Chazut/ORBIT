@@ -230,6 +230,7 @@ public class Plugin : BaseUnityPlugin
         {
             SetupConfig();
             LootConfig.Init(Config);
+            BindPerformanceConfig(); // bound last so "09. Performance" sorts to the bottom (after "08. Looting")
         }
         catch (Exception ex)
         {
@@ -440,17 +441,6 @@ public class Plugin : BaseUnityPlugin
             "ON (default): when a squad member takes fire or engages an enemy, the rest break from their current objective and converge on the fight to support. ORBIT only routes them toward the contact; SAIN takes over for each one as it gets close. OFF: members fight their own fights, no convergence.",
             null, new ConfigurationManagerAttributes { Order = -3 }));
 
-        const string perf = "09. Performance";
-        DegradedTickrateEnabled = Config.Bind(perf, "Degraded tickrate for off-screen squads", false, new ConfigDescription(
-            "OFF (default): every squad re-runs its decision loop at the full strategy rate. ON: squads far from every player re-decide much less often (see the two knobs below) to reclaim CPU on lower-end machines. Movement, aiming, doors and stuck-handling still run every frame, so throttled bots keep moving — they just defer NEW decisions (dispatch / rally / extract). Off-screen the difference is invisible.",
-            null, new ConfigurationManagerAttributes { Order = 2 }));
-        DegradedTickrateNearDistance = Config.Bind(perf, "Full-rate distance (m)", 200f, new ConfigDescription(
-            "Squads within this distance of any living player always run at full rate (never throttled), so nearby bots stay crisp. Beyond it, the interval below applies.",
-            new AcceptableValueRange<float>(0f, 1000f), new ConfigurationManagerAttributes { Order = 1 }));
-        DegradedTickrateFarIntervalSeconds = Config.Bind(perf, "Far decision interval (s)", 6f, new ConfigDescription(
-            "How often a far / off-screen squad re-runs its decision loop. Higher = more CPU saved but slower reactions for distant squads. 5-10 s is a good range.",
-            new AcceptableValueRange<float>(0.5f, 30f), new ConfigurationManagerAttributes { Order = 0 }));
-
         // ── 02. POI guard duration ──────────────────────────────────
         ObjectiveGuardDuration = Config.Bind(poiGuard, "Base guard duration (s, min..max)", new Vector2(60f, 180f), new ConfigDescription(
             "Time a squad holds at a quest/cover POI before requesting a new one. Longer = more static map.",
@@ -609,6 +599,23 @@ public class Plugin : BaseUnityPlugin
 
         // ── 07.x SAIN personality ───────────────────────────────────
         BindSainPersonalityConfigs();
+    }
+
+    // ── 09. Performance ─────────────────────────────────────────────
+    // Bound last (after Looting in DelayedLoad) so the "09." section lands at the bottom of the .cfg /
+    // F12 list, matching its number — BepInEx orders sections by first-bind order, not by name.
+    private void BindPerformanceConfig()
+    {
+        const string perf = "09. Performance";
+        DegradedTickrateEnabled = Config.Bind(perf, "Degraded tickrate for off-screen squads", false, new ConfigDescription(
+            "OFF (default): every squad re-runs its decision loop at the full strategy rate. ON: squads far from every player re-decide much less often (see the two knobs below) to reclaim CPU on lower-end machines. Movement, aiming, doors and stuck-handling still run every frame, so throttled bots keep moving — they just defer NEW decisions (dispatch / rally / extract). Off-screen the difference is invisible.",
+            null, new ConfigurationManagerAttributes { Order = 2 }));
+        DegradedTickrateNearDistance = Config.Bind(perf, "Full-rate distance (m)", 200f, new ConfigDescription(
+            "Squads within this distance of any living player always run at full rate (never throttled), so nearby bots stay crisp. Beyond it, the interval below applies.",
+            new AcceptableValueRange<float>(0f, 1000f), new ConfigurationManagerAttributes { Order = 1 }));
+        DegradedTickrateFarIntervalSeconds = Config.Bind(perf, "Far decision interval (s)", 6f, new ConfigDescription(
+            "How often a far / off-screen squad re-runs its decision loop. Higher = more CPU saved but slower reactions for distant squads. 5-10 s is a good range.",
+            new AcceptableValueRange<float>(0.5f, 30f), new ConfigurationManagerAttributes { Order = 0 }));
     }
 
     private void BindSainPersonalityConfigs()
