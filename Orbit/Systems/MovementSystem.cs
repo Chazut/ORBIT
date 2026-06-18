@@ -491,24 +491,70 @@ public class MovementSystem
                 var role = agent.Bot?.Profile?.Info?.Settings?.Role;
                 if (!role.HasValue || !role.Value.IsPMC()) continue;
 
-                // The squad rolled (or was granted 100% as a Main anchor) for this door at dispatch time —
-                // call Door.Unlock() to bypass the BSG key check. Unlock() flips the state to Shut on the
-                // next coroutine yield; the next HandleDoors tick will then take the normal OpenDoor branch
-                // since DoorState != Open & != Locked. Without the ForceUnlock tag, fall through cleanly —
-                // vmethod_1 would silently fail without a key anyway.
-                if (agent.Squad != null && agent.Squad.ForceUnlockDoorIds.Contains(door.GetInstanceID()))
+                // The squad rolled (or was granted 100% as a Main anchor) for this door at dispatch time, so
+                // ORBIT already opened its navmesh carver (the door is reachable but still visually Locked).
+                // Now that a bot has physically arrived, call Door.Unlock() to flip it to Shut on the next
+                // coroutine yield; the next HandleDoors tick takes the normal OpenDoor branch. We unlock for
+                // ANY PMC standing at a carver-opened door, not only the granting squad — the carver is shared
+                // per door, so a bot from another squad (or one just passing through) would otherwise phase
+                // through the still-locked leaf (bots ignore door colliders). Without either signal, fall
+                // through cleanly — vmethod_1 would silently fail without a key anyway.
+                var doorIdForUnlock = door.GetInstanceID();
+                if ((agent.Squad != null && agent.Squad.ForceUnlockDoorIds.Contains(doorIdForUnlock))
+                    || Orbit.Helpers.DoorNavMesh.IsCarverOpened(doorIdForUnlock))
                 {
-                    var doorIdForUnlock = door.GetInstanceID();
                     if (_doorInteractCooldown.TryGetValue(doorIdForUnlock, out var lastUnlockTime)
                         && Time.time - lastUnlockTime < DoorInteractCooldownSeconds)
                     {
                         continue; // already unlocking this door, wait for animation
                     }
+                    // Prep the bot like OpenDoor so BSG will actually play the interaction animation (a
+                    // sprinting / proned / ADS'd bot's interaction is silently dropped).
+                    var unlockPlayer = agent.Player;
+                    try
+                    {
+                        var unlockBot = agent.Bot;
+                        unlockBot.Sprint(false);
+                        unlockBot.SetPose(1f);
+                        unlockBot.Mover?.SetTargetMoveSpeed(1f);
+                    }
+                    catch (System.Exception prepEx)
+                    {
+                        Log.Debug($"{agent} unlock prep on {door.Id} threw (non-fatal): {prepEx.Message}");
+                    }
+
+                    // Best-effort: play the bot's key-in-lock animation by driving the Unlock interaction with
+                    // a forced success result (keyless bypass — bots don't carry the key). If BSG drops the
+                    // animation or this throws, the door.Unlock() floor below still flips the door, so the
+                    // worst case is the old behaviour (no key gesture) with zero functional regression.
+                    if (unlockPlayer != null)
+                    {
+                        try
+                        {
+                            unlockPlayer.MovementContext.ResetCanUsePropState();
+                            unlockPlayer.vmethod_1(door, new KeyInteractionResultClass(null, null, succeed: true));
+                        }
+                        catch (System.Exception animEx)
+                        {
+                            Log.Debug($"{agent} unlock animation attempt on {door.Id} threw (non-fatal): {animEx.Message}");
+                        }
+                    }
+
+                    // Guaranteed floor: flip Locked → Shut even if the animation interaction didn't take. (If
+                    // the animation DID unlock via its interaction handler this re-runs the latch coroutine;
+                    // watch for a double latch click in RR — if it shows, gate this on DoorState==Locked.)
                     door.Unlock();
                     _doorInteractCooldown[doorIdForUnlock] = Time.time;
-                    Log.Debug($"{agent} force-unlocked {door.Id} (was Locked, squad had ForceUnlock tag)");
+                    // Hold the bot in place through the whole unlock + open sequence. Without this it walks
+                    // straight through the doorway while Unlock()'s coroutine is still running: the carver is
+                    // open (navmesh passes) and ORBIT globally ignores door<->bot collision, so the leaf never
+                    // visibly opens and the bot phantom-walks through a still-shut door (RR: no stop, no
+                    // animation, unlike normal doors). Hold long enough to bridge the interact cooldown so
+                    // OpenDoor takes over and finishes the open before we release path-following.
+                    agent.Movement.DoorInteractHoldUntil = Time.time + DoorInteractCooldownSeconds + DoorInteractHoldSeconds;
+                    Log.Debug($"{agent} unlocked {door.Id} on arrival (was Locked, ORBIT carver-opened) — holding {DoorInteractCooldownSeconds + DoorInteractHoldSeconds:F1}s for unlock+open, no phase-through");
                     StartDoorWatch(agent, door, "Unlock");
-                    continue; // next tick: door is Shut → normal Open path runs
+                    continue; // next tick: door is Shut → normal Open path runs (re-holds + animates)
                 }
                 continue;
             }

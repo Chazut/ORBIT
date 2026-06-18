@@ -238,6 +238,10 @@ public class WaypointSystem
     /// move, the pull follows them.</summary>
     public void Update()
     {
+        // TEMP diagnostic (1.2.0-pre): emit the deferred post-unlock door-routing snapshots. Runs every frame
+        // (before the convergence pacing gate) so the +1s after-samples actually fire.
+        DoorRoutingDiag.Tick();
+
         if (_convergenceUpdatePacing.Blocked())
             return;
         CalculateConvergence();
@@ -1728,18 +1732,21 @@ public class WaypointSystem
             if (proba >= 1f || Random.value < proba)
             {
                 squad.ForceUnlockDoorIds.Add(doorId);
-                // Unlock world-side immediately: the grant alone reroutes nothing — the locked door's
-                // navmesh link stays closed, so the dispatch path computed right after this pick routes
-                // AROUND the building to the exterior point nearest the target, and the proximity-
-                // triggered unlock in HandleDoors never fires because the path never passes the door.
-                // Observed: a bot pathed to the exterior side of a locked-room loot point and stopped a
-                // few metres short through the wall, then 3-fail blacklisted the POI. With the door
-                // flipped to Shut before the move order's path calc, the route goes through the
-                // corridor and the door opens on approach like any other. World-state flip also means
-                // the door stays unlocked for everyone for the rest of the raid (lock was "picked").
-                try { door.Unlock(); }
-                catch (System.Exception e) { Log.Debug($"{squad} world-side unlock of {door.Id} threw: {e.Message}"); }
-                Log.Info($"{squad} granted force-unlock on door {door.Id} (instance {doorId}) for {pick} — {(isMainAnchor ? "MAIN anchor (100%)" : $"intermediate ({proba:F2})")} — unlocked world-side");
+                // Open ONLY the navmesh carver, leave the door visually Locked. A locked door keeps
+                // Carver_Closed.carving=true which cuts the navmesh across the doorway, so the dispatch path
+                // computed right after this pick would otherwise route AROUND the building to the exterior
+                // point nearest the target (bot stops short through the wall, 3-fail blacklists the POI). The
+                // OLD fix flipped the door to Shut here (world-side unlock) to reopen the link — but that
+                // unlocked the door for everyone the instant the squad picked, so a player arriving early
+                // found locked rooms already unlocked with no bot in sight. Flipping just Carver_Closed.carving
+                // to false reopens the route while DoorState stays Locked; the door is unlocked for real (with
+                // the key animation) only when a bot reaches it in MovementSystem.HandleDoors. DoorNavMesh
+                // records the door so ANY arriving PMC unlocks it, not just this squad — see its phasing guard.
+                // TEMP diagnostic (1.2.0-pre): snapshot the navmesh-blocker state before and ~1s after the
+                // carver flip to confirm the route opens AND the door stays Locked (no BSG re-assert).
+                DoorRoutingDiag.LogBefore(squad, pick, door);
+                var carverOpened = DoorNavMesh.OpenCarver(door);
+                Log.Info($"{squad} granted force-unlock on door {door.Id} (instance {doorId}) for {pick} — {(isMainAnchor ? "MAIN anchor (100%)" : $"intermediate ({proba:F2})")} — {(carverOpened ? "navmesh carver opened, door stays Locked until a bot arrives" : "NO NavMeshDoorLink found — carver not opened, POI may stay unreachable")}");
             }
             else
             {

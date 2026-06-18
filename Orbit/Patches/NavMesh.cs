@@ -34,6 +34,9 @@ public class DoorCarverShrinkPatch : ModulePatch
         {
             var doorLink = doorsController._navMeshDoorLinks[i];
 
+            // Register every link (DoorId → link) so the carver can be opened per door, even ones we skip below.
+            Orbit.Helpers.DoorNavMesh.RegisterLink(doorLink);
+
             if (!processed.Add(doorLink))
             {
                 continue;

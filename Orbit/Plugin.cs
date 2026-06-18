@@ -255,6 +255,7 @@ public class Plugin : BaseUnityPlugin
         EnableSafe(new OrbitDisposePatch());
 
         EnableSafe(new DoorCarverShrinkPatch());
+        EnableSafe(new DoorUnlockTracePatch()); // TEMP 1.2.0-pre: detect double-latch from the unlock-anim + floor
 
         EnableSafe(new SoftTeleportTracePatch());
         EnableSafe(new HardTeleportTracePatch());
