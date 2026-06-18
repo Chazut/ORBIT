@@ -163,6 +163,16 @@ public class Squad(int id, float[] taskScores, int targetMembersCount) : Entity(
     public float LastOpportunisticCorpseScanTime;
 
     /// <summary>
+    /// Corpse-stuck watchdog state. <see cref="CorpseWatchdogLocId"/> is the corpse waypoint id the squad has
+    /// been glued to (-1 = none), <see cref="CorpseWatchdogSince"/> when it became the objective. If the same
+    /// corpse stays the objective past the timeout without completing (loot fails / unreachable / a stuck
+    /// member keeps finishedCount &lt; Size so the en-route 3-fail blacklist never fires), the strategy
+    /// blacklists it and re-dispatches so the squad doesn't sit on it forever.
+    /// </summary>
+    public int CorpseWatchdogLocId = -1;
+    public float CorpseWatchdogSince;
+
+    /// <summary>
     /// Time.time of the last time this squad's decision loop (GotoObjectiveStrategy.Update body) actually ran.
     /// Used by the degraded-tickrate throttle: squads far from every human re-decide only every
     /// DegradedTickrateFarIntervalSeconds instead of every 0.5 s strategy tick.

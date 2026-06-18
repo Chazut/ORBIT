@@ -89,6 +89,37 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                 Singleton<OrbitManager>.Instance?.SquadRegistry?.TryResolvePersonality(squad);
             }
 
+            // Corpse-stuck watchdog. A squad glued to one corpse it never completes would otherwise sit on it
+            // forever. Normal corpse loot resolves well under the timeout and blacklists the corpse on
+            // success / fail / empty, so this only bites when nothing completes: the corpse is unreachable, the
+            // loot hangs, or a stuck member keeps finishedCount < Size so the en-route 3-fail blacklist below
+            // never fires (reported: Team 39 / 33 pinning on a body after a failed loot and never moving). It
+            // never triggers mid-combat — the objective is a CombatCaller waypoint then, not a Corpse.
+            {
+                var corpseObj = squadObjective.Location;
+                if (corpseObj != null && corpseObj.Category == WaypointCategory.Corpse)
+                {
+                    if (squad.CorpseWatchdogLocId != corpseObj.Id)
+                    {
+                        squad.CorpseWatchdogLocId = corpseObj.Id;
+                        squad.CorpseWatchdogSince = Time.time;
+                    }
+                    else if (Time.time - squad.CorpseWatchdogSince > CorpseStuckTimeoutSeconds)
+                    {
+                        squad.CompletedPoiIds.Add(corpseObj.Id);
+                        squad.PreInterruptObjectiveLocation = null; // drop any stale opportunistic resume so it can't re-pin the corpse
+                        squad.CorpseWatchdogLocId = -1;
+                        Log.Info($"{squad} corpse-stuck watchdog: blacklisting {corpseObj} after {CorpseStuckTimeoutSeconds:F0}s glued to it without completing — re-dispatching");
+                        AssignNewObjective(squad);
+                        continue;
+                    }
+                }
+                else
+                {
+                    squad.CorpseWatchdogLocId = -1;
+                }
+            }
+
             // Rolling per-squad unreachability refresh. _squadUnreachable is populated from the leader's
             // CURRENT position via NavMesh.CalculatePath; verdicts cached when the leader was
             // 500m away become wrong once they walk into the area. On
@@ -1091,6 +1122,11 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
     // teleport-rescue snapping every member onto the POI's navmesh sample point; removed because it dropped
     // bots into locked rooms and caused infinite TP attempt loops on mains whose anchor was off-navmesh.
     private const int UnreachableBlacklistThreshold = 5;
+
+    // Corpse-stuck watchdog timeout. A normal corpse loot resolves in well under this (6-25s inspection +
+    // pickup, then the corpse is blacklisted on success/fail/empty). If the squad stays glued to the SAME
+    // corpse longer than this without it completing, the strategy force-blacklists + re-dispatches.
+    private const float CorpseStuckTimeoutSeconds = 45f;
 
     /// <summary>
     /// Anchor position of the first in-progress main objective on the squad's list, or <see langword="null"/>

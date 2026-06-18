@@ -873,6 +873,13 @@ public class WaypointSystem
                         var loc = locs[i];
                         if (loc.Category != WaypointCategory.Corpse) continue;
                         if (squad.CompletedPoiIds.Contains(loc.Id)) continue;
+                        // Also skip a corpse THIS member already inspected and value-skipped (sub-threshold
+                        // loot). A picked-over body (typically one the squad didn't kill) gets a per-agent
+                        // value-skip, not a squad-wide CompletedPoiIds entry — so without this check the same
+                        // member keeps re-detecting it on LoS and the squad oscillates back to it forever
+                        // (reported: a 3-PMC squad returning to the same corpse repeatedly). A different
+                        // lower-threshold member that genuinely wants it can still trigger on it.
+                        if (member.ValueSkippedPoiIds.Contains(loc.Id)) continue;
                         if (_claims.ContainsKey(loc.Id)) continue;
 
                         var delta = loc.Position - memberPos;
