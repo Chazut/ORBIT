@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using Comfort.Common;
 using EFT;
@@ -52,6 +53,14 @@ public class OrbitManager
 
     private readonly BotRoster _botRoster;
     private readonly List<Agent> _liveAgents;
+
+    // TEMP perf diagnostic (1.2.0-pre): per-subsystem tick accumulators, gated by Plugin.PerfTimingDiag and
+    // flushed to the Debug log every PerfFlushSeconds so we can see where ORBIT spends its frame budget
+    // (Strategy / Action / Movement / Look / Waypoint / Nav) on heavy maps like Streets. Zero overhead when off.
+    private double _perfStrategy, _perfAction, _perfMovement, _perfLook, _perfWaypoint, _perfNav;
+    private int _perfFrames;
+    private float _perfLastFlush;
+    private const float PerfFlushSeconds = 5f;
 
     public OrbitManager(BotsController botsController, BotRoster botRoster)
     {
@@ -133,13 +142,59 @@ public class OrbitManager
 
     public void Update()
     {
-        StrategyManager.Update();
-        ActionManager.Update();
-        MovementSystem.Update(_liveAgents);
-        LookSystem.Update(_liveAgents);
-        WaypointSystem.Update();
+        // Fast path (default): no timing overhead unless the perf diagnostic is toggled on.
+        if (Plugin.PerfTimingDiag == null || !Plugin.PerfTimingDiag.Value)
+        {
+            StrategyManager.Update();
+            ActionManager.Update();
+            MovementSystem.Update(_liveAgents);
+            LookSystem.Update(_liveAgents);
+            WaypointSystem.Update();
+            NavJobExecutor.Update();
+            return;
+        }
 
+        // TEMP perf diagnostic: time each subsystem with Stopwatch tick deltas (cheap, no allocation).
+        var t0 = Stopwatch.GetTimestamp();
+        StrategyManager.Update();
+        var t1 = Stopwatch.GetTimestamp();
+        ActionManager.Update();
+        var t2 = Stopwatch.GetTimestamp();
+        MovementSystem.Update(_liveAgents);
+        var t3 = Stopwatch.GetTimestamp();
+        LookSystem.Update(_liveAgents);
+        var t4 = Stopwatch.GetTimestamp();
+        WaypointSystem.Update();
+        var t5 = Stopwatch.GetTimestamp();
         NavJobExecutor.Update();
+        var t6 = Stopwatch.GetTimestamp();
+
+        _perfStrategy += t1 - t0;
+        _perfAction += t2 - t1;
+        _perfMovement += t3 - t2;
+        _perfLook += t4 - t3;
+        _perfWaypoint += t5 - t4;
+        _perfNav += t6 - t5;
+        _perfFrames++;
+
+        if (UnityEngine.Time.time - _perfLastFlush >= PerfFlushSeconds)
+        {
+            FlushPerfDiag();
+            _perfLastFlush = UnityEngine.Time.time;
+        }
+    }
+
+    private void FlushPerfDiag()
+    {
+        if (_perfFrames == 0) return;
+        var freqMs = Stopwatch.Frequency / 1000.0; // ticks per millisecond
+        double Avg(double ticks) => ticks / freqMs / _perfFrames;
+        var total = Avg(_perfStrategy + _perfAction + _perfMovement + _perfLook + _perfWaypoint + _perfNav);
+        Log.Debug($"PerfDiag ({_perfFrames}f avg, {_liveAgents.Count} agents): total={total:F2}ms/f | " +
+                  $"Strategy={Avg(_perfStrategy):F2} Action={Avg(_perfAction):F2} Movement={Avg(_perfMovement):F2} " +
+                  $"Look={Avg(_perfLook):F2} Waypoint={Avg(_perfWaypoint):F2} Nav={Avg(_perfNav):F2}");
+        _perfStrategy = _perfAction = _perfMovement = _perfLook = _perfWaypoint = _perfNav = 0;
+        _perfFrames = 0;
     }
 
     private void RegisterComponents()

@@ -58,6 +58,7 @@ public class Plugin : BaseUnityPlugin
     public static ConfigEntry<bool> DegradedTickrateEnabled;
     public static ConfigEntry<float> DegradedTickrateNearDistance;
     public static ConfigEntry<float> DegradedTickrateFarIntervalSeconds;
+    public static ConfigEntry<bool> PerfTimingDiag;
 
     // 02. POI guard duration
     public static ConfigEntry<Vector2> ObjectiveGuardDuration;
@@ -113,6 +114,7 @@ public class Plugin : BaseUnityPlugin
     public static ConfigEntry<bool> HijackRuaf;
     public static ConfigEntry<bool> HijackBlackDivision;
     public static ConfigEntry<bool> HijackIsb;
+    public static ConfigEntry<bool> HijackCombineSoldiers;
 
     // 07.0 SAIN personality — general
     public static ConfigEntry<bool> SainPersonalityEnabled;
@@ -207,6 +209,7 @@ public class Plugin : BaseUnityPlugin
     // (no BepInPlugin), so this is the GUID to detect. Matched as a substring (see
     // ApplyFactionTakeoverToggle) so a future com.-prefixed variant ("com.samc137.ISBinfo") still registers.
     private const string IsbPluginGuid = "samc137.ISBinfo";
+    private const string CombineSoldiersPluginGuid = "com.manimal.combinesoldiers";
 
     private void Awake()
     {
@@ -288,6 +291,9 @@ public class Plugin : BaseUnityPlugin
         // ISBFirefly*, …), so the single substring covers the whole faction (match is case-insensitive
         // and no vanilla role name contains "isb").
         ApplyFactionTakeoverToggle(IsbPluginGuid,      "ISB",           HijackIsb,           "ISB");
+        // Manimal's Combine Soldiers — WildSpawnType roles CombineSoldier / CombineShotgunner / CombineElite,
+        // all prefixed "Combine" (case-insensitive match, no vanilla or other-faction role contains it).
+        ApplyFactionTakeoverToggle(CombineSoldiersPluginGuid, "CombineSoldiers", HijackCombineSoldiers, "Combine");
 
         OrbitBrainLayer.SetVanillaScavExclusion(VanillaScavs.Value);
         OrbitBrainLayer.SetVanillaGoonExclusion(VanillaGoons.Value);
@@ -597,6 +603,9 @@ public class Plugin : BaseUnityPlugin
         HijackIsb = Config.Bind(takeover, "Take over ISB bots", true, new ConfigDescription(
             "ON (default): ORBIT routes ISB bots like PMCs. OFF: ISB bots run on their own behaviour.",
             null, new ConfigurationManagerAttributes { Order = 0 }));
+        HijackCombineSoldiers = Config.Bind(takeover, "Take over Combine Soldiers bots", false, new ConfigDescription(
+            "OFF (default): Manimal's Combine Soldiers run on their own behaviour. ON: ORBIT routes them like PMCs.",
+            null, new ConfigurationManagerAttributes { Order = -1 }));
 
         // ── 07.x SAIN personality ───────────────────────────────────
         BindSainPersonalityConfigs();
@@ -617,6 +626,9 @@ public class Plugin : BaseUnityPlugin
         DegradedTickrateFarIntervalSeconds = Config.Bind(perf, "Far decision interval (s)", 6f, new ConfigDescription(
             "How often a far / off-screen squad re-runs its decision loop. Higher = more CPU saved but slower reactions for distant squads. 5-10 s is a good range.",
             new AcceptableValueRange<float>(0.5f, 30f), new ConfigurationManagerAttributes { Order = 0 }));
+        PerfTimingDiag = Config.Bind(perf, "Perf timing diagnostic (Debug log)", false, new ConfigDescription(
+            "TEMP profiling aid: logs per-subsystem cost (Strategy / Action / Movement / Look / Waypoint / Nav) as ms/frame to the Debug log every few seconds, so we can see what ORBIT spends its frame budget on (e.g. on Streets) before optimising. OFF by default, no gameplay effect; needs the Debug log to be visible.",
+            null, new ConfigurationManagerAttributes { Order = -1 }));
     }
 
     private void BindSainPersonalityConfigs()
