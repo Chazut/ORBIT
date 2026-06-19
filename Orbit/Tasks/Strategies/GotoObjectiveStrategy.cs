@@ -340,8 +340,12 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
         EBodyPart.LeftArm, EBodyPart.RightArm, EBodyPart.LeftLeg, EBodyPart.RightLeg
     };
 
-    // Below this overall HP fraction a wounded, med-less bot is treated as an emergency-extract case.
-    private const float EmergencyHpFraction = 0.5f;
+    // HP-trend emergency-extract tuning (BSG-independent). Trigger when HP has stayed below its recent
+    // high-water mark for this long AND dropped at least this fraction of total HP without recovering;
+    // cancel an active emergency extract once HP climbs back this much above its low.
+    private const float EmergencyDropWindowSeconds = 5f;
+    private const float EmergencyMinDropFraction = 0.12f;
+    private const float EmergencyRecoverFraction = 0.10f;
 
     /// <summary>Only PMCs and PlayerScavs extract via exfils in ORBIT; everyone else despawns / leaves on a
     /// script, so a solo exfil run is meaningless for them. Gates the emergency trigger to avoid churning
@@ -354,16 +358,58 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
         return role.Value.IsPMC() || profile.WillBeAPlayerScav();
     }
 
-    /// <summary>Wounded with nothing left to heal with: damaged, no usable med, not currently healing, and
-    /// either bleeding or below the emergency HP fraction.</summary>
-    private static bool IsEmergencyExtract(Agent agent)
+    /// <summary>
+    /// HP-trend emergency extract. Samples the bot's own HP each decision tick (no BSG Medecine/FirstAid
+    /// dependency — those flags didn't reliably catch a bleeding, med-less bot, which then died picking POIs
+    /// instead of extracting). If HP stays below its recent high-water mark for a sustained window without
+    /// recovering (bleeding out, can't heal), peel the member off to extract alone. If HP climbs back up while
+    /// the emergency extract is active (it healed), cancel it so the bot rejoins the squad. A bot that DOES
+    /// have meds naturally heals → HP rises → cancel, so no explicit med check is needed.
+    /// </summary>
+    private static void UpdateEmergencyExtract(Agent agent)
     {
-        var med = agent.Bot?.Medecine;
-        var firstAid = med?.FirstAid;
-        if (med == null || firstAid == null) return false;
-        if (med.Using || firstAid.HaveSmth2Use) return false; // healing now or has a med to use → not stranded
-        if (!firstAid.Damaged) return false;                   // not actually hurt
-        return firstAid.IsBleeding || HpFraction(agent) < EmergencyHpFraction;
+        if (!CanSoloExtract(agent)) return;
+        var cur = HpFraction(agent);
+
+        // Already emergency-extracting: cancel if HP recovered since its low; otherwise track the new low.
+        if (agent.SoloExtractRequested && agent.SoloExtractIsEmergency)
+        {
+            if (cur >= agent.EmergencyHpLow + EmergencyRecoverFraction)
+            {
+                agent.SoloExtractRequested = false;
+                agent.SoloExtractIsEmergency = false;
+                agent.SoloExtractReason = null;
+                agent.SoloExtractTarget = null;
+                agent.EmergencyHpRef = cur;
+                agent.EmergencyHpRefTime = Time.time;
+                Log.Info($"{agent} emergency extract cancelled — HP recovered to {cur:P0}, rejoining squad");
+            }
+            else
+            {
+                agent.EmergencyHpLow = Mathf.Min(agent.EmergencyHpLow, cur);
+            }
+            return;
+        }
+
+        // Track the high-water mark; reset the timer whenever HP is stable or rising.
+        if (agent.EmergencyHpRef < 0f || cur >= agent.EmergencyHpRef)
+        {
+            agent.EmergencyHpRef = cur;
+            agent.EmergencyHpRefTime = Time.time;
+            return;
+        }
+
+        // HP below the high-water mark: trigger once the drop is both sustained and meaningful.
+        if (!agent.SoloExtractRequested
+            && Time.time - agent.EmergencyHpRefTime >= EmergencyDropWindowSeconds
+            && agent.EmergencyHpRef - cur >= EmergencyMinDropFraction)
+        {
+            agent.SoloExtractRequested = true;
+            agent.SoloExtractIsEmergency = true;
+            agent.SoloExtractReason = $"emergency (HP {cur:P0}, dropping with no recovery)";
+            agent.EmergencyHpLow = cur;
+            Log.Info($"{agent} emergency extract — HP at {cur:P0} (down from {agent.EmergencyHpRef:P0}) for {Time.time - agent.EmergencyHpRefTime:F0}s with no recovery, bee-lining to exfil");
+        }
     }
 
     private static float HpFraction(Agent agent)
@@ -461,11 +507,8 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
             // splinter logic so the rest of the squad keeps playing. GotoObjectiveAction's exfil-arrival
             // handler then flips it to Extracting and ExtractAction despawns it — no squad-wide
             // ExtractRequested needed.
-            if (!agent.SoloExtractRequested && CanSoloExtract(agent) && IsEmergencyExtract(agent))
-            {
-                agent.SoloExtractRequested = true;
-                agent.SoloExtractReason = "emergency (wounded, no meds left)";
-            }
+            // HP-trend emergency extract (trigger if bleeding out + no recovery, cancel if HP climbs back).
+            UpdateEmergencyExtract(agent);
             if (agent.SoloExtractRequested)
             {
                 if (agent.SoloExtractTarget == null)

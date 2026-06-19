@@ -114,6 +114,18 @@ public class Agent(int id, BotOwner bot, float[] taskScores) : Entity(id, taskSc
     public bool SoloLootThresholdRolled;
 
     /// <summary>
+    /// HP-trend emergency-extract state (BSG-independent, see GotoObjectiveStrategy.UpdateEmergencyExtract).
+    /// <see cref="SoloExtractIsEmergency"/> marks the active solo extract as HP-triggered (so it can be
+    /// cancelled if HP recovers, unlike a loot-threshold one). <see cref="EmergencyHpRef"/> is the recent
+    /// high-water HP fraction (-1 = unset), <see cref="EmergencyHpRefTime"/> when it was set, and
+    /// <see cref="EmergencyHpLow"/> the lowest HP seen since the emergency fired.
+    /// </summary>
+    public bool SoloExtractIsEmergency;
+    public float EmergencyHpRef = -1f;
+    public float EmergencyHpRefTime;
+    public float EmergencyHpLow;
+
+    /// <summary>
     /// Per-archetype mini-loot value threshold, lazily resolved from the agent's own SAIN brain. 0 until
     /// resolved; falls back to the squad personality (or <see
     /// cref="OrbitLootHandler.DefaultMinPickupPrice"/>) when SAIN attach is pending.

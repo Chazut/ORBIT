@@ -1013,8 +1013,11 @@ public class MovementSystem
 
         if (Time.time - stuck.IdleRescueSince < IdleRescueThresholdSeconds) return;
 
-        // Stranded far from the objective for the whole window → attempt the one-shot rescue.
-        if (RescueTeleportToConnectedPoint(agent, objLoc.Position))
+        // Stranded far from the objective for the whole window → attempt the one-shot rescue. First try a
+        // point connected to the objective; if none exists (wedged on an isolated chunk with no objective-
+        // reachable sample in range, even though a squadmate can be fine a few metres away), fall back to
+        // teleporting next to the nearest alive squadmate, which is by definition on usable navmesh.
+        if (RescueTeleportToConnectedPoint(agent, objLoc.Position) || RescueTeleportNearSquadmate(agent))
             stuck.IdleRescued = true;
 
         // Re-arm the window either way: on success the one-shot flag stops further attempts; on failure we
@@ -1048,8 +1051,43 @@ public class MovementSystem
                 return true;
             }
         }
-        Log.Debug($"{agent} idle-island rescue: no connected navmesh point within {IdleRescueRingRadii[^1]:F0}m — staying put");
+        Log.Debug($"{agent} idle-island rescue: no connected navmesh point within {IdleRescueRingRadii[^1]:F0}m — trying squadmate fallback");
         return false;
+    }
+
+    // Fallback when no objective-connected point exists: teleport next to the nearest alive squadmate. They
+    // reached their own objective, so their position sits on usable, squad-relevant navmesh — enough to get a
+    // wedged bot off a dead chunk even if its own objective stays unreachable from there.
+    private bool RescueTeleportNearSquadmate(Agent agent)
+    {
+        var squad = agent.Squad;
+        if (squad?.Members == null) return false;
+        if (!TeleportSafe(agent, _humanPlayers)) return false;
+
+        var pos = agent.Position;
+        const float minDistSqr = 3f * 3f; // don't bother TPing to a mate basically on top of us
+        Agent best = null;
+        var bestDistSqr = float.MaxValue;
+        var bestDest = Vector3.zero;
+        for (var i = 0; i < squad.Members.Count; i++)
+        {
+            var m = squad.Members[i];
+            if (m == null || m == agent) continue;
+            if (m.Player?.HealthController is not { IsAlive: true }) continue;
+            var d = (m.Position - pos).sqrMagnitude;
+            if (d < minDistSqr || d >= bestDistSqr) continue;
+            if (!NavMesh.SamplePosition(m.Position, out var hit, 3f, NavMesh.AllAreas)) continue;
+            best = m;
+            bestDistSqr = d;
+            bestDest = hit.position;
+        }
+        if (best == null) return false;
+
+        bestDest.y += 0.25f;
+        agent.Player.Teleport(bestDest);
+        ResetPath(agent);
+        Log.Info($"{agent} idle-island rescue: no objective-connected point, teleported {Vector3.Distance(pos, bestDest):F0}m next to squadmate {best} instead (off the stuck chunk)");
+        return true;
     }
 
     private class StuckRemediation(MovementSystem movementSystem, List<Player> humanPlayers)
