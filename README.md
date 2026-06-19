@@ -405,6 +405,7 @@ No ETA, no promises, but on the list:
 **Tuning**
 - Faction takeover split: patrols → ORBIT, checkpoints → vanilla (RUAF / UNTAR / BlackDivision)
 - Flip the faction-control model to opt-IN instead of opt-OUT — ORBIT only controls explicitly enabled bot types, safer for future custom-bot mods
+- Labs-specific checkpoint tuning - fewer / relocated patrol points around the security gates, which bots get stuck on (BSG gate-pathing quirk, made worse by ORBIT placing checkpoints inside the gates; reported by Firefly)
 
 **Animations / polish**
 - Keycard / key swipe animation for PMC bots opening locked rooms (currently they call the Unlock function instantly with no anim — should walk to the reader and play the swipe like a player)
@@ -418,6 +419,7 @@ No ETA, no promises, but on the list:
 - **Bots stuck at spawn on isolated navmesh** - vanilla SPT quirk where a spawn point lands a bot on a tiny chunk of navmesh disconnected from the rest of the map (Streets near transits, Factory inside the silo, etc.). Shows up more often with ORBIT than pure vanilla because vanilla's built-in TP rescue is disabled (it was teleporting bots constantly on every unreachable pick). Fix planned: targeted TP rescue that fires only when a bot is genuinely stuck for X seconds.
 - **Rare stuck bots** - usually unstick themselves within a minute. Still iterating.
 - **Faction-mod takeover (RUAF / UNTAR / Black Division) can misbehave** - these mods swap the bot's brain at runtime (via MoreBotsAPI) and ORBIT's handling of that handoff is not fully solid yet, so a controlled squad may rapidly switch goals or get stuck. Workaround: leave the per-faction takeover toggles OFF (their default) so ORBIT leaves those bots vanilla. ISB takeover is handled correctly. Fix in progress.
+- **Bots stuck or oscillating at Labs security gates** - the Labs gates have a BSG pathing quirk bots struggle to pass, and ORBIT places patrol checkpoints inside/near the gates which makes it worse (a bot parks at a gate, or goes in then immediately wants back out). Needs Labs-specific checkpoint tuning to keep points clear of the gates. Reported by Firefly (ISB author).
 - **Mod conflicts** - tested with my own config. Yours may differ. Report anything obviously broken on [GitHub](https://github.com/Chazut/ORBIT/issues).
 
 ### About AI
