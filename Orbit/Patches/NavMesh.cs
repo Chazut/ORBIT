@@ -46,5 +46,9 @@ public class DoorCarverShrinkPatch : ModulePatch
             doorLink.Carver_Closed.size = 0.375f * doorLink.Carver_Closed.size;
             doorLink.Carver_Breached.size = 0.375f * doorLink.Carver_Breached.size;
         }
+
+        // Boot diagnostic (1.2.0-pre): measure the link-resolution gap that left many doors logging
+        // "NO NavMeshDoorLink found" so we can tell a key mismatch (now fixed) from genuinely linkless doors.
+        Orbit.Helpers.DoorNavMesh.LogLinkCensus();
     }
 }
