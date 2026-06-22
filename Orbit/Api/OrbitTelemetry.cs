@@ -52,9 +52,19 @@ public static class OrbitTelemetry
         var y = loc?.Position.y ?? 0f;
         var z = loc?.Position.z ?? 0f;
 
+        // Per-member solo/emergency extract takes precedence over the squad-wide reason for THIS agent's
+        // display — it's the member's own decision to peel off. A clean canonical label feeds RR's
+        // "Extracting: <reason>" line; the verbose agent.SoloExtractReason (HP% / loot total) stays in the
+        // logs. Falls back to the squad-wide ExtractRequested reason when the agent isn't solo-extracting.
         var extractReason = "";
         var squad = agent.Squad;
-        if (squad != null && squad.ExtractRequested)
+        if (agent.SoloExtractRequested)
+        {
+            extractReason = agent.SoloExtractIsEmergency
+                ? "emergency extract"
+                : (string.IsNullOrEmpty(agent.SoloExtractReason) ? "loot threshold reached" : agent.SoloExtractReason);
+        }
+        else if (squad != null && squad.ExtractRequested)
         {
             extractReason = squad.ExtractRequestedReason ?? "";
         }

@@ -397,7 +397,9 @@ public class LootContainerAction(AgentData dataset, WaypointSystem waypointSyste
         if (UnityEngine.Random.Range(0, 100) < chancePct)
         {
             agent.SoloExtractRequested = true;
-            agent.SoloExtractReason = $"own loot ≥ {ownThreshold / 1000f:F0}k₽ (won {chancePct}% solo roll)";
+            // Kept short — this string surfaces in RR's "Extracting: <reason>" tooltip. The roll % stays in
+            // the Log.Info below.
+            agent.SoloExtractReason = $"own loot ≥ {ownThreshold / 1000f:F0}k₽";
             Log.Info($"{agent} hit its OWN extract threshold ({ownLooted:N0}₽ >= {ownThreshold:N0}₽) and won the {chancePct}% solo-extract roll — peeling off to extract alone");
         }
         else
