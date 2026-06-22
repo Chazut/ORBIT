@@ -380,6 +380,7 @@ No ETA, no promises, but on the list:
 - "Boss hunting"
 - Faction-vs-faction "hunt" objective: a squad actively seeks out another faction's bots instead of just roaming. Enables rivalries like cultists hunting PMCs, UNTAR hunting scavs, or ISB ↔ Black Division hunting each other. Doubles as a robustness win for custom/vanilla bots whose stock SAIN/BSG nodes sometimes freeze and stop moving (suggested by Firefly on Discord - ISB author)
 - Airdrop / helicopter crash / BTR objectives — squads slow-approach the drop zone, hold position at a nearby vantage for a few minutes (ambush window), then close in and loot. Mimics how players treat airdrops in live — nobody walks straight to the smoke.
+- "Rally flare" item — firing it immediately overrides the current objective of every bot alive on the map and sends them converging on the spot it was fired (a hard redirect, not a soft advection nudge). A player-triggered "pull the whole map onto this point" tool, kept separate from the airdrop system so calling a drop never aggros the lobby
 - Multi-step objectives (activate → loot/extract):
   - Interchange Kiba (disable alarm → loot)
   - Interchange ULTRA (power on → loot)
