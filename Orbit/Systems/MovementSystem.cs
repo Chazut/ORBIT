@@ -349,6 +349,11 @@ public class MovementSystem
     /// </summary>
     private const float DoorInteractHoldSeconds = 1.25f;
 
+    /// <summary>Tighter max distance (squared) for the on-arrival key-unlock gesture than the generic 3 m door
+    /// gate. Without it the bot plays the key animation several metres back in the corridor (seen in
+    /// raid-review); ~1.6 m puts the gesture right at the door leaf.</summary>
+    private const float DoorKeyUnlockMaxDistanceSqr = 1.6f * 1.6f;
+
     /// <summary>
     /// Tracks every OpenDoor / force-unlock interaction we've initiated. After
     /// <see cref="DoorWatchTimeoutSeconds"/> we poll the door's actual state — if it never reached Open AND
@@ -491,6 +496,13 @@ public class MovementSystem
                 var role = agent.Bot?.Profile?.Info?.Settings?.Role;
                 if (!role.HasValue || !role.Value.IsPMC()) continue;
 
+                // Play the key-unlock gesture only when the bot is right AT the door. The outer 3 m gate is
+                // generous enough that otherwise the animation fires several metres back in the corridor (seen
+                // in raid-review for Jehree). The bot keeps path-following through the carver-opened doorway, so
+                // it reaches this tighter range within a frame or two.
+                if ((door.transform.position - agent.Position).sqrMagnitude > DoorKeyUnlockMaxDistanceSqr)
+                    continue;
+
                 // The squad rolled (or was granted 100% as a Main anchor) for this door at dispatch time, so
                 // ORBIT already opened its navmesh carver (the door is reachable but still visually Locked).
                 // Now that a bot has physically arrived, call Door.Unlock() to flip it to Shut on the next
@@ -508,9 +520,8 @@ public class MovementSystem
                     {
                         continue; // already unlocking this door, wait for animation
                     }
-                    // Prep the bot like OpenDoor so BSG will actually play the interaction animation (a
-                    // sprinting / proned / ADS'd bot's interaction is silently dropped).
-                    var unlockPlayer = agent.Player;
+                    // Prep the bot like OpenDoor so BSG plays the door-open animation cleanly on the NEXT tick
+                    // (a sprinting / proned / ADS'd bot's interaction is silently dropped).
                     try
                     {
                         var unlockBot = agent.Bot;
@@ -523,27 +534,31 @@ public class MovementSystem
                         Log.Debug($"{agent} unlock prep on {door.Id} threw (non-fatal): {prepEx.Message}");
                     }
 
-                    // Best-effort: play the bot's key-in-lock animation by driving the Unlock interaction with
-                    // a forced success result (keyless bypass — bots don't carry the key). If BSG drops the
-                    // animation or this throws, the door.Unlock() floor below still flips the door, so the
-                    // worst case is the old behaviour (no key gesture) with zero functional regression.
-                    if (unlockPlayer != null)
+                    // Unlock the latch AND play the bot's key-in-lock gesture, WITHOUT routing through an Unlock
+                    // interaction result. EFT's Door.Interact(Unlock) casts the result to KeyInteractionResultClass,
+                    // whose RaiseEvents/CanExecute dereference a real KeyComponent — a keyless bot can only pass a
+                    // null Key, which NRE'd inside vmethod_1 every time (raid logs: 2/2 "unlock animation attempt
+                    // threw", plus a double Unlock() latch). Instead we replicate the two halves of
+                    // MovementState.ExecuteDoorInteraction by hand: read the interaction params WHILE the door is
+                    // still Locked — GetInteractionParameters resolves AnimationId to the door's DoorKeyOpen gesture,
+                    // because the key animation is driven by the locked STATE, not by holding a key — then unlock the
+                    // latch directly (keyless, no cast → no NRE, no double-latch) and drive the hands animation via
+                    // SetInteractInHands exactly as ExecuteDoorInteraction does. The door then opens on the next tick
+                    // via the normal OpenDoor path.
+                    try
                     {
-                        try
-                        {
-                            unlockPlayer.MovementContext.ResetCanUsePropState();
-                            unlockPlayer.vmethod_1(door, new KeyInteractionResultClass(null, null, succeed: true));
-                        }
-                        catch (System.Exception animEx)
-                        {
-                            Log.Debug($"{agent} unlock animation attempt on {door.Id} threw (non-fatal): {animEx.Message}");
-                        }
+                        var keyAnim = door.GetInteractionParameters(agent.Position);
+                        door.LockForInteraction();
+                        if (door.DoorState == EDoorState.Locked)
+                            door.Unlock();
+                        if (!door.interactWithoutAnimation)
+                            agent.Player.MovementContext.SetInteractInHands((EInteraction)keyAnim.AnimationId);
                     }
-
-                    // Guaranteed floor: flip Locked → Shut even if the animation interaction didn't take. (If
-                    // the animation DID unlock via its interaction handler this re-runs the latch coroutine;
-                    // watch for a double latch click in RR — if it shows, gate this on DoorState==Locked.)
-                    door.Unlock();
+                    catch (System.Exception unlockEx)
+                    {
+                        Log.Debug($"{agent} key-unlock on {door.Id} threw (non-fatal), flooring to direct Unlock: {unlockEx.Message}");
+                        if (door.DoorState == EDoorState.Locked) door.Unlock();
+                    }
                     _doorInteractCooldown[doorIdForUnlock] = Time.time;
                     // Hold the bot in place through the whole unlock + open sequence. Without this it walks
                     // straight through the doorway while Unlock()'s coroutine is still running: the carver is
