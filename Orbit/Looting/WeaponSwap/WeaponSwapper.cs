@@ -554,6 +554,10 @@ public static class WeaponSwapper
             var slot = weaponToDiscard.Slots[i];
             var mod = slot?.ContainedItem;
             if (mod == null) continue;
+            // Vital weapon parts (barrel, receiver, gas block…) can't be detached in-raid. Moving one out via
+            // a raw transaction desyncs FIKA — "Cannot modify vital part slot mod_barrel … in raid" (Kobe
+            // report). Skip them so they stay on the discarded weapon. Mirrors the EnumerateItemsForDrain gate.
+            if (mod is Mod nonRaidMod && !nonRaidMod.RaidModdable) continue;
             var pricePerSlot = ItemPriceLookup.GetPricePerSlot(mod);
             string reason = null;
             if (pricePerSlot >= threshold) reason = $"price/slot={pricePerSlot:N0}₽ ≥ {threshold:N0}₽";
