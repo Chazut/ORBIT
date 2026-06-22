@@ -724,7 +724,7 @@ public class WaypointSystem
     /// Returns the first reachable, unclaimed, non-blacklisted runtime Corpse waypoint that this squad is
     /// credited with the kill on, or null if none exist.
     /// </summary>
-    private Waypoint TryPickOwnKillCorpse(Squad squad)
+    internal Waypoint TryPickOwnKillCorpse(Squad squad)
     {
         if (squad == null) return null;
 

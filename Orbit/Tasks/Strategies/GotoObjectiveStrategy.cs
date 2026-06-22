@@ -104,6 +104,15 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                         squad.CorpseWatchdogLocId = corpseObj.Id;
                         squad.CorpseWatchdogSince = Time.time;
                     }
+                    else if (SquadAnyMemberInCombat(squad))
+                    {
+                        // Pause the clock while a member is in SAIN combat / healing (IsActive=false → ORBIT
+                        // can't move anyone toward the body). Otherwise a bot that kills, gets dragged into
+                        // another fight right beside the corpse, and only frees up ~25s later has its OWN kill
+                        // blacklisted before it ever approaches (observed: roman killed Bot17, fought + killed
+                        // Bot9 next to it, the watchdog blacklisted Bot17 mid-fight and the body was abandoned).
+                        squad.CorpseWatchdogSince = Time.time;
+                    }
                     else if (Time.time - squad.CorpseWatchdogSince > CorpseStuckTimeoutSeconds)
                     {
                         squad.CompletedPoiIds.Add(corpseObj.Id);
@@ -340,12 +349,18 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
         EBodyPart.LeftArm, EBodyPart.RightArm, EBodyPart.LeftLeg, EBodyPart.RightLeg
     };
 
-    // HP-trend emergency-extract tuning (BSG-independent). Trigger when HP has stayed below its recent
-    // high-water mark for this long AND dropped at least this fraction of total HP without recovering;
-    // cancel an active emergency extract once HP climbs back this much above its low.
-    private const float EmergencyDropWindowSeconds = 5f;
+    // HP-trend emergency-extract tuning (BSG-independent). Two triggers: (1) ACTIVE DECLINE — HP is ≥MinDrop
+    // below where it was DropWindow seconds ago AND is STILL falling across two consecutive recent sub-windows
+    // (a genuine ongoing bleed, not a single hit that then stabilised); (2) STAGNANT LOW — HP sat below
+    // StagnantLowFraction for StagnantLowSeconds without climbing out (crippled, out of meds, sitting wounded).
+    // Either way, cancel once HP climbs RecoverFraction back above its low.
+    private const float EmergencyDropWindowSeconds = 8f;
     private const float EmergencyMinDropFraction = 0.12f;
     private const float EmergencyRecoverFraction = 0.10f;
+    private const float EmergencyFallSubWindowSeconds = 2.5f;
+    private const float EmergencyFallEps = 0.01f;
+    private const float EmergencyStagnantLowFraction = 0.50f;
+    private const float EmergencyStagnantLowSeconds = 60f;
 
     /// <summary>Only PMCs and PlayerScavs extract via exfils in ORBIT; everyone else despawns / leaves on a
     /// script, so a solo exfil run is meaningless for them. Gates the emergency trigger to avoid churning
@@ -361,10 +376,17 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
     /// <summary>
     /// HP-trend emergency extract. Samples the bot's own HP each decision tick (no BSG Medecine/FirstAid
     /// dependency — those flags didn't reliably catch a bleeding, med-less bot, which then died picking POIs
-    /// instead of extracting). If HP stays below its recent high-water mark for a sustained window without
-    /// recovering (bleeding out, can't heal), peel the member off to extract alone. If HP climbs back up while
-    /// the emergency extract is active (it healed), cancel it so the bot rejoins the squad. A bot that DOES
-    /// have meds naturally heals → HP rises → cancel, so no explicit med check is needed.
+    /// instead of extracting). Two triggers: an ACTIVE DECLINE (HP dropped ≥12% below a trailing reference and
+    /// stayed down ≥5s — a fast bleed) and a STAGNANT LOW (HP stuck below 50% for a full minute without
+    /// climbing out — crippled, out of meds). If HP climbs back up while the emergency extract is active (it
+    /// healed), cancel it so the bot rejoins the squad — a bot that DOES have meds naturally heals → HP rises →
+    /// cancel, so no explicit med check is needed.
+    ///
+    /// Active decline is read off a rolling HP-sample buffer, NOT a high-water mark: it fires only when HP is
+    /// ≥12% below where it was DropWindow seconds ago AND is still actively falling across two consecutive
+    /// recent sub-windows. That two-window check is the fix for the false positives where a single hit dropped
+    /// HP once and it then sat STABLE (e.g. "HP at 81% down from 100%" while parked at 81%) — a single hit fills
+    /// only one sub-window, a real bleed keeps dropping across both, so only the latter triggers.
     /// </summary>
     private static void UpdateEmergencyExtract(Agent agent)
     {
@@ -382,6 +404,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                 agent.SoloExtractTarget = null;
                 agent.EmergencyHpRef = cur;
                 agent.EmergencyHpRefTime = Time.time;
+                agent.EmergencyLowSince = -1f;
                 Log.Info($"{agent} emergency extract cancelled — HP recovered to {cur:P0}, rejoining squad");
             }
             else
@@ -391,25 +414,102 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
             return;
         }
 
-        // Track the high-water mark; reset the timer whenever HP is stable or rising.
-        if (agent.EmergencyHpRef < 0f || cur >= agent.EmergencyHpRef)
+        // Stagnant-low timer: how long the bot has been continuously below the low-HP floor. Reset the moment
+        // it climbs back out.
+        if (cur < EmergencyStagnantLowFraction)
         {
-            agent.EmergencyHpRef = cur;
-            agent.EmergencyHpRefTime = Time.time;
-            return;
+            if (agent.EmergencyLowSince < 0f) agent.EmergencyLowSince = Time.time;
+        }
+        else
+        {
+            agent.EmergencyLowSince = -1f;
         }
 
-        // HP below the high-water mark: trigger once the drop is both sustained and meaningful.
-        if (!agent.SoloExtractRequested
-            && Time.time - agent.EmergencyHpRefTime >= EmergencyDropWindowSeconds
-            && agent.EmergencyHpRef - cur >= EmergencyMinDropFraction)
+        // Record this HP sample into the agent's rolling history for trend detection.
+        var now = Time.time;
+        var slot = agent.EmergencyHpHistCount % agent.EmergencyHpHist.Length;
+        agent.EmergencyHpHist[slot] = cur;
+        agent.EmergencyHpHistTime[slot] = now;
+        agent.EmergencyHpHistCount++;
+
+        // Active decline: HP is ≥MinDropFraction below where it was DropWindowSeconds ago AND is still falling
+        // across BOTH the older and the most-recent sub-window. The two-window "still falling" test is what
+        // rejects a single hit that then stabilised (the hit lands in one sub-window only; the other reads flat),
+        // while a genuine bleed keeps dropping across both. Needs DropWindowSeconds of history first.
+        var hpWindowAgo = HpFromAtLeastAgo(agent, now, EmergencyDropWindowSeconds);
+        var hpMidAgo = HpFromAtLeastAgo(agent, now, EmergencyFallSubWindowSeconds * 2f);
+        var hpRecentAgo = HpFromAtLeastAgo(agent, now, EmergencyFallSubWindowSeconds);
+        var activeDecline = hpWindowAgo >= 0f && hpMidAgo >= 0f && hpRecentAgo >= 0f
+                            && hpWindowAgo - cur >= EmergencyMinDropFraction   // ≥12% lower than DropWindow ago
+                            && hpMidAgo - hpRecentAgo >= EmergencyFallEps      // fell during the older sub-window
+                            && hpRecentAgo - cur >= EmergencyFallEps;          // and still falling in the latest one
+        var stagnantLow = agent.EmergencyLowSince >= 0f
+                          && Time.time - agent.EmergencyLowSince >= EmergencyStagnantLowSeconds;
+
+        if (agent.SoloExtractRequested || (!activeDecline && !stagnantLow)) return;
+
+        agent.SoloExtractRequested = true;
+        agent.SoloExtractIsEmergency = true;
+        agent.EmergencyHpLow = cur;
+        if (activeDecline)
         {
-            agent.SoloExtractRequested = true;
-            agent.SoloExtractIsEmergency = true;
             agent.SoloExtractReason = $"emergency (HP {cur:P0}, dropping with no recovery)";
-            agent.EmergencyHpLow = cur;
-            Log.Info($"{agent} emergency extract — HP at {cur:P0} (down from {agent.EmergencyHpRef:P0}) for {Time.time - agent.EmergencyHpRefTime:F0}s with no recovery, bee-lining to exfil");
+            Log.Info($"{agent} emergency extract — HP at {cur:P0} (down from {hpWindowAgo:P0} over the last {EmergencyDropWindowSeconds:F0}s, still falling), bee-lining to exfil");
         }
+        else
+        {
+            agent.SoloExtractReason = $"emergency (HP {cur:P0}, stuck below 50% with no recovery)";
+            Log.Info($"{agent} emergency extract — HP stuck at {cur:P0} below 50% for {Time.time - agent.EmergencyLowSince:F0}s with no recovery, bee-lining to exfil");
+        }
+    }
+
+    /// <summary>True once any squad member has run a loot session on this corpse and value-skipped it (i.e.
+    /// left sub-threshold loot for softer-gated teammates). Before that the corpse is FRESH and only the killer
+    /// should approach; after, a Rat-tier member is allowed to clean up the leftovers — so the anti-pile null
+    /// must NOT fire. Keeps the Chad-loots-then-Rat-cleans-up flow intact.</summary>
+    private static bool CorpseValueSkippedByAnyMember(Squad squad, int locId)
+    {
+        if (squad?.Members == null) return false;
+        for (var i = 0; i < squad.Members.Count; i++)
+        {
+            var m = squad.Members[i];
+            if (m != null && m.ValueSkippedPoiIds.Contains(locId)) return true;
+        }
+        return false;
+    }
+
+    /// <summary>True if any ALIVE squad member is currently outside ORBIT control (IsActive=false → SAIN combat
+    /// / healing has the bot). Used to pause the corpse-stuck watchdog: time spent fighting beside a body
+    /// shouldn't count against reaching it.</summary>
+    private static bool SquadAnyMemberInCombat(Squad squad)
+    {
+        if (squad?.Members == null) return false;
+        for (var i = 0; i < squad.Members.Count; i++)
+        {
+            var m = squad.Members[i];
+            if (m != null && !m.IsActive && m.Player?.HealthController is { IsAlive: true }) return true;
+        }
+        return false;
+    }
+
+    /// <summary>Most recent HP sample in the agent's rolling history that is at least <paramref name="ago"/>
+    /// seconds old, or -1 if the history doesn't reach back that far yet.</summary>
+    private static float HpFromAtLeastAgo(Agent agent, float now, float ago)
+    {
+        var target = now - ago;
+        var best = -1f;
+        var bestTime = -1f;
+        var n = Mathf.Min(agent.EmergencyHpHistCount, agent.EmergencyHpHist.Length);
+        for (var i = 0; i < n; i++)
+        {
+            var t = agent.EmergencyHpHistTime[i];
+            if (t <= target && t > bestTime)
+            {
+                bestTime = t;
+                best = agent.EmergencyHpHist[i];
+            }
+        }
+        return best;
     }
 
     private static float HpFraction(Agent agent)
@@ -575,7 +675,20 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                                   && agentObjective.SplinterParent == squadObjective.Location)
                               || splinterStickyAcrossAnchor);
             if (leaderFinishedAnchorInRoam)
+            {
                 Log.Debug($"{agent} leader roam continuation: finished anchor {agentObjective.Location}, picking a splinter instead of guarding");
+                // Don't roam off while we still have another of our OWN kills unlooted nearby. A double-kill
+                // arms the single PendingOwnKill direct-route slot for only the LATEST corpse, so the earlier
+                // kill stays tagged but is never re-picked here — roam splinters bypass RequestNear's own-kill
+                // pre-scan, so the leader wanders off and abandons the first body (observed: a bot got 2 kills
+                // but only looted the second). Force a squad re-dispatch so RequestNear's pre-scan re-anchors
+                // onto the remaining tagged corpse before we wander away.
+                if (waypointSystem.TryPickOwnKillCorpse(squad) != null)
+                {
+                    squad.Objective.Duration = 0;
+                    Log.Info($"{agent} finished an own-kill corpse but another tagged own-kill is still unlooted nearby — forcing squad re-anchor onto it before roaming");
+                }
+            }
 
             if (aligned && agentObjective.Location != null)
             {
@@ -614,6 +727,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                 //   5. Fallback to squad anchor (no splinter found).
                 Waypoint targetLoc;
                 Waypoint splinterParent;
+                var tookOwnKillCorpse = false;
                 var ownKillAgentId = squad.PendingOwnKillKillerAgentId;
                 var anchorReservedForOwnKill = ownKillAgentId >= 0
                                                && squadObjective.Location != null
@@ -622,6 +736,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                 {
                     targetLoc = squadObjective.Location;
                     splinterParent = null;
+                    tookOwnKillCorpse = true;
                     squad.PendingOwnKillKillerAgentId = -1;
                     squad.PendingOwnKillCorpseLocId = 0;
                     Log.Debug($"{agent} own-kill direct-route to {targetLoc} (skipped splinter)");
@@ -700,6 +815,23 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                         targetLoc = squadObjective.Location;
                         splinterParent = null;
                     }
+                }
+
+                // A FRESH body has a single claim — only the own-kill killer (routed via the branch above)
+                // targets a Corpse SQUAD anchor directly. Any other member that landed on it through the
+                // leader-anchor or splinter fallback would just pile on and fail the claim, so guard in place
+                // instead (observed: all 3 squad members converging on one kill). The null is gated on the
+                // corpse being FRESH: once a member has actually run a loot session and value-skipped it
+                // (left sub-threshold loot for softer-gated teammates), a Rat-tier member is meant to come back
+                // and clean up the leftovers, so we must NOT block that. A Corpse picked as a SPLINTER (a
+                // different body) is also left untouched — only the squad-anchor corpse is single-claimed here.
+                if (!tookOwnKillCorpse && targetLoc != null
+                    && targetLoc.Category == WaypointCategory.Corpse
+                    && squadObjective.Location != null && targetLoc.Id == squadObjective.Location.Id
+                    && !CorpseValueSkippedByAnyMember(squad, targetLoc.Id))
+                {
+                    targetLoc = null;
+                    splinterParent = null;
                 }
 
                 agentObjective.Location = targetLoc;

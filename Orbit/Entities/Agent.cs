@@ -124,6 +124,15 @@ public class Agent(int id, BotOwner bot, float[] taskScores) : Entity(id, taskSc
     public float EmergencyHpRef = -1f;
     public float EmergencyHpRefTime;
     public float EmergencyHpLow;
+    /// <summary>Time.time at which HP first dropped below the stagnant-low floor and stayed there; -1 = HP is
+    /// above the floor. Drives the "stuck below 50% for a minute" emergency trigger.</summary>
+    public float EmergencyLowSince = -1f;
+    /// <summary>Rolling HpFraction samples (ring buffer at <c>EmergencyHpHistCount % Length</c>) with their
+    /// Time.time, used by UpdateEmergencyExtract's active-decline trend test to tell an ongoing bleed from a
+    /// single hit that then stabilised.</summary>
+    public readonly float[] EmergencyHpHist = new float[32];
+    public readonly float[] EmergencyHpHistTime = new float[32];
+    public int EmergencyHpHistCount;
 
     /// <summary>
     /// Per-archetype mini-loot value threshold, lazily resolved from the agent's own SAIN brain. 0 until
