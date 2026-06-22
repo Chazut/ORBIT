@@ -58,7 +58,6 @@ public class Plugin : BaseUnityPlugin
     public static ConfigEntry<bool> DegradedTickrateEnabled;
     public static ConfigEntry<float> DegradedTickrateNearDistance;
     public static ConfigEntry<float> DegradedTickrateFarIntervalSeconds;
-    public static ConfigEntry<bool> PerfTimingDiag;
 
     // 02. POI guard duration
     public static ConfigEntry<Vector2> ObjectiveGuardDuration;
@@ -626,9 +625,6 @@ public class Plugin : BaseUnityPlugin
         DegradedTickrateFarIntervalSeconds = Config.Bind(perf, "Far decision interval (s)", 6f, new ConfigDescription(
             "How often a far / off-screen squad re-runs its decision loop. Higher = more CPU saved but slower reactions for distant squads. 5-10 s is a good range.",
             new AcceptableValueRange<float>(0.5f, 30f), new ConfigurationManagerAttributes { Order = 0 }));
-        PerfTimingDiag = Config.Bind(perf, "Perf timing diagnostic (Debug log)", false, new ConfigDescription(
-            "TEMP profiling aid: logs per-subsystem cost (Strategy / Action / Movement / Look / Waypoint / Nav) as ms/frame to the Debug log every few seconds, so we can see what ORBIT spends its frame budget on (e.g. on Streets) before optimising. OFF by default, no gameplay effect; needs the Debug log to be visible.",
-            null, new ConfigurationManagerAttributes { Order = -1 }));
     }
 
     private void BindSainPersonalityConfigs()
