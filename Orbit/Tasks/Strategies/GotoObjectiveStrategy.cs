@@ -359,6 +359,10 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
     private const float EmergencyRecoverFraction = 0.10f;
     private const float EmergencyFallSubWindowSeconds = 2.5f;
     private const float EmergencyFallEps = 0.01f;
+    // If this method didn't run for longer than this (the bot was in SAIN combat / inactive, so HP wasn't
+    // sampled), the rolling buffer holds stale pre-gap HP — drop it and rebuild, so active-decline never reads
+    // a pre-combat 100% sample as "8s ago" and mistakes post-combat damage for a fresh bleed.
+    private const float EmergencyMaxSampleGapSeconds = 2f;
     private const float EmergencyStagnantLowFraction = 0.50f;
     private const float EmergencyStagnantLowSeconds = 60f;
 
@@ -425,8 +429,18 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
             agent.EmergencyLowSince = -1f;
         }
 
-        // Record this HP sample into the agent's rolling history for trend detection.
+        // Record this HP sample into the agent's rolling history for trend detection. If sampling stalled (the
+        // bot was in SAIN combat / inactive, so this method didn't run), the buffer holds stale pre-gap HP —
+        // discard it so active-decline only ever reads a continuous recent run, never a pre-combat 100% sample
+        // treated as "8s ago" (that made post-combat damage look like a fresh 8s bleed and false-triggered the
+        // extract on bots that were actually stable post-fight).
         var now = Time.time;
+        if (agent.EmergencyHpHistCount > 0)
+        {
+            var prevSlot = (agent.EmergencyHpHistCount - 1) % agent.EmergencyHpHist.Length;
+            if (now - agent.EmergencyHpHistTime[prevSlot] > EmergencyMaxSampleGapSeconds)
+                agent.EmergencyHpHistCount = 0;
+        }
         var slot = agent.EmergencyHpHistCount % agent.EmergencyHpHist.Length;
         agent.EmergencyHpHist[slot] = cur;
         agent.EmergencyHpHistTime[slot] = now;
