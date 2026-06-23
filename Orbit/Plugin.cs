@@ -55,6 +55,7 @@ public class Plugin : BaseUnityPlugin
     public static ConfigEntry<bool> VanillaBloodhounds;
     public static ConfigEntry<bool> RoamingBloodhounds;
     public static ConfigEntry<bool> SquadRally;
+    public static ConfigEntry<bool> QuietLogging;
     public static ConfigEntry<bool> DegradedTickrateEnabled;
     public static ConfigEntry<float> DegradedTickrateNearDistance;
     public static ConfigEntry<float> DegradedTickrateFarIntervalSeconds;
@@ -246,7 +247,7 @@ public class Plugin : BaseUnityPlugin
         // FIKA headless client skips, so we can't depend on it (issue #5).
         StartCoroutine(WaitForHandbook());
 
-        Log.Info($"ORBIT {OrbitVersion} initialised");
+        Log.Always($"ORBIT {OrbitVersion} initialised");
 
         // Patches — wrap each in EnableSafe so one bad patch (wrong Harmony parameter name, missing target
         // method after a game update) can't collapse the rest of init. Without the guard a single failure
@@ -336,7 +337,7 @@ public class Plugin : BaseUnityPlugin
         brains.Add(nameof(BsgBrain.FollowerGluharScout));
         BrainManager.AddCustomLayer(typeof(OrbitBrainLayer), brains, 19);
 
-        Log.Info($"ORBIT {OrbitVersion} fully loaded — BrainManager wired");
+        Log.Always($"ORBIT {OrbitVersion} fully loaded — BrainManager wired");
     }
 
     private IEnumerator WaitForHandbook()
@@ -446,6 +447,9 @@ public class Plugin : BaseUnityPlugin
         SquadRally = Config.Bind(general, "Squad rally", true, new ConfigDescription(
             "ON (default): when a squad member takes fire or engages an enemy, the rest break from their current objective and converge on the fight to support. ORBIT only routes them toward the contact; SAIN takes over for each one as it gets close. OFF: members fight their own fights, no convergence.",
             null, new ConfigurationManagerAttributes { Order = -3 }));
+        QuietLogging = Config.Bind(general, "Quiet logging", true, new ConfigDescription(
+            "ON (default): ORBIT keeps the BepInEx log clean — only warnings, errors and the version banner are written. OFF: full per-event info logging (dispatch / loot / doors / extracts) for debugging or when sending a bug report. Debug builds always log more regardless.",
+            null, new ConfigurationManagerAttributes { Order = -4 }));
 
         // ── 02. POI guard duration ──────────────────────────────────
         ObjectiveGuardDuration = Config.Bind(poiGuard, "Base guard duration (s, min..max)", new Vector2(60f, 180f), new ConfigDescription(
