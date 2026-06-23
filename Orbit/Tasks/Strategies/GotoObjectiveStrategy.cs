@@ -394,6 +394,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
     /// </summary>
     private static void UpdateEmergencyExtract(Agent agent)
     {
+        if (Orbit.Looting.LootConfig.EmergencyExtractEnabled is { Value: false }) return;
         if (!CanSoloExtract(agent)) return;
         var cur = HpFraction(agent);
 

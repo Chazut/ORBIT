@@ -19,6 +19,7 @@ public static class LootConfig
     public static ConfigEntry<ExtractFaction> ExtractAllowedFor;
     public static ConfigEntry<float> ExtractAtLootValuePlayerScav;
     public static ConfigEntry<int> SoloLootExtractChancePct;
+    public static ConfigEntry<bool> EmergencyExtractEnabled;
     public static ConfigEntry<int> ScavLootChancePct;
     /// <summary>
     /// Swap threshold shared by every gear kind (weapon / armor / helmet / rig / backpack / headset):
@@ -49,8 +50,10 @@ public static class LootConfig
             "Once a PlayerScav squad's living members have collectively looted this many roubles, the whole squad bee-lines to the nearest exfil. 0 disables.");
         SoloLootExtractChancePct = config.Bind(section, "Solo extract on own loot threshold (%)", 50,
             new ConfigDescription(
-                "When a PMC / PlayerScav member's OWN looted value crosses its OWN extract threshold, the chance it peels off to extract ALONE while the rest of the squad keeps playing. Rolled once per member. 0 = never (it stays with the squad), 100 = always. (The emergency 'wounded with no meds' extract is independent of this.)",
+                "When a PMC / PlayerScav member's OWN looted value crosses its OWN extract threshold, the chance it peels off to extract ALONE while the rest of the squad keeps playing. Rolled once per member. 0 = never (it stays with the squad), 100 = always. (The emergency wounded extract is a separate toggle below.)",
                 new AcceptableValueRange<int>(0, 100)));
+        EmergencyExtractEnabled = config.Bind(section, "Emergency extract when wounded", true,
+            "ON (default): a PMC / PlayerScav whose HP is actively bleeding out (a sustained drop with no recovery) or stuck below 50% for a full minute peels off to extract alone, and cancels if it heals back up. OFF: members never self-extract on health — they only leave on the loot / time / squad triggers.");
         ScavLootChancePct = config.Bind(section, "Scav: per-item loot chance (%)", 30,
             new ConfigDescription(
                 "Bot scavs (NOT PlayerScavs) skip the per-archetype loot-value gate entirely and instead roll this chance per item on corpses, containers, and loose loot. Mirrors vanilla scav behaviour — opportunistic pickups, not deliberate searches. PlayerScavs and PMCs are unaffected.",
