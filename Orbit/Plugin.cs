@@ -421,16 +421,16 @@ public class Plugin : BaseUnityPlugin
         // detach ORBIT → vanilla brain).
         VanillaScavs = Config.Bind(general, "Vanilla scavs (RESTART)", false, new ConfigDescription(
             "OFF (default): bot scavs are controlled by ORBIT (cell dispatch, home pull, loot routing). ON: bot scavs run on BSG's vanilla brain — ORBIT doesn't attach to them, so 'Roaming Scavs' below has no effect. PlayerScavs always stay on ORBIT regardless of this toggle.",
-            null, new ConfigurationManagerAttributes { DispName = "Disable ORBIT on scavs (RESTART)", Order = 5 }));
+            null, new ConfigurationManagerAttributes { DispName = "Disable ORBIT on scavs (RESTART)", Order = 8 }));
         VanillaGoons = Config.Bind(general, "Vanilla goons (RESTART)", false, new ConfigDescription(
             "OFF (default): Goons (Knight + Big Pipe + Bird Eye) are controlled by ORBIT. ON: Goons run on BSG's vanilla brain.",
-            null, new ConfigurationManagerAttributes { DispName = "Disable ORBIT on goons (RESTART)", Order = 4 }));
+            null, new ConfigurationManagerAttributes { DispName = "Disable ORBIT on goons (RESTART)", Order = 7 }));
         VanillaCultists = Config.Bind(general, "Vanilla cultists (RESTART)", false, new ConfigDescription(
             "OFF (default): Cultists (Priest + Warriors + cursed scavs) are controlled by ORBIT. ON: Cultists run on BSG's vanilla brain.",
-            null, new ConfigurationManagerAttributes { DispName = "Disable ORBIT on cultists (RESTART)", Order = 3 }));
+            null, new ConfigurationManagerAttributes { DispName = "Disable ORBIT on cultists (RESTART)", Order = 6 }));
         VanillaRaiders = Config.Bind(general, "Vanilla raiders (RESTART)", true, new ConfigDescription(
             "OFF (default): Raiders (pmcBot — Reserve / Labs) and Rogues (exUsec — Lighthouse) are controlled by ORBIT. ON: they run on BSG's vanilla brain.",
-            null, new ConfigurationManagerAttributes { DispName = "Disable ORBIT on raiders (RESTART)", Order = 2 }));
+            null, new ConfigurationManagerAttributes { DispName = "Disable ORBIT on raiders (RESTART)", Order = 5 }));
         RoamingScavs = Config.Bind(general, "Roaming Scavs", false, new ConfigDescription(
             "OFF (default): scavs stay near their spawn quartier (current cell + 8 neighbours). ON: scavs roam the whole map like PMCs. Ignored when Vanilla scavs is ON.",
             null, new ConfigurationManagerAttributes { Order = 1 }));
@@ -439,7 +439,7 @@ public class Plugin : BaseUnityPlugin
             null, new ConfigurationManagerAttributes { Order = 0 }));
         VanillaBloodhounds = Config.Bind(general, "Vanilla bloodhounds (RESTART)", false, new ConfigDescription(
             "OFF (default): Bloodhounds (Smugglers / arena spawns) are controlled by ORBIT. ON: they run on BSG's vanilla brain.",
-            null, new ConfigurationManagerAttributes { DispName = "Disable ORBIT on bloodhounds (RESTART)", Order = -1 }));
+            null, new ConfigurationManagerAttributes { DispName = "Disable ORBIT on bloodhounds (RESTART)", Order = 4 }));
         RoamingBloodhounds = Config.Bind(general, "Roaming Bloodhounds", true, new ConfigDescription(
             "OFF: Bloodhounds stay near their spawn quartier. ON (default): Bloodhounds roam the whole map. Ignored when Vanilla bloodhounds is ON.",
             null, new ConfigurationManagerAttributes { Order = -2 }));
