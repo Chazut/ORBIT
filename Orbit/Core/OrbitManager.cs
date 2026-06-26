@@ -53,6 +53,15 @@ public class OrbitManager
     private readonly BotRoster _botRoster;
     private readonly List<Agent> _liveAgents;
 
+    // Wedged-emergency-extracter watchdog. Force-despawn a committed emergency extracter that has been engaged
+    // AND stationary AND out of combat past the timeout. Runs independent of IsActive: the common stuck case is
+    // a bot that started healing (medsWorking → OrbitBrainLayer.IsActive=false), which detaches ORBIT so it
+    // never reaches the exfil and ExtractAction (IsActive-gated) never despawns it.
+    private const float EmergencyExtractStuckTimeoutSeconds = 30f;
+    private const float EmergencyExtractStuckMoveRadiusSqr = 2f * 2f;
+    private const float EmergencyExtractHealProgressEps = 0.005f; // HP-fraction rise since the last reset that counts as "heal working"
+    private readonly List<Agent> _emergencyExtractDespawn = new();
+
     public OrbitManager(BotsController botsController, BotRoster botRoster)
     {
         var gameWorld = Singleton<GameWorld>.Instance;
@@ -135,10 +144,54 @@ public class OrbitManager
     {
         StrategyManager.Update();
         ActionManager.Update();
+        TickEmergencyExtractWatchdog();
         MovementSystem.Update(_liveAgents);
         LookSystem.Update(_liveAgents);
         WaypointSystem.Update();
         NavJobExecutor.Update();
+    }
+
+    // See the EmergencyExtractStuck* constants. Force-despawn a committed emergency extracter that has been
+    // engaged AND stationary AND out of combat past the timeout — handles the case where ORBIT is detached (the
+    // bot started healing, or SAIN took over) so the normal exfil-arrival → Extracting → despawn path can never
+    // run for it. A force-despawn here = the bot leaves the map (extracts) instead of standing still bleeding out.
+    private void TickEmergencyExtractWatchdog()
+    {
+        var now = UnityEngine.Time.time;
+        for (var i = 0; i < _liveAgents.Count; i++)
+        {
+            var agent = _liveAgents[i];
+            if (agent == null || !agent.SoloExtractRequested || !agent.SoloExtractIsEmergency) continue;
+            var bot = agent.Bot;
+            var inCombat = bot?.Memory != null && (bot.Memory.HaveEnemy || bot.Memory.IsUnderFire);
+            var hp = GotoObjectiveStrategy.HpFraction(agent);
+            var moved = (agent.Position - agent.EmergencyExtractLastPos).sqrMagnitude > EmergencyExtractStuckMoveRadiusSqr;
+            // A heal that's actually WORKING = HP climbing since the last reset. This is the real "is it healing"
+            // test, not BotOwner.Medecine.Using: the death-spiral case (Butchery_Boss) had meds in progress the
+            // whole time yet HP only fell, so gating on "using meds" would never fire and re-break that case. A
+            // genuine heal (incl. a long multi-limb surgery, which restores HP in steps) bumps HP → re-arms here
+            // → never cut short.
+            var healing = hp > agent.EmergencyExtractLastHp + EmergencyExtractHealProgressEps;
+            if (inCombat || moved || healing)
+            {
+                // Still moving, pinned by SAIN combat, or recovering HP — not stuck. Reset the no-progress clock.
+                agent.EmergencyExtractLastPos = agent.Position;
+                agent.EmergencyExtractLastHp = hp;
+                agent.EmergencyExtractStillSince = now;
+                continue;
+            }
+            if (now - agent.EmergencyExtractRequestedAt >= EmergencyExtractStuckTimeoutSeconds
+                && now - agent.EmergencyExtractStillSince >= EmergencyExtractStuckTimeoutSeconds)
+                _emergencyExtractDespawn.Add(agent);
+        }
+        // Despawn AFTER the scan — ForceDespawn → RemoveAgent mutates _liveAgents.
+        for (var i = 0; i < _emergencyExtractDespawn.Count; i++)
+        {
+            var agent = _emergencyExtractDespawn[i];
+            Log.Info($"{agent} emergency-extract watchdog: engaged {now - agent.EmergencyExtractRequestedAt:F0}s, stationary {now - agent.EmergencyExtractStillSince:F0}s, ORBIT not driving it (detached / can't reach exfil) — force-despawning (counts as extracted)");
+            ExtractAction.ForceDespawn(agent);
+        }
+        _emergencyExtractDespawn.Clear();
     }
 
     private void RegisterComponents()

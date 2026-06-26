@@ -220,6 +220,12 @@ public class ExtractAction(AgentData dataset, float hysteresis) : Task<Agent>(hy
         manager?.RemoveAgent(agent);
     }
 
+    /// <summary>Despawn a bot immediately, bypassing the Status==Extracting / IsActive gating that normally
+    /// drives this action — used by the OrbitManager emergency-extract watchdog to remove a committed extracter
+    /// that can never reach the exfil (e.g. it started healing, which detaches ORBIT so this action never runs
+    /// for it). RemoveFromMap = the bot leaves the map, i.e. it extracts.</summary>
+    internal static void ForceDespawn(Agent agent) => DespawnAgent(agent);
+
     protected override void Deactivate(Agent entity)
     {
         // Combat takeover or external state change mid-extract — drop the per-agent foot tracker. The V-Ex

@@ -411,11 +411,9 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                 agent.EmergencyHpRefTime = Time.time;
                 agent.EmergencyLowSince = -1f;
                 Log.Info($"{agent} emergency extract cancelled — HP recovered to {cur:P0}, rejoining squad");
+                return;
             }
-            else
-            {
-                agent.EmergencyHpLow = Mathf.Min(agent.EmergencyHpLow, cur);
-            }
+            agent.EmergencyHpLow = Mathf.Min(agent.EmergencyHpLow, cur);
             return;
         }
 
@@ -466,6 +464,10 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
         agent.SoloExtractRequested = true;
         agent.SoloExtractIsEmergency = true;
         agent.EmergencyHpLow = cur;
+        agent.EmergencyExtractRequestedAt = Time.time;
+        agent.EmergencyExtractStillSince = Time.time;
+        agent.EmergencyExtractLastPos = agent.Position;
+        agent.EmergencyExtractLastHp = cur;
         if (activeDecline)
         {
             agent.SoloExtractReason = $"emergency (HP {cur:P0}, dropping with no recovery)";
@@ -527,7 +529,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
         return best;
     }
 
-    private static float HpFraction(Agent agent)
+    internal static float HpFraction(Agent agent)
     {
         var hc = agent.Player?.HealthController;
         if (hc == null || !hc.IsAlive) return 1f;
@@ -630,13 +632,27 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                     agent.SoloExtractTarget = waypointSystem.FindNearestEligibleExfil(squad);
                 if (agent.SoloExtractTarget != null)
                 {
-                    if (agentObjective.Location != agent.SoloExtractTarget)
+                    // Keep the bee-line ALIVE — don't point it just once. The move order is otherwise issued a
+                    // single time (only when Location changes); a SAIN-combat detour drops the destination
+                    // (OrbitBrainLayer hand-off calls SetPlayerToNavMesh) and an arrival stall flips the
+                    // objective to Failed, either of which strands the bot near the exfil with no fresh move and
+                    // no way back into the arrival→Extracting handler. Re-arm whenever it isn't already moving
+                    // to / extracting at the exfil.
+                    var firstDispatch = agentObjective.Location != agent.SoloExtractTarget;
+                    var stalled = !firstDispatch
+                                  && agentObjective.Status != ObjectiveStatus.Moving
+                                  && agentObjective.Status != ObjectiveStatus.Extracting;
+                    if (firstDispatch || stalled)
                     {
+                        var prevStatus = agentObjective.Status;
                         agentObjective.Location = agent.SoloExtractTarget;
                         agentObjective.SplinterParent = null;
                         agentObjective.Status = ObjectiveStatus.None;
                         agentObjective.DispatchTime = Time.time;
-                        Log.Info($"{agent} solo extract ({agent.SoloExtractReason}) → bee-lining to {agent.SoloExtractTarget}");
+                        if (firstDispatch)
+                            Log.Info($"{agent} solo extract ({agent.SoloExtractReason}) → bee-lining to {agent.SoloExtractTarget}");
+                        else
+                            Log.Debug($"{agent} solo extract re-arming bee-line to {agent.SoloExtractTarget} (was {prevStatus} — lost its move order)");
                     }
                     // Count the departing member as "finished" w.r.t. squad objectives so the squad keeps
                     // advancing (finishedCount == squad.Size) instead of stalling until this member despawns.
