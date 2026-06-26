@@ -999,6 +999,16 @@ public class MovementSystem
         var stuck = agent.Stuck;
         if (stuck.IdleRescued) return; // one-shot per bot lifetime
 
+        // Only rescue a bot actively trying to REACH its objective (Status == Moving). A bot that has arrived
+        // and is guarding / holding while the squad waits (Status == Finished) sits deliberately still, often
+        // >12m from a wide Synthetic anchor's centre — that is NOT "stranded", and teleporting it yanks it off
+        // its post (observed: Mr_President & KittehKun each TP'd once just waiting at a Synthetic POI).
+        if (agent.Objective?.Status != ObjectiveStatus.Moving)
+        {
+            stuck.IdleRescueSince = -1f;
+            return;
+        }
+
         // Needs somewhere it is actually trying to get to. Use the AGENT's own objective, not the squad
         // anchor — a follower legitimately holding a splinter position can be >12 m from the squad anchor,
         // and gating on the squad anchor would teleport it mid-guard.
@@ -1298,10 +1308,19 @@ public class MovementSystem
         {
             if (!TeleportSafe(agent, humanPlayers)) return;
 
+            // Prefer a teleport that actually gets the bot UNSTUCK: a navmesh point connected to its objective,
+            // or failing that next to a squadmate (known-good navmesh). The old behaviour teleported to the next
+            // corner of the SAME wedged path, dropping the bot right back where it jammed so it re-stuck at the
+            // same spot every cycle (observed: IDKwutIdo re-stuck ~4× at the same coords). Path-corner hop is
+            // only the last-resort fallback now.
+            var objLoc = agent.Objective?.Location;
+            if (objLoc != null && movementSystem.RescueTeleportToConnectedPoint(agent, objLoc.Position)) return;
+            if (movementSystem.RescueTeleportNearSquadmate(agent)) return;
+
             var teleportPos = agent.Movement.Path[agent.Movement.CurrentCorner];
             teleportPos.y += 0.25f;
             agent.Player.Teleport(teleportPos);
-            Log.Debug($"{agent} teleporting to {teleportPos}");
+            Log.Debug($"{agent} teleporting to {teleportPos} (path-corner fallback)");
         }
     }
 }
