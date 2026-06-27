@@ -53,13 +53,13 @@ public class OrbitManager
     private readonly BotRoster _botRoster;
     private readonly List<Agent> _liveAgents;
 
-    // Wedged-emergency-extracter watchdog. Force-despawn a committed emergency extracter that has been engaged
-    // AND stationary AND out of combat past the timeout. Runs independent of IsActive: the common stuck case is
-    // a bot that started healing (medsWorking → OrbitBrainLayer.IsActive=false), which detaches ORBIT so it
-    // never reaches the exfil and ExtractAction (IsActive-gated) never despawns it.
-    private const float EmergencyExtractStuckTimeoutSeconds = 30f;
+    // Emergency-extract watchdog. Force-despawn (= extract) a committed emergency extracter that reached its
+    // exfil but is sitting still there without completing the extract — e.g. ORBIT got detached at the exfil
+    // (healing / SAIN) so ExtractAction (IsActive-gated) never ran. Gated on being AT the exfil, so a bot stuck
+    // anywhere else is never despawned in a random spot.
+    private const float EmergencyExtractExfilProximitySqr = 12f * 12f; // within this of the exfil = "at the exfil"
     private const float EmergencyExtractStuckMoveRadiusSqr = 2f * 2f;
-    private const float EmergencyExtractHealProgressEps = 0.005f; // HP-fraction rise since the last reset that counts as "heal working"
+    private const float EmergencyExtractStuckSeconds = 10f;            // sat still at the exfil, not extracting, this long
     private readonly List<Agent> _emergencyExtractDespawn = new();
 
     public OrbitManager(BotsController botsController, BotRoster botRoster)
@@ -162,33 +162,28 @@ public class OrbitManager
         {
             var agent = _liveAgents[i];
             if (agent == null || !agent.SoloExtractRequested || !agent.SoloExtractIsEmergency) continue;
+            var target = agent.SoloExtractTarget;
             var bot = agent.Bot;
             var inCombat = bot?.Memory != null && (bot.Memory.HaveEnemy || bot.Memory.IsUnderFire);
-            var hp = GotoObjectiveStrategy.HpFraction(agent);
+            var atExfil = target != null && (agent.Position - target.Position).sqrMagnitude <= EmergencyExtractExfilProximitySqr;
             var moved = (agent.Position - agent.EmergencyExtractLastPos).sqrMagnitude > EmergencyExtractStuckMoveRadiusSqr;
-            // A heal that's actually WORKING = HP climbing since the last reset. This is the real "is it healing"
-            // test, not BotOwner.Medecine.Using: the death-spiral case (Butchery_Boss) had meds in progress the
-            // whole time yet HP only fell, so gating on "using meds" would never fire and re-break that case. A
-            // genuine heal (incl. a long multi-limb surgery, which restores HP in steps) bumps HP → re-arms here
-            // → never cut short.
-            var healing = hp > agent.EmergencyExtractLastHp + EmergencyExtractHealProgressEps;
-            if (inCombat || moved || healing)
+            // Only count "stuck" while the bot is sitting still AT its exfil and not fighting. Anywhere else
+            // (still travelling, stuck far away, in combat) reset the clock — never despawn off in a random spot.
+            if (!atExfil || inCombat || moved)
             {
-                // Still moving, pinned by SAIN combat, or recovering HP — not stuck. Reset the no-progress clock.
                 agent.EmergencyExtractLastPos = agent.Position;
-                agent.EmergencyExtractLastHp = hp;
                 agent.EmergencyExtractStillSince = now;
                 continue;
             }
-            if (now - agent.EmergencyExtractRequestedAt >= EmergencyExtractStuckTimeoutSeconds
-                && now - agent.EmergencyExtractStillSince >= EmergencyExtractStuckTimeoutSeconds)
+            if (agent.Objective.Status != ObjectiveStatus.Extracting
+                && now - agent.EmergencyExtractStillSince >= EmergencyExtractStuckSeconds)
                 _emergencyExtractDespawn.Add(agent);
         }
         // Despawn AFTER the scan — ForceDespawn → RemoveAgent mutates _liveAgents.
         for (var i = 0; i < _emergencyExtractDespawn.Count; i++)
         {
             var agent = _emergencyExtractDespawn[i];
-            Log.Info($"{agent} emergency-extract watchdog: engaged {now - agent.EmergencyExtractRequestedAt:F0}s, stationary {now - agent.EmergencyExtractStillSince:F0}s, ORBIT not driving it (detached / can't reach exfil) — force-despawning (counts as extracted)");
+            Log.Info($"{agent} emergency-extract watchdog: stuck at exfil {agent.SoloExtractTarget} for {now - agent.EmergencyExtractStillSince:F0}s without extracting — force-despawning (counts as extracted)");
             ExtractAction.ForceDespawn(agent);
         }
         _emergencyExtractDespawn.Clear();

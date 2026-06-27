@@ -464,10 +464,6 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
         agent.SoloExtractRequested = true;
         agent.SoloExtractIsEmergency = true;
         agent.EmergencyHpLow = cur;
-        agent.EmergencyExtractRequestedAt = Time.time;
-        agent.EmergencyExtractStillSince = Time.time;
-        agent.EmergencyExtractLastPos = agent.Position;
-        agent.EmergencyExtractLastHp = cur;
         if (activeDecline)
         {
             agent.SoloExtractReason = $"emergency (HP {cur:P0}, dropping with no recovery)";
@@ -529,7 +525,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
         return best;
     }
 
-    internal static float HpFraction(Agent agent)
+    private static float HpFraction(Agent agent)
     {
         var hc = agent.Player?.HealthController;
         if (hc == null || !hc.IsAlive) return 1f;

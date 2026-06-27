@@ -133,14 +133,12 @@ public class Agent(int id, BotOwner bot, float[] taskScores) : Entity(id, taskSc
     public readonly float[] EmergencyHpHist = new float[32];
     public readonly float[] EmergencyHpHistTime = new float[32];
     public int EmergencyHpHistCount;
-    /// <summary>Wedged-extracter watchdog (UpdateEmergencyExtract): <see cref="EmergencyExtractRequestedAt"/> is
-    /// when the emergency extract was requested; <see cref="EmergencyExtractStillSince"/> when the bot last
-    /// started sitting still, measured against <see cref="EmergencyExtractLastPos"/>. Force-extract fires when
-    /// both the engaged-time and the no-move time exceed the timeout.</summary>
-    public float EmergencyExtractRequestedAt;
+    /// <summary>Emergency-extract watchdog (OrbitManager.TickEmergencyExtractWatchdog):
+    /// <see cref="EmergencyExtractStillSince"/> is when the bot last started sitting still AT the exfil, measured
+    /// against <see cref="EmergencyExtractLastPos"/>. Force-extract fires when it sits stuck at the exfil (not
+    /// extracting, not in combat) past the timeout.</summary>
     public float EmergencyExtractStillSince;
     public UnityEngine.Vector3 EmergencyExtractLastPos;
-    public float EmergencyExtractLastHp;
 
     /// <summary>
     /// Per-archetype mini-loot value threshold, lazily resolved from the agent's own SAIN brain. 0 until
