@@ -178,5 +178,14 @@ public class Stuck
     public float IdleRescueSince = -1f; // -1 = not currently tracking an idle window
     public bool IdleRescued;            // one-shot per bot lifetime
 
+    // ── Spawn-island rescue ───────────────────────────────────────────
+    // One-shot teleport for a bot that SPAWNED on a navmesh chunk disconnected from the rest of the map. Unlike
+    // the idle-island rescue above it doesn't key off objective distance (such a bot still "arrives" at its few
+    // on-island waypoints) — it keys off being parked near spawn while unable to path to any other agent.
+    // SpawnIslandRescued doubles as "resolved": set once the bot is rescued OR proves it can reach the map.
+    public Vector3 SpawnIslandPos;
+    public float SpawnIslandSeenAt;
+    public bool SpawnIslandRescued;
+
     public override string ToString() => $"Stuck(soft: {Soft} hard: {Hard})";
 }

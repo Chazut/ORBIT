@@ -93,6 +93,7 @@ public class MovementSystem
             // because an islanded bot has no path and UpdateMovement early-returns, so the stuck remediation
             // never sees it.
             TryIdleIslandRescue(agent);
+            TrySpawnIslandRescue(agent, liveAgents);
 
             UpdateMovement(agent);
         }
@@ -994,6 +995,12 @@ public class MovementSystem
     private const float IdleRescueMinObjectiveDistSqr = 12f * 12f;
     private static readonly float[] IdleRescueRingRadii = { 4f, 8f, 16f, 28f, 45f };
 
+    // ── Spawn-island rescue thresholds ──
+    private const float SpawnIslandGraceSeconds = 30f;             // parked near spawn this long before probing
+    private const float SpawnIslandMoveRadiusSqr = 20f * 20f;      // got >this from spawn => not islanded, stop
+    private const float SpawnIslandMinReferenceDistSqr = 15f * 15f; // ignore reference agents basically on top of us
+    private const float SpawnIslandBotSafetyRadiusSqr = 5f * 5f;   // keep the TP destination clear of players/bots
+
     private void TryIdleIslandRescue(Agent agent)
     {
         var stuck = agent.Stuck;
@@ -1112,6 +1119,111 @@ public class MovementSystem
         agent.Player.Teleport(bestDest);
         ResetPath(agent);
         Log.Info($"{agent} idle-island rescue: no objective-connected point, teleported {Vector3.Distance(pos, bestDest):F0}m next to squadmate {best} instead (off the stuck chunk)");
+        return true;
+    }
+
+    // ── Spawn-island rescue ────────────────────────────────────────────────────────────────────────────
+    // One-shot teleport for a bot that SPAWNED on a navmesh chunk disconnected from the rest of the map (Streets
+    // transits, Factory silo, ...). The idle-island rescue above can't catch this: such a bot still "arrives" at
+    // its few on-island waypoints (nav-snap arrival accept), so it never reads as stranded-far-from-objective.
+    // Detect it directly — parked near spawn past a grace window AND unable to path to ANY other live agent (the
+    // rest of the bots sit on the main mesh) — then teleport it once onto the main mesh near the nearest such
+    // agent, clear of humans and other bots by a safety radius.
+    private void TrySpawnIslandRescue(Agent agent, List<Agent> liveAgents)
+    {
+        var stuck = agent.Stuck;
+        if (stuck.SpawnIslandRescued) return; // one-shot; also set once the bot proves it can reach the map
+
+        var pos = agent.Position;
+        if (stuck.SpawnIslandSeenAt <= 0f)
+        {
+            stuck.SpawnIslandPos = pos;
+            stuck.SpawnIslandSeenAt = Time.time;
+            return;
+        }
+
+        // Got somewhere => not spawn-islanded; stop probing this bot.
+        if ((pos - stuck.SpawnIslandPos).sqrMagnitude > SpawnIslandMoveRadiusSqr)
+        {
+            stuck.SpawnIslandRescued = true;
+            return;
+        }
+
+        if (Time.time - stuck.SpawnIslandSeenAt < SpawnIslandGraceSeconds) return;
+
+        // Parked near spawn for the whole grace window. Find the nearest other live agent we CANNOT reach. If we
+        // can reach ANY of them we are on the main mesh and fine.
+        Agent reference = null;
+        var bestDistSqr = float.MaxValue;
+        for (var i = 0; i < liveAgents.Count; i++)
+        {
+            var other = liveAgents[i];
+            if (other == null || other == agent) continue;
+            if (other.Player?.HealthController is not { IsAlive: true }) continue;
+            var d = (other.Position - pos).sqrMagnitude;
+            if (d < SpawnIslandMinReferenceDistSqr) continue; // too close — might be on the same chunk
+            if (IsPathComplete(pos, other.Position))
+            {
+                stuck.SpawnIslandRescued = true; // reachable => not islanded, stop checking
+                return;
+            }
+            if (d < bestDistSqr) { bestDistSqr = d; reference = other; }
+        }
+
+        if (reference == null) return; // no usable reference yet — retry next tick
+
+        if (!TeleportSafe(agent, _humanPlayers)) return; // never blink across a watching player
+        TeleportToMainMeshNear(agent, reference, liveAgents);
+    }
+
+    private bool IsPathComplete(Vector3 from, Vector3 to)
+        => NavMesh.CalculatePath(from, to, NavMesh.AllAreas, _rescuePath)
+           && _rescuePath.status == NavMeshPathStatus.PathComplete;
+
+    // Ring-scan navmesh points around `reference` (on the main mesh by construction) for one that is PathComplete
+    // to it AND clear of humans/other bots by the safety radius, and teleport the islanded bot there.
+    private void TeleportToMainMeshNear(Agent agent, Agent reference, List<Agent> liveAgents)
+    {
+        var fromPos = agent.Position;
+        var refPos = reference.Position;
+        for (var ri = 0; ri < IdleRescueRingRadii.Length; ri++)
+        {
+            var r = IdleRescueRingRadii[ri];
+            for (var a = 0; a < 8; a++)
+            {
+                var ang = a * (Mathf.PI * 2f / 8f);
+                var candidate = refPos + new Vector3(Mathf.Cos(ang) * r, 0f, Mathf.Sin(ang) * r);
+                if (!NavMesh.SamplePosition(candidate, out var hit, 2f, NavMesh.AllAreas)) continue;
+                if (!IsPathComplete(hit.position, refPos)) continue;          // genuinely on the main mesh
+                if (!IsClearOfPlayersAndBots(hit.position, agent, liveAgents)) continue;
+
+                var dest = hit.position;
+                dest.y += 0.25f;
+                agent.Player.Teleport(dest);
+                ResetPath(agent);
+                agent.Stuck.SpawnIslandRescued = true;
+                Log.Info($"{agent} spawn-island rescue: teleported {Vector3.Distance(fromPos, dest):F0}m onto the main navmesh near {reference} (was stranded on a disconnected spawn chunk)");
+                return;
+            }
+        }
+        Log.Debug($"{agent} spawn-island rescue: no safe main-mesh point near {reference} this pass — retrying");
+    }
+
+    private bool IsClearOfPlayersAndBots(Vector3 dest, Agent self, List<Agent> liveAgents)
+    {
+        for (var i = 0; i < _humanPlayers.Count; i++)
+        {
+            var p = _humanPlayers[i];
+            if (p?.HealthController is { IsAlive: true } && (p.Position - dest).sqrMagnitude < SpawnIslandBotSafetyRadiusSqr)
+                return false;
+        }
+        for (var i = 0; i < liveAgents.Count; i++)
+        {
+            var other = liveAgents[i];
+            if (other == null || other == self) continue;
+            if (other.Player?.HealthController is { IsAlive: true } && (other.Position - dest).sqrMagnitude < SpawnIslandBotSafetyRadiusSqr)
+                return false;
+        }
         return true;
     }
 
