@@ -58,12 +58,14 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
     /// </summary>
     private const float ExfilOutsideTriggerForceExtractSeconds = 15f;
 
-    // Per-agent stuck watchdog on Exfil objectives: if the bot's position barely moves for this duration
-    // while targeting an exfil, blacklist the exfil and re-pick. Walking from across the map is fine — only
-    // genuinely stationary bots trip the watchdog.
-    private const float ExfilStuckThresholdSeconds = 30f;
-    private const float ExfilStuckMoveDistSqr = 2f * 2f;
-    private readonly System.Collections.Generic.Dictionary<int, (int locId, Vector3 lastPos, float lastMoveTime)> _exfilStuckTracker = new();
+    // Per-agent stuck watchdog on ANY navigation objective: if the bot's position barely moves for this
+    // duration while still Moving toward its target, blacklist the POI and re-pick. Walking from across the map
+    // is fine — only genuinely stationary bots trip it. Keys on actual position, NOT Movement.Status, so it also
+    // catches a "Moving but not advancing" limbo at an off-navmesh loot spot where the Status-gated arrival-fail
+    // never fires (observed: a PMC sat ~2 min on a bunker container with zero remediation).
+    private const float StuckEnRouteThresholdSeconds = 30f;
+    private const float StuckEnRouteMoveDistSqr = 2f * 2f;
+    private readonly System.Collections.Generic.Dictionary<int, (int locId, Vector3 lastPos, float lastMoveTime)> _stuckEnRouteTracker = new();
 
     public override void UpdateScore(int ordinal)
     {
@@ -142,34 +144,40 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
 
                     var distanceSqr = (objective.Location.Position - agent.Position).sqrMagnitude;
 
-                    // Exfil stuck watchdog: blacklist + re-pick when the bot has stopped moving while
-                    // targeting an exfil.
-                    if (objective.Location.Category == WaypointCategory.Exfil)
+                    // Stuck-en-route watchdog (ALL categories): if the bot stops physically advancing toward its
+                    // objective for StuckEnRouteThresholdSeconds, blacklist the POI and fail the objective so the
+                    // squad re-dispatches. Keys on actual position, NOT Movement.Status — a bot can wedge in a
+                    // "Moving but not advancing" limbo at an off-navmesh loot spot (e.g. a bunker container whose
+                    // exact position isn't on the navmesh) where the Status-gated arrival-fail below never fires,
+                    // leaving it idle for minutes.
+                    //
+                    // ONLY counts while ORBIT actually drives the bot. If it has yielded to SAIN / vanilla
+                    // (IsActive false) the bot may sit still legitimately (combat, cover) — don't accumulate, and
+                    // reset so the next ORBIT-driven approach gets a fresh timer. (Deactivate clears it on the
+                    // yield transition too — this guards any tick where the agent lingers in the active set.)
+                    if (!agent.IsActive)
                     {
-                        if (!_exfilStuckTracker.TryGetValue(agent.Id, out var t)
-                            || t.locId != objective.Location.Id)
-                        {
-                            _exfilStuckTracker[agent.Id] = (objective.Location.Id, agent.Position, Time.time);
-                        }
-                        else if ((agent.Position - t.lastPos).sqrMagnitude > ExfilStuckMoveDistSqr)
-                        {
-                            _exfilStuckTracker[agent.Id] = (t.locId, agent.Position, Time.time);
-                        }
-                        else if (Time.time - t.lastMoveTime > ExfilStuckThresholdSeconds)
-                        {
-                            if (agent.Squad != null && !agent.Squad.CompletedPoiIds.Contains(objective.Location.Id))
-                            {
-                                agent.Squad.CompletedPoiIds.Add(objective.Location.Id);
-                            }
-                            objective.Status = ObjectiveStatus.Failed;
-                            _exfilStuckTracker.Remove(agent.Id);
-                            Log.Info($"{agent} stuck en-route to {objective.Location} for {ExfilStuckThresholdSeconds:F0}s — blacklisted for {agent.Squad}, rerouting");
-                            break;
-                        }
+                        _stuckEnRouteTracker.Remove(agent.Id);
                     }
-                    else if (_exfilStuckTracker.ContainsKey(agent.Id))
+                    else if (!_stuckEnRouteTracker.TryGetValue(agent.Id, out var t)
+                             || t.locId != objective.Location.Id)
                     {
-                        _exfilStuckTracker.Remove(agent.Id);
+                        _stuckEnRouteTracker[agent.Id] = (objective.Location.Id, agent.Position, Time.time);
+                    }
+                    else if ((agent.Position - t.lastPos).sqrMagnitude > StuckEnRouteMoveDistSqr)
+                    {
+                        _stuckEnRouteTracker[agent.Id] = (t.locId, agent.Position, Time.time);
+                    }
+                    else if (Time.time - t.lastMoveTime > StuckEnRouteThresholdSeconds)
+                    {
+                        if (agent.Squad != null && !agent.Squad.CompletedPoiIds.Contains(objective.Location.Id))
+                        {
+                            agent.Squad.CompletedPoiIds.Add(objective.Location.Id);
+                        }
+                        objective.Status = ObjectiveStatus.Failed;
+                        _stuckEnRouteTracker.Remove(agent.Id);
+                        Log.Info($"{agent} stuck en-route to {objective.Location} for {StuckEnRouteThresholdSeconds:F0}s without advancing — blacklisted for {agent.Squad}, rerouting");
+                        break;
                     }
 
                     // Stop sprinting once inside the 50m "scan" radius so the bot has time to spot enemies on
@@ -369,6 +377,12 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
 
     protected override void Deactivate(Agent entity)
     {
+        // Stop the stuck-en-route timer the instant ORBIT loses this agent (yielded to SAIN / vanilla, or
+        // switched task) — it must ONLY accumulate while ORBIT is actively driving the bot toward the objective.
+        // Without this, a bot held stationary by SAIN combat / cover would re-enter Goto with a stale timer and
+        // wrongly blacklist its POI. Reactivation re-arms a fresh timer.
+        _stuckEnRouteTracker.Remove(entity.Id);
+
         if (entity.Objective.Status is ObjectiveStatus.Finished or ObjectiveStatus.Failed
                                     or ObjectiveStatus.Looting or ObjectiveStatus.Extracting)
             return;
