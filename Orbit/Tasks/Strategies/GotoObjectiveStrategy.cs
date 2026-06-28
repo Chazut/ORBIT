@@ -1226,12 +1226,15 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
             if (loc.Category != WaypointCategory.ContainerLoot
                 && loc.Category != WaypointCategory.LooseLoot
                 && loc.Category != WaypointCategory.Corpse) continue;
-            // Each remaining loot POI must be blacklisted by this squad (visited + skipped, or visited +
-            // looted with item removed — looted items remove the POI from cell.Waypoints globally, so they
-            // wouldn't appear here in the first place) OR known-unreachable for this squad. An unreachable POI
-            // can never be worked: leaving it uncounted parks the squad in the cell with nothing to do until
-            // the full LootValue timeout, so treat it as cleaned and let the main complete + the squad move on.
-            if (!squad.CompletedPoiIds.Contains(loc.Id) && !waypointSystem.IsSquadKnownUnreachable(squad, loc.Id))
+            // Each remaining loot POI must be DONE for this squad — any of: looted / blacklisted
+            // (CompletedPoiIds; looted items are removed from cell.Waypoints globally so they wouldn't appear
+            // here anyway), known-unreachable (can never be worked), or value-skipped by EVERY alive member
+            // (nobody is willing to take it — below all their thresholds). Leaving any of these uncounted parks
+            // the squad in the cell with nothing to do until the full LootValue timeout, so treat them all as
+            // cleaned and let the main complete + the squad move on.
+            if (!squad.CompletedPoiIds.Contains(loc.Id)
+                && !waypointSystem.IsSquadKnownUnreachable(squad, loc.Id)
+                && !WaypointSystem.AllAliveMembersValueSkipped(squad, loc.Id))
                 return false;
         }
         return true;

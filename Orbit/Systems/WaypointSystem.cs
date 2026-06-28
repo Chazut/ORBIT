@@ -1961,7 +1961,7 @@ public class WaypointSystem
     /// CompletedPoiIds entry. Solo squads collapse to "this single bot personally skipped it" which is exactly
     /// what we want to avoid the priority-pick loop on a value-skipped Main anchor.
     /// </summary>
-    private static bool AllAliveMembersValueSkipped(Squad squad, int locId)
+    internal static bool AllAliveMembersValueSkipped(Squad squad, int locId)
     {
         if (squad?.Members == null || squad.Members.Count == 0) return false;
         var any = false;
