@@ -171,6 +171,26 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
 
             CheckTimeExtractTrigger(squad);
 
+            // Extract interrupt: the instant ExtractRequested is set, bee-line to the exfil NOW instead of
+            // finishing the current objective first (loot / guard / a ~2 min scav wait-mode pause). Without this
+            // the extract is only honoured on the next natural AssignNewObjective (objective null / wait timer
+            // expired), so a squad mid-objective stands idle for up to a wait-mode before heading out — observed
+            // as a bot frozen ~2 min after looting, between the loot-value extract trigger firing and actually
+            // getting the exfil objective. Gated on an eligible exfil actually existing so we don't churn a
+            // re-dispatch every tick when none is reachable (that case falls through to normal dispatch); once
+            // the objective IS an exfil the Category check stops it re-firing. Location==null is left to the
+            // standard null-handling below, which already routes to the exfil under ExtractRequested.
+            if (squad.ExtractRequested
+                && squadObjective.Location != null
+                && squadObjective.Location.Category != WaypointCategory.Exfil
+                && waypointSystem.FindNearestEligibleExfil(squad) != null)
+            {
+                Log.Info($"{squad} ExtractRequested — interrupting {squadObjective.Location} to bee-line to the exfil now");
+                squadObjective.Location = null;
+                AssignNewObjective(squad);
+                continue;
+            }
+
             // Opportunistic corpse interrupt: any squad member who sees an unlooted corpse within
             // DetectCorpseDistance drops the current objective to investigate. Real-Tarkov behaviour — a bot
             // walking past a body always checks it. We gate the scan on:
