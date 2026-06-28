@@ -2312,7 +2312,7 @@ public class WaypointSystem
     private const float LockedDoorDetectionRadius = 12f;
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private bool IsSquadKnownUnreachable(Squad squad, int locId)
+    internal bool IsSquadKnownUnreachable(Squad squad, int locId)
     {
         if (squad == null) return false;
         return _squadUnreachable.TryGetValue(squad.Id, out var set) && set.Contains(locId);

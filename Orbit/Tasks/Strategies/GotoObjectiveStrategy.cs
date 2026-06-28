@@ -881,6 +881,18 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                         splinterParent = squadObjective.Location;
                         _splinterScratch.Add(roamSplinter.Id);
                     }
+                    else if (squadObjective.Location != null
+                             && (squadObjective.Location.Position - agent.Position).sqrMagnitude <= squadObjective.Location.RadiusSqr)
+                    {
+                        // No roam splinter left (cell loot exhausted / all unreachable / beyond radius) and this
+                        // member is already standing on the anchor. Re-picking it is a no-op that loops every
+                        // tick ("finished anchor → already in radius → Finished → re-pick") without the bot ever
+                        // moving — the exact spin seen when a LootValue cell has nothing reachable left. Leave
+                        // the objective null so it settles into a guard; the squad wait timer (and the cell-clean
+                        // completion for LootValue) move the squad on.
+                        targetLoc = null;
+                        splinterParent = null;
+                    }
                     else
                     {
                         targetLoc = squadObjective.Location;
@@ -1213,8 +1225,11 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                 && loc.Category != WaypointCategory.Corpse) continue;
             // Each remaining loot POI must be blacklisted by this squad (visited + skipped, or visited +
             // looted with item removed — looted items remove the POI from cell.Waypoints globally, so they
-            // wouldn't appear here in the first place).
-            if (!squad.CompletedPoiIds.Contains(loc.Id)) return false;
+            // wouldn't appear here in the first place) OR known-unreachable for this squad. An unreachable POI
+            // can never be worked: leaving it uncounted parks the squad in the cell with nothing to do until
+            // the full LootValue timeout, so treat it as cleaned and let the main complete + the squad move on.
+            if (!squad.CompletedPoiIds.Contains(loc.Id) && !waypointSystem.IsSquadKnownUnreachable(squad, loc.Id))
+                return false;
         }
         return true;
     }
