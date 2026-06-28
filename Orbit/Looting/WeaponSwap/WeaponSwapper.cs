@@ -145,9 +145,11 @@ public static class WeaponSwapper
         var nick = profile.Nickname ?? "(no-nick)";
         var isBotScav = profile.Side == EPlayerSide.Savage && !profile.WillBeAPlayerScav();
 
-        return isBotScav
+        var outcome = isBotScav
             ? await TryEquipIntoFirstEmptySlotAsync(bot, candidate, nick, ct)
             : await EvaluateAndPerformAsync(bot, candidate, rootSource, nick, ct);
+        if (outcome == Outcome.Swapped) await FinalizeWeaponSwapAsync(bot, nick, ct);
+        return outcome;
     }
 
     private static readonly EquipmentSlot[] WeaponSlotsPrimaryFirst =
@@ -166,7 +168,9 @@ public static class WeaponSwapper
     {
         if (bot == null || candidate == null) return Outcome.NotApplicable;
         var nick = bot.Profile?.Nickname ?? "(no-nick)";
-        return await TryEquipIntoFirstEmptySlotAsync(bot, candidate, nick, ct);
+        var outcome = await TryEquipIntoFirstEmptySlotAsync(bot, candidate, nick, ct);
+        if (outcome == Outcome.Swapped) await FinalizeWeaponSwapAsync(bot, nick, ct);
+        return outcome;
     }
 
     private static async Task<Outcome> TryEquipIntoFirstEmptySlotAsync(BotOwner bot, Weapon candidate, string nick, CancellationToken ct)
@@ -494,6 +498,31 @@ public static class WeaponSwapper
             elapsed += pollIntervalMs;
         }
         Log.Warning($"WeaponSwap.WaitForIsChangingWeapon({nick}): hit {maxWaitMs}ms cap — proceeding");
+    }
+
+    // After a successful swap/equip, force BSG to actually re-draw the new weapon. UpdateWeaponsList alone only
+    // rebuilds the selector's internal list — the hands controller / current weapon can still reference the OLD
+    // (now-discarded) gun, so the bot enters SAIN combat and "fires" a dead reference (no shots) until BSG
+    // happens to re-select on its own. Mirror BSG's own post-inventory-change pattern (BotSecondWeaponData:
+    // UpdateWeaponsList → ChangeToMain): let any in-flight change settle, refresh the list, re-draw the main
+    // weapon, recompute power. Runs at the end of the loot session while the bot is still frozen, so it exits
+    // looting already holding the new gun.
+    private static async Task FinalizeWeaponSwapAsync(BotOwner bot, string nick, CancellationToken ct)
+    {
+        try
+        {
+            await WaitForIsChangingWeaponAsync(bot, nick, ct);
+            var selector = bot?.WeaponManager?.Selector;
+            if (selector == null) return;
+            selector.UpdateWeaponsList();
+            selector.ChangeToMain();
+            try { bot.AIData?.CalcPower(); } catch { }
+            Log.Debug($"WeaponSwap.Finalize({nick}): refreshed weapon list + re-drew main weapon so SAIN fires the new gun");
+        }
+        catch (System.Exception e)
+        {
+            Log.Warning($"WeaponSwap.Finalize({nick}): THREW {e.Message}");
+        }
     }
 
     private static bool BotHasGoodPenWeapon(BotOwner bot, List<Item> inventoryItems)
