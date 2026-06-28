@@ -136,6 +136,12 @@ public class HardStuck
     public float LastUpdate;
     public float Timer;
 
+    // Re-stick escalation: how many times we teleported this bot from ~the same spot, and where. Re-teleporting
+    // from near the last spot escalates to a farther rescue ring so a bot wedged on tight geometry escapes
+    // instead of landing a few metres away and re-wedging.
+    public int TeleportCount;
+    public Vector3 LastTeleportPos;
+
     public override string ToString()
     {
         var moveDist = Mathf.Sqrt(PositionHistory.GetDistanceSqr());

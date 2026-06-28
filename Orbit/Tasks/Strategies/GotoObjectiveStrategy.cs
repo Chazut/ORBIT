@@ -230,6 +230,24 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
             {
                 if (squadObjective.Status == SquadObjectiveState.Active)
                 {
+                    // No member actually pursued this objective when they are ALL off on a solo / emergency
+                    // extract: UpdateAgents counts a departing extracter as "finished" (so the squad keeps
+                    // advancing instead of stalling), which makes finishedCount reach squad.Size with zero real
+                    // path attempts. Treating that as an "unreachable" en-route failure wrongly blacklists the
+                    // objective — most visibly a credited own-kill corpse — and excludes it for the rest of the
+                    // raid, so once the member's HP recovers and it rejoins it never returns to the body. Hold
+                    // the objective instead (don't touch the failure streak); the rejoining member resumes it.
+                    var anyMemberPursuing = false;
+                    for (var m = 0; m < squad.Size; m++)
+                    {
+                        if (!squad.Members[m].SoloExtractRequested) { anyMemberPursuing = true; break; }
+                    }
+                    if (!anyMemberPursuing)
+                    {
+                        Log.Debug($"{squad} 'all finished' is only solo-extract departures — holding {squadObjective.Location}, not counting an en-route failure");
+                        continue;
+                    }
+
                     // Every member's path attempt came back Failed without anyone reaching the POI. After
                     // enough in a row the POI is effectively unreachable for this squad — blacklist it so the
                     // next pick goes somewhere else.
@@ -505,18 +523,24 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
         return false;
     }
 
-    /// <summary>Most recent HP sample in the agent's rolling history that is at least <paramref name="ago"/>
-    /// seconds old, or -1 if the history doesn't reach back that far yet.</summary>
+    /// <summary>Most recent HP sample in the agent's rolling history whose age is between <paramref name="ago"/>
+    /// and <paramref name="ago"/> + one sampling gap, or -1 if no sample falls in that band. The upper bound
+    /// rejects a STALE pre-gap sample (left over from a SAIN-combat sampling hole) being read as the "ago" value
+    /// — without it, an old 96% sample gets treated as "8s ago" and a bot sitting flat post-fight false-fires
+    /// active-decline.</summary>
     private static float HpFromAtLeastAgo(Agent agent, float now, float ago)
     {
         var target = now - ago;
+        // A sample staler than the window by more than one sampling gap means there was a hole in sampling, so
+        // it is not a trustworthy "ago seconds ago" reading — ignore it.
+        var floor = target - EmergencyMaxSampleGapSeconds;
         var best = -1f;
         var bestTime = -1f;
         var n = Mathf.Min(agent.EmergencyHpHistCount, agent.EmergencyHpHist.Length);
         for (var i = 0; i < n; i++)
         {
             var t = agent.EmergencyHpHistTime[i];
-            if (t <= target && t > bestTime)
+            if (t <= target && t >= floor && t > bestTime)
             {
                 bestTime = t;
                 best = agent.EmergencyHpHist[i];
@@ -759,7 +783,32 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                 var anchorReservedForOwnKill = ownKillAgentId >= 0
                                                && squadObjective.Location != null
                                                && squadObjective.Location.Id == squad.PendingOwnKillCorpseLocId;
-                if (anchorReservedForOwnKill && agent.Id == ownKillAgentId)
+                // Persistent own-kill re-route (highest priority). This agent killed someone, was credited, then
+                // got pulled away before looting (SAIN combat / healing / a solo-extract right after the kill) —
+                // the one-shot squad pending below can't help once the squad anchor has drifted off the body
+                // (combat-caller / re-dispatch while it was detached). agent.OwnKillCorpseLocId remembers the
+                // body across the detour; resolve it against THIS agent's position (so a follower killer is
+                // covered, not just the leader) and route straight to it as a personal splinter. Resolver
+                // returns null + we drop the memory once the corpse is looted / blacklisted / removed / too far.
+                Waypoint ownKillReroute = null;
+                if (agent.OwnKillCorpseLocId != 0)
+                {
+                    ownKillReroute = waypointSystem.TryGetOwnKillCorpseForAgent(squad, agent, agent.OwnKillCorpseLocId);
+                    if (ownKillReroute == null) agent.OwnKillCorpseLocId = 0;
+                }
+                if (ownKillReroute != null)
+                {
+                    targetLoc = ownKillReroute;
+                    splinterParent = squadObjective.Location;
+                    tookOwnKillCorpse = true;
+                    if (anchorReservedForOwnKill && agent.Id == ownKillAgentId)
+                    {
+                        squad.PendingOwnKillKillerAgentId = -1;
+                        squad.PendingOwnKillCorpseLocId = 0;
+                    }
+                    Log.Debug($"{agent} own-kill re-route to its corpse {targetLoc} (reactivated after a combat / heal / extract detour)");
+                }
+                else if (anchorReservedForOwnKill && agent.Id == ownKillAgentId)
                 {
                     targetLoc = squadObjective.Location;
                     splinterParent = null;

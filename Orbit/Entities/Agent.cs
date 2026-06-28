@@ -41,6 +41,15 @@ public class Agent(int id, BotOwner bot, float[] taskScores) : Entity(id, taskSc
     public int LastFailedPoiId = -1;
 
     /// <summary>
+    /// Waypoint.Id of a corpse THIS agent killed and was credited with, but was pulled away from before
+    /// looting (it detached for SAIN combat / healing / a solo-extract right after the kill). 0 = none. While
+    /// set, squad dispatch re-routes the agent back onto its own kill as a personal splinter once it is active
+    /// again — gated on the corpse still existing, unlooted, reachable and near THIS agent. Cleared
+    /// automatically (memory zeroed) once the corpse is looted / blacklisted / removed / drifts out of range.
+    /// </summary>
+    public int OwnKillCorpseLocId;
+
+    /// <summary>
     /// Counter incremented every time Goto fails on
     /// <see cref="LastFailedPoiId"/>. Reset to 1 when the agent fails on a
     /// DIFFERENT POI. Past the blacklist threshold the POI is added to the squad's <c>CompletedPoiIds</c> so

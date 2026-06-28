@@ -28,14 +28,17 @@ public class MovementSystem
     private readonly Queue<ValueTuple<Agent, NavJob>> _moveJobs;
     private readonly StuckRemediation _stuckRemediation;
     private readonly List<Player> _humanPlayers;
+    private readonly WaypointSystem _waypointSystem;
     private readonly NavMeshPath _rescuePath = new();
+    private readonly List<Waypoint> _wpScratch = new();
 
-    public MovementSystem(NavJobExecutor navJobExecutor, List<Player> humanPlayers)
+    public MovementSystem(NavJobExecutor navJobExecutor, List<Player> humanPlayers, WaypointSystem waypointSystem)
     {
         _navJobExecutor = navJobExecutor;
         _moveJobs = new Queue<(Agent, NavJob)>(20);
         _stuckRemediation = new StuckRemediation(this, humanPlayers);
         _humanPlayers = humanPlayers;
+        _waypointSystem = waypointSystem;
     }
 
     public void Update(List<Agent> liveAgents)
@@ -1000,6 +1003,7 @@ public class MovementSystem
     private const float SpawnIslandMoveRadiusSqr = 20f * 20f;      // got >this from spawn => not islanded, stop
     private const float SpawnIslandMinReferenceDistSqr = 15f * 15f; // ignore reference agents basically on top of us
     private const float SpawnIslandBotSafetyRadiusSqr = 5f * 5f;   // keep the TP destination clear of players/bots
+    private const float SpawnIslandWaypointSearchRadius = 80f;     // look this far from the bot for a player-reachable waypoint
 
     private void TryIdleIslandRescue(Agent agent)
     {
@@ -1057,12 +1061,12 @@ public class MovementSystem
         stuck.IdleRescueSince = Time.time;
     }
 
-    private bool RescueTeleportToConnectedPoint(Agent agent, Vector3 objectivePos)
+    private bool RescueTeleportToConnectedPoint(Agent agent, Vector3 objectivePos, int startRing = 0)
     {
         if (!TeleportSafe(agent, _humanPlayers)) return false;
 
         var pos = agent.Position;
-        for (var ri = 0; ri < IdleRescueRingRadii.Length; ri++)
+        for (var ri = startRing; ri < IdleRescueRingRadii.Length; ri++)
         {
             var r = IdleRescueRingRadii[ri];
             for (var a = 0; a < 8; a++)
@@ -1159,6 +1163,10 @@ public class MovementSystem
         {
             var other = liveAgents[i];
             if (other == null || other == agent) continue;
+            // Skip SAME-SQUAD agents: squadmates spawn together so they sit on the SAME island — using one as
+            // the reachability reference would read "not islanded" (the bot can reach it) or anchor the TP onto
+            // the same disconnected chunk. Only an OTHER squad anchors real (main-mesh) reachability.
+            if (agent.Squad != null && other.Squad != null && other.Squad.Id == agent.Squad.Id) continue;
             if (other.Player?.HealthController is not { IsAlive: true }) continue;
             var d = (other.Position - pos).sqrMagnitude;
             if (d < SpawnIslandMinReferenceDistSqr) continue; // too close — might be on the same chunk
@@ -1173,41 +1181,75 @@ public class MovementSystem
         if (reference == null) return; // no usable reference yet — retry next tick
 
         if (!TeleportSafe(agent, _humanPlayers)) return; // never blink across a watching player
-        TeleportToMainMeshNear(agent, reference, liveAgents);
+        // Reachability anchor: the human PLAYER (main mesh, what the player sees) if one is alive, else the
+        // nearest other agent as a reachability reference. Either way we teleport to a WAYPOINT reachable from
+        // it — NEVER next to another bot.
+        var anchorPos = reference.Position;
+        for (var i = 0; i < _humanPlayers.Count; i++)
+        {
+            var p = _humanPlayers[i];
+            if (p?.HealthController is { IsAlive: true }) { anchorPos = p.Position; break; }
+        }
+        if (TryFindReachableWaypoint(agent, liveAgents, agent.Position, anchorPos, SpawnIslandWaypointSearchRadius, out var wpDest))
+        {
+            var fromPos = agent.Position;
+            agent.Player.Teleport(wpDest);
+            ResetPath(agent);
+            agent.Stuck.SpawnIslandRescued = true;
+            Log.Info($"{agent} spawn-island rescue: teleported {Vector3.Distance(fromPos, wpDest):F0}m to the nearest reachable waypoint (off the disconnected spawn chunk)");
+            return;
+        }
+        // No reachable waypoint this pass — leave the bot put and retry next tick. We NEVER drop it next to
+        // another bot.
+    }
+
+    // Find a teleport destination at the nearest WAYPOINT to fromPos that is reachable (PathComplete) from
+    // anchorPos and clear of players/bots by the safety radius. Used by the spawn-island rescue so an islanded
+    // bot lands on a real POI on the reachable main mesh — never next to another bot.
+    private bool TryFindReachableWaypoint(Agent agent, List<Agent> liveAgents, Vector3 fromPos, Vector3 anchorPos, float maxRadius, out Vector3 dest)
+    {
+        dest = Vector3.zero;
+        if (_waypointSystem == null) return false;
+
+        var cells = _waypointSystem.Cells;
+        var w = cells.GetLength(0);
+        var h = cells.GetLength(1);
+        var center = _waypointSystem.WorldToCell(fromPos);
+        var range = Mathf.CeilToInt(maxRadius / _waypointSystem.CellSize);
+        var maxRadSqr = maxRadius * maxRadius;
+        _wpScratch.Clear();
+        for (var dx = -range; dx <= range; dx++)
+        for (var dy = -range; dy <= range; dy++)
+        {
+            var cx = center.x + dx;
+            var cy = center.y + dy;
+            if (cx < 0 || cy < 0 || cx >= w || cy >= h) continue;
+            var wps = cells[cx, cy].Waypoints;
+            for (var k = 0; k < wps.Count; k++)
+            {
+                var wp = wps[k];
+                if ((wp.Position - fromPos).sqrMagnitude <= maxRadSqr) _wpScratch.Add(wp);
+            }
+        }
+        _wpScratch.Sort((x, y) => (x.Position - fromPos).sqrMagnitude.CompareTo((y.Position - fromPos).sqrMagnitude));
+
+        var cap = Mathf.Min(_wpScratch.Count, 40); // bound the CalculatePath calls
+        for (var i = 0; i < cap; i++)
+        {
+            var wp = _wpScratch[i];
+            if (!_waypointSystem.IsReachableFromPosition(anchorPos, wp.Position)) continue;
+            if (!NavMesh.SamplePosition(wp.Position, out var hit, 2f, NavMesh.AllAreas)) continue;
+            if (!IsClearOfPlayersAndBots(hit.position, agent, liveAgents)) continue;
+            dest = hit.position;
+            dest.y += 0.25f;
+            return true;
+        }
+        return false;
     }
 
     private bool IsPathComplete(Vector3 from, Vector3 to)
         => NavMesh.CalculatePath(from, to, NavMesh.AllAreas, _rescuePath)
            && _rescuePath.status == NavMeshPathStatus.PathComplete;
-
-    // Ring-scan navmesh points around `reference` (on the main mesh by construction) for one that is PathComplete
-    // to it AND clear of humans/other bots by the safety radius, and teleport the islanded bot there.
-    private void TeleportToMainMeshNear(Agent agent, Agent reference, List<Agent> liveAgents)
-    {
-        var fromPos = agent.Position;
-        var refPos = reference.Position;
-        for (var ri = 0; ri < IdleRescueRingRadii.Length; ri++)
-        {
-            var r = IdleRescueRingRadii[ri];
-            for (var a = 0; a < 8; a++)
-            {
-                var ang = a * (Mathf.PI * 2f / 8f);
-                var candidate = refPos + new Vector3(Mathf.Cos(ang) * r, 0f, Mathf.Sin(ang) * r);
-                if (!NavMesh.SamplePosition(candidate, out var hit, 2f, NavMesh.AllAreas)) continue;
-                if (!IsPathComplete(hit.position, refPos)) continue;          // genuinely on the main mesh
-                if (!IsClearOfPlayersAndBots(hit.position, agent, liveAgents)) continue;
-
-                var dest = hit.position;
-                dest.y += 0.25f;
-                agent.Player.Teleport(dest);
-                ResetPath(agent);
-                agent.Stuck.SpawnIslandRescued = true;
-                Log.Info($"{agent} spawn-island rescue: teleported {Vector3.Distance(fromPos, dest):F0}m onto the main navmesh near {reference} (was stranded on a disconnected spawn chunk)");
-                return;
-            }
-        }
-        Log.Debug($"{agent} spawn-island rescue: no safe main-mesh point near {reference} this pass — retrying");
-    }
 
     private bool IsClearOfPlayersAndBots(Vector3 dest, Agent self, List<Agent> liveAgents)
     {
@@ -1420,13 +1462,22 @@ public class MovementSystem
         {
             if (!TeleportSafe(agent, humanPlayers)) return;
 
+            // Escalate on RE-STICK: if we are teleporting again from ~the same spot as last time, the bot landed
+            // and re-wedged, so jump to a farther rescue ring (then a squadmate) instead of dropping it 4m away
+            // to re-stick again (observed: Arangr re-stuck ~10min on Streets door geometry).
+            var stuck = agent.Stuck.Hard;
+            var pos = agent.Position;
+            const float reStuckRadiusSqr = 10f * 10f;
+            stuck.TeleportCount = stuck.TeleportCount > 0 && (pos - stuck.LastTeleportPos).sqrMagnitude < reStuckRadiusSqr
+                ? stuck.TeleportCount + 1
+                : 1;
+            stuck.LastTeleportPos = pos;
+            var startRing = stuck.TeleportCount <= 1 ? 0 : stuck.TeleportCount == 2 ? 2 : 3; // rings {4,8,16,28,45}
+
             // Prefer a teleport that actually gets the bot UNSTUCK: a navmesh point connected to its objective,
-            // or failing that next to a squadmate (known-good navmesh). The old behaviour teleported to the next
-            // corner of the SAME wedged path, dropping the bot right back where it jammed so it re-stuck at the
-            // same spot every cycle (observed: IDKwutIdo re-stuck ~4× at the same coords). Path-corner hop is
-            // only the last-resort fallback now.
+            // else next to a squadmate. Path-corner hop is only the last-resort fallback.
             var objLoc = agent.Objective?.Location;
-            if (objLoc != null && movementSystem.RescueTeleportToConnectedPoint(agent, objLoc.Position)) return;
+            if (objLoc != null && movementSystem.RescueTeleportToConnectedPoint(agent, objLoc.Position, startRing)) return;
             if (movementSystem.RescueTeleportNearSquadmate(agent)) return;
 
             var teleportPos = agent.Movement.Path[agent.Movement.CurrentCorner];

@@ -785,6 +785,41 @@ public class WaypointSystem
     }
 
     /// <summary>
+    /// Persistent own-kill re-route resolver. Like <see cref="TryPickOwnKillCorpse"/> but for ONE specific
+    /// corpse and gated on the KILLER agent's own position rather than the squad leader's — so a follower who
+    /// got pulled off its kill (combat / heal / extract) is routed back to it on reactivation without dragging
+    /// the whole squad. Returns the corpse waypoint if it still exists, is unlooted, unclaimed, reachable and
+    /// within range of the agent; null otherwise (the caller drops its OwnKillCorpseLocId memory on null). The
+    /// loot-faction gate is already applied upstream — only PMC / PlayerScav / bot-scav killers ever get
+    /// OwnKillCorpseLocId set in CorpseRegistrationPatch.
+    /// </summary>
+    internal Waypoint TryGetOwnKillCorpseForAgent(Squad squad, Agent agent, int locId)
+    {
+        if (squad == null || agent == null || locId == 0) return null;
+        if (!WasCorpseKilledBySquad(locId, squad.Id)) return null; // tag dropped (looted elsewhere / squad recycled)
+        if (squad.CompletedPoiIds.Contains(locId)) return null;     // blacklisted / already looted
+        if (_claims.ContainsKey(locId)) return null;                // a squadmate is already on it
+        if (!_waypointCells.TryGetValue(locId, out var coords)) return null;
+        // Stale-kill gate from the KILLER's cell: don't chase a body left far behind after a long detour.
+        var agentCell = WorldToCell(agent.Position);
+        var cellDelta = coords - agentCell;
+        if (Mathf.Abs(cellDelta.x) > OwnKillCorpseMaxCellDistance
+            || Mathf.Abs(cellDelta.y) > OwnKillCorpseMaxCellDistance)
+        {
+            return null;
+        }
+        var cell = _cells[coords.x, coords.y];
+        Waypoint corpse = null;
+        for (var i = 0; i < cell.Waypoints.Count; i++)
+        {
+            if (cell.Waypoints[i].Id == locId) { corpse = cell.Waypoints[i]; break; }
+        }
+        if (corpse == null || corpse.Category != WaypointCategory.Corpse) return null;
+        if (!IsWaypointReachable(corpse, squad)) return null;
+        return corpse;
+    }
+
+    /// <summary>
     /// Raycast from the squad leader's eye position to the corpse, using the same HighPolyWithTerrainMask BSG
     /// bots use for cover/vision checks. Returns true if nothing blocks the line.
     /// </summary>

@@ -87,9 +87,9 @@ public class OrbitManager
 
         NavJobExecutor = new NavJobExecutor();
 
-        MovementSystem = new MovementSystem(NavJobExecutor, humanPlayers);
-        LookSystem = new LookSystem();
         WaypointSystem = new WaypointSystem(MapId, Waypoints, botsController, humanPlayers);
+        MovementSystem = new MovementSystem(NavJobExecutor, humanPlayers, WaypointSystem);
+        LookSystem = new LookSystem();
         DoorSystem = new DoorSystem();
 
         RegisterComponents();
