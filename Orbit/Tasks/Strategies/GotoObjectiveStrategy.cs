@@ -1078,6 +1078,9 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
             if (main.Completed) continue;
             allDone = false;
             CheckMainCompletion(squad, main, now);
+            // A main just flipped Completed → bump the revision so raid-review re-snapshots immediately instead
+            // of showing the finished main as "in progress" until its next periodic poll.
+            if (main.Completed) Orbit.Api.OrbitTelemetry.MainObjectivesRevision++;
         }
         if (allDone && !squad.ExtractRequested && Plugin.MainObjectivesExtractOnAllCompleted.Value)
         {

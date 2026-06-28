@@ -20,6 +20,14 @@ public static class OrbitTelemetry
     public static bool IsAvailable => Singleton<OrbitManager>.Instance != null;
 
     /// <summary>
+    /// Monotonic counter bumped every time a squad main objective flips to Completed. raid-review polls the
+    /// main-objectives snapshot on a slow interval; reading this cheap int each tick lets it capture a fresh
+    /// snapshot the instant a main completes, instead of leaving a finished main shown as "in progress" until
+    /// the next poll. Not reset between raids (consumers track deltas).
+    /// </summary>
+    public static int MainObjectivesRevision;
+
+    /// <summary>
     /// Resolve a bot's current objective by profile id. Returns null when no ORBIT-managed agent matches, the
     /// agent is inactive, or it has no objective. Lookup is O(N) over the live agent list — fine at the
     /// pacing raid-review uses but caller may want to batch.
