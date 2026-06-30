@@ -145,6 +145,7 @@ public class LootContainerAction(AgentData dataset, WaypointSystem waypointSyste
             // the whole squad into ExtractRequested mode. From the next dispatch on, the strategy bypasses
             // normal POI selection and routes straight to the nearest eligible exfil. One-way switch.
             CheckExtractTrigger(agent);
+            CheckSoloLootExtract(agent);
         }
         else
         {
@@ -368,6 +369,40 @@ public class LootContainerAction(AgentData dataset, WaypointSystem waypointSyste
     }
 
     /// <summary>
+    /// Per-member solo extract on the loot threshold: when this agent's own looted value crosses its own
+    /// threshold, roll once (exactly once per member, so repeated loots don't compound into a certainty); on a
+    /// win the member peels off to extract alone while the squad keeps playing.
+    /// </summary>
+    private static void CheckSoloLootExtract(Agent agent)
+    {
+        if (agent == null || agent.SoloExtractRequested || agent.SoloLootThresholdRolled) return;
+        if (agent.Squad == null || agent.Squad.ExtractRequested) return;
+
+        var chancePct = LootConfig.SoloLootExtractChancePct?.Value ?? 50;
+        if (chancePct <= 0) return;
+
+        var ownThreshold = GetOrResolveAgentExtractThreshold(agent);
+        if (ownThreshold <= 0f) return; // not resolved yet / feature disabled — retry on the next loot
+
+        var go = agent.Player?.gameObject;
+        var ownLooted = go != null ? (go.GetComponent<OrbitLootHandler>()?.Stats?.TotalGained ?? 0f) : 0f;
+        if (ownLooted < ownThreshold) return;
+
+        agent.SoloLootThresholdRolled = true;
+        if (UnityEngine.Random.Range(0, 100) < chancePct)
+        {
+            agent.SoloExtractRequested = true;
+            // Surfaces in the Raid Review "Extracting: <reason>" tooltip, so keep it short.
+            agent.SoloExtractReason = $"own loot ≥ {ownThreshold / 1000f:F0}k₽";
+            Log.Info($"{agent} hit its OWN extract threshold ({ownLooted:N0}₽ >= {ownThreshold:N0}₽) and won the {chancePct}% solo-extract roll — peeling off to extract alone");
+        }
+        else
+        {
+            Log.Info($"{agent} hit its OWN extract threshold ({ownLooted:N0}₽) but lost the {chancePct}% solo-extract roll — staying with the squad");
+        }
+    }
+
+    /// <summary>
     /// Apply the appropriate blacklist after a no-take loot session. Bot scavs use squad-wide blacklist
     /// (random-roll model, no threshold). Empty/errored sessions also squad-blacklist. Bypass-item-present
     /// sessions blacklist only for the looter. Otherwise, smart per-member: squad members whose own threshold
@@ -529,14 +564,14 @@ public class LootContainerAction(AgentData dataset, WaypointSystem waypointSyste
         // blacklisted for the squad (CompletedPoiIds) so the next FindNearbySweepTarget call sees it as
         // already- consumed and returns the next closest item. Caps at a few retries to keep the loop
         // bounded.
-        var coverage = Mathf.Clamp01(Plugin.LootCoveragePct.Value);
+        var coverage = Mathf.Clamp01(Orbit.Sain.PersonalityFallback.LootCoverage);
         Waypoint next = null;
         var coverageDisabled = coverage >= 0.9999f;
         for (var attempt = 0; attempt < ScavengeSweepMaxCandidates; attempt++)
         {
             var sweepRadius = agent.Squad?.Personality != null
                 ? agent.Squad.Personality.ScavengeSweepRadius
-                : Plugin.ScavengeSweepRadius.Value;
+                : Orbit.Sain.PersonalityFallback.ScavengeSweepRadius;
             var candidate = waypointSystem.FindNearbySweepTarget(agent.Position, agent, sweepRadius);
             if (candidate == null) return false;
             if (coverageDisabled || Random.value < coverage)

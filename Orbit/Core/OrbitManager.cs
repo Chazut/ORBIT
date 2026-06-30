@@ -53,6 +53,13 @@ public class OrbitManager
     private readonly BotRoster _botRoster;
     private readonly List<Agent> _liveAgents;
 
+    private const float EmergencyExtractExfilProximitySqr = 12f * 12f;
+    private const float EmergencyExtractStuckMoveRadiusSqr = 2f * 2f;
+    // Kept above GotoObjectiveStrategy.EmergencyBleedStoppedSeconds (12s) so a bot that recovers can be cancelled
+    // and rejoin its squad before this fires, instead of being force-despawned just for bleeding near an exfil.
+    private const float EmergencyExtractStuckSeconds = 14f;
+    private readonly List<Agent> _emergencyExtractDespawn = new();
+
     public OrbitManager(BotsController botsController, BotRoster botRoster)
     {
         var gameWorld = Singleton<GameWorld>.Instance;
@@ -78,9 +85,9 @@ public class OrbitManager
 
         NavJobExecutor = new NavJobExecutor();
 
-        MovementSystem = new MovementSystem(NavJobExecutor, humanPlayers);
-        LookSystem = new LookSystem();
         WaypointSystem = new WaypointSystem(MapId, Waypoints, botsController, humanPlayers);
+        MovementSystem = new MovementSystem(NavJobExecutor, humanPlayers, WaypointSystem);
+        LookSystem = new LookSystem();
         DoorSystem = new DoorSystem();
 
         RegisterComponents();
@@ -96,6 +103,16 @@ public class OrbitManager
 
     public Agent AddAgent(BotOwner bot)
     {
+        // A runtime brain swap (e.g. MoreBotsAPI on custom bots) makes BigBrain rebuild the brain and re-enter
+        // here for a BotOwner that already has an Agent. Without this dedup each swap leaves an orphan agent that
+        // holds a squad slot and never moves (its layer is dead), stalling the squad on the "all arrived" gate.
+        var existing = _botRoster.GetAgent(bot);
+        if (existing != null)
+        {
+            Log.Debug($"AddAgent: reusing {existing} (brain re-instantiation, no duplicate agent created)");
+            return existing;
+        }
+
         var agent = AgentData.AddEntity(bot, ActionManager.Tasks.Length);
         SquadRegistry.AddAgent(agent);
         _botRoster.AddAgent(agent);
@@ -104,6 +121,11 @@ public class OrbitManager
 
     public void RemoveAgent(Agent agent)
     {
+        // Death can fire RemoveAgent once per brain layer wired for this bot (each layer's OnPlayerDead survives
+        // brain swaps), but the teardown below is not idempotent (id slots get recycled). Bail unless this agent
+        // is still the live registration; the first pass nulls the roster slot and later passes no-op.
+        if (_botRoster.GetAgent(agent.Bot) != agent) return;
+
         AgentData.RemoveEntity(agent);
         SquadRegistry.RemoveAgent(agent);
         ActionManager.RemoveEntity(agent);
@@ -114,11 +136,46 @@ public class OrbitManager
     {
         StrategyManager.Update();
         ActionManager.Update();
+        TickEmergencyExtractWatchdog();
         MovementSystem.Update(_liveAgents);
         LookSystem.Update(_liveAgents);
         WaypointSystem.Update();
-
         NavJobExecutor.Update();
+    }
+
+    // Force-despawn (= extract) an emergency extracter sat still at its exfil, out of combat, past the timeout.
+    // Covers the case where ORBIT is detached (healing / SAIN) so the normal arrival -> Extracting path never runs.
+    private void TickEmergencyExtractWatchdog()
+    {
+        var now = UnityEngine.Time.time;
+        for (var i = 0; i < _liveAgents.Count; i++)
+        {
+            var agent = _liveAgents[i];
+            if (agent == null || !agent.SoloExtractRequested || !agent.SoloExtractIsEmergency) continue;
+            var target = agent.SoloExtractTarget;
+            var bot = agent.Bot;
+            var inCombat = bot?.Memory != null && (bot.Memory.HaveEnemy || bot.Memory.IsUnderFire);
+            var atExfil = target != null && (agent.Position - target.Position).sqrMagnitude <= EmergencyExtractExfilProximitySqr;
+            var moved = (agent.Position - agent.EmergencyExtractLastPos).sqrMagnitude > EmergencyExtractStuckMoveRadiusSqr;
+            // Any state other than sitting still at the exfil resets the clock, so it's never despawned elsewhere.
+            if (!atExfil || inCombat || moved)
+            {
+                agent.EmergencyExtractLastPos = agent.Position;
+                agent.EmergencyExtractStillSince = now;
+                continue;
+            }
+            if (agent.Objective.Status != ObjectiveStatus.Extracting
+                && now - agent.EmergencyExtractStillSince >= EmergencyExtractStuckSeconds)
+                _emergencyExtractDespawn.Add(agent);
+        }
+        // Despawn after the scan, since ForceDespawn -> RemoveAgent mutates _liveAgents.
+        for (var i = 0; i < _emergencyExtractDespawn.Count; i++)
+        {
+            var agent = _emergencyExtractDespawn[i];
+            Log.Info($"{agent} emergency-extract watchdog: stuck at exfil {agent.SoloExtractTarget} for {now - agent.EmergencyExtractStillSince:F0}s without extracting — force-despawning (counts as extracted)");
+            ExtractAction.ForceDespawn(agent);
+        }
+        _emergencyExtractDespawn.Clear();
     }
 
     private void RegisterComponents()

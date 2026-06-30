@@ -137,6 +137,9 @@ public class CorpseRegistrationPatch : ModulePatch
                 // dispatch is set.
                 a.Squad.PendingOwnKillKillerAgentId = a.Id;
                 a.Squad.PendingOwnKillCorpseLocId = loc.Id;
+                // Persistent backup: re-routes the killer back to this body on reactivation even if it detaches
+                // (SAIN combat / healing / solo-extract) before the one-shot squad pending above fires.
+                a.OwnKillCorpseLocId = loc.Id;
                 Log.Info($"CorpseRegistration: {a} ({a.Squad}) credited with {loc} — forced squad re-dispatch + direct-route on next tick");
                 return;
             }

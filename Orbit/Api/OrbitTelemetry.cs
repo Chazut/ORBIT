@@ -20,6 +20,12 @@ public static class OrbitTelemetry
     public static bool IsAvailable => Singleton<OrbitManager>.Instance != null;
 
     /// <summary>
+    /// Bumped whenever a squad main objective flips to Completed, so a slow poller can detect completions via
+    /// deltas without waiting for its next interval. Not reset between raids.
+    /// </summary>
+    public static int MainObjectivesRevision;
+
+    /// <summary>
     /// Resolve a bot's current objective by profile id. Returns null when no ORBIT-managed agent matches, the
     /// agent is inactive, or it has no objective. Lookup is O(N) over the live agent list — fine at the
     /// pacing raid-review uses but caller may want to batch.
@@ -52,9 +58,16 @@ public static class OrbitTelemetry
         var y = loc?.Position.y ?? 0f;
         var z = loc?.Position.z ?? 0f;
 
+        // A member's own solo/emergency extract takes precedence over the squad-wide reason for display.
         var extractReason = "";
         var squad = agent.Squad;
-        if (squad != null && squad.ExtractRequested)
+        if (agent.SoloExtractRequested)
+        {
+            extractReason = agent.SoloExtractIsEmergency
+                ? "emergency extract"
+                : (string.IsNullOrEmpty(agent.SoloExtractReason) ? "loot threshold reached" : agent.SoloExtractReason);
+        }
+        else if (squad != null && squad.ExtractRequested)
         {
             extractReason = squad.ExtractRequestedReason ?? "";
         }

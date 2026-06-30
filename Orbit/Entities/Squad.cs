@@ -163,6 +163,22 @@ public class Squad(int id, float[] taskScores, int targetMembersCount) : Entity(
     public float LastOpportunisticCorpseScanTime;
 
     /// <summary>
+    /// Corpse-stuck watchdog: if the same corpse stays the objective past the timeout without completing, the
+    /// strategy blacklists it and re-dispatches so the squad doesn't sit on it forever. (-1 = no corpse.)
+    /// </summary>
+    public int CorpseWatchdogLocId = -1;
+    public float CorpseWatchdogSince;
+
+    /// <summary>
+    /// Time.time the decision loop last ran. Drives the degraded-tickrate throttle: squads far from every player
+    /// re-decide on a longer interval instead of every strategy tick.
+    /// </summary>
+    public float LastDecisionTickTime;
+
+    // Tracked only so we can log the near/far transition once each, not on every throttled tick.
+    public bool DecisionThrottled;
+
+    /// <summary>
     /// World position where this squad's leader spawned (captured once at squad creation). Used by the
     /// waypoint system to derive an Infiltration name from the closest SpawnPointMarker when the bot's
     /// <c>Profile.Info.EntryPoint</c> is empty — covers PMC bots spawned

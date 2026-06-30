@@ -167,6 +167,12 @@ public static class BotTypeUtils
     public static bool IsRaider(this WildSpawnType wildSpawnType)
         => wildSpawnType is WildSpawnType.pmcBot or WildSpawnType.exUsec;
 
+    /// <summary>Bloodhounds (arena-event spawns), driven like the Goons with the same Roaming / Vanilla toggles.</summary>
+    public static bool IsBloodhound(this WildSpawnType wildSpawnType)
+        => wildSpawnType is WildSpawnType.arenaFighter
+            or WildSpawnType.arenaFighterEvent
+            or WildSpawnType.crazyAssaultEvent;
+
     public static bool IsBoss(WildSpawnType wildSpawnType)
     {
         switch (wildSpawnType)

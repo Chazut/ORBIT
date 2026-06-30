@@ -11,7 +11,7 @@ namespace Orbit.Patches;
 
 /// <summary>
 /// Logs the small "soft" rescue teleport BSG fires via BotMover.Teleport. Strictly for diagnosing pathing
-/// pathologies — production builds noop this via Log.Debug being [Conditional("DEBUG")].
+/// pathologies — only written when the Debug log level is enabled (F12 Log levels), off in the default config.
 /// </summary>
 public class SoftTeleportTracePatch : ModulePatch
 {

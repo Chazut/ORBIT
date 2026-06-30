@@ -238,6 +238,9 @@ public class WaypointSystem
     /// move, the pull follows them.</summary>
     public void Update()
     {
+        // Before the pacing gate so the deferred door-routing after-samples fire every frame.
+        DoorRoutingDiag.Tick();
+
         if (_convergenceUpdatePacing.Blocked())
             return;
         CalculateConvergence();
@@ -614,10 +617,9 @@ public class WaypointSystem
     }
 
     /// <summary>
-    /// Decides whether this entity should be denied RequestFar (the map- wide dispatch fallback). Scavs are
-    /// pinned by default (Plugin.RoamingScavs OFF) — keeps them in their spawn quartier. Goons are NOT pinned
-    /// by default (Plugin.RoamingGoons ON, since vanilla Tarkov has them roaming across the map). Everyone
-    /// else (PMCs, raiders, bosses, cultists, bloodhounds) roams freely.
+    /// Decides whether this entity should be denied RequestFar (the map-wide dispatch fallback). Scavs are
+    /// pinned to their spawn area by default; Goons and Bloodhounds roam by default (matching vanilla) but can
+    /// be pinned via their toggles. Everyone else (PMCs, raiders, bosses, cultists) roams freely.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static bool ScavOrIslandedLocalOnly(Entity entity)
@@ -631,6 +633,7 @@ public class WaypointSystem
         var isPlayerScav = leaderBot?.Profile != null && leaderBot.Profile.WillBeAPlayerScav();
         if (role.Value.IsScav() && !isPlayerScav && !Plugin.RoamingScavs.Value) return true;
         if (role.Value.IsGoon() && !Plugin.RoamingGoons.Value) return true;
+        if (role.Value.IsBloodhound() && !Plugin.RoamingBloodhounds.Value) return true;
         return false;
     }
 
@@ -718,9 +721,22 @@ public class WaypointSystem
     /// Returns the first reachable, unclaimed, non-blacklisted runtime Corpse waypoint that this squad is
     /// credited with the kill on, or null if none exist.
     /// </summary>
-    private Waypoint TryPickOwnKillCorpse(Squad squad)
+    internal Waypoint TryPickOwnKillCorpse(Squad squad)
     {
         if (squad == null) return null;
+
+        // Loot-faction gate: non-loot factions have no loot routine, so a bee-line to their own kill pins the
+        // squad on a body it can't loot. Mirrors SquadCanUseWaypoint and the CorpseRegistrationPatch bee-line
+        // skip; lenient on an unknown role since non-loot factions always have a known role.
+        var leaderRole = squad.Leader?.Bot?.Profile?.Info?.Settings?.Role;
+        if (leaderRole.HasValue)
+        {
+            var leaderIsPmc = leaderRole.Value.IsPMC();
+            var leaderIsPlayerScav = squad.Leader?.Bot?.Profile != null && squad.Leader.Bot.Profile.WillBeAPlayerScav();
+            var leaderIsBotScav = leaderRole.Value.IsScav() && !leaderIsPlayerScav;
+            if (!leaderIsPmc && !leaderIsPlayerScav && !leaderIsBotScav) return null;
+        }
+
         var leaderCell = WorldToCell(squad.Leader?.Bot?.Position ?? Vector3.zero);
         foreach (var kvp in _corpseKillerSquadId)
         {
@@ -758,6 +774,37 @@ public class WaypointSystem
             return corpse;
         }
         return null;
+    }
+
+    /// <summary>
+    /// Own-kill re-route resolver for ONE corpse, gated on the killer agent's own position rather than the
+    /// squad leader's, so a follower pulled off its kill is routed back without dragging the whole squad.
+    /// Returns null if it no longer qualifies (the caller drops its OwnKillCorpseLocId memory on null).
+    /// </summary>
+    internal Waypoint TryGetOwnKillCorpseForAgent(Squad squad, Agent agent, int locId)
+    {
+        if (squad == null || agent == null || locId == 0) return null;
+        if (!WasCorpseKilledBySquad(locId, squad.Id)) return null;
+        if (squad.CompletedPoiIds.Contains(locId)) return null;
+        if (_claims.ContainsKey(locId)) return null;
+        if (!_waypointCells.TryGetValue(locId, out var coords)) return null;
+        // Stale-kill gate from the KILLER's cell: don't chase a body left far behind after a long detour.
+        var agentCell = WorldToCell(agent.Position);
+        var cellDelta = coords - agentCell;
+        if (Mathf.Abs(cellDelta.x) > OwnKillCorpseMaxCellDistance
+            || Mathf.Abs(cellDelta.y) > OwnKillCorpseMaxCellDistance)
+        {
+            return null;
+        }
+        var cell = _cells[coords.x, coords.y];
+        Waypoint corpse = null;
+        for (var i = 0; i < cell.Waypoints.Count; i++)
+        {
+            if (cell.Waypoints[i].Id == locId) { corpse = cell.Waypoints[i]; break; }
+        }
+        if (corpse == null || corpse.Category != WaypointCategory.Corpse) return null;
+        if (!IsWaypointReachable(corpse, squad)) return null;
+        return corpse;
     }
 
     /// <summary>
@@ -849,6 +896,9 @@ public class WaypointSystem
                         var loc = locs[i];
                         if (loc.Category != WaypointCategory.Corpse) continue;
                         if (squad.CompletedPoiIds.Contains(loc.Id)) continue;
+                        // Per-agent (not squad-wide CompletedPoiIds): without this the same member re-detects
+                        // its own value-skip on LoS and oscillates back forever; a keener member can still take it.
+                        if (member.ValueSkippedPoiIds.Contains(loc.Id)) continue;
                         if (_claims.ContainsKey(loc.Id)) continue;
 
                         var delta = loc.Position - memberPos;
@@ -987,6 +1037,22 @@ public class WaypointSystem
         if (bestSameFloor != null) return bestSameFloor;
         if (preferSameFloor && best != null)
             Log.Debug($"FindRoamSplinterForMember: no same-floor splinter in radius (member Y={memberPos.y:F1}) — cross-floor pick {best} (Y={best.Position.y:F1})");
+        return best;
+    }
+
+    /// <summary>
+    /// Squared distance to the nearest LIVING human player, or float.MaxValue if there are none.
+    /// </summary>
+    public float NearestHumanDistanceSqr(Vector3 pos)
+    {
+        var best = float.MaxValue;
+        for (var i = 0; i < _humanPlayers.Count; i++)
+        {
+            var p = _humanPlayers[i];
+            if (p?.HealthController is not { IsAlive: true }) continue;
+            var d = (p.Position - pos).sqrMagnitude;
+            if (d < best) best = d;
+        }
         return best;
     }
 
@@ -1191,7 +1257,7 @@ public class WaypointSystem
         if (squad == null) return;
         var coverageRaw = squad.Personality != null
             ? squad.Personality.LootCoverage
-            : Plugin.LootCoveragePct.Value;
+            : Orbit.Sain.PersonalityFallback.LootCoverage;
         var coverage = Mathf.Clamp01(coverageRaw);
         if (coverage >= 0.9999f) return; // feature disabled
 
@@ -1664,7 +1730,7 @@ public class WaypointSystem
         var isMainAnchor = IsWaypointMainAnchorOfSquad(squad, pick);
         var intermediateRaw = squad.Personality != null
             ? squad.Personality.LockedDoorUnlockProba
-            : Plugin.MainObjectivesUnlockProbabilityIntermediate.Value;
+            : Orbit.Sain.PersonalityFallback.LockedDoorUnlockProba;
         var intermediateProba = Mathf.Clamp01(intermediateRaw);
 
         for (var i = 0; i < doors.Count; i++)
@@ -1691,18 +1757,15 @@ public class WaypointSystem
             if (proba >= 1f || Random.value < proba)
             {
                 squad.ForceUnlockDoorIds.Add(doorId);
-                // Unlock world-side immediately: the grant alone reroutes nothing — the locked door's
-                // navmesh link stays closed, so the dispatch path computed right after this pick routes
-                // AROUND the building to the exterior point nearest the target, and the proximity-
-                // triggered unlock in HandleDoors never fires because the path never passes the door.
-                // Observed: a bot pathed to the exterior side of a locked-room loot point and stopped a
-                // few metres short through the wall, then 3-fail blacklisted the POI. With the door
-                // flipped to Shut before the move order's path calc, the route goes through the
-                // corridor and the door opens on approach like any other. World-state flip also means
-                // the door stays unlocked for everyone for the rest of the raid (lock was "picked").
-                try { door.Unlock(); }
-                catch (System.Exception e) { Log.Debug($"{squad} world-side unlock of {door.Id} threw: {e.Message}"); }
-                Log.Info($"{squad} granted force-unlock on door {door.Id} (instance {doorId}) for {pick} — {(isMainAnchor ? "MAIN anchor (100%)" : $"intermediate ({proba:F2})")} — unlocked world-side");
+                // Open ONLY the navmesh carver, leaving DoorState Locked. A locked door keeps
+                // Carver_Closed.carving=true, cutting the navmesh across the doorway, so the dispatch path
+                // computed right after this pick would otherwise route AROUND the building (bot stops short
+                // through the wall, 3-fail blacklists the POI). The real unlock (key animation) happens only
+                // when a bot reaches the door in MovementSystem.HandleDoors. DoorNavMesh records it so any
+                // arriving PMC unlocks it, not just this squad.
+                DoorRoutingDiag.LogBefore(squad, pick, door);
+                var carverOpened = DoorNavMesh.OpenCarver(door);
+                Log.Info($"{squad} granted force-unlock on door {door.Id} (instance {doorId}) for {pick} — {(isMainAnchor ? "MAIN anchor (100%)" : $"intermediate ({proba:F2})")} — {(carverOpened ? "navmesh carver opened, door stays Locked until a bot arrives" : "NO NavMeshDoorLink found — carver not opened, POI may stay unreachable")}");
             }
             else
             {
@@ -1875,7 +1938,7 @@ public class WaypointSystem
     /// CompletedPoiIds entry. Solo squads collapse to "this single bot personally skipped it" which is exactly
     /// what we want to avoid the priority-pick loop on a value-skipped Main anchor.
     /// </summary>
-    private static bool AllAliveMembersValueSkipped(Squad squad, int locId)
+    internal static bool AllAliveMembersValueSkipped(Squad squad, int locId)
     {
         if (squad?.Members == null || squad.Members.Count == 0) return false;
         var any = false;
@@ -1941,6 +2004,9 @@ public class WaypointSystem
                 if (loc.Category != WaypointCategory.Corpse) continue;
                 if (!IsRuntimeWaypoint(loc)) continue;
                 if (!WasCorpseKilledBySquad(loc.Id, squad.Id)) continue;
+                // Loot-faction gate: a corpse priority-pick for a non-loot faction would pin the squad forever
+                // on a body IsLootableForAgent rejects on arrival.
+                if (!SquadCanUseWaypoint(squad, squadIsPmc, loc)) continue;
                 if (hasBlacklist && squad.CompletedPoiIds.Contains(loc.Id)) continue;
                 if (_claims.ContainsKey(loc.Id)) continue;
                 if (HasFailedDoorOnPath(squad, loc)) continue;
@@ -2220,7 +2286,7 @@ public class WaypointSystem
     private const float LockedDoorDetectionRadius = 12f;
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private bool IsSquadKnownUnreachable(Squad squad, int locId)
+    internal bool IsSquadKnownUnreachable(Squad squad, int locId)
     {
         if (squad == null) return false;
         return _squadUnreachable.TryGetValue(squad.Id, out var set) && set.Contains(locId);
@@ -2591,7 +2657,7 @@ public class WaypointSystem
             }
         }
         cellValues.Sort((a, b) => b.Value.CompareTo(a.Value));
-        var keep = Math.Min(Plugin.MainObjectivesTopLootCellsMaxCount.Value, cellValues.Count);
+        var keep = Math.Min(Orbit.Sain.PersonalityFallback.TopLootCellsMax, cellValues.Count);
         _topLootCellsCache = new List<Vector2Int>(keep);
         for (var i = 0; i < keep; i++) _topLootCellsCache.Add(cellValues[i].Key);
         var summary = new System.Text.StringBuilder();

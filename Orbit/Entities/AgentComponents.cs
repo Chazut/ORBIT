@@ -136,6 +136,11 @@ public class HardStuck
     public float LastUpdate;
     public float Timer;
 
+    // Repeated teleports from near the last spot escalate to a farther rescue ring, so a bot wedged on tight
+    // geometry escapes instead of landing nearby and re-wedging.
+    public int TeleportCount;
+    public Vector3 LastTeleportPos;
+
     public override string ToString()
     {
         var moveDist = Mathf.Sqrt(PositionHistory.GetDistanceSqr());
@@ -169,6 +174,20 @@ public class Stuck
 
     public HardStuck Hard = new();
     public SoftStuck Soft = new();
+
+    // Idle-island rescue: a bot on a navmesh chunk disconnected from the map can never path anywhere, and the
+    // per-agent stuck remediation never sees it (no path means UpdateMovement early-returns), so this is a
+    // separate one-shot watchdog tracked on the bot's real position, independent of move-speed.
+    public Vector3 IdleRescueAnchor;
+    public float IdleRescueSince = -1f; // -1 = not tracking
+    public bool IdleRescued;
+
+    // Spawn-island rescue: keys off being parked near spawn while unable to path to any other agent, since such a
+    // bot still "arrives" at its few on-island waypoints (so the idle-island watchdog above can't catch it).
+    // SpawnIslandRescued doubles as "resolved": set once rescued or once it proves it can reach the map.
+    public Vector3 SpawnIslandPos;
+    public float SpawnIslandSeenAt;
+    public bool SpawnIslandRescued;
 
     public override string ToString() => $"Stuck(soft: {Soft} hard: {Hard})";
 }

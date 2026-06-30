@@ -220,6 +220,11 @@ public class ExtractAction(AgentData dataset, float hysteresis) : Task<Agent>(hy
         manager?.RemoveAgent(agent);
     }
 
+    // Despawn immediately, bypassing the Status==Extracting / IsActive gating. Used by the emergency-extract
+    // watchdog for a committed extracter that can never reach the exfil — e.g. it started healing, which detaches
+    // ORBIT so this action otherwise never runs for it.
+    internal static void ForceDespawn(Agent agent) => DespawnAgent(agent);
+
     protected override void Deactivate(Agent entity)
     {
         // Combat takeover or external state change mid-extract — drop the per-agent foot tracker. The V-Ex

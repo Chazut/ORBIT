@@ -61,8 +61,8 @@ public static class MainObjectiveBuilder
         }
         else
         {
-            var rawMin = isPmc ? Plugin.MainObjectivesCountMinPmc.Value : Plugin.MainObjectivesCountMinPlayerScav.Value;
-            var rawMax = isPmc ? Plugin.MainObjectivesCountMaxPmc.Value : Plugin.MainObjectivesCountMaxPlayerScav.Value;
+            var rawMin = isPmc ? PersonalityFallback.PmcMainCountMin : Plugin.MainObjectivesCountMinPlayerScav.Value;
+            var rawMax = isPmc ? PersonalityFallback.PmcMainCountMax : Plugin.MainObjectivesCountMaxPlayerScav.Value;
             var minCount = Mathf.Max(1, rawMin);
             var maxCount = Mathf.Max(minCount, rawMax);
             count = Random.Range(minCount, maxCount + 1);
@@ -85,9 +85,9 @@ public static class MainObjectiveBuilder
         }
         else if (isPmc)
         {
-            wQuest = Mathf.Max(0f, Plugin.MainObjectivesPmcQuestWeight.Value);
-            wKills = Mathf.Max(0f, Plugin.MainObjectivesPmcKillsWeight.Value);
-            wLootValue = Mathf.Max(0f, Plugin.MainObjectivesPmcLootValueWeight.Value);
+            wQuest = Mathf.Max(0f, PersonalityFallback.PmcMixQuest);
+            wKills = Mathf.Max(0f, PersonalityFallback.PmcMixKills);
+            wLootValue = Mathf.Max(0f, PersonalityFallback.PmcMixLootValue);
         }
         else
         {
@@ -184,7 +184,7 @@ public static class MainObjectiveBuilder
         // range for PlayerScavs and personality-OFF PMCs.
         var roamRange = squad.Personality != null
             ? squad.Personality.KillsRoamDuration
-            : Plugin.MainObjectivesKillsRoamDuration.Value;
+            : PersonalityFallback.KillsRoamDuration;
         return new MainObjective
         {
             Type = MainObjectiveType.Kills,

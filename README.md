@@ -380,6 +380,7 @@ No ETA, no promises, but on the list:
 - "Boss hunting"
 - Faction-vs-faction "hunt" objective: a squad actively seeks out another faction's bots instead of just roaming. Enables rivalries like cultists hunting PMCs, UNTAR hunting scavs, or ISB ↔ Black Division hunting each other. Doubles as a robustness win for custom/vanilla bots whose stock SAIN/BSG nodes sometimes freeze and stop moving (suggested by Firefly on Discord - ISB author)
 - Airdrop / helicopter crash / BTR objectives — squads slow-approach the drop zone, hold position at a nearby vantage for a few minutes (ambush window), then close in and loot. Mimics how players treat airdrops in live — nobody walks straight to the smoke.
+- "Rally flare" item — firing it immediately overrides the current objective of every bot alive on the map and sends them converging on the spot it was fired (a hard redirect, not a soft advection nudge). A player-triggered "pull the whole map onto this point" tool, kept separate from the airdrop system so calling a drop never aggros the lobby
 - Multi-step objectives (activate → loot/extract):
   - Interchange Kiba (disable alarm → loot)
   - Interchange ULTRA (power on → loot)
@@ -405,6 +406,7 @@ No ETA, no promises, but on the list:
 **Tuning**
 - Faction takeover split: patrols → ORBIT, checkpoints → vanilla (RUAF / UNTAR / BlackDivision)
 - Flip the faction-control model to opt-IN instead of opt-OUT — ORBIT only controls explicitly enabled bot types, safer for future custom-bot mods
+- Labs-specific checkpoint tuning - fewer / relocated patrol points around the security gates, which bots get stuck on (BSG gate-pathing quirk, made worse by ORBIT placing checkpoints inside the gates; reported by Firefly)
 
 **Animations / polish**
 - Keycard / key swipe animation for PMC bots opening locked rooms (currently they call the Unlock function instantly with no anim — should walk to the reader and play the swipe like a player)
@@ -417,6 +419,8 @@ No ETA, no promises, but on the list:
 - **Possible interaction with CactusPie's "Transfer Loot Into Container Automatically" mod** - reported symptom: items a bot loots end up in YOUR tagged containers (SICC case, etc.). Best theory at the moment is that ORBIT routes pickups through BSG vanilla APIs (same path as the player), so a mod hooking those APIs may end up applying its logic to bot pickups too. Investigating.
 - **Bots stuck at spawn on isolated navmesh** - vanilla SPT quirk where a spawn point lands a bot on a tiny chunk of navmesh disconnected from the rest of the map (Streets near transits, Factory inside the silo, etc.). Shows up more often with ORBIT than pure vanilla because vanilla's built-in TP rescue is disabled (it was teleporting bots constantly on every unreachable pick). Fix planned: targeted TP rescue that fires only when a bot is genuinely stuck for X seconds.
 - **Rare stuck bots** - usually unstick themselves within a minute. Still iterating.
+- **Faction-mod takeover (RUAF / UNTAR / Black Division) can misbehave** - these mods swap the bot's brain at runtime (via MoreBotsAPI) and ORBIT's handling of that handoff is not fully solid yet, so a controlled squad may rapidly switch goals or get stuck. Workaround: leave the per-faction takeover toggles OFF (their default) so ORBIT leaves those bots vanilla. ISB takeover is handled correctly. Fix in progress.
+- **Bots stuck or oscillating at Labs security gates** - the Labs gates have a BSG pathing quirk bots struggle to pass, and ORBIT places patrol checkpoints inside/near the gates which makes it worse (a bot parks at a gate, or goes in then immediately wants back out). Needs Labs-specific checkpoint tuning to keep points clear of the gates. Reported by Firefly (ISB author).
 - **Mod conflicts** - tested with my own config. Yours may differ. Report anything obviously broken on [GitHub](https://github.com/Chazut/ORBIT/issues).
 
 ### About AI

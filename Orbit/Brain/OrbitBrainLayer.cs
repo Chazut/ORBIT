@@ -58,6 +58,7 @@ public class OrbitBrainLayer : CustomLayer
     private static bool _vanillaGoons;
     private static bool _vanillaCultists;
     private static bool _vanillaRaiders;
+    private static bool _vanillaBloodhounds;
 
     public static void AddExcludedRoleSubstring(string sub)
     {
@@ -68,11 +69,23 @@ public class OrbitBrainLayer : CustomLayer
     public static void SetVanillaGoonExclusion(bool excluded) => _vanillaGoons = excluded;
     public static void SetVanillaCultistExclusion(bool excluded) => _vanillaCultists = excluded;
     public static void SetVanillaRaiderExclusion(bool excluded) => _vanillaRaiders = excluded;
+    public static void SetVanillaBloodhoundExclusion(bool excluded) => _vanillaBloodhounds = excluded;
 
     private static bool IsExcludedRole(BotOwner botOwner)
     {
         var role = botOwner?.Profile?.Info?.Settings?.Role;
         if (!role.HasValue) return false;
+
+        // ORBIT registers on these vanilla brains only to drive custom factions that borrow them; never take over
+        // the real vanilla bots, so exclude their WildSpawnTypes unconditionally. Custom faction types differ and
+        // fall through to the toggle logic below.
+        switch (role.Value)
+        {
+            case EFT.WildSpawnType.exUsec:
+            case EFT.WildSpawnType.bossGluhar:
+            case EFT.WildSpawnType.followerGluharScout:
+                return true;
+        }
 
         if (_excludedRoleSubstrings.Count > 0)
         {
@@ -100,6 +113,11 @@ public class OrbitBrainLayer : CustomLayer
         }
 
         if (_vanillaRaiders && role.Value.IsRaider())
+        {
+            return true;
+        }
+
+        if (_vanillaBloodhounds && role.Value.IsBloodhound())
         {
             return true;
         }

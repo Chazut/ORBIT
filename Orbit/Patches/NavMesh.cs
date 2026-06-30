@@ -34,6 +34,9 @@ public class DoorCarverShrinkPatch : ModulePatch
         {
             var doorLink = doorsController._navMeshDoorLinks[i];
 
+            // Register every link, including ones the dedup below skips, so any door's carver can be opened.
+            Orbit.Helpers.DoorNavMesh.RegisterLink(doorLink);
+
             if (!processed.Add(doorLink))
             {
                 continue;
@@ -43,5 +46,7 @@ public class DoorCarverShrinkPatch : ModulePatch
             doorLink.Carver_Closed.size = 0.375f * doorLink.Carver_Closed.size;
             doorLink.Carver_Breached.size = 0.375f * doorLink.Carver_Breached.size;
         }
+
+        Orbit.Helpers.DoorNavMesh.LogLinkCensus();
     }
 }
