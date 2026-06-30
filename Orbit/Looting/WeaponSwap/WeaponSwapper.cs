@@ -500,13 +500,8 @@ public static class WeaponSwapper
         Log.Warning($"WeaponSwap.WaitForIsChangingWeapon({nick}): hit {maxWaitMs}ms cap — proceeding");
     }
 
-    // After a successful swap/equip, force BSG to actually re-draw the new weapon. UpdateWeaponsList alone only
-    // rebuilds the selector's internal list — the hands controller / current weapon can still reference the OLD
-    // (now-discarded) gun, so the bot enters SAIN combat and "fires" a dead reference (no shots) until BSG
-    // happens to re-select on its own. Mirror BSG's own post-inventory-change pattern (BotSecondWeaponData:
-    // UpdateWeaponsList → ChangeToMain): let any in-flight change settle, refresh the list, re-draw the main
-    // weapon, recompute power. Runs at the end of the loot session while the bot is still frozen, so it exits
-    // looting already holding the new gun.
+    // UpdateWeaponsList alone only rebuilds the selector's list while the hands controller still holds the
+    // discarded gun, so the bot "fires" a dead reference until BSG re-selects; ChangeToMain forces the re-draw.
     private static async Task FinalizeWeaponSwapAsync(BotOwner bot, string nick, CancellationToken ct)
     {
         try
@@ -542,12 +537,8 @@ public static class WeaponSwapper
     // Bot's full ammo pool: every item across equipment slots, including the secure container (part of
     // Inventory.Equipment).
     /// <summary>
-    /// Strip valuable mods off a weapon about to be discarded by an atomic Swap. A mod is stripped when its
-    /// per-slot handbook price clears the bot's per-personality mini-loot threshold (the same per-slot bar it
-    /// uses to decide what loose loot is worth picking up) OR it's a magazine whose caliber matches any weapon
-    /// the bot will keep / acquire post-swap (loose rounds inside the mag will be useful for the kept guns).
-    /// Stripped mods QFAP into the bot's grids via the standard guarded tx. After this returns the caller
-    /// fires the atomic Swap that sends the remaining (cheap) weapon skeleton to the corpse.
+    /// Strip valuable mods off a weapon about to be discarded. A mod is stripped when its per-slot price clears
+    /// the bot's mini-loot threshold, or it's a magazine whose caliber matches a weapon kept post-swap.
     /// </summary>
     private static async Task StripValuableModsBeforeDiscardAsync(
         BotOwner bot, Weapon weaponToDiscard, IList<Weapon> postSwapWeapons, string nick, CancellationToken ct)
@@ -555,9 +546,7 @@ public static class WeaponSwapper
         if (weaponToDiscard?.Slots == null || weaponToDiscard.Slots.Length == 0) return;
         var ic = bot.GetPlayer?.InventoryController;
         if (ic == null) return;
-        // Strip threshold = the bot's own per-personality mini-loot threshold (the same per-slot rouble bar it
-        // uses to decide what loose loot is worth picking up). A mod worth bending down for off the floor is
-        // worth saving off a weapon about to be discarded. Mirrors OrbitLootHandler.GetMinPickupPrice.
+        // Reuse the bot's mini-loot threshold: a mod worth picking off the floor is worth saving off a discard.
         var agent = Singleton<BotRoster>.Instance?.GetAgent(bot);
         var resolved = agent != null
             ? Orbit.Tasks.Actions.LootContainerAction.GetOrResolveAgentMiniLootThreshold(agent)
@@ -583,9 +572,8 @@ public static class WeaponSwapper
             var slot = weaponToDiscard.Slots[i];
             var mod = slot?.ContainedItem;
             if (mod == null) continue;
-            // Vital weapon parts (barrel, receiver, gas block…) can't be detached in-raid. Moving one out via
-            // a raw transaction desyncs FIKA — "Cannot modify vital part slot mod_barrel … in raid" (Kobe
-            // report). Skip them so they stay on the discarded weapon. Mirrors the EnumerateItemsForDrain gate.
+            // Non-raid-moddable parts (barrel, receiver) can't be detached in-raid; moving one via a raw tx
+            // desyncs FIKA, so skip them.
             if (mod is Mod nonRaidMod && !nonRaidMod.RaidModdable) continue;
             var pricePerSlot = ItemPriceLookup.GetPricePerSlot(mod);
             string reason = null;

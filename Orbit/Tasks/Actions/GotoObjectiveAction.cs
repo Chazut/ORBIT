@@ -58,11 +58,8 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
     /// </summary>
     private const float ExfilOutsideTriggerForceExtractSeconds = 15f;
 
-    // Per-agent stuck watchdog on ANY navigation objective: if the bot's position barely moves for this
-    // duration while still Moving toward its target, blacklist the POI and re-pick. Walking from across the map
-    // is fine — only genuinely stationary bots trip it. Keys on actual position, NOT Movement.Status, so it also
-    // catches a "Moving but not advancing" limbo at an off-navmesh loot spot where the Status-gated arrival-fail
-    // never fires (observed: a PMC sat ~2 min on a bunker container with zero remediation).
+    // Per-agent stuck watchdog on any navigation objective: barely-moving for this long blacklists the POI
+    // and re-picks. Long enough that walking from across the map doesn't trip it.
     private const float StuckEnRouteThresholdSeconds = 30f;
     private const float StuckEnRouteMoveDistSqr = 2f * 2f;
     private readonly System.Collections.Generic.Dictionary<int, (int locId, Vector3 lastPos, float lastMoveTime)> _stuckEnRouteTracker = new();
@@ -144,17 +141,10 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
 
                     var distanceSqr = (objective.Location.Position - agent.Position).sqrMagnitude;
 
-                    // Stuck-en-route watchdog (ALL categories): if the bot stops physically advancing toward its
-                    // objective for StuckEnRouteThresholdSeconds, blacklist the POI and fail the objective so the
-                    // squad re-dispatches. Keys on actual position, NOT Movement.Status — a bot can wedge in a
-                    // "Moving but not advancing" limbo at an off-navmesh loot spot (e.g. a bunker container whose
-                    // exact position isn't on the navmesh) where the Status-gated arrival-fail below never fires,
-                    // leaving it idle for minutes.
-                    //
-                    // ONLY counts while ORBIT actually drives the bot. If it has yielded to SAIN / vanilla
-                    // (IsActive false) the bot may sit still legitimately (combat, cover) — don't accumulate, and
-                    // reset so the next ORBIT-driven approach gets a fresh timer. (Deactivate clears it on the
-                    // yield transition too — this guards any tick where the agent lingers in the active set.)
+                    // Stuck-en-route watchdog. Keys on actual position, NOT Movement.Status, so it catches a
+                    // "Moving but not advancing" limbo at an off-navmesh loot spot where the Status-gated
+                    // arrival-fail below never fires. Only accumulates while ORBIT drives the bot: when yielded
+                    // to SAIN / vanilla the bot may sit still legitimately (combat, cover), so reset instead.
                     if (!agent.IsActive)
                     {
                         _stuckEnRouteTracker.Remove(agent.Id);
@@ -377,10 +367,8 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
 
     protected override void Deactivate(Agent entity)
     {
-        // Stop the stuck-en-route timer the instant ORBIT loses this agent (yielded to SAIN / vanilla, or
-        // switched task) — it must ONLY accumulate while ORBIT is actively driving the bot toward the objective.
-        // Without this, a bot held stationary by SAIN combat / cover would re-enter Goto with a stale timer and
-        // wrongly blacklist its POI. Reactivation re-arms a fresh timer.
+        // Clear the stuck-en-route timer on losing the agent; otherwise a bot held stationary by SAIN
+        // re-enters Goto with a stale timer and wrongly blacklists its POI.
         _stuckEnRouteTracker.Remove(entity.Id);
 
         if (entity.Objective.Status is ObjectiveStatus.Finished or ObjectiveStatus.Failed

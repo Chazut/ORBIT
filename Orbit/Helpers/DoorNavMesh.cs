@@ -5,38 +5,27 @@ using UnityEngine.AI;
 namespace Orbit.Helpers;
 
 /// <summary>
-/// Maps each Door to its NavMeshDoorLink and opens a locked door's navmesh carver on demand, so ORBIT can
-/// route a squad to a loot point behind a locked door WITHOUT visibly unlocking the door early.
+/// Maps each Door to its NavMeshDoorLink and opens a locked door's navmesh carver on demand, so a squad can
+/// route to loot behind a locked door without visibly unlocking it early.
 ///
-/// A Locked door keeps <c>Carver_Closed.carving = true</c>, which cuts the Unity navmesh across the doorway
-/// so <c>NavMesh.CalculatePath</c> routes AROUND the building (confirmed in-raid by DoorRoutingDiag: a locked
-/// door reads PathPartial with Carver_Closed.carving=True; unlocking it flips ONLY that carver to false and
-/// the path becomes PathComplete). <see cref="OpenCarver"/> flips just that carver and leaves
-/// <c>DoorState = Locked</c>, so the door stays visually locked until a bot physically arrives and unlocks it
-/// (with the key animation) in MovementSystem.HandleDoors.
+/// A Locked door keeps <c>Carver_Closed.carving = true</c>, cutting the Unity navmesh across the doorway.
+/// <see cref="OpenCarver"/> flips only that carver and leaves <c>DoorState = Locked</c>. No BSG routine
+/// re-asserts the carver while the door is Locked (BotDoorsController.ManualUpdate is a no-op until Open), so
+/// the flip persists for the raid.
 ///
-/// No per-frame BSG routine re-asserts the carver on a locked door (BotDoorsController.Update → ManualUpdate
-/// is a no-op until the door is Open), so the flip persists for the rest of the raid.
-///
-/// Phasing guard: the carver is shared per door, so once opened the navmesh is passable for EVERY bot, not
-/// just the squad that rolled. ORBIT bots ignore door colliders, so a bot reaching a carver-opened-but-still-
-/// locked door would phase straight through it. <see cref="IsCarverOpened"/> lets the proximity door handler
-/// unlock+open the door for ANY arriving PMC, not only the granting squad, so the door always actually opens
-/// before anyone passes.
+/// Phasing guard: the carver is shared per door and bots ignore door colliders, so once it is open every bot
+/// could pass through a still-locked leaf. <see cref="IsCarverOpened"/> lets the proximity handler unlock+open
+/// the door for any arriving PMC first.
 /// </summary>
 public static class DoorNavMesh
 {
-    // Primary lookup: keyed by the Door object's instance id. Immune to any DoorId<->Door.Id string mismatch
-    // because GetLink resolves by the exact same Door reference. The string-id map is kept as a fallback for
-    // the rare link whose Door reference is null at registration time.
+    // Instance-id is primary (immune to DoorId/Door.Id mismatch); string-id is a fallback for links whose
+    // Door is null at registration.
     private static readonly Dictionary<int, NavMeshDoorLink> _linksByDoorInstanceId = new();
     private static readonly Dictionary<string, NavMeshDoorLink> _linksByDoorId = new();
     private static readonly HashSet<int> _carverOpenedDoorIds = new();
 
-    /// <summary>Populated at boot from BotDoorsController._navMeshDoorLinks (DoorCarverShrinkPatch enumerates
-    /// them). Keyed by the Door's instance id first (mismatch-proof), with the string DoorId kept as a
-    /// fallback. Earlier this keyed only by DoorId, which silently missed any link whose DoorId disagreed with
-    /// its Door.Id — those doors logged "NO NavMeshDoorLink found" and their loot stayed unreachable.</summary>
+    /// <summary>Registers a link at boot from BotDoorsController._navMeshDoorLinks.</summary>
     public static void RegisterLink(NavMeshDoorLink link)
     {
         if (link == null) return;
@@ -51,16 +40,13 @@ public static class DoorNavMesh
     public static NavMeshDoorLink GetLink(Door door)
     {
         if (door == null) return null;
-        // Match by the exact Door reference first (mismatch-proof), then fall back to the string id.
         if (_linksByDoorInstanceId.TryGetValue(door.GetInstanceID(), out var link)) return link;
         return _linksByDoorId.TryGetValue(door.Id, out link) ? link : null;
     }
 
     /// <summary>
-    /// Open the navmesh through a locked door by clearing its Carver_Closed carving, leaving DoorState
-    /// untouched (door stays visually Locked). Returns true if the link was found and the carver flipped. The
-    /// door is recorded so any arriving PMC (not just the granting squad) unlocks+opens it on contact — see
-    /// the phasing guard note on the class.
+    /// Opens the navmesh through a locked door by clearing Carver_Closed.carving, leaving DoorState Locked.
+    /// Records the door for the phasing guard (see class summary). Returns false if no link was found.
     /// </summary>
     public static bool OpenCarver(Door door)
     {
@@ -72,16 +58,12 @@ public static class DoorNavMesh
         return true;
     }
 
-    /// <summary>True when ORBIT opened this door's navmesh carver — the proximity handler must then unlock it
-    /// for any arriving PMC so no bot phases through the still-locked leaf.</summary>
+    /// <summary>True once this door's carver was opened, so the proximity handler unlocks it before any bot reaches it.</summary>
     public static bool IsCarverOpened(int doorInstanceId) => _carverOpenedDoorIds.Contains(doorInstanceId);
 
     /// <summary>
-    /// Boot diagnostic (1.2.0-pre): census of how many scene doors actually resolve a <see cref="NavMeshDoorLink"/>
-    /// via <see cref="GetLink"/>, how many do NOT (and how many of those are Locked), plus the count of registered
-    /// links whose <c>DoorId</c> disagrees with their <c>Door.Id</c>. Distinguishes the "NO NavMeshDoorLink found"
-    /// gap between a lookup mismatch (now fixed by the instance-id key) and genuinely linkless doors (loot behind
-    /// those is navmesh-unreachable regardless of door state). Remove with the rest of the door-routing diag.
+    /// Boot diagnostic: logs how many scene doors resolve a link vs. not, to tell a lookup mismatch apart from
+    /// genuinely linkless doors (whose loot is navmesh-unreachable regardless of door state).
     /// </summary>
     public static void LogLinkCensus()
     {

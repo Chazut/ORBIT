@@ -8,15 +8,9 @@ using UnityEngine.AI;
 namespace Orbit.Helpers;
 
 /// <summary>
-/// TEMPORARY verification instrumentation (1.2.0-pre — remove once the carver-open fix is confirmed in raids).
-///
-/// WaypointSystem.RollForceUnlockForPick now opens ONLY the door's Carver_Closed (via <see cref="DoorNavMesh"/>)
-/// instead of unlocking it world-side, so a locked-room loot point becomes routable while the door stays
-/// visually Locked until a bot arrives. This logs the navmesh-blocker state (CalculatePath status from the
-/// leader's position + the door's self-Obstacle + the three NavMeshDoorLink carvers) immediately BEFORE the
-/// carver flip and ~1s AFTER, from the SAME origin. The AFTER snapshot should show <c>state=Locked</c> with
-/// <c>Carver_Closed.carving=False</c> and <c>path=PathComplete</c> — confirming the route opens AND the door
-/// stays locked AND nothing re-asserts the carver.
+/// Verification instrumentation for the carver-open routing path. Snapshots the navmesh-blocker state (path
+/// status from the leader, the door's self-Obstacle, the three carvers) just before the flip and ~1s after.
+/// A healthy after snapshot reads <c>state=Locked</c>, <c>Carver_Closed.carving=False</c>, <c>path=PathComplete</c>.
 /// </summary>
 public static class DoorRoutingDiag
 {
@@ -35,8 +29,7 @@ public static class DoorRoutingDiag
     private static readonly List<Pending> _pending = new();
     private static readonly NavMeshPath _path = new();
 
-    /// <summary>Snapshot the locked-door state right before WaypointSystem opens its navmesh carver, and queue
-    /// the matching post-flip snapshot from the same origin.</summary>
+    /// <summary>Snapshots the pre-flip state and queues the matching post-flip snapshot from the same origin.</summary>
     public static void LogBefore(Squad squad, Waypoint pick, Door door)
     {
         if (door == null) return;
@@ -58,8 +51,7 @@ public static class DoorRoutingDiag
         });
     }
 
-    /// <summary>Drained every frame from WaypointSystem.Update — emits the post-flip snapshot once the delay
-    /// elapses so the navmesh carve bake has settled.</summary>
+    /// <summary>Emits each queued post-flip snapshot once the delay elapses, so the navmesh carve bake has settled.</summary>
     public static void Tick()
     {
         if (_pending.Count == 0) return;

@@ -34,7 +34,7 @@ public class DoorCarverShrinkPatch : ModulePatch
         {
             var doorLink = doorsController._navMeshDoorLinks[i];
 
-            // Register every link (DoorId → link) so the carver can be opened per door, even ones we skip below.
+            // Register every link, including ones the dedup below skips, so any door's carver can be opened.
             Orbit.Helpers.DoorNavMesh.RegisterLink(doorLink);
 
             if (!processed.Add(doorLink))
@@ -47,8 +47,6 @@ public class DoorCarverShrinkPatch : ModulePatch
             doorLink.Carver_Breached.size = 0.375f * doorLink.Carver_Breached.size;
         }
 
-        // Boot diagnostic (1.2.0-pre): measure the link-resolution gap that left many doors logging
-        // "NO NavMeshDoorLink found" so we can tell a key mismatch (now fixed) from genuinely linkless doors.
         Orbit.Helpers.DoorNavMesh.LogLinkCensus();
     }
 }

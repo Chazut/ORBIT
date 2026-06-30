@@ -163,24 +163,19 @@ public class Squad(int id, float[] taskScores, int targetMembersCount) : Entity(
     public float LastOpportunisticCorpseScanTime;
 
     /// <summary>
-    /// Corpse-stuck watchdog state. <see cref="CorpseWatchdogLocId"/> is the corpse waypoint id the squad has
-    /// been glued to (-1 = none), <see cref="CorpseWatchdogSince"/> when it became the objective. If the same
-    /// corpse stays the objective past the timeout without completing (loot fails / unreachable / a stuck
-    /// member keeps finishedCount &lt; Size so the en-route 3-fail blacklist never fires), the strategy
-    /// blacklists it and re-dispatches so the squad doesn't sit on it forever.
+    /// Corpse-stuck watchdog: if the same corpse stays the objective past the timeout without completing, the
+    /// strategy blacklists it and re-dispatches so the squad doesn't sit on it forever. (-1 = no corpse.)
     /// </summary>
     public int CorpseWatchdogLocId = -1;
     public float CorpseWatchdogSince;
 
     /// <summary>
-    /// Time.time of the last time this squad's decision loop (GotoObjectiveStrategy.Update body) actually ran.
-    /// Used by the degraded-tickrate throttle: squads far from every human re-decide only every
-    /// DegradedTickrateFarIntervalSeconds instead of every 0.5 s strategy tick.
+    /// Time.time the decision loop last ran. Drives the degraded-tickrate throttle: squads far from every player
+    /// re-decide on a longer interval instead of every strategy tick.
     /// </summary>
     public float LastDecisionTickTime;
 
-    /// <summary>Whether this squad is currently in degraded-tickrate (far from all players). Tracked only to
-    /// log the near↔far transitions once each (for the dashboard tile), not every throttled tick.</summary>
+    // Tracked only so we can log the near/far transition once each, not on every throttled tick.
     public bool DecisionThrottled;
 
     /// <summary>

@@ -76,11 +76,9 @@ public class OrbitBrainLayer : CustomLayer
         var role = botOwner?.Profile?.Info?.Settings?.Role;
         if (!role.HasValue) return false;
 
-        // Custom factions (e.g. ISB) borrow several vanilla brains that ORBIT registers on so it can drive
-        // the custom bots: Rogue (exUsec), Glukhar (bossGluhar) and Glukhar-Scout (followerGluharScout).
-        // Never take over the REAL vanilla bots sharing those brains, so exclude their WildSpawnTypes
-        // unconditionally. Custom faction types (ISBSpecialForces / ISBTeamLeader etc.) are different
-        // WildSpawnTypes and fall through to the normal toggle logic below.
+        // ORBIT registers on these vanilla brains only to drive custom factions that borrow them; never take over
+        // the real vanilla bots, so exclude their WildSpawnTypes unconditionally. Custom faction types differ and
+        // fall through to the toggle logic below.
         switch (role.Value)
         {
             case EFT.WildSpawnType.exUsec:

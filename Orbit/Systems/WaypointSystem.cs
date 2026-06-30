@@ -238,8 +238,7 @@ public class WaypointSystem
     /// move, the pull follows them.</summary>
     public void Update()
     {
-        // TEMP diagnostic (1.2.0-pre): emit the deferred post-unlock door-routing snapshots. Runs every frame
-        // (before the convergence pacing gate) so the +1s after-samples actually fire.
+        // Before the pacing gate so the deferred door-routing after-samples fire every frame.
         DoorRoutingDiag.Tick();
 
         if (_convergenceUpdatePacing.Blocked())
@@ -618,11 +617,9 @@ public class WaypointSystem
     }
 
     /// <summary>
-    /// Decides whether this entity should be denied RequestFar (the map- wide dispatch fallback). Scavs are
-    /// pinned by default (Plugin.RoamingScavs OFF) — keeps them in their spawn quartier. Goons and Bloodhounds
-    /// are NOT pinned by default (Plugin.RoamingGoons / RoamingBloodhounds ON, since vanilla Tarkov has them
-    /// roaming across the map) but can be pinned via their toggle. Everyone else (PMCs, raiders, bosses,
-    /// cultists) roams freely.
+    /// Decides whether this entity should be denied RequestFar (the map-wide dispatch fallback). Scavs are
+    /// pinned to their spawn area by default; Goons and Bloodhounds roam by default (matching vanilla) but can
+    /// be pinned via their toggles. Everyone else (PMCs, raiders, bosses, cultists) roams freely.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static bool ScavOrIslandedLocalOnly(Entity entity)
@@ -728,14 +725,9 @@ public class WaypointSystem
     {
         if (squad == null) return null;
 
-        // Loot-faction gate. A Corpse is a loot category, so non-loot factions (Goons / ISB / bosses /
-        // cultists / raiders) must NEVER bee-line to their own kills: they have no loot routine to consume
-        // the dispatch, so the squad pins on a body it can't loot and loops forever on arrival, while the
-        // followers get container/loose splinters dispatched around it. The per-agent registration path
-        // (CorpseRegistrationPatch) already skips the IMMEDIATE bee-line for these factions, and the normal
-        // candidate scan is gated by SquadCanUseWaypoint — but this squad-level re-pick from RequestNear was
-        // bypassing both. Mirror the exact same gate here (PMC + PlayerScav + bot scav only; lenient on an
-        // unknown role like SquadCanUseWaypoint, since ISB/Goons always have a known non-loot role).
+        // Loot-faction gate: non-loot factions have no loot routine, so a bee-line to their own kill pins the
+        // squad on a body it can't loot. Mirrors SquadCanUseWaypoint and the CorpseRegistrationPatch bee-line
+        // skip; lenient on an unknown role since non-loot factions always have a known role.
         var leaderRole = squad.Leader?.Bot?.Profile?.Info?.Settings?.Role;
         if (leaderRole.HasValue)
         {
@@ -785,20 +777,16 @@ public class WaypointSystem
     }
 
     /// <summary>
-    /// Persistent own-kill re-route resolver. Like <see cref="TryPickOwnKillCorpse"/> but for ONE specific
-    /// corpse and gated on the KILLER agent's own position rather than the squad leader's — so a follower who
-    /// got pulled off its kill (combat / heal / extract) is routed back to it on reactivation without dragging
-    /// the whole squad. Returns the corpse waypoint if it still exists, is unlooted, unclaimed, reachable and
-    /// within range of the agent; null otherwise (the caller drops its OwnKillCorpseLocId memory on null). The
-    /// loot-faction gate is already applied upstream — only PMC / PlayerScav / bot-scav killers ever get
-    /// OwnKillCorpseLocId set in CorpseRegistrationPatch.
+    /// Own-kill re-route resolver for ONE corpse, gated on the killer agent's own position rather than the
+    /// squad leader's, so a follower pulled off its kill is routed back without dragging the whole squad.
+    /// Returns null if it no longer qualifies (the caller drops its OwnKillCorpseLocId memory on null).
     /// </summary>
     internal Waypoint TryGetOwnKillCorpseForAgent(Squad squad, Agent agent, int locId)
     {
         if (squad == null || agent == null || locId == 0) return null;
-        if (!WasCorpseKilledBySquad(locId, squad.Id)) return null; // tag dropped (looted elsewhere / squad recycled)
-        if (squad.CompletedPoiIds.Contains(locId)) return null;     // blacklisted / already looted
-        if (_claims.ContainsKey(locId)) return null;                // a squadmate is already on it
+        if (!WasCorpseKilledBySquad(locId, squad.Id)) return null;
+        if (squad.CompletedPoiIds.Contains(locId)) return null;
+        if (_claims.ContainsKey(locId)) return null;
         if (!_waypointCells.TryGetValue(locId, out var coords)) return null;
         // Stale-kill gate from the KILLER's cell: don't chase a body left far behind after a long detour.
         var agentCell = WorldToCell(agent.Position);
@@ -908,12 +896,8 @@ public class WaypointSystem
                         var loc = locs[i];
                         if (loc.Category != WaypointCategory.Corpse) continue;
                         if (squad.CompletedPoiIds.Contains(loc.Id)) continue;
-                        // Also skip a corpse THIS member already inspected and value-skipped (sub-threshold
-                        // loot). A picked-over body (typically one the squad didn't kill) gets a per-agent
-                        // value-skip, not a squad-wide CompletedPoiIds entry — so without this check the same
-                        // member keeps re-detecting it on LoS and the squad oscillates back to it forever
-                        // (reported: a 3-PMC squad returning to the same corpse repeatedly). A different
-                        // lower-threshold member that genuinely wants it can still trigger on it.
+                        // Per-agent (not squad-wide CompletedPoiIds): without this the same member re-detects
+                        // its own value-skip on LoS and oscillates back forever; a keener member can still take it.
                         if (member.ValueSkippedPoiIds.Contains(loc.Id)) continue;
                         if (_claims.ContainsKey(loc.Id)) continue;
 
@@ -1057,8 +1041,7 @@ public class WaypointSystem
     }
 
     /// <summary>
-    /// Squared distance from <paramref name="pos"/> to the nearest LIVING human player, or float.MaxValue if
-    /// there are none. Cheap (a handful of players); used by the degraded-tickrate decision throttle.
+    /// Squared distance to the nearest LIVING human player, or float.MaxValue if there are none.
     /// </summary>
     public float NearestHumanDistanceSqr(Vector3 pos)
     {
@@ -1774,18 +1757,12 @@ public class WaypointSystem
             if (proba >= 1f || Random.value < proba)
             {
                 squad.ForceUnlockDoorIds.Add(doorId);
-                // Open ONLY the navmesh carver, leave the door visually Locked. A locked door keeps
-                // Carver_Closed.carving=true which cuts the navmesh across the doorway, so the dispatch path
-                // computed right after this pick would otherwise route AROUND the building to the exterior
-                // point nearest the target (bot stops short through the wall, 3-fail blacklists the POI). The
-                // OLD fix flipped the door to Shut here (world-side unlock) to reopen the link — but that
-                // unlocked the door for everyone the instant the squad picked, so a player arriving early
-                // found locked rooms already unlocked with no bot in sight. Flipping just Carver_Closed.carving
-                // to false reopens the route while DoorState stays Locked; the door is unlocked for real (with
-                // the key animation) only when a bot reaches it in MovementSystem.HandleDoors. DoorNavMesh
-                // records the door so ANY arriving PMC unlocks it, not just this squad — see its phasing guard.
-                // TEMP diagnostic (1.2.0-pre): snapshot the navmesh-blocker state before and ~1s after the
-                // carver flip to confirm the route opens AND the door stays Locked (no BSG re-assert).
+                // Open ONLY the navmesh carver, leaving DoorState Locked. A locked door keeps
+                // Carver_Closed.carving=true, cutting the navmesh across the doorway, so the dispatch path
+                // computed right after this pick would otherwise route AROUND the building (bot stops short
+                // through the wall, 3-fail blacklists the POI). The real unlock (key animation) happens only
+                // when a bot reaches the door in MovementSystem.HandleDoors. DoorNavMesh records it so any
+                // arriving PMC unlocks it, not just this squad.
                 DoorRoutingDiag.LogBefore(squad, pick, door);
                 var carverOpened = DoorNavMesh.OpenCarver(door);
                 Log.Info($"{squad} granted force-unlock on door {door.Id} (instance {doorId}) for {pick} — {(isMainAnchor ? "MAIN anchor (100%)" : $"intermediate ({proba:F2})")} — {(carverOpened ? "navmesh carver opened, door stays Locked until a bot arrives" : "NO NavMeshDoorLink found — carver not opened, POI may stay unreachable")}");
@@ -2027,11 +2004,8 @@ public class WaypointSystem
                 if (loc.Category != WaypointCategory.Corpse) continue;
                 if (!IsRuntimeWaypoint(loc)) continue;
                 if (!WasCorpseKilledBySquad(loc.Id, squad.Id)) continue;
-                // Loot-faction gate (mirrors SquadCanUseWaypoint in the main candidate loop and the own-kill
-                // bee-line skip in CorpseRegistrationPatch): non-loot factions (Goons / bosses / ISB-style
-                // faction bots) have no loot routine, so they must NOT priority-pick a corpse they can't
-                // actually loot. IsLootableForAgent rejects it on arrival and the squad pins on the body
-                // forever. This "body I dropped" priority block previously bypassed that gate.
+                // Loot-faction gate: a corpse priority-pick for a non-loot faction would pin the squad forever
+                // on a body IsLootableForAgent rejects on arrival.
                 if (!SquadCanUseWaypoint(squad, squadIsPmc, loc)) continue;
                 if (hasBlacklist && squad.CompletedPoiIds.Contains(loc.Id)) continue;
                 if (_claims.ContainsKey(loc.Id)) continue;

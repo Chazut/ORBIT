@@ -20,15 +20,12 @@ public static class Log
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static void Info(string message)
     {
-        // Quiet logging (config toggle, ON by default): suppress routine info spam so the BepInEx log stays
-        // readable in release. Warnings/errors and the version banner (Log.Always) are never gated. The null
-        // check keeps very-early-boot info visible before the config is bound.
+        // The null check keeps very-early-boot info visible before the Quiet-logging config is bound.
         if (Plugin.QuietLogging is { Value: true }) return;
         Plugin.LogSource.LogInfo($"F{Time.frameCount}: {message}");
     }
 
-    /// <summary>Info-level message that is NEVER suppressed by Quiet logging — for the version banner and other
-    /// must-see one-shots that help with support / bug reports.</summary>
+    /// <summary>Info-level message never suppressed by Quiet logging, for must-see one-shots (version banner, etc.).</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static void Always(string message)
     {

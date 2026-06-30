@@ -6,11 +6,8 @@ using UnityEngine;
 namespace Orbit.Patches;
 
 /// <summary>
-/// TEMP diagnostic (1.2.0-pre — remove once the door-unlock fix is validated). Logs every
-/// WorldInteractiveObject.Unlock() call with the object id + frame. The carver-decoupling fix drives a
-/// key-in-lock animation via the Unlock interaction AND keeps an explicit door.Unlock() floor; if BOTH fire
-/// for a single arrival the latch coroutine runs twice (cosmetic double-click that is near-impossible to spot
-/// in freecam). Two trace lines for the same id on the same frame = the double, easy to grep / tile.
+/// Logs every WorldInteractiveObject.Unlock(). Two trace lines for the same id on one frame mean the latch
+/// coroutine ran twice (a cosmetic double-unlock).
 /// </summary>
 public class DoorUnlockTracePatch : ModulePatch
 {

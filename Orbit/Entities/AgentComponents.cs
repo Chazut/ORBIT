@@ -136,9 +136,8 @@ public class HardStuck
     public float LastUpdate;
     public float Timer;
 
-    // Re-stick escalation: how many times we teleported this bot from ~the same spot, and where. Re-teleporting
-    // from near the last spot escalates to a farther rescue ring so a bot wedged on tight geometry escapes
-    // instead of landing a few metres away and re-wedging.
+    // Repeated teleports from near the last spot escalate to a farther rescue ring, so a bot wedged on tight
+    // geometry escapes instead of landing nearby and re-wedging.
     public int TeleportCount;
     public Vector3 LastTeleportPos;
 
@@ -176,19 +175,16 @@ public class Stuck
     public HardStuck Hard = new();
     public SoftStuck Soft = new();
 
-    // ── Idle-island rescue ────────────────────────────────────────────
-    // A bot spawned on a navmesh chunk disconnected from the rest of the map can never path to its objective,
-    // and the per-agent stuck remediation never sees it (no path → UpdateMovement early-returns). This is a
-    // separate one-shot watchdog tracked on the bot's REAL position, independent of move-speed.
+    // Idle-island rescue: a bot on a navmesh chunk disconnected from the map can never path anywhere, and the
+    // per-agent stuck remediation never sees it (no path means UpdateMovement early-returns), so this is a
+    // separate one-shot watchdog tracked on the bot's real position, independent of move-speed.
     public Vector3 IdleRescueAnchor;
-    public float IdleRescueSince = -1f; // -1 = not currently tracking an idle window
-    public bool IdleRescued;            // one-shot per bot lifetime
+    public float IdleRescueSince = -1f; // -1 = not tracking
+    public bool IdleRescued;
 
-    // ── Spawn-island rescue ───────────────────────────────────────────
-    // One-shot teleport for a bot that SPAWNED on a navmesh chunk disconnected from the rest of the map. Unlike
-    // the idle-island rescue above it doesn't key off objective distance (such a bot still "arrives" at its few
-    // on-island waypoints) — it keys off being parked near spawn while unable to path to any other agent.
-    // SpawnIslandRescued doubles as "resolved": set once the bot is rescued OR proves it can reach the map.
+    // Spawn-island rescue: keys off being parked near spawn while unable to path to any other agent, since such a
+    // bot still "arrives" at its few on-island waypoints (so the idle-island watchdog above can't catch it).
+    // SpawnIslandRescued doubles as "resolved": set once rescued or once it proves it can reach the map.
     public Vector3 SpawnIslandPos;
     public float SpawnIslandSeenAt;
     public bool SpawnIslandRescued;

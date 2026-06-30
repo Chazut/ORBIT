@@ -167,10 +167,7 @@ public static class BotTypeUtils
     public static bool IsRaider(this WildSpawnType wildSpawnType)
         => wildSpawnType is WildSpawnType.pmcBot or WildSpawnType.exUsec;
 
-    /// <summary>
-    /// Bloodhounds — the Smugglers' boat / arena-event spawns. Driven by ORBIT like the other non-loot
-    /// factions; gets the same Roaming / Vanilla toggles as the Goons.
-    /// </summary>
+    /// <summary>Bloodhounds (arena-event spawns), driven like the Goons with the same Roaming / Vanilla toggles.</summary>
     public static bool IsBloodhound(this WildSpawnType wildSpawnType)
         => wildSpawnType is WildSpawnType.arenaFighter
             or WildSpawnType.arenaFighterEvent

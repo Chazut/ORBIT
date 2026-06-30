@@ -92,9 +92,8 @@ public class MovementSystem
                 mover.PositionOnWayInner = pos;
             }
 
-            // One-shot rescue for bots stranded on a disconnected navmesh chunk. Runs before UpdateMovement
-            // because an islanded bot has no path and UpdateMovement early-returns, so the stuck remediation
-            // never sees it.
+            // Runs before UpdateMovement: an islanded bot has no path, so UpdateMovement early-returns and the
+            // stuck remediation never sees it.
             TryIdleIslandRescue(agent);
             TrySpawnIslandRescue(agent, liveAgents);
 
@@ -353,9 +352,7 @@ public class MovementSystem
     /// </summary>
     private const float DoorInteractHoldSeconds = 1.25f;
 
-    /// <summary>Tighter max distance (squared) for the on-arrival key-unlock gesture than the generic 3 m door
-    /// gate. Without it the bot plays the key animation several metres back in the corridor (seen in
-    /// raid-review); ~1.6 m puts the gesture right at the door leaf.</summary>
+    // Tighter than the generic 3 m door gate so the key animation plays at the door leaf, not metres back.
     private const float DoorKeyUnlockMaxDistanceSqr = 1.6f * 1.6f;
 
     /// <summary>
@@ -500,21 +497,13 @@ public class MovementSystem
                 var role = agent.Bot?.Profile?.Info?.Settings?.Role;
                 if (!role.HasValue || !role.Value.IsPMC()) continue;
 
-                // Play the key-unlock gesture only when the bot is right AT the door. The outer 3 m gate is
-                // generous enough that otherwise the animation fires several metres back in the corridor (seen
-                // in raid-review for Jehree). The bot keeps path-following through the carver-opened doorway, so
-                // it reaches this tighter range within a frame or two.
                 if ((door.transform.position - agent.Position).sqrMagnitude > DoorKeyUnlockMaxDistanceSqr)
                     continue;
 
-                // The squad rolled (or was granted 100% as a Main anchor) for this door at dispatch time, so
-                // ORBIT already opened its navmesh carver (the door is reachable but still visually Locked).
-                // Now that a bot has physically arrived, call Door.Unlock() to flip it to Shut on the next
-                // coroutine yield; the next HandleDoors tick takes the normal OpenDoor branch. We unlock for
-                // ANY PMC standing at a carver-opened door, not only the granting squad — the carver is shared
-                // per door, so a bot from another squad (or one just passing through) would otherwise phase
-                // through the still-locked leaf (bots ignore door colliders). Without either signal, fall
-                // through cleanly — vmethod_1 would silently fail without a key anyway.
+                // Unlock for ANY PMC at a carver-opened door, not only the granting squad: the carver is shared
+                // per door, so another bot would otherwise phase through the still-locked leaf (bots ignore door
+                // colliders). Door.Unlock() flips it to Shut on the next coroutine yield so the following tick
+                // takes the normal OpenDoor branch.
                 var doorIdForUnlock = door.GetInstanceID();
                 if ((agent.Squad != null && agent.Squad.ForceUnlockDoorIds.Contains(doorIdForUnlock))
                     || Orbit.Helpers.DoorNavMesh.IsCarverOpened(doorIdForUnlock))
@@ -524,8 +513,7 @@ public class MovementSystem
                     {
                         continue; // already unlocking this door, wait for animation
                     }
-                    // Prep the bot like OpenDoor so BSG plays the door-open animation cleanly on the NEXT tick
-                    // (a sprinting / proned / ADS'd bot's interaction is silently dropped).
+                    // BSG silently drops a sprinting / proned / ADS'd bot's interaction; prep like OpenDoor.
                     try
                     {
                         var unlockBot = agent.Bot;
@@ -538,17 +526,11 @@ public class MovementSystem
                         Log.Debug($"{agent} unlock prep on {door.Id} threw (non-fatal): {prepEx.Message}");
                     }
 
-                    // Unlock the latch AND play the bot's key-in-lock gesture, WITHOUT routing through an Unlock
-                    // interaction result. EFT's Door.Interact(Unlock) casts the result to KeyInteractionResultClass,
-                    // whose RaiseEvents/CanExecute dereference a real KeyComponent — a keyless bot can only pass a
-                    // null Key, which NRE'd inside vmethod_1 every time (raid logs: 2/2 "unlock animation attempt
-                    // threw", plus a double Unlock() latch). Instead we replicate the two halves of
-                    // MovementState.ExecuteDoorInteraction by hand: read the interaction params WHILE the door is
-                    // still Locked — GetInteractionParameters resolves AnimationId to the door's DoorKeyOpen gesture,
-                    // because the key animation is driven by the locked STATE, not by holding a key — then unlock the
-                    // latch directly (keyless, no cast → no NRE, no double-latch) and drive the hands animation via
-                    // SetInteractInHands exactly as ExecuteDoorInteraction does. The door then opens on the next tick
-                    // via the normal OpenDoor path.
+                    // Don't route through Door.Interact(Unlock): it casts to KeyInteractionResultClass, which
+                    // dereferences a real KeyComponent, so a keyless bot NREs inside vmethod_1. Replicate
+                    // ExecuteDoorInteraction by hand: read interaction params WHILE still Locked (resolves
+                    // AnimationId to the DoorKeyOpen gesture from the locked state), unlock the latch directly,
+                    // then drive the hands animation via SetInteractInHands.
                     try
                     {
                         var keyAnim = door.GetInteractionParameters(agent.Position);
@@ -564,16 +546,13 @@ public class MovementSystem
                         if (door.DoorState == EDoorState.Locked) door.Unlock();
                     }
                     _doorInteractCooldown[doorIdForUnlock] = Time.time;
-                    // Hold the bot in place through the whole unlock + open sequence. Without this it walks
-                    // straight through the doorway while Unlock()'s coroutine is still running: the carver is
-                    // open (navmesh passes) and ORBIT globally ignores door<->bot collision, so the leaf never
-                    // visibly opens and the bot phantom-walks through a still-shut door (RR: no stop, no
-                    // animation, unlike normal doors). Hold long enough to bridge the interact cooldown so
-                    // OpenDoor takes over and finishes the open before we release path-following.
+                    // Hold through the whole unlock + open. Without it the bot phantom-walks the still-shut leaf:
+                    // the carver is open (navmesh passes) and ORBIT ignores door<->bot collision. Bridge the
+                    // interact cooldown so OpenDoor finishes the open before we release path-following.
                     agent.Movement.DoorInteractHoldUntil = Time.time + DoorInteractCooldownSeconds + DoorInteractHoldSeconds;
                     Log.Debug($"{agent} unlocked {door.Id} on arrival (was Locked, ORBIT carver-opened) — holding {DoorInteractCooldownSeconds + DoorInteractHoldSeconds:F1}s for unlock+open, no phase-through");
                     StartDoorWatch(agent, door, "Unlock");
-                    continue; // next tick: door is Shut → normal Open path runs (re-holds + animates)
+                    continue; // next tick: door is Shut → normal Open path runs
                 }
                 continue;
             }
@@ -732,11 +711,8 @@ public class MovementSystem
     /// for wedging the bot's nav, and a recalculated path through a clean cross-section often succeeds.
     /// Cheap: only walks the agent's own opened-doors list, only fires under explicit stuck signals.
     /// </summary>
-    /// <param name="includeNear">When true (hard-stuck path), also close doors within
-    /// <see cref="CloseDoorBehindMinDistance"/>. A bot pinned in place is most likely wedged on the swing
-    /// arc of a door it is standing right next to, so the near door is exactly the one to close — the normal
-    /// 4 m floor (meant to avoid auto-closing a door a bot is calmly looting beside) would skip the real
-    /// culprit and leave the bot stuck behind its own door for the whole raid.</param>
+    /// <param name="includeNear">When true (hard-stuck path), also close doors inside the normal 4 m floor: a
+    /// pinned bot is usually wedged on the swing arc of a door right next to it, which the floor would skip.</param>
     public void CloseRecentDoorsBehindAgent(Agent agent, bool includeNear = false)
     {
         var list = agent?.RecentOpenedDoors;
@@ -837,14 +813,8 @@ public class MovementSystem
         var distSqr = dx * dx + dz * dz;
         if (distSqr > 9f) return false; // > 3 m XZ — out of reach for this tick
 
-        // Vertical guard. Every distance/cone test in this method is projected onto the ground plane (the XZ
-        // distance above, and forward.y = 0f below), so a door directly ABOVE or BELOW the bot reads as
-        // "right next to me" even though it sits on another floor reached only via stairs. A dorms floor is
-        // ~3 m, so without this a bot near a stairwell on the floor below force-unlocks / opens the marked-
-        // room door through the ceiling before ever climbing up — the door ends up unlocked-but-shut and the
-        // room is never entered. A same-floor approach keeps the bot body within ~1 m of the door pivot in
-        // Y; reject anything past 1.5 m so only same-level doors qualify. Gates BOTH unlock and open, since
-        // every door reaching the Locked/Open branches passes through here first.
+        // Every test here is projected onto XZ, so a door on the floor above/below reads as adjacent. A
+        // same-floor approach stays within ~1 m of the door pivot in Y; reject anything past 1.5 m.
         const float VerticalReachMeters = 1.5f;
         if (Mathf.Abs(doorPos.y - agentPos.y) > VerticalReachMeters) return false;
 
@@ -950,11 +920,8 @@ public class MovementSystem
         EBodyPartColliderType.RightCalf
     };
 
-    /// <summary>
-    /// True when it is safe to teleport this agent: no living human player within 10 m, and no human has
-    /// line of sight to any of the agent's tracked body parts. A player watching a bot blink across the map
-    /// is the worst-case visual regression, so every teleport path gates on this.
-    /// </summary>
+    // Safe to teleport only when no live human is within 10 m and none has line of sight to any tracked body
+    // part — a player watching a bot blink across the map is the worst-case visual regression.
     private static bool TeleportSafe(Agent agent, List<Player> humanPlayers)
     {
         var agentPos = agent.Position;
@@ -974,9 +941,8 @@ public class MovementSystem
             for (var j = 0; j < TeleportVisBodyParts.Length; j++)
             {
                 var bodyPart = agentBodyParts[TeleportVisBodyParts[j]];
-                // Linecast returns true when something blocks the view → that body part isn't visible.
+                // Linecast true == view blocked == body part not visible.
                 if (Physics.Linecast(humanHeadPos, bodyPart.transform.position, out _, TeleportVisLayerMask.value)) continue;
-                // Nothing blocked → the player can see this body part → not safe.
                 Log.Debug($"{agent} teleport vis check failed: {player.Profile.Nickname} can see {bodyPart.BodyPartColliderType}");
                 return false;
             }
@@ -985,13 +951,10 @@ public class MovementSystem
     }
 
     // ── Idle-island rescue ────────────────────────────────────────────────────────────────────────────
-    // A bot spawned on a navmesh chunk disconnected from the rest of the map (Streets near transits, Factory
-    // silo, etc.) can never path to its objective, so it stands still until raid end. The per-agent stuck
-    // remediation never sees it (UpdateMovement early-returns when there is no path). This one-shot watchdog
-    // runs for every active agent regardless of path state: if the bot has a squad objective it is FAR from
-    // and has not moved for a sustained window, teleport it once to the nearest navmesh point actually
-    // connected to that objective. Same proximity + LoS safety as the hard-stuck teleport. One-shot per bot
-    // so it can't fall into the constant-teleport loop that made us disable vanilla's built-in rescue.
+    // A bot on a navmesh chunk disconnected from the map can never path to its objective and the stuck
+    // remediation never sees it (UpdateMovement early-returns with no path). This watchdog runs regardless of
+    // path state: a bot far from its objective that hasn't moved for a window gets one teleport to the nearest
+    // navmesh point connected to that objective. One-shot per bot so it can't loop.
 
     private const float IdleRescueNoMoveRadiusSqr = 3f * 3f;
     private const float IdleRescueThresholdSeconds = 25f;
@@ -1008,21 +971,18 @@ public class MovementSystem
     private void TryIdleIslandRescue(Agent agent)
     {
         var stuck = agent.Stuck;
-        if (stuck.IdleRescued) return; // one-shot per bot lifetime
+        if (stuck.IdleRescued) return;
 
-        // Only rescue a bot actively trying to REACH its objective (Status == Moving). A bot that has arrived
-        // and is guarding / holding while the squad waits (Status == Finished) sits deliberately still, often
-        // >12m from a wide Synthetic anchor's centre — that is NOT "stranded", and teleporting it yanks it off
-        // its post (observed: Mr_President & KittehKun each TP'd once just waiting at a Synthetic POI).
+        // Only rescue a bot actively trying to REACH its objective. A guarding bot (Status == Finished) sits
+        // deliberately still, often far from a wide anchor's centre; teleporting it would yank it off its post.
         if (agent.Objective?.Status != ObjectiveStatus.Moving)
         {
             stuck.IdleRescueSince = -1f;
             return;
         }
 
-        // Needs somewhere it is actually trying to get to. Use the AGENT's own objective, not the squad
-        // anchor — a follower legitimately holding a splinter position can be >12 m from the squad anchor,
-        // and gating on the squad anchor would teleport it mid-guard.
+        // Use the agent's own objective, not the squad anchor: a follower holding a splinter position can be
+        // far from the anchor, and gating on the anchor would teleport it mid-guard.
         var objLoc = agent.Objective?.Location;
         if (objLoc == null)
         {
@@ -1032,14 +992,13 @@ public class MovementSystem
 
         var pos = agent.Position;
 
-        // If it is already at/near the objective it isn't islanded — it arrived and is looting/guarding.
+        // Already near the objective: it arrived, not islanded.
         if ((objLoc.Position - pos).sqrMagnitude < IdleRescueMinObjectiveDistSqr)
         {
             stuck.IdleRescueSince = -1f;
             return;
         }
 
-        // Reset the window on first sight or whenever the bot makes real progress.
         if (stuck.IdleRescueSince < 0f || (pos - stuck.IdleRescueAnchor).sqrMagnitude > IdleRescueNoMoveRadiusSqr)
         {
             stuck.IdleRescueAnchor = pos;
@@ -1049,15 +1008,10 @@ public class MovementSystem
 
         if (Time.time - stuck.IdleRescueSince < IdleRescueThresholdSeconds) return;
 
-        // Stranded far from the objective for the whole window → attempt the one-shot rescue. First try a
-        // point connected to the objective; if none exists (wedged on an isolated chunk with no objective-
-        // reachable sample in range, even though a squadmate can be fine a few metres away), fall back to
-        // teleporting next to the nearest alive squadmate, which is by definition on usable navmesh.
         if (RescueTeleportToConnectedPoint(agent, objLoc.Position) || RescueTeleportNearSquadmate(agent))
             stuck.IdleRescued = true;
 
-        // Re-arm the window either way: on success the one-shot flag stops further attempts; on failure we
-        // retry after another full window instead of hammering CalculatePath every frame.
+        // Re-arm either way: on failure, retry after another full window rather than hammering CalculatePath.
         stuck.IdleRescueSince = Time.time;
     }
 
@@ -1074,15 +1028,14 @@ public class MovementSystem
                 var ang = a * (Mathf.PI * 2f / 8f);
                 var candidate = pos + new Vector3(Mathf.Cos(ang) * r, 0f, Mathf.Sin(ang) * r);
                 if (!NavMesh.SamplePosition(candidate, out var hit, 2f, NavMesh.AllAreas)) continue;
-                // Only accept a point genuinely CONNECTED to the objective — that's what gets the bot off the
-                // island. SamplePosition alone could snap straight back onto the disconnected chunk.
+                // Require a point CONNECTED to the objective; SamplePosition alone could snap back onto the island.
                 if (!NavMesh.CalculatePath(hit.position, objectivePos, NavMesh.AllAreas, _rescuePath)) continue;
                 if (_rescuePath.status != NavMeshPathStatus.PathComplete) continue;
 
                 var dest = hit.position;
                 dest.y += 0.25f;
                 agent.Player.Teleport(dest);
-                ResetPath(agent); // re-dispatch from the new position next tick
+                ResetPath(agent);
                 Log.Info($"{agent} idle-island rescue: teleported {Vector3.Distance(pos, dest):F0}m to a navmesh point connected to its objective (stranded {IdleRescueThresholdSeconds:F0}s)");
                 return true;
             }
@@ -1091,9 +1044,8 @@ public class MovementSystem
         return false;
     }
 
-    // Fallback when no objective-connected point exists: teleport next to the nearest alive squadmate. They
-    // reached their own objective, so their position sits on usable, squad-relevant navmesh — enough to get a
-    // wedged bot off a dead chunk even if its own objective stays unreachable from there.
+    // Fallback when no objective-connected point exists: a live squadmate reached its own objective, so its
+    // position is usable navmesh — enough to get the bot off a dead chunk.
     private bool RescueTeleportNearSquadmate(Agent agent)
     {
         var squad = agent.Squad;
@@ -1101,7 +1053,7 @@ public class MovementSystem
         if (!TeleportSafe(agent, _humanPlayers)) return false;
 
         var pos = agent.Position;
-        const float minDistSqr = 3f * 3f; // don't bother TPing to a mate basically on top of us
+        const float minDistSqr = 3f * 3f; // skip a mate on top of us
         Agent best = null;
         var bestDistSqr = float.MaxValue;
         var bestDest = Vector3.zero;
@@ -1127,12 +1079,10 @@ public class MovementSystem
     }
 
     // ── Spawn-island rescue ────────────────────────────────────────────────────────────────────────────
-    // One-shot teleport for a bot that SPAWNED on a navmesh chunk disconnected from the rest of the map (Streets
-    // transits, Factory silo, ...). The idle-island rescue above can't catch this: such a bot still "arrives" at
-    // its few on-island waypoints (nav-snap arrival accept), so it never reads as stranded-far-from-objective.
-    // Detect it directly — parked near spawn past a grace window AND unable to path to ANY other live agent (the
-    // rest of the bots sit on the main mesh) — then teleport it once onto the main mesh near the nearest such
-    // agent, clear of humans and other bots by a safety radius.
+    // One-shot teleport for a bot that SPAWNED on a disconnected navmesh chunk. The idle-island rescue can't
+    // catch this: the bot still "arrives" at its few on-island waypoints, so it never reads as stranded-far.
+    // Detect directly (parked near spawn past a grace window AND can't path to any other live agent, since the
+    // rest sit on the main mesh), then teleport once onto the main mesh, clear of humans and bots.
     private void TrySpawnIslandRescue(Agent agent, List<Agent> liveAgents)
     {
         var stuck = agent.Stuck;
@@ -1146,7 +1096,7 @@ public class MovementSystem
             return;
         }
 
-        // Got somewhere => not spawn-islanded; stop probing this bot.
+        // Moved away from spawn => not islanded.
         if ((pos - stuck.SpawnIslandPos).sqrMagnitude > SpawnIslandMoveRadiusSqr)
         {
             stuck.SpawnIslandRescued = true;
@@ -1155,35 +1105,31 @@ public class MovementSystem
 
         if (Time.time - stuck.SpawnIslandSeenAt < SpawnIslandGraceSeconds) return;
 
-        // Parked near spawn for the whole grace window. Find the nearest other live agent we CANNOT reach. If we
-        // can reach ANY of them we are on the main mesh and fine.
+        // Find the nearest live agent we CANNOT reach; reaching ANY of them means we're on the main mesh.
         Agent reference = null;
         var bestDistSqr = float.MaxValue;
         for (var i = 0; i < liveAgents.Count; i++)
         {
             var other = liveAgents[i];
             if (other == null || other == agent) continue;
-            // Skip SAME-SQUAD agents: squadmates spawn together so they sit on the SAME island — using one as
-            // the reachability reference would read "not islanded" (the bot can reach it) or anchor the TP onto
-            // the same disconnected chunk. Only an OTHER squad anchors real (main-mesh) reachability.
+            // Skip same-squad agents: squadmates spawn on the same island, so one would falsely read as a
+            // reachable reference or anchor the TP back onto the disconnected chunk.
             if (agent.Squad != null && other.Squad != null && other.Squad.Id == agent.Squad.Id) continue;
             if (other.Player?.HealthController is not { IsAlive: true }) continue;
             var d = (other.Position - pos).sqrMagnitude;
             if (d < SpawnIslandMinReferenceDistSqr) continue; // too close — might be on the same chunk
             if (IsPathComplete(pos, other.Position))
             {
-                stuck.SpawnIslandRescued = true; // reachable => not islanded, stop checking
+                stuck.SpawnIslandRescued = true; // reachable => not islanded
                 return;
             }
             if (d < bestDistSqr) { bestDistSqr = d; reference = other; }
         }
 
-        if (reference == null) return; // no usable reference yet — retry next tick
+        if (reference == null) return;
 
-        if (!TeleportSafe(agent, _humanPlayers)) return; // never blink across a watching player
-        // Reachability anchor: the human PLAYER (main mesh, what the player sees) if one is alive, else the
-        // nearest other agent as a reachability reference. Either way we teleport to a WAYPOINT reachable from
-        // it — NEVER next to another bot.
+        if (!TeleportSafe(agent, _humanPlayers)) return;
+        // Anchor reachability on the alive human player (main mesh) if there is one, else the nearest agent.
         var anchorPos = reference.Position;
         for (var i = 0; i < _humanPlayers.Count; i++)
         {
@@ -1199,13 +1145,10 @@ public class MovementSystem
             Log.Info($"{agent} spawn-island rescue: teleported {Vector3.Distance(fromPos, wpDest):F0}m to the nearest reachable waypoint (off the disconnected spawn chunk)");
             return;
         }
-        // No reachable waypoint this pass — leave the bot put and retry next tick. We NEVER drop it next to
-        // another bot.
     }
 
-    // Find a teleport destination at the nearest WAYPOINT to fromPos that is reachable (PathComplete) from
-    // anchorPos and clear of players/bots by the safety radius. Used by the spawn-island rescue so an islanded
-    // bot lands on a real POI on the reachable main mesh — never next to another bot.
+    // Nearest waypoint to fromPos that is reachable from anchorPos and clear of players/bots, so the bot lands
+    // on a real POI rather than next to another bot.
     private bool TryFindReachableWaypoint(Agent agent, List<Agent> liveAgents, Vector3 fromPos, Vector3 anchorPos, float maxRadius, out Vector3 dest)
     {
         dest = Vector3.zero;
@@ -1419,11 +1362,8 @@ public class MovementSystem
                 case HardStuckStatus.None when stuck.Timer >= PathRetryDelay:
                     Log.Debug($"{agent} is hard stuck, attempting to recalculate path.");
                     stuck.Status = HardStuckStatus.Retrying;
-                    // Before retrying, close any doors the agent opened that might be wedging the
-                    // corridor — swing-arc geometry is a common cause of HardStuck in interior maps.
-                    // includeNear: a pinned bot is usually wedged on a door it is standing right next to,
-                    // so close the near door too (the normal 4 m floor would skip the actual culprit and
-                    // leave the bot stuck behind its own door). No-op if it opened no doors.
+                    // Swing-arc geometry is a common cause of HardStuck indoors; close any doors this bot opened
+                    // before re-pathing. includeNear because a pinned bot is usually wedged on the door next to it.
                     movementSystem.CloseRecentDoorsBehindAgent(agent, includeNear: true);
                     movementSystem.MoveRetry(agent, agent.Movement.Target);
                     break;
@@ -1462,9 +1402,8 @@ public class MovementSystem
         {
             if (!TeleportSafe(agent, humanPlayers)) return;
 
-            // Escalate on RE-STICK: if we are teleporting again from ~the same spot as last time, the bot landed
-            // and re-wedged, so jump to a farther rescue ring (then a squadmate) instead of dropping it 4m away
-            // to re-stick again (observed: Arangr re-stuck ~10min on Streets door geometry).
+            // Escalate on re-stick: teleporting again from ~the same spot means the bot re-wedged, so jump to a
+            // farther rescue ring instead of dropping it a few metres away to re-stick.
             var stuck = agent.Stuck.Hard;
             var pos = agent.Position;
             const float reStuckRadiusSqr = 10f * 10f;
@@ -1474,8 +1413,7 @@ public class MovementSystem
             stuck.LastTeleportPos = pos;
             var startRing = stuck.TeleportCount <= 1 ? 0 : stuck.TeleportCount == 2 ? 2 : 3; // rings {4,8,16,28,45}
 
-            // Prefer a teleport that actually gets the bot UNSTUCK: a navmesh point connected to its objective,
-            // else next to a squadmate. Path-corner hop is only the last-resort fallback.
+            // Prefer an unsticking teleport (objective-connected point, else a squadmate); path-corner is last resort.
             var objLoc = agent.Objective?.Location;
             if (objLoc != null && movementSystem.RescueTeleportToConnectedPoint(agent, objLoc.Position, startRing)) return;
             if (movementSystem.RescueTeleportNearSquadmate(agent)) return;

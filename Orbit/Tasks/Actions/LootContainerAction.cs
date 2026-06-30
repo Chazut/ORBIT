@@ -145,9 +145,6 @@ public class LootContainerAction(AgentData dataset, WaypointSystem waypointSyste
             // the whole squad into ExtractRequested mode. From the next dispatch on, the strategy bypasses
             // normal POI selection and routes straight to the nearest eligible exfil. One-way switch.
             CheckExtractTrigger(agent);
-
-            // Per-member solo extract: this bot personally hit its OWN threshold — roll once (50%) to peel it
-            // off to extract alone while the squad keeps playing. Only fires on a real loot by this agent.
             CheckSoloLootExtract(agent);
         }
         else
@@ -372,19 +369,17 @@ public class LootContainerAction(AgentData dataset, WaypointSystem waypointSyste
     }
 
     /// <summary>
-    /// Per-member solo extract on the LOOT threshold: when this agent's OWN looted value crosses its OWN
-    /// rolled threshold, roll once (50%) — on a win the member peels off to extract alone (routed by
-    /// GotoObjectiveStrategy) while the squad keeps playing. The roll happens exactly once per member
-    /// (<see cref="Agent.SoloLootThresholdRolled"/>) so repeated loots don't compound it into a certainty.
+    /// Per-member solo extract on the loot threshold: when this agent's own looted value crosses its own
+    /// threshold, roll once (exactly once per member, so repeated loots don't compound into a certainty); on a
+    /// win the member peels off to extract alone while the squad keeps playing.
     /// </summary>
     private static void CheckSoloLootExtract(Agent agent)
     {
         if (agent == null || agent.SoloExtractRequested || agent.SoloLootThresholdRolled) return;
-        // Squad already extracting → the member leaves with the squad anyway, no point peeling off.
         if (agent.Squad == null || agent.Squad.ExtractRequested) return;
 
         var chancePct = LootConfig.SoloLootExtractChancePct?.Value ?? 50;
-        if (chancePct <= 0) return; // solo loot-extract disabled in F12
+        if (chancePct <= 0) return;
 
         var ownThreshold = GetOrResolveAgentExtractThreshold(agent);
         if (ownThreshold <= 0f) return; // not resolved yet / feature disabled — retry on the next loot
@@ -393,12 +388,11 @@ public class LootContainerAction(AgentData dataset, WaypointSystem waypointSyste
         var ownLooted = go != null ? (go.GetComponent<OrbitLootHandler>()?.Stats?.TotalGained ?? 0f) : 0f;
         if (ownLooted < ownThreshold) return;
 
-        agent.SoloLootThresholdRolled = true; // one-shot, win or lose
+        agent.SoloLootThresholdRolled = true;
         if (UnityEngine.Random.Range(0, 100) < chancePct)
         {
             agent.SoloExtractRequested = true;
-            // Kept short — this string surfaces in RR's "Extracting: <reason>" tooltip. The roll % stays in
-            // the Log.Info below.
+            // Surfaces in the Raid Review "Extracting: <reason>" tooltip, so keep it short.
             agent.SoloExtractReason = $"own loot ≥ {ownThreshold / 1000f:F0}k₽";
             Log.Info($"{agent} hit its OWN extract threshold ({ownLooted:N0}₽ >= {ownThreshold:N0}₽) and won the {chancePct}% solo-extract roll — peeling off to extract alone");
         }
