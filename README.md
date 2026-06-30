@@ -359,19 +359,16 @@ channel — link in Support.
 No ETA, no promises, but on the list:
 
 **Behaviour**
-- Members can extract alone if they personally hit their loot threshold
 - Squads can decide to camp + ambush instead of always roaming
-- Squad rally — when one member starts taking fire, the rest break from their current objective and bee-line to support (currently each bot reacts to combat individually via SAIN, so an isolated teammate can get gunned down while squadmates have already exited combat on their end)
 - Smarter movement - checking corners, scanning the rear, less straight-line dashing
 - Less static regrouping (bots are easy 1-taps while waiting for squadmates)
 - Post-combat self-heal if meds are in inventory
 - Squad splitting with radio comms
 - New personalities
-- Detect bots spawned on isolated navmesh islands (e.g. near Streets transits, Factory silo) and teleport them once to a valid spot nearby so they stay in the raid instead of standing still until raid end. TP destination must respect a safety radius from the player (and other bots) so the rescue can't drop a bot right in front of someone
 - Prone or crouch when looting a body in the open to minimise silhouette (a bot lying flat on a corpse in a field is way harder to spot than one standing over it)
 - Weapon-type → behaviour archetype hint (CQB-leaning loadout pushes harder, sniper loadout stays back) driven by MOA + RPM + scope presence, biasing POI selection so a Mosin squad doesn't get routed into Resort interiors
 - Cross-raid player-movement heatmap — aggregate the player positions raid-review already logs into a per-map occurrence map, then weight squad dispatch toward those hotspots so the side routes a player habitually rats through stop being safe over time (suggested by Fiodor on Discord)
-- Built-in degraded-tickrate mode for off-screen / far-from-player squads — runs the dispatch / loot / extract loops at a lower frequency (e.g. once every 5-10s instead of every tick) to reclaim CPU on lower-end machines without flat-out deactivating bots the way external AI-limiter mods do. Goal: keep the "full lifecycle" guarantee while trying to help out low-end PCs
+- A proper in-ORBIT AI limiter for off-screen / far-from-player squads — the 1.2.0 "degraded tickrate" option only throttles ORBIT's own decision loop, which is a small slice of a bot's total cost (SAIN / EFT combat, vision and pathfinding dominate and keep running), so the real-world gain is marginal. The goal is a deeper limiter that safely scales back the heavy AI processing for distant bots without flat-out deactivating them the way external AI-limiter mods do (which kills the "full lifecycle" guarantee)
 - Investigate why extended raid duration breaks bot behaviour — users running SVM / RaidOverhaul / Custom Raid Times with longer-than-vanilla raid lengths consistently report bots going inert, freezing, or behaving erratically (multiple Discord reports — Chern's terrain clipping, others). Currently in Troubleshooting as a "test with vanilla raid times first" recommendation, but the underlying cause isn't understood. Worth tracing what state ORBIT (or a dependency) accumulates over time that fails past the vanilla window
 
 **Objectives**
@@ -396,7 +393,6 @@ No ETA, no promises, but on the list:
 - "Drop backpack" exfils (Empty / EmptyOrSize) - usable when bot has no backpack, OR wounded bots drop the bag and use them anyway
 - HasItem (RedRebel-style - bot must own a Red Rebel in inventory, but don't consume it; ignore the paracord and WearsItem gear constraints entirely)
 - Chance roll on whether a squad will use the car / V-Ex (SharedTimer) exfil
-- Emergency extract: a member who is bleeding or low on HP with no heals left heads for the nearest exfil alone - the rest of the squad keeps playing its objectives
 
 **Looting**
 - Post-loot inventory sort so the grid stays usable as the bot fills up
@@ -409,15 +405,14 @@ No ETA, no promises, but on the list:
 - Labs-specific checkpoint tuning - fewer / relocated patrol points around the security gates, which bots get stuck on (BSG gate-pathing quirk, made worse by ORBIT placing checkpoints inside the gates; reported by Firefly)
 
 **Animations / polish**
-- Keycard / key swipe animation for PMC bots opening locked rooms (currently they call the Unlock function instantly with no anim — should walk to the reader and play the swipe like a player)
+- Hand animation for unlocking doors — as of 1.2.0 bots no longer unlock doors from a distance (they unlock once they're at the door), but the unlock itself is still silent. Playing the key / keycard swipe animation at the door was attempted but doesn't work yet, so it's parked for now (low priority)
 
 ### Known Issues
 
-- **1.0.0 is the first public release** - a few rough edges are expected. Bug reports and feedback on the [Discord thread](https://discord.com/channels/875684761291599922/1509314495019745451) are very welcome.
+- ORBIT is still young and has rough edges. Bug reports and feedback on the [Discord thread](https://discord.com/channels/875684761291599922/1509314495019745451) are very welcome.
 - **Most Reserve exfils require switches ORBIT doesn't operate yet** - bots there mostly stay until killed or raid end.
-- **Bots walk into the Lighthouse minefield** - the rebuilt POI generation doesn't exclude minefield zones yet, so bots can be routed straight into them. Fix planned for 1.0.1.
+- **Bots walk into the Lighthouse minefield** - the rebuilt POI generation doesn't exclude minefield zones yet, so bots can be routed straight into them. Fix planned.
 - **Possible interaction with CactusPie's "Transfer Loot Into Container Automatically" mod** - reported symptom: items a bot loots end up in YOUR tagged containers (SICC case, etc.). Best theory at the moment is that ORBIT routes pickups through BSG vanilla APIs (same path as the player), so a mod hooking those APIs may end up applying its logic to bot pickups too. Investigating.
-- **Bots stuck at spawn on isolated navmesh** - vanilla SPT quirk where a spawn point lands a bot on a tiny chunk of navmesh disconnected from the rest of the map (Streets near transits, Factory inside the silo, etc.). Shows up more often with ORBIT than pure vanilla because vanilla's built-in TP rescue is disabled (it was teleporting bots constantly on every unreachable pick). Fix planned: targeted TP rescue that fires only when a bot is genuinely stuck for X seconds.
 - **Rare stuck bots** - usually unstick themselves within a minute. Still iterating.
 - **Faction-mod takeover (RUAF / UNTAR / Black Division) can misbehave** - these mods swap the bot's brain at runtime (via MoreBotsAPI) and ORBIT's handling of that handoff is not fully solid yet, so a controlled squad may rapidly switch goals or get stuck. Workaround: leave the per-faction takeover toggles OFF (their default) so ORBIT leaves those bots vanilla. ISB takeover is handled correctly. Fix in progress.
 - **Bots stuck or oscillating at Labs security gates** - the Labs gates have a BSG pathing quirk bots struggle to pass, and ORBIT places patrol checkpoints inside/near the gates which makes it worse (a bot parks at a gate, or goes in then immediately wants back out). Needs Labs-specific checkpoint tuning to keep points clear of the gates. Reported by Firefly (ISB author).
