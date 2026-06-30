@@ -41,11 +41,9 @@ public class Agent(int id, BotOwner bot, float[] taskScores) : Entity(id, taskSc
     public int LastFailedPoiId = -1;
 
     /// <summary>
-    /// Waypoint.Id of a corpse THIS agent killed and was credited with, but was pulled away from before
-    /// looting (it detached for SAIN combat / healing / a solo-extract right after the kill). 0 = none. While
-    /// set, squad dispatch re-routes the agent back onto its own kill as a personal splinter once it is active
-    /// again — gated on the corpse still existing, unlooted, reachable and near THIS agent. Cleared
-    /// automatically (memory zeroed) once the corpse is looted / blacklisted / removed / drifts out of range.
+    /// Waypoint.Id of a corpse this agent killed but was pulled away from before looting (SAIN combat, healing,
+    /// solo-extract). 0 = none. While set, dispatch re-routes the agent back onto its own kill as a personal
+    /// splinter, gated on the corpse still being unlooted, reachable and nearby.
     /// </summary>
     public int OwnKillCorpseLocId;
 
@@ -111,11 +109,8 @@ public class Agent(int id, BotOwner bot, float[] taskScores) : Entity(id, taskSc
     public float OwnExtractLootThreshold;
 
     /// <summary>
-    /// Solo extract: this member has decided to peel off and extract on its own while the squad keeps playing.
-    /// Two triggers (see GotoObjectiveStrategy / LootContainerAction): an EMERGENCY (wounded with no usable
-    /// meds left) and the per-member LOOT threshold (own loot ≥ own threshold, gated by a one-time 50% roll).
-    /// <see cref="SoloExtractTarget"/> caches the exfil it bee-lines to; <see cref="SoloLootThresholdRolled"/>
-    /// makes the loot-threshold roll happen exactly once.
+    /// Solo extract: this member peels off to extract on its own while the squad keeps playing. Two triggers: an
+    /// emergency (wounded with no usable meds left) and the per-member loot threshold (gated by a one-time roll).
     /// </summary>
     public bool SoloExtractRequested;
     public string SoloExtractReason;
@@ -123,28 +118,22 @@ public class Agent(int id, BotOwner bot, float[] taskScores) : Entity(id, taskSc
     public bool SoloLootThresholdRolled;
 
     /// <summary>
-    /// HP-trend emergency-extract state (BSG-independent, see GotoObjectiveStrategy.UpdateEmergencyExtract).
-    /// <see cref="SoloExtractIsEmergency"/> marks the active solo extract as HP-triggered (so it can be
-    /// cancelled if HP recovers, unlike a loot-threshold one). <see cref="EmergencyHpRef"/> is the recent
-    /// high-water HP fraction (-1 = unset), <see cref="EmergencyHpRefTime"/> when it was set, and
-    /// <see cref="EmergencyHpLow"/> the lowest HP seen since the emergency fired.
+    /// HP-trend emergency-extract state. An HP-triggered solo extract can be cancelled if HP recovers (unlike a
+    /// loot-threshold one): once HP stops hitting new lows (tracked by EmergencyHpLow/EmergencyHpLowTime) and is
+    /// back above the danger floor, the bleed is over and the member rejoins.
     /// </summary>
     public bool SoloExtractIsEmergency;
-    public float EmergencyHpRef = -1f;
-    public float EmergencyHpRefTime;
     public float EmergencyHpLow;
-    /// <summary>Time.time at which HP first dropped below the stagnant-low floor and stayed there; -1 = HP is
-    /// above the floor. Drives the "stuck below 50% for a minute" emergency trigger.</summary>
+    public float EmergencyHpLowTime;
+    /// <summary>Time.time HP first dropped below the stagnant-low floor and stayed there (-1 = above floor),
+    /// driving the "stuck below the floor for too long" emergency trigger.</summary>
     public float EmergencyLowSince = -1f;
-    /// <summary>Rolling HpFraction samples (ring buffer at <c>EmergencyHpHistCount % Length</c>) with their
-    /// Time.time, used by UpdateEmergencyExtract's active-decline trend test to tell an ongoing bleed from a
-    /// single hit that then stabilised.</summary>
+    /// <summary>Rolling HpFraction samples (ring buffer indexed <c>EmergencyHpHistCount % Length</c>) with their
+    /// Time.time, used by the trend test to tell an ongoing bleed from a single hit that then stabilised.</summary>
     public readonly float[] EmergencyHpHist = new float[32];
     public readonly float[] EmergencyHpHistTime = new float[32];
     public int EmergencyHpHistCount;
-    /// <summary>Emergency-extract watchdog (OrbitManager.TickEmergencyExtractWatchdog):
-    /// <see cref="EmergencyExtractStillSince"/> is when the bot last started sitting still AT the exfil, measured
-    /// against <see cref="EmergencyExtractLastPos"/>. Force-extract fires when it sits stuck at the exfil (not
+    /// <summary>Emergency-extract watchdog: force-extract fires when the bot sits stuck at the exfil (not
     /// extracting, not in combat) past the timeout.</summary>
     public float EmergencyExtractStillSince;
     public UnityEngine.Vector3 EmergencyExtractLastPos;

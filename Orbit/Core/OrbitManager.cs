@@ -53,13 +53,11 @@ public class OrbitManager
     private readonly BotRoster _botRoster;
     private readonly List<Agent> _liveAgents;
 
-    // Emergency-extract watchdog. Force-despawn (= extract) a committed emergency extracter that reached its
-    // exfil but is sitting still there without completing the extract — e.g. ORBIT got detached at the exfil
-    // (healing / SAIN) so ExtractAction (IsActive-gated) never ran. Gated on being AT the exfil, so a bot stuck
-    // anywhere else is never despawned in a random spot.
-    private const float EmergencyExtractExfilProximitySqr = 12f * 12f; // within this of the exfil = "at the exfil"
+    private const float EmergencyExtractExfilProximitySqr = 12f * 12f;
     private const float EmergencyExtractStuckMoveRadiusSqr = 2f * 2f;
-    private const float EmergencyExtractStuckSeconds = 10f;            // sat still at the exfil, not extracting, this long
+    // Kept above GotoObjectiveStrategy.EmergencyBleedStoppedSeconds (12s) so a bot that recovers can be cancelled
+    // and rejoin its squad before this fires, instead of being force-despawned just for bleeding near an exfil.
+    private const float EmergencyExtractStuckSeconds = 14f;
     private readonly List<Agent> _emergencyExtractDespawn = new();
 
     public OrbitManager(BotsController botsController, BotRoster botRoster)
@@ -105,13 +103,9 @@ public class OrbitManager
 
     public Agent AddAgent(BotOwner bot)
     {
-        // Dedup by BSG bot id. MoreBotsAPI swaps a custom bot's brain at runtime (e.g. ISB types), which makes
-        // BigBrain tear down and rebuild the brain — re-instantiating our OrbitBrainLayer and re-entering here
-        // for a BotOwner that already has an Agent. Without this guard each swap leaves an ORPHAN agent: it
-        // keeps a squad slot and gets dispatched objectives, but its layer is dead so it never physically
-        // moves. A 7-bot ISB group balloons to 14 "members" (7 movers + 7 frozen orphans), which breaks
-        // per-member dispatch and stalls the squad on the "all members arrived" gate (orphans never arrive).
-        // Reuse the live agent instead — the newly-active layer drives the same Agent.
+        // A runtime brain swap (e.g. MoreBotsAPI on custom bots) makes BigBrain rebuild the brain and re-enter
+        // here for a BotOwner that already has an Agent. Without this dedup each swap leaves an orphan agent that
+        // holds a squad slot and never moves (its layer is dead), stalling the squad on the "all arrived" gate.
         var existing = _botRoster.GetAgent(bot);
         if (existing != null)
         {
@@ -127,11 +121,9 @@ public class OrbitManager
 
     public void RemoveAgent(Agent agent)
     {
-        // Every brain layer instantiated for this bot wires its own OnPlayerDead handler (the player outlives
-        // brain swaps), so death fires RemoveAgent once per layer — all referencing the same deduped Agent.
-        // The squad/entity teardown below is NOT idempotent (id slots get recycled), so bail unless this agent
-        // is still the live registration for its bot. The first pass tears down and nulls the roster slot; any
-        // further passes find GetAgent != agent and no-op.
+        // Death can fire RemoveAgent once per brain layer wired for this bot (each layer's OnPlayerDead survives
+        // brain swaps), but the teardown below is not idempotent (id slots get recycled). Bail unless this agent
+        // is still the live registration; the first pass nulls the roster slot and later passes no-op.
         if (_botRoster.GetAgent(agent.Bot) != agent) return;
 
         AgentData.RemoveEntity(agent);
@@ -151,10 +143,8 @@ public class OrbitManager
         NavJobExecutor.Update();
     }
 
-    // See the EmergencyExtractStuck* constants. Force-despawn a committed emergency extracter that has been
-    // engaged AND stationary AND out of combat past the timeout — handles the case where ORBIT is detached (the
-    // bot started healing, or SAIN took over) so the normal exfil-arrival → Extracting → despawn path can never
-    // run for it. A force-despawn here = the bot leaves the map (extracts) instead of standing still bleeding out.
+    // Force-despawn (= extract) an emergency extracter sat still at its exfil, out of combat, past the timeout.
+    // Covers the case where ORBIT is detached (healing / SAIN) so the normal arrival -> Extracting path never runs.
     private void TickEmergencyExtractWatchdog()
     {
         var now = UnityEngine.Time.time;
@@ -167,8 +157,7 @@ public class OrbitManager
             var inCombat = bot?.Memory != null && (bot.Memory.HaveEnemy || bot.Memory.IsUnderFire);
             var atExfil = target != null && (agent.Position - target.Position).sqrMagnitude <= EmergencyExtractExfilProximitySqr;
             var moved = (agent.Position - agent.EmergencyExtractLastPos).sqrMagnitude > EmergencyExtractStuckMoveRadiusSqr;
-            // Only count "stuck" while the bot is sitting still AT its exfil and not fighting. Anywhere else
-            // (still travelling, stuck far away, in combat) reset the clock — never despawn off in a random spot.
+            // Any state other than sitting still at the exfil resets the clock, so it's never despawned elsewhere.
             if (!atExfil || inCombat || moved)
             {
                 agent.EmergencyExtractLastPos = agent.Position;
@@ -179,7 +168,7 @@ public class OrbitManager
                 && now - agent.EmergencyExtractStillSince >= EmergencyExtractStuckSeconds)
                 _emergencyExtractDespawn.Add(agent);
         }
-        // Despawn AFTER the scan — ForceDespawn → RemoveAgent mutates _liveAgents.
+        // Despawn after the scan, since ForceDespawn -> RemoveAgent mutates _liveAgents.
         for (var i = 0; i < _emergencyExtractDespawn.Count; i++)
         {
             var agent = _emergencyExtractDespawn[i];

@@ -73,10 +73,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
             var squad = ActiveEntities[i];
             var squadObjective = squad.Objective;
 
-            // Degraded tickrate (opt-in): squads far from every living human re-run their decision loop less
-            // often to reclaim CPU on lower-end machines. MovementSystem (path-follow, look, doors, stuck) runs
-            // every frame regardless, so a throttled squad keeps walking its current path and just defers NEW
-            // decisions (dispatch, rally, extract, objective completion) until the far interval elapses.
+            // Movement still runs every frame; only the decision loop is deferred for far-away squads.
             if (Plugin.DegradedTickrateEnabled.Value && ShouldDeferDecisionTick(squad)) continue;
             squad.LastDecisionTickTime = Time.time;
 
@@ -89,12 +86,9 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                 Singleton<OrbitManager>.Instance?.SquadRegistry?.TryResolvePersonality(squad);
             }
 
-            // Corpse-stuck watchdog. A squad glued to one corpse it never completes would otherwise sit on it
-            // forever. Normal corpse loot resolves well under the timeout and blacklists the corpse on
-            // success / fail / empty, so this only bites when nothing completes: the corpse is unreachable, the
-            // loot hangs, or a stuck member keeps finishedCount < Size so the en-route 3-fail blacklist below
-            // never fires (reported: Team 39 / 33 pinning on a body after a failed loot and never moving). It
-            // never triggers mid-combat — the objective is a CombatCaller waypoint then, not a Corpse.
+            // Corpse-stuck watchdog: only bites when nothing completes (unreachable corpse, hung loot, or a
+            // stuck member keeps the en-route blacklist below from firing) and would otherwise pin the squad
+            // on the body forever.
             {
                 var corpseObj = squadObjective.Location;
                 if (corpseObj != null && corpseObj.Category == WaypointCategory.Corpse)
@@ -106,11 +100,8 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                     }
                     else if (SquadAnyMemberInCombat(squad))
                     {
-                        // Pause the clock while a member is in SAIN combat / healing (IsActive=false → ORBIT
-                        // can't move anyone toward the body). Otherwise a bot that kills, gets dragged into
-                        // another fight right beside the corpse, and only frees up ~25s later has its OWN kill
-                        // blacklisted before it ever approaches (observed: roman killed Bot17, fought + killed
-                        // Bot9 next to it, the watchdog blacklisted Bot17 mid-fight and the body was abandoned).
+                        // Pause the clock during SAIN combat / healing: ORBIT can't move anyone toward the
+                        // body, so a bot dragged into a fight beside its own kill shouldn't lose the corpse.
                         squad.CorpseWatchdogSince = Time.time;
                     }
                     else if (Time.time - squad.CorpseWatchdogSince > CorpseStuckTimeoutSeconds)
@@ -141,20 +132,15 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
             // attraction, the dispatch picks tick-level secondary POIs.
             TickMainObjectives(squad);
 
-            // Squad rally: scan members for combat EVERY tick (any squad, any objective, gated only by the
-            // SquadRally toggle). The first member to take fire / engage becomes the "caller" and
-            // squad.Objective.Location is swapped to a virtual Waypoint at their position so realign converges
-            // everyone there to support. No SAIN handoff — ORBIT just routes the supporters toward the
-            // contact; SAIN's combat layer (priority 20 > ORBIT 19) preempts each one as it acquires an enemy.
-            // Grace keeps the override stable through brief LoS breaks; when it lapses the squad picks a fresh
-            // objective and resumes normal play.
+            // Squad rally: the first member to engage becomes the "caller" and squad.Objective.Location is
+            // swapped to a virtual Waypoint at their position so realign converges everyone there to support.
+            // ORBIT only routes supporters in; SAIN's combat layer (priority 20 > ORBIT 19) preempts each as
+            // it acquires an enemy. Grace keeps the override stable through brief LoS breaks.
             if (Plugin.SquadRally.Value)
             {
                 DetectAndUpdateCombatCaller(squad);
                 if (squad.CombatCallerMemberIdx >= 0)
                 {
-                    // Refresh the virtual override each tick — cheap, and keeps squad.Objective.Location
-                    // pointing at the (moving) caller even if other code mutated it.
                     squad.Objective.Location = waypointSystem.CreateVirtualWaypoint(
                         squad.CombatCallerPosition, "CombatCaller");
                     squad.Objective.Status = SquadObjectiveState.Active;
@@ -165,21 +151,14 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
             }
             else if (squad.CombatCallerMemberIdx >= 0)
             {
-                // Rally toggled off mid-raid — clear any active caller defensively.
                 squad.CombatCallerMemberIdx = -1;
             }
 
             CheckTimeExtractTrigger(squad);
 
-            // Extract interrupt: the instant ExtractRequested is set, bee-line to the exfil NOW instead of
-            // finishing the current objective first (loot / guard / a ~2 min scav wait-mode pause). Without this
-            // the extract is only honoured on the next natural AssignNewObjective (objective null / wait timer
-            // expired), so a squad mid-objective stands idle for up to a wait-mode before heading out — observed
-            // as a bot frozen ~2 min after looting, between the loot-value extract trigger firing and actually
-            // getting the exfil objective. Gated on an eligible exfil actually existing so we don't churn a
-            // re-dispatch every tick when none is reachable (that case falls through to normal dispatch); once
-            // the objective IS an exfil the Category check stops it re-firing. Location==null is left to the
-            // standard null-handling below, which already routes to the exfil under ExtractRequested.
+            // Extract interrupt: bee-line to the exfil the instant ExtractRequested is set, rather than letting
+            // the squad finish (and wait out) its current objective first. Gated on an eligible exfil existing
+            // so we don't churn a re-dispatch every tick when none is reachable.
             if (squad.ExtractRequested
                 && squadObjective.Location != null
                 && squadObjective.Location.Category != WaypointCategory.Exfil
@@ -250,13 +229,9 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
             {
                 if (squadObjective.Status == SquadObjectiveState.Active)
                 {
-                    // No member actually pursued this objective when they are ALL off on a solo / emergency
-                    // extract: UpdateAgents counts a departing extracter as "finished" (so the squad keeps
-                    // advancing instead of stalling), which makes finishedCount reach squad.Size with zero real
-                    // path attempts. Treating that as an "unreachable" en-route failure wrongly blacklists the
-                    // objective — most visibly a credited own-kill corpse — and excludes it for the rest of the
-                    // raid, so once the member's HP recovers and it rejoins it never returns to the body. Hold
-                    // the objective instead (don't touch the failure streak); the rejoining member resumes it.
+                    // UpdateAgents counts a departing solo-extracter as "finished", so finishedCount can reach
+                    // squad.Size with zero real path attempts. Treating that as an en-route failure would
+                    // wrongly blacklist the objective — hold it instead so a rejoining member resumes it.
                     var anyMemberPursuing = false;
                     for (var m = 0; m < squad.Size; m++)
                     {
@@ -380,33 +355,28 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
         return _agentSkipScratch;
     }
 
-    // Body parts summed for the emergency-extract HP check.
     private static readonly EBodyPart[] _emergencyHpParts =
     {
         EBodyPart.Head, EBodyPart.Chest, EBodyPart.Stomach,
         EBodyPart.LeftArm, EBodyPart.RightArm, EBodyPart.LeftLeg, EBodyPart.RightLeg
     };
 
-    // HP-trend emergency-extract tuning (BSG-independent). Two triggers: (1) ACTIVE DECLINE — HP is ≥MinDrop
-    // below where it was DropWindow seconds ago AND is STILL falling across two consecutive recent sub-windows
-    // (a genuine ongoing bleed, not a single hit that then stabilised); (2) STAGNANT LOW — HP sat below
-    // StagnantLowFraction for StagnantLowSeconds without climbing out (crippled, out of meds, sitting wounded).
-    // Either way, cancel once HP climbs RecoverFraction back above its low.
+    // HP-trend emergency-extract tuning. Triggers and cancel logic are documented on UpdateEmergencyExtract.
     private const float EmergencyDropWindowSeconds = 8f;
     private const float EmergencyMinDropFraction = 0.12f;
     private const float EmergencyRecoverFraction = 0.10f;
     private const float EmergencyFallSubWindowSeconds = 2.5f;
     private const float EmergencyFallEps = 0.01f;
-    // If this method didn't run for longer than this (the bot was in SAIN combat / inactive, so HP wasn't
-    // sampled), the rolling buffer holds stale pre-gap HP — drop it and rebuild, so active-decline never reads
-    // a pre-combat 100% sample as "8s ago" and mistakes post-combat damage for a fresh bleed.
+    // Max gap between HP samples before the rolling buffer is dropped as stale (a SAIN-combat sampling hole
+    // otherwise leaves a pre-combat full-HP sample that reads as a fresh bleed).
     private const float EmergencyMaxSampleGapSeconds = 2f;
     private const float EmergencyStagnantLowFraction = 0.50f;
     private const float EmergencyStagnantLowSeconds = 60f;
+    // Bleed-stopped cancel: HP holding (no new low) this long above the danger floor rejoins the squad, even
+    // when a partial heal plateaued just under the +RecoverFraction recover bar that never cancels.
+    private const float EmergencyBleedStoppedSeconds = 12f;
 
-    /// <summary>Only PMCs and PlayerScavs extract via exfils in ORBIT; everyone else despawns / leaves on a
-    /// script, so a solo exfil run is meaningless for them. Gates the emergency trigger to avoid churning
-    /// FindNearestEligibleExfil for factions that can never get a result.</summary>
+    // Only PMCs / PlayerScavs extract via exfils in ORBIT; everyone else despawns, so a solo run is moot.
     private static bool CanSoloExtract(Agent agent)
     {
         var profile = agent.Bot?.Profile;
@@ -415,48 +385,50 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
         return role.Value.IsPMC() || profile.WillBeAPlayerScav();
     }
 
-    /// <summary>
-    /// HP-trend emergency extract. Samples the bot's own HP each decision tick (no BSG Medecine/FirstAid
-    /// dependency — those flags didn't reliably catch a bleeding, med-less bot, which then died picking POIs
-    /// instead of extracting). Two triggers: an ACTIVE DECLINE (HP dropped ≥12% below a trailing reference and
-    /// stayed down ≥5s — a fast bleed) and a STAGNANT LOW (HP stuck below 50% for a full minute without
-    /// climbing out — crippled, out of meds). If HP climbs back up while the emergency extract is active (it
-    /// healed), cancel it so the bot rejoins the squad — a bot that DOES have meds naturally heals → HP rises →
-    /// cancel, so no explicit med check is needed.
-    ///
-    /// Active decline is read off a rolling HP-sample buffer, NOT a high-water mark: it fires only when HP is
-    /// ≥12% below where it was DropWindow seconds ago AND is still actively falling across two consecutive
-    /// recent sub-windows. That two-window check is the fix for the false positives where a single hit dropped
-    /// HP once and it then sat STABLE (e.g. "HP at 81% down from 100%" while parked at 81%) — a single hit fills
-    /// only one sub-window, a real bleed keeps dropping across both, so only the latter triggers.
-    /// </summary>
+    private static void ClearEmergencyExtract(Agent agent, string reason)
+    {
+        agent.SoloExtractRequested = false;
+        agent.SoloExtractIsEmergency = false;
+        agent.SoloExtractReason = null;
+        agent.SoloExtractTarget = null;
+        agent.EmergencyLowSince = -1f;
+        Log.Info($"{agent} emergency extract cancelled — {reason}, rejoining squad");
+    }
+
+    // HP-trend emergency extract, sampled per tick because the BSG Medecine/FirstAid flags didn't reliably
+    // catch a bleeding, med-less bot. Two triggers: ACTIVE DECLINE (HP still falling across two consecutive
+    // sub-windows — the two-window test rejects a single hit that then stabilised) and STAGNANT LOW. A bot
+    // with meds heals naturally, so recovery cancels the extract and no explicit med check is needed.
     private static void UpdateEmergencyExtract(Agent agent)
     {
         if (Orbit.Looting.LootConfig.EmergencyExtractEnabled is { Value: false }) return;
         if (!CanSoloExtract(agent)) return;
         var cur = HpFraction(agent);
 
-        // Already emergency-extracting: cancel if HP recovered since its low; otherwise track the new low.
         if (agent.SoloExtractRequested && agent.SoloExtractIsEmergency)
         {
+            // Healed: HP climbed a full RecoverFraction back above its low.
             if (cur >= agent.EmergencyHpLow + EmergencyRecoverFraction)
             {
-                agent.SoloExtractRequested = false;
-                agent.SoloExtractIsEmergency = false;
-                agent.SoloExtractReason = null;
-                agent.SoloExtractTarget = null;
-                agent.EmergencyHpRef = cur;
-                agent.EmergencyHpRefTime = Time.time;
-                agent.EmergencyLowSince = -1f;
-                Log.Info($"{agent} emergency extract cancelled — HP recovered to {cur:P0}, rejoining squad");
+                ClearEmergencyExtract(agent, $"HP recovered to {cur:P0}");
                 return;
             }
-            agent.EmergencyHpLow = Mathf.Min(agent.EmergencyHpLow, cur);
+            // Bleed stopped: HP held (no new low) above the danger floor — rejoin instead of running a solo
+            // exfil on stable HP.
+            if (cur > EmergencyStagnantLowFraction
+                && Time.time - agent.EmergencyHpLowTime >= EmergencyBleedStoppedSeconds)
+            {
+                ClearEmergencyExtract(agent, $"bleed stopped, HP stable at {cur:P0}");
+                return;
+            }
+            if (cur < agent.EmergencyHpLow - EmergencyFallEps)
+            {
+                agent.EmergencyHpLow = cur;
+                agent.EmergencyHpLowTime = Time.time;
+            }
             return;
         }
 
-        // Stagnant-low timer: how long the bot has been continuously below the low-HP floor. Reset the moment
-        // it climbs back out.
         if (cur < EmergencyStagnantLowFraction)
         {
             if (agent.EmergencyLowSince < 0f) agent.EmergencyLowSince = Time.time;
@@ -466,11 +438,8 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
             agent.EmergencyLowSince = -1f;
         }
 
-        // Record this HP sample into the agent's rolling history for trend detection. If sampling stalled (the
-        // bot was in SAIN combat / inactive, so this method didn't run), the buffer holds stale pre-gap HP —
-        // discard it so active-decline only ever reads a continuous recent run, never a pre-combat 100% sample
-        // treated as "8s ago" (that made post-combat damage look like a fresh 8s bleed and false-triggered the
-        // extract on bots that were actually stable post-fight).
+        // Record this HP sample, discarding the whole buffer first if sampling stalled past the max gap, so
+        // active-decline only ever reads a continuous recent run.
         var now = Time.time;
         if (agent.EmergencyHpHistCount > 0)
         {
@@ -483,15 +452,12 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
         agent.EmergencyHpHistTime[slot] = now;
         agent.EmergencyHpHistCount++;
 
-        // Active decline: HP is ≥MinDropFraction below where it was DropWindowSeconds ago AND is still falling
-        // across BOTH the older and the most-recent sub-window. The two-window "still falling" test is what
-        // rejects a single hit that then stabilised (the hit lands in one sub-window only; the other reads flat),
-        // while a genuine bleed keeps dropping across both. Needs DropWindowSeconds of history first.
+        // Active decline: below the DropWindow-ago reference AND still falling across both sub-windows.
         var hpWindowAgo = HpFromAtLeastAgo(agent, now, EmergencyDropWindowSeconds);
         var hpMidAgo = HpFromAtLeastAgo(agent, now, EmergencyFallSubWindowSeconds * 2f);
         var hpRecentAgo = HpFromAtLeastAgo(agent, now, EmergencyFallSubWindowSeconds);
         var activeDecline = hpWindowAgo >= 0f && hpMidAgo >= 0f && hpRecentAgo >= 0f
-                            && hpWindowAgo - cur >= EmergencyMinDropFraction   // ≥12% lower than DropWindow ago
+                            && hpWindowAgo - cur >= EmergencyMinDropFraction   // dropped below the DropWindow-ago reference
                             && hpMidAgo - hpRecentAgo >= EmergencyFallEps      // fell during the older sub-window
                             && hpRecentAgo - cur >= EmergencyFallEps;          // and still falling in the latest one
         var stagnantLow = agent.EmergencyLowSince >= 0f
@@ -502,6 +468,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
         agent.SoloExtractRequested = true;
         agent.SoloExtractIsEmergency = true;
         agent.EmergencyHpLow = cur;
+        agent.EmergencyHpLowTime = Time.time;
         if (activeDecline)
         {
             agent.SoloExtractReason = $"emergency (HP {cur:P0}, dropping with no recovery)";
@@ -514,10 +481,8 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
         }
     }
 
-    /// <summary>True once any squad member has run a loot session on this corpse and value-skipped it (i.e.
-    /// left sub-threshold loot for softer-gated teammates). Before that the corpse is FRESH and only the killer
-    /// should approach; after, a Rat-tier member is allowed to clean up the leftovers — so the anti-pile null
-    /// must NOT fire. Keeps the Chad-loots-then-Rat-cleans-up flow intact.</summary>
+    // True once a member has looted+value-skipped this corpse. Until then it's fresh (killer-only); after, a
+    // lower-threshold member may clean up the leftovers, so the anti-pile null below must not fire.
     private static bool CorpseValueSkippedByAnyMember(Squad squad, int locId)
     {
         if (squad?.Members == null) return false;
@@ -529,9 +494,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
         return false;
     }
 
-    /// <summary>True if any ALIVE squad member is currently outside ORBIT control (IsActive=false → SAIN combat
-    /// / healing has the bot). Used to pause the corpse-stuck watchdog: time spent fighting beside a body
-    /// shouldn't count against reaching it.</summary>
+    // True if any alive member is outside ORBIT control (IsActive=false — SAIN combat / healing has the bot).
     private static bool SquadAnyMemberInCombat(Squad squad)
     {
         if (squad?.Members == null) return false;
@@ -543,16 +506,11 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
         return false;
     }
 
-    /// <summary>Most recent HP sample in the agent's rolling history whose age is between <paramref name="ago"/>
-    /// and <paramref name="ago"/> + one sampling gap, or -1 if no sample falls in that band. The upper bound
-    /// rejects a STALE pre-gap sample (left over from a SAIN-combat sampling hole) being read as the "ago" value
-    /// — without it, an old 96% sample gets treated as "8s ago" and a bot sitting flat post-fight false-fires
-    /// active-decline.</summary>
+    // Most recent HP sample aged between `ago` and `ago` + one sampling gap, or -1 if none. The upper bound
+    // (floor) rejects a stale pre-gap sample from a SAIN-combat hole being read as the "ago" reference.
     private static float HpFromAtLeastAgo(Agent agent, float now, float ago)
     {
         var target = now - ago;
-        // A sample staler than the window by more than one sampling gap means there was a hole in sampling, so
-        // it is not a trustworthy "ago seconds ago" reading — ignore it.
         var floor = target - EmergencyMaxSampleGapSeconds;
         var best = -1f;
         var bestTime = -1f;
@@ -583,20 +541,15 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
         return max > 0f ? cur / max : 1f;
     }
 
-    /// <summary>
-    /// Degraded-tickrate gate: true when this squad should SKIP its decision loop this strategy tick. A squad
-    /// within DegradedTickrateNearDistance of any living human always runs (keep it crisp where it's visible);
-    /// a squad beyond that re-decides only every DegradedTickrateFarIntervalSeconds. Movement still runs every
-    /// frame in MovementSystem, so a deferred squad keeps executing its current path/objective.
-    /// </summary>
+    // Degraded-tickrate gate: squads near a living human always run; ones beyond DegradedTickrateNearDistance
+    // re-decide only every DegradedTickrateFarIntervalSeconds.
     private bool ShouldDeferDecisionTick(Squad squad)
     {
         var leader = squad.Leader?.Bot;
         if (leader == null) return false;
         var near = Plugin.DegradedTickrateNearDistance.Value;
         var far = waypointSystem.NearestHumanDistanceSqr(leader.Position) > near * near;
-        // Log only the near<->far transition (once each) so the dashboard can confirm throttling engaged,
-        // without spamming a line every deferred tick.
+        // Log only the near<->far transition, not every deferred tick.
         if (far != squad.DecisionThrottled)
         {
             squad.DecisionThrottled = far;
@@ -639,16 +592,10 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
             var agent = squad.Members[i];
             var agentObjective = agent.Objective;
 
-            // During a combat-caller window, skip every member who is themselves engaged — the caller AND
-            // any other in-combat member. Reasons:
-            //  * Caller: squad.Objective is a virtual CombatCaller waypoint AT his own position, refreshed
-            //    every tick. Realigning would assign him a waypoint at his own feet → "reached" immediately
-            //    → reassign next tick, ad infinitum. SAIN's combat layer is driving him; leave his agent
-            //    objective alone.
-            //  * Other in-combat members: each has their own enemy and SAIN sequence in flight. Realigning
-            //    to the caller's position would queue a stale destination behind their SAIN combat — when
-            //    SAIN finally exits, ORBIT would route them to the caller's spot where they may also be
-            //    self-pinned by SAIN's sticky HaveEnemy. Only members NOT in combat are eligible supporters.
+            // Skip every member who is themselves engaged. The caller's objective is a virtual waypoint at his
+            // own feet (realigning would "reach" it instantly then reassign forever), and any other in-combat
+            // member has a live SAIN sequence we'd queue a stale destination behind. Only non-combat members
+            // are eligible supporters.
             if (squad.CombatCallerMemberIdx == i) continue;
             var memberBot = agent.Bot;
             if (squad.CombatCallerMemberIdx >= 0
@@ -658,13 +605,8 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                 continue;
             }
 
-            // Solo / emergency extract. EMERGENCY: a wounded member with no usable meds left peels off to
-            // extract on its own. (The LOOT-threshold trigger is set elsewhere, in LootContainerAction.) When
-            // SoloExtractRequested, route the member straight to its exfil and skip the squad alignment +
-            // splinter logic so the rest of the squad keeps playing. GotoObjectiveAction's exfil-arrival
-            // handler then flips it to Extracting and ExtractAction despawns it — no squad-wide
-            // ExtractRequested needed.
-            // HP-trend emergency extract (trigger if bleeding out + no recovery, cancel if HP climbs back).
+            // Solo / emergency extract: a wounded member peels off to its own exfil, skipping squad alignment +
+            // splinter logic so the rest keep playing. The arrival handler flips it to Extracting from there.
             UpdateEmergencyExtract(agent);
             if (agent.SoloExtractRequested)
             {
@@ -672,12 +614,9 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                     agent.SoloExtractTarget = waypointSystem.FindNearestEligibleExfil(squad);
                 if (agent.SoloExtractTarget != null)
                 {
-                    // Keep the bee-line ALIVE — don't point it just once. The move order is otherwise issued a
-                    // single time (only when Location changes); a SAIN-combat detour drops the destination
-                    // (OrbitBrainLayer hand-off calls SetPlayerToNavMesh) and an arrival stall flips the
-                    // objective to Failed, either of which strands the bot near the exfil with no fresh move and
-                    // no way back into the arrival→Extracting handler. Re-arm whenever it isn't already moving
-                    // to / extracting at the exfil.
+                    // Re-arm the move order rather than issuing it once: a SAIN-combat detour drops the
+                    // destination and an arrival stall flips it to Failed, either of which strands the bot near
+                    // the exfil with no way back into the arrival->Extracting handler.
                     var firstDispatch = agentObjective.Location != agent.SoloExtractTarget;
                     var stalled = !firstDispatch
                                   && agentObjective.Status != ObjectiveStatus.Moving
@@ -694,12 +633,11 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                         else
                             Log.Debug($"{agent} solo extract re-arming bee-line to {agent.SoloExtractTarget} (was {prevStatus} — lost its move order)");
                     }
-                    // Count the departing member as "finished" w.r.t. squad objectives so the squad keeps
-                    // advancing (finishedCount == squad.Size) instead of stalling until this member despawns.
+                    // Count the departing member as "finished" so the squad keeps advancing, not stalling.
                     finishedCount++;
                     continue;
                 }
-                // No eligible exfil for this faction / map → can't solo extract. Drop it and rejoin the squad.
+                // No eligible exfil, so drop the solo extract and rejoin the squad.
                 agent.SoloExtractRequested = false;
                 agent.SoloExtractReason = null;
             }
@@ -748,12 +686,9 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
             if (leaderFinishedAnchorInRoam)
             {
                 Log.Debug($"{agent} leader roam continuation: finished anchor {agentObjective.Location}, picking a splinter instead of guarding");
-                // Don't roam off while we still have another of our OWN kills unlooted nearby. A double-kill
-                // arms the single PendingOwnKill direct-route slot for only the LATEST corpse, so the earlier
-                // kill stays tagged but is never re-picked here — roam splinters bypass RequestNear's own-kill
-                // pre-scan, so the leader wanders off and abandons the first body (observed: a bot got 2 kills
-                // but only looted the second). Force a squad re-dispatch so RequestNear's pre-scan re-anchors
-                // onto the remaining tagged corpse before we wander away.
+                // A double-kill only arms the single PendingOwnKill slot for the latest corpse; the earlier
+                // tagged kill is never re-picked here (roam splinters bypass RequestNear's own-kill pre-scan).
+                // Force a squad re-dispatch so the pre-scan re-anchors onto it before roaming off.
                 if (waypointSystem.TryPickOwnKillCorpse(squad) != null)
                 {
                     squad.Objective.Duration = 0;
@@ -803,13 +738,9 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                 var anchorReservedForOwnKill = ownKillAgentId >= 0
                                                && squadObjective.Location != null
                                                && squadObjective.Location.Id == squad.PendingOwnKillCorpseLocId;
-                // Persistent own-kill re-route (highest priority). This agent killed someone, was credited, then
-                // got pulled away before looting (SAIN combat / healing / a solo-extract right after the kill) —
-                // the one-shot squad pending below can't help once the squad anchor has drifted off the body
-                // (combat-caller / re-dispatch while it was detached). agent.OwnKillCorpseLocId remembers the
-                // body across the detour; resolve it against THIS agent's position (so a follower killer is
-                // covered, not just the leader) and route straight to it as a personal splinter. Resolver
-                // returns null + we drop the memory once the corpse is looted / blacklisted / removed / too far.
+                // Persistent own-kill re-route (highest priority). A killer pulled away before looting (combat /
+                // heal / solo-extract) can't be helped by the one-shot squad pending below once the anchor has
+                // drifted off the body, so agent.OwnKillCorpseLocId remembers it across the detour.
                 Waypoint ownKillReroute = null;
                 if (agent.OwnKillCorpseLocId != 0)
                 {
@@ -884,12 +815,9 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                     else if (squadObjective.Location != null
                              && (squadObjective.Location.Position - agent.Position).sqrMagnitude <= squadObjective.Location.RadiusSqr)
                     {
-                        // No roam splinter left (cell loot exhausted / all unreachable / beyond radius) and this
-                        // member is already standing on the anchor. Re-picking it is a no-op that loops every
-                        // tick ("finished anchor → already in radius → Finished → re-pick") without the bot ever
-                        // moving — the exact spin seen when a LootValue cell has nothing reachable left. Leave
-                        // the objective null so it settles into a guard; the squad wait timer (and the cell-clean
-                        // completion for LootValue) move the squad on.
+                        // No roam splinter left and this member is already on the anchor; re-picking it just
+                        // loops every tick without moving. Null it so it settles into a guard and the squad wait
+                        // timer (or cell-clean completion) moves the squad on.
                         targetLoc = null;
                         splinterParent = null;
                     }
@@ -925,14 +853,9 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                     }
                 }
 
-                // A FRESH body has a single claim — only the own-kill killer (routed via the branch above)
-                // targets a Corpse SQUAD anchor directly. Any other member that landed on it through the
-                // leader-anchor or splinter fallback would just pile on and fail the claim, so guard in place
-                // instead (observed: all 3 squad members converging on one kill). The null is gated on the
-                // corpse being FRESH: once a member has actually run a loot session and value-skipped it
-                // (left sub-threshold loot for softer-gated teammates), a Rat-tier member is meant to come back
-                // and clean up the leftovers, so we must NOT block that. A Corpse picked as a SPLINTER (a
-                // different body) is also left untouched — only the squad-anchor corpse is single-claimed here.
+                // Single-claim a fresh squad-anchor corpse to the own-kill killer (routed above); any other
+                // member would just pile on and fail the claim, so guard in place instead. Once the body's been
+                // value-skipped it's leftovers and a lower-threshold member may return — don't block that.
                 if (!tookOwnKillCorpse && targetLoc != null
                     && targetLoc.Category == WaypointCategory.Corpse
                     && squadObjective.Location != null && targetLoc.Id == squadObjective.Location.Id
@@ -1078,8 +1001,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
             if (main.Completed) continue;
             allDone = false;
             CheckMainCompletion(squad, main, now);
-            // A main just flipped Completed → bump the revision so raid-review re-snapshots immediately instead
-            // of showing the finished main as "in progress" until its next periodic poll.
+            // Bump the revision so raid-review re-snapshots immediately rather than at its next periodic poll.
             if (main.Completed) Orbit.Api.OrbitTelemetry.MainObjectivesRevision++;
         }
         if (allDone && !squad.ExtractRequested && Plugin.MainObjectivesExtractOnAllCompleted.Value)
@@ -1226,12 +1148,8 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
             if (loc.Category != WaypointCategory.ContainerLoot
                 && loc.Category != WaypointCategory.LooseLoot
                 && loc.Category != WaypointCategory.Corpse) continue;
-            // Each remaining loot POI must be DONE for this squad — any of: looted / blacklisted
-            // (CompletedPoiIds; looted items are removed from cell.Waypoints globally so they wouldn't appear
-            // here anyway), known-unreachable (can never be worked), or value-skipped by EVERY alive member
-            // (nobody is willing to take it — below all their thresholds). Leaving any of these uncounted parks
-            // the squad in the cell with nothing to do until the full LootValue timeout, so treat them all as
-            // cleaned and let the main complete + the squad move on.
+            // "Done" = blacklisted, known-unreachable, or value-skipped by every alive member. Counting only
+            // CompletedPoiIds would park the squad in the cell until the full LootValue timeout.
             if (!squad.CompletedPoiIds.Contains(loc.Id)
                 && !waypointSystem.IsSquadKnownUnreachable(squad, loc.Id)
                 && !WaypointSystem.AllAliveMembersValueSkipped(squad, loc.Id))
@@ -1325,13 +1243,10 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
 
     private void DetectAndUpdateCombatCaller(Squad squad)
     {
-        // Solo squads can't rally — no supporters to call. Without this gate, a lone bot whose
-        // Memory.HaveEnemy gets stuck true (SAIN keeps the flag on for an extended window after losing LoS
-        // — Search / SeekCover sub-states) self-registers as caller every tick, which pins squad.Objective
-        // to a virtual CombatCaller waypoint at his own position and resets StartTime so the wait timer
-        // never expires and AssignNewObjective never fires. The bot is then physically stranded once SAIN's
-        // mover stops producing motion (raid trace: AiKunCCTV / Xust1ed frozen 10+ min at the spot SAIN
-        // reached on Search arrival).
+        // Solo squads can't rally. Without this gate a lone bot whose Memory.HaveEnemy stays stuck true (SAIN
+        // holds the flag for a window after losing LoS) self-registers as caller every tick, pinning the
+        // objective to a waypoint at its own feet and resetting StartTime so the wait timer never fires —
+        // stranding the bot once SAIN's mover stops producing motion.
         if (squad.Size <= 1)
         {
             if (squad.CombatCallerMemberIdx >= 0)
@@ -1415,9 +1330,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
     // bots into locked rooms and caused infinite TP attempt loops on mains whose anchor was off-navmesh.
     private const int UnreachableBlacklistThreshold = 5;
 
-    // Corpse-stuck watchdog timeout. A normal corpse loot resolves in well under this (6-25s inspection +
-    // pickup, then the corpse is blacklisted on success/fail/empty). If the squad stays glued to the SAME
-    // corpse longer than this without it completing, the strategy force-blacklists + re-dispatches.
+    // Normal corpse loot resolves well under this; staying glued past it force-blacklists and re-dispatches.
     private const float CorpseStuckTimeoutSeconds = 45f;
 
     /// <summary>
