@@ -45,7 +45,7 @@ public class Plugin : BaseUnityPlugin
     // ║ F12 ConfigEntries                                              ║
     // ╚══════════════════════════════════════════════════════════════╝
 
-    // 01. General
+    // 02. Factions (faction toggles) + 01. Essentials (rally, quiet, tickrate)
     public static ConfigEntry<bool> RoamingScavs;
     public static ConfigEntry<bool> RoamingGoons;
     public static ConfigEntry<bool> VanillaScavs;
@@ -56,16 +56,17 @@ public class Plugin : BaseUnityPlugin
     public static ConfigEntry<bool> RoamingBloodhounds;
     public static ConfigEntry<bool> SquadRally;
     public static ConfigEntry<bool> QuietLogging;
+    public static ConfigEntry<OrbitLogLevel> LogLevels;
     public static ConfigEntry<bool> DegradedTickrateEnabled;
     public static ConfigEntry<float> DegradedTickrateNearDistance;
     public static ConfigEntry<float> DegradedTickrateFarIntervalSeconds;
 
-    // 02. POI guard duration
+    // 08. POI guard
     public static ConfigEntry<Vector2> ObjectiveGuardDuration;
     public static ConfigEntry<Vector2> ObjectiveAdjustedGuardDuration;
     public static ConfigEntry<Vector2> ObjectiveGuardDurationCut;
 
-    // 03. Advection zones
+    // 07. Advection & convergence (ConvergenceEnabled shown in 01. Essentials)
     public static ConfigEntry<float> AdvectionZoneRadiusScale;
     public static ConfigEntry<float> AdvectionZoneForceScale;
     public static ConfigEntry<float> AdvectionZoneRadiusDecayScale;
@@ -73,43 +74,33 @@ public class Plugin : BaseUnityPlugin
     public static ConfigEntry<float> ConvergenceRadiusScale;
     public static ConfigEntry<float> ConvergenceForceScale;
 
-    // 04. Main objectives — setup
-    public static ConfigEntry<bool> MainObjectivesEnabled;
-    public static ConfigEntry<bool> MainObjectivesEnabledForPmc;
+    // 03. PlayerScav (no SAIN archetype, so these actually drive PlayerScav behaviour)
     public static ConfigEntry<bool> MainObjectivesEnabledForPlayerScav;
-    public static ConfigEntry<int> MainObjectivesCountMinPmc;
-    public static ConfigEntry<int> MainObjectivesCountMaxPmc;
     public static ConfigEntry<int> MainObjectivesCountMinPlayerScav;
     public static ConfigEntry<int> MainObjectivesCountMaxPlayerScav;
-    public static ConfigEntry<float> MainObjectivesPmcQuestWeight;
-    public static ConfigEntry<float> MainObjectivesPmcKillsWeight;
-    public static ConfigEntry<float> MainObjectivesPmcLootValueWeight;
     public static ConfigEntry<float> MainObjectivesPlayerScavQuestWeight;
     public static ConfigEntry<float> MainObjectivesPlayerScavKillsWeight;
     public static ConfigEntry<float> MainObjectivesPlayerScavLootValueWeight;
-    public static ConfigEntry<int> MainObjectivesTopLootCellsMaxCount;
+    public static ConfigEntry<Vector2> TimeExtractWindowPlayerScav;
 
-    // 05. Main objectives — runtime tuning
-    public static ConfigEntry<Vector2> MainObjectivesKillsRoamDuration;
+    // 06. Main objectives (global knobs only; per-archetype values are in 09.x, archetype-overridden fallbacks
+    // are hard-coded in Sain.PersonalityFallback and no longer exposed in F12).
+    public static ConfigEntry<bool> MainObjectivesEnabled;
+    public static ConfigEntry<bool> MainObjectivesEnabledForPmc;
+    public static ConfigEntry<bool> MainObjectivesExtractOnAllCompleted;
     public static ConfigEntry<float> MainObjectivesAttractionMagnitude;
     public static ConfigEntry<float> MainObjectivesKillsRoamForceMagnitude;
     public static ConfigEntry<float> MainObjectivesLootValueTimeoutSeconds;
     public static ConfigEntry<float> MainObjectivesCombatCallerGraceSeconds;
     public static ConfigEntry<float> MainObjectivesRoamSplinterRadius;
-    public static ConfigEntry<float> MainObjectivesUnlockProbabilityIntermediate;
-    public static ConfigEntry<float> LootCoveragePct;
-    public static ConfigEntry<bool> MainObjectivesExtractOnAllCompleted;
     public static ConfigEntry<Vector2> TimeExtractWindowPmc;
-    public static ConfigEntry<Vector2> TimeExtractWindowPlayerScav;
     public static ConfigEntry<float> PmcLootCellCooldownSeconds;
     public static ConfigEntry<float> SyntheticVisitCooldownSeconds;
     public static ConfigEntry<float> OpportunisticCorpseScanIntervalSeconds;
-    public static ConfigEntry<float> SplinterSearchRadius;
-    public static ConfigEntry<float> ScavengeSweepRadius;
     public static ConfigEntry<float> SameFloorLootYTolerance;
     public static ConfigEntry<float> CrossFloorSplinterChance;
 
-    // 06. Faction-mod takeover (consumers wired in Phase 7)
+    // Faction-mod takeover (shown in 02. Factions, under Advanced)
     public static ConfigEntry<bool> HijackUntar;
     public static ConfigEntry<bool> HijackRuaf;
     public static ConfigEntry<bool> HijackBlackDivision;
@@ -232,8 +223,6 @@ public class Plugin : BaseUnityPlugin
         try
         {
             SetupConfig();
-            LootConfig.Init(Config);
-            BindPerformanceConfig();
         }
         catch (Exception ex)
         {
@@ -402,260 +391,239 @@ public class Plugin : BaseUnityPlugin
 
     private void SetupConfig()
     {
-        const string general = "01. General";
-        const string poiGuard = "02. POI guard duration (RESTART)";
-        const string zones = "03. Advection zones";
-        const string mainSetup = "04. Main objectives - setup (RESTART)";
-        const string mainTune = "05. Main objectives - runtime tuning";
-        const string takeover = "06. Faction-mod takeover (RESTART)";
+        const string essentials = "01. Essentials";
+        const string general = "02. Factions";
+        const string takeover = "02. Factions";
+        const string playerScav = "03. PlayerScav";
+        const string mainSetup = "08. Main objectives";
+        const string mainTune = "08. Main objectives";
+        const string zones = "07. Advection & convergence";
+        const string poiGuard = "06. POI guard (RESTART)";
 
-        // ── 01. General ─────────────────────────────────────────────
-        // Underlying keys kept as "Vanilla X" so 1.0.x configs aren't broken. F12 displays use DispName
-        // to surface the clearer "Disable ORBIT on X" wording without flipping polarity (ON still means
-        // detach ORBIT → vanilla brain).
+        // ── 01. Essentials ──────────────────────────────────────────
+        SquadRally = Config.Bind(essentials, "Squad rally", true, new ConfigDescription(
+            "ON (default): when a squadmate takes fire, the others break off and converge to support (ORBIT routes them in, SAIN fights). OFF: everyone fights their own fight.",
+            null, new ConfigurationManagerAttributes { Order = 9 }));
+        QuietLogging = Config.Bind(essentials, "Quiet logging", true, new ConfigDescription(
+            "ON (default): clean log — only warnings & errors, regardless of the Log levels below. Turn it OFF to use the Log levels (e.g. tick Debug there before sending a bug report).",
+            null, new ConfigurationManagerAttributes { Order = 1 }));
+        LogLevels = Config.Bind(essentials, "Log levels", OrbitLogLevel.Info | OrbitLogLevel.Warning | OrbitLogLevel.Error, new ConfigDescription(
+            "Which message levels ORBIT writes (used when Quiet logging is OFF). Default: everything except Debug. Tick Debug for a detailed bug-report log — it works in the release build now, not just debug builds.",
+            null, new ConfigurationManagerAttributes { Order = 0 }));
+
+        // ── 02. Factions ────────────────────────────────────────────
+        // "Disable ORBIT on X" keys are stored as "Vanilla X" so old configs aren't broken; ON = detach ORBIT
+        // (vanilla brain), the DispName just shows the clearer wording.
         VanillaScavs = Config.Bind(general, "Vanilla scavs (RESTART)", false, new ConfigDescription(
-            "OFF (default): bot scavs are controlled by ORBIT (cell dispatch, home pull, loot routing). ON: bot scavs run on BSG's vanilla brain — ORBIT doesn't attach to them, so 'Roaming Scavs' below has no effect. PlayerScavs always stay on ORBIT regardless of this toggle.",
+            "ON: bot scavs run BSG's vanilla brain instead of ORBIT (so 'Roaming Scavs' does nothing). OFF (default): ORBIT controls them. PlayerScavs always stay on ORBIT.",
             null, new ConfigurationManagerAttributes { DispName = "Disable ORBIT on scavs (RESTART)", Order = 8 }));
         VanillaGoons = Config.Bind(general, "Vanilla goons (RESTART)", false, new ConfigDescription(
-            "OFF (default): Goons (Knight + Big Pipe + Bird Eye) are controlled by ORBIT. ON: Goons run on BSG's vanilla brain.",
+            "ON: Goons (Knight, Big Pipe, Bird Eye) run BSG's vanilla brain. OFF (default): ORBIT controls them.",
             null, new ConfigurationManagerAttributes { DispName = "Disable ORBIT on goons (RESTART)", Order = 7 }));
         VanillaCultists = Config.Bind(general, "Vanilla cultists (RESTART)", false, new ConfigDescription(
-            "OFF (default): Cultists (Priest + Warriors + cursed scavs) are controlled by ORBIT. ON: Cultists run on BSG's vanilla brain.",
+            "ON: Cultists run BSG's vanilla brain. OFF (default): ORBIT controls them.",
             null, new ConfigurationManagerAttributes { DispName = "Disable ORBIT on cultists (RESTART)", Order = 6 }));
         VanillaRaiders = Config.Bind(general, "Vanilla raiders (RESTART)", true, new ConfigDescription(
-            "OFF (default): Raiders (pmcBot — Reserve / Labs) and Rogues (exUsec — Lighthouse) are controlled by ORBIT. ON: they run on BSG's vanilla brain.",
+            "ON (default): Raiders (Reserve / Labs) and Rogues (Lighthouse) run BSG's vanilla brain. OFF: ORBIT controls them.",
             null, new ConfigurationManagerAttributes { DispName = "Disable ORBIT on raiders (RESTART)", Order = 5 }));
         RoamingScavs = Config.Bind(general, "Roaming Scavs", false, new ConfigDescription(
-            "OFF (default): scavs stay near their spawn quartier (current cell + 8 neighbours). ON: scavs roam the whole map like PMCs. Ignored when Vanilla scavs is ON.",
+            "OFF (default): scavs stay near their spawn area. ON: they roam the whole map like PMCs.",
             null, new ConfigurationManagerAttributes { Order = 1 }));
         RoamingGoons = Config.Bind(general, "Roaming Goons", true, new ConfigDescription(
-            "OFF: Goons stay near their spawn quartier. ON (default): Goons roam the whole map. Ignored when Vanilla goons is ON.",
+            "ON (default): Goons roam the whole map freely. OFF: ORBIT keeps nudging them back toward their spawn area whenever they're not fighting (a steady pull toward spawn) — but they still cover a lot of ground, since Goons hear and see from very far.",
             null, new ConfigurationManagerAttributes { Order = 0 }));
         VanillaBloodhounds = Config.Bind(general, "Vanilla bloodhounds (RESTART)", false, new ConfigDescription(
-            "OFF (default): Bloodhounds (Smugglers / arena spawns) are controlled by ORBIT. ON: they run on BSG's vanilla brain.",
+            "ON: Bloodhounds (Smugglers / arena spawns) run BSG's vanilla brain. OFF (default): ORBIT controls them.",
             null, new ConfigurationManagerAttributes { DispName = "Disable ORBIT on bloodhounds (RESTART)", Order = 4 }));
         RoamingBloodhounds = Config.Bind(general, "Roaming Bloodhounds", true, new ConfigDescription(
-            "OFF: Bloodhounds stay near their spawn quartier. ON (default): Bloodhounds roam the whole map. Ignored when Vanilla bloodhounds is ON.",
+            "OFF: Bloodhounds stay near their spawn. ON (default): they roam the whole map.",
             null, new ConfigurationManagerAttributes { Order = -2 }));
-        SquadRally = Config.Bind(general, "Squad rally", true, new ConfigDescription(
-            "ON (default): when a squad member takes fire or engages an enemy, the rest break from their current objective and converge on the fight to support. ORBIT only routes them toward the contact; SAIN takes over for each one as it gets close. OFF: members fight their own fights, no convergence.",
-            null, new ConfigurationManagerAttributes { Order = -3 }));
-        QuietLogging = Config.Bind(general, "Quiet logging", true, new ConfigDescription(
-            "ON (default): ORBIT keeps the BepInEx log clean — only warnings, errors and the version banner are written. OFF: full per-event info logging (dispatch / loot / doors / extracts) for debugging or when sending a bug report. Debug builds always log more regardless.",
-            null, new ConfigurationManagerAttributes { Order = -4 }));
+        // ── 03. PlayerScav ──────────────────────────────────────────
+        // PlayerScavs get no SAIN archetype, so (unlike PMCs) these values actually drive their behaviour.
+        MainObjectivesEnabledForPlayerScav = Config.Bind(playerScav, "Enabled (goal system)", true, new ConfigDescription(
+            "OFF: PlayerScav squads skip the Quest / Kills / LootValue goal system.",
+            null, new ConfigurationManagerAttributes { Order = 100 }));
+        MainObjectivesCountMinPlayerScav = Config.Bind(playerScav, "Main count min", 1, new ConfigDescription(
+            "Fewest objectives a PlayerScav squad rolls.",
+            new AcceptableValueRange<int>(1, 20), new ConfigurationManagerAttributes { Order = 90 }));
+        MainObjectivesCountMaxPlayerScav = Config.Bind(playerScav, "Main count max", 5, new ConfigDescription(
+            "Most objectives a PlayerScav squad rolls.",
+            new AcceptableValueRange<int>(1, 20), new ConfigurationManagerAttributes { Order = 89 }));
+        MainObjectivesPlayerScavQuestWeight = Config.Bind(playerScav, "Main mix — Quest %", 0.10f, new ConfigDescription(
+            "Share of Quest objectives in the PlayerScav mix (normalized against Kills + LootValue).",
+            new AcceptableValueRange<float>(0f, 1f), new ConfigurationManagerAttributes { Order = 80, ShowRangeAsPercent = true }));
+        MainObjectivesPlayerScavKillsWeight = Config.Bind(playerScav, "Main mix — Kills %", 0.30f, new ConfigDescription(
+            "Share of Kills objectives in the PlayerScav mix.",
+            new AcceptableValueRange<float>(0f, 1f), new ConfigurationManagerAttributes { Order = 79, ShowRangeAsPercent = true }));
+        MainObjectivesPlayerScavLootValueWeight = Config.Bind(playerScav, "Main mix — LootValue %", 0.60f, new ConfigDescription(
+            "Share of LootValue objectives in the PlayerScav mix.",
+            new AcceptableValueRange<float>(0f, 1f), new ConfigurationManagerAttributes { Order = 78, ShowRangeAsPercent = true }));
+        TimeExtractWindowPlayerScav = Config.Bind(playerScav, "Time extract window (%)", new Vector2(10f, 30f), new ConfigDescription(
+            "Random window (as % of raid time left) when a PlayerScav squad decides to head out.",
+            null, new ConfigurationManagerAttributes { Order = 70 }));
 
-        // ── 02. POI guard duration ──────────────────────────────────
+        // 04. Looting + 05. Performance — bound here so the sections register in menu order.
+        LootConfig.Init(Config);
+        BindPerformanceConfig();
+
+        // POI guard — how long squads hold a spot before moving on (advanced).
         ObjectiveGuardDuration = Config.Bind(poiGuard, "Base guard duration (s, min..max)", new Vector2(60f, 180f), new ConfigDescription(
-            "Time a squad holds at a quest/cover POI before requesting a new one. Longer = more static map.",
-            null, new ConfigurationManagerAttributes { Order = 3 }));
+            "How long a squad holds a quest/cover spot before picking a new objective. Higher = more static map.",
+            null, new ConfigurationManagerAttributes { Order = 3, IsAdvanced = true }));
         ObjectiveAdjustedGuardDuration = Config.Bind(poiGuard, "Synthetic POI guard duration (s, min..max)", new Vector2(3.5f, 6.5f), new ConfigDescription(
-            "Same idea but for Synthetic POIs (virtual patrol coords with no real loot/quest). Kept short.",
-            null, new ConfigurationManagerAttributes { Order = 2 }));
+            "Same, but for virtual patrol points (no real loot/quest). Kept short so bots keep moving.",
+            null, new ConfigurationManagerAttributes { Order = 2, IsAdvanced = true }));
         ObjectiveGuardDurationCut = Config.Bind(poiGuard, "Loot/Quest guard duration cut (×, min..max)", new Vector2(0.2f, 0.5f), new ConfigDescription(
-            "Once the whole squad has arrived at a loot/quest POI, the base guard wait is multiplied by a factor in this range (0.2-0.5 = 20-50% of base).",
-            null, new ConfigurationManagerAttributes { Order = 1 }));
+            "Once the whole squad has arrived at a loot/quest spot, the guard wait is cut to this fraction (e.g. 0.2–0.5 = 20–50% of base).",
+            null, new ConfigurationManagerAttributes { Order = 1, IsAdvanced = true }));
 
-        // ── 03. Advection zones ─────────────────────────────────────
+        // Advection zone scales — fine-tuning of the per-map force field (advanced).
         AdvectionZoneRadiusScale = Config.Bind(zones, "Zone radius scale", 1f, new ConfigDescription(
-            "Multiplier on the radius of per-map advection zones. 1.0 = author defaults.",
-            new AcceptableValueRange<float>(0f, 10f), new ConfigurationManagerAttributes { Order = 3 }));
+            "Multiplier on per-map advection-zone radius. 1.0 = author defaults.",
+            new AcceptableValueRange<float>(0f, 10f), new ConfigurationManagerAttributes { Order = 3, IsAdvanced = true }));
         AdvectionZoneRadiusScale.SettingChanged += AdvectionZoneParametersChanged;
 
         AdvectionZoneForceScale = Config.Bind(zones, "Zone force scale", 1f, new ConfigDescription(
-            "Multiplier on advection force strength. NEGATIVE flips attractors↔repulsors. 0 disables advection entirely.",
-            new AcceptableValueRange<float>(-10f, 10f), new ConfigurationManagerAttributes { Order = 2 }));
+            "Multiplier on advection force. Negative flips attractors↔repulsors; 0 disables advection.",
+            new AcceptableValueRange<float>(-10f, 10f), new ConfigurationManagerAttributes { Order = 2, IsAdvanced = true }));
         AdvectionZoneForceScale.SettingChanged += AdvectionZoneParametersChanged;
 
         AdvectionZoneRadiusDecayScale = Config.Bind(zones, "Zone falloff scale", 1f, new ConfigDescription(
-            "How fast a zone's force decays with distance. Larger = tighter to the zone. 1.0 = linear-ish.",
-            new AcceptableValueRange<float>(0f, 5f), new ConfigurationManagerAttributes { Order = 1 }));
+            "How fast a zone's force fades with distance. Larger = tighter to the zone.",
+            new AcceptableValueRange<float>(0f, 5f), new ConfigurationManagerAttributes { Order = 1, IsAdvanced = true }));
         AdvectionZoneRadiusDecayScale.SettingChanged += AdvectionZoneParametersChanged;
 
-        ConvergenceEnabled = Config.Bind(zones, "Player convergence", false, new ConfigDescription(
-            "Master toggle for the player-convergence pull: every cell of the dispatch grid receives a vector toward the living human player(s), so the world drifts toward where the action is. OFF (default): the field stays zero everywhere, regardless of the per-map JSON settings.",
-            null, new ConfigurationManagerAttributes { Order = 0 }));
+        ConvergenceEnabled = Config.Bind(essentials, "Player convergence", false, new ConfigDescription(
+            "ON: the world gently drifts toward the human player(s), bringing more action your way. OFF (default): no pull. (Strength/range are under Advection in Advanced.)",
+            null, new ConfigurationManagerAttributes { Order = 7 }));
         ConvergenceEnabled.SettingChanged += ConvergenceParametersChanged;
 
         ConvergenceRadiusScale = Config.Bind(zones, "Convergence radius scale", 1f, new ConfigDescription(
-            "Multiplier on the radius of the convergence pull emitted from living human players (per-map base radius in Maps/Zones JSON). 1.0 = author defaults.",
-            new AcceptableValueRange<float>(0f, 10f), new ConfigurationManagerAttributes { Order = -1 }));
+            "Multiplier on how far the pull toward players reaches. 1.0 = author defaults.",
+            new AcceptableValueRange<float>(0f, 10f), new ConfigurationManagerAttributes { Order = -1, IsAdvanced = true }));
         ConvergenceRadiusScale.SettingChanged += ConvergenceParametersChanged;
 
         ConvergenceForceScale = Config.Bind(zones, "Convergence force scale", 1f, new ConfigDescription(
-            "Multiplier on the strength of the convergence pull emitted from living human players. NEGATIVE pushes bots AWAY from players. 0 disables the pull.",
-            new AcceptableValueRange<float>(-10f, 10f), new ConfigurationManagerAttributes { Order = -2 }));
+            "Multiplier on how strongly bots are pulled toward players. Negative pushes them AWAY; 0 disables.",
+            new AcceptableValueRange<float>(-10f, 10f), new ConfigurationManagerAttributes { Order = -2, IsAdvanced = true }));
         ConvergenceForceScale.SettingChanged += ConvergenceParametersChanged;
 
-        // ── 04. Main objectives - setup ─────────────────────────────
+        // ── 08. Main objectives (advanced) ──────────────────────────
+        // PMC squads with SAIN personality (the default) use their per-archetype values in section 09; the knobs
+        // an archetype overrides are NOT exposed here (hard-coded in PersonalityFallback), since tuning them only
+        // ever affected the rare SAIN-off case and confused users. What's left are the genuinely-global knobs.
         MainObjectivesEnabled = Config.Bind(mainSetup, "Enabled", true, new ConfigDescription(
-            "Master toggle for the main-objectives system. OFF = baseline dispatch.",
-            null, new ConfigurationManagerAttributes { Order = 100 }));
+            "Master switch for the goal system (Quest / Kills / LootValue objectives). OFF = plain dispatch.",
+            null, new ConfigurationManagerAttributes { Order = 100, IsAdvanced = true }));
         MainObjectivesEnabledForPmc = Config.Bind(mainSetup, "Enabled for PMC", true, new ConfigDescription(
-            "Per-faction opt-out: if OFF, PMC squads skip the main-objectives system.",
-            null, new ConfigurationManagerAttributes { Order = 99 }));
-        MainObjectivesEnabledForPlayerScav = Config.Bind(mainSetup, "Enabled for PlayerScav", true, new ConfigDescription(
-            "Per-faction opt-out: if OFF, PlayerScav squads skip the system.",
-            null, new ConfigurationManagerAttributes { Order = 98 }));
-        MainObjectivesCountMinPmc = Config.Bind(mainSetup, "PMC: main count min", 1, new ConfigDescription(
-            "Lower bound on number of mains per PMC squad (uniform random with max).",
-            new AcceptableValueRange<int>(1, 20), new ConfigurationManagerAttributes { Order = 91 }));
-        MainObjectivesCountMaxPmc = Config.Bind(mainSetup, "PMC: main count max", 5, new ConfigDescription(
-            "Upper bound on number of mains per PMC squad.",
-            new AcceptableValueRange<int>(1, 20), new ConfigurationManagerAttributes { Order = 90 }));
-        MainObjectivesCountMinPlayerScav = Config.Bind(mainSetup, "PlayerScav: main count min", 1, new ConfigDescription(
-            "Lower bound on number of mains per PlayerScav squad.",
-            new AcceptableValueRange<int>(1, 20), new ConfigurationManagerAttributes { Order = 89 }));
-        MainObjectivesCountMaxPlayerScav = Config.Bind(mainSetup, "PlayerScav: main count max", 5, new ConfigDescription(
-            "Upper bound on number of mains per PlayerScav squad.",
-            new AcceptableValueRange<int>(1, 20), new ConfigurationManagerAttributes { Order = 88 }));
-        MainObjectivesPmcQuestWeight = Config.Bind(mainSetup, "PMC mix — Quest %", 0.70f, new ConfigDescription(
-            "Quest share of PMC main rolls (auto-normalised against the other two — only the ratio matters).",
-            new AcceptableValueRange<float>(0f, 1f), new ConfigurationManagerAttributes { Order = 79 }));
-        MainObjectivesPmcKillsWeight = Config.Bind(mainSetup, "PMC mix — Kills %", 0.15f, new ConfigDescription(
-            "Kills share of PMC main rolls. Higher = more PMCs target PvP hotspots.",
-            new AcceptableValueRange<float>(0f, 1f), new ConfigurationManagerAttributes { Order = 78 }));
-        MainObjectivesPmcLootValueWeight = Config.Bind(mainSetup, "PMC mix — LootValue %", 0.15f, new ConfigDescription(
-            "LootValue share of PMC main rolls. Higher = more PMCs target loot-rich cells.",
-            new AcceptableValueRange<float>(0f, 1f), new ConfigurationManagerAttributes { Order = 77 }));
-        MainObjectivesPlayerScavQuestWeight = Config.Bind(mainSetup, "PlayerScav mix — Quest %", 0.10f, new ConfigDescription(
-            "Quest share of PlayerScav main rolls.",
-            new AcceptableValueRange<float>(0f, 1f), new ConfigurationManagerAttributes { Order = 69 }));
-        MainObjectivesPlayerScavKillsWeight = Config.Bind(mainSetup, "PlayerScav mix — Kills %", 0.30f, new ConfigDescription(
-            "Kills share of PlayerScav main rolls.",
-            new AcceptableValueRange<float>(0f, 1f), new ConfigurationManagerAttributes { Order = 68 }));
-        MainObjectivesPlayerScavLootValueWeight = Config.Bind(mainSetup, "PlayerScav mix — LootValue %", 0.60f, new ConfigDescription(
-            "LootValue share of PlayerScav main rolls.",
-            new AcceptableValueRange<float>(0f, 1f), new ConfigurationManagerAttributes { Order = 67 }));
-        MainObjectivesTopLootCellsMaxCount = Config.Bind(mainSetup, "Top loot cells max", 10, new ConfigDescription(
-            "How many of the richest cells are kept in the LootValue main-anchor pool. Lower = stronger PvP concentration on the top spots.",
-            new AcceptableValueRange<int>(1, 50), new ConfigurationManagerAttributes { Order = 27 }));
-
-        // ── 05. Main objectives - runtime tuning ────────────────────
+            "OFF: PMC squads skip the goal system.",
+            null, new ConfigurationManagerAttributes { Order = 99, IsAdvanced = true }));
         MainObjectivesExtractOnAllCompleted = Config.Bind(mainTune, "Extract when all mains done", true, new ConfigDescription(
-            "ON (default): squad auto-extracts once every main is completed.",
-            null, new ConfigurationManagerAttributes { Order = 100 }));
-        LootCoveragePct = Config.Bind(mainTune, "Loot coverage %", 0.7f, new ConfigDescription(
-            "Per-POI pick probability — 0.7 = ~70% of items get looted, the rest are silently skipped (simulates player miss rate). 1.0 disables.",
-            new AcceptableValueRange<float>(0f, 1f), new ConfigurationManagerAttributes { Order = 95 }));
-        MainObjectivesUnlockProbabilityIntermediate = Config.Bind(mainTune, "Locked door unlock % (intermediate)", 0.3f, new ConfigDescription(
-            "Chance a PMC squad force-unlocks a locked door blocking an intermediate (non-main-anchor) POI. Main-anchor POIs always 100%. Scavs never unlock.",
-            new AcceptableValueRange<float>(0f, 1f), new ConfigurationManagerAttributes { Order = 90 }));
+            "ON (default): the squad heads for an exfil once every objective is finished.",
+            null, new ConfigurationManagerAttributes { Order = 90, IsAdvanced = true }));
         MainObjectivesAttractionMagnitude = Config.Bind(mainTune, "Main pull strength", 4.0f, new ConfigDescription(
-            "Maximum total pull magnitude across pending mains. Larger = squads commit harder to goals.",
-            new AcceptableValueRange<float>(0f, 20f), new ConfigurationManagerAttributes { Order = 80 }));
+            "How hard squads commit to their objectives. Larger = more goal-focused.",
+            new AcceptableValueRange<float>(0f, 20f), new ConfigurationManagerAttributes { Order = 80, IsAdvanced = true }));
         MainObjectivesKillsRoamForceMagnitude = Config.Bind(mainTune, "Kills roam pull strength", 3.0f, new ConfigDescription(
-            "Constant pull toward the Kills anchor during roam phase.",
-            new AcceptableValueRange<float>(0f, 20f), new ConfigurationManagerAttributes { Order = 79 }));
-        MainObjectivesKillsRoamDuration = Config.Bind(mainTune, "Kills roam duration (s, min..max)", new Vector2(60f, 300f), new ConfigDescription(
-            "Time the squad spends roaming around a Kills anchor before the main completes.",
-            null, new ConfigurationManagerAttributes { Order = 78 }));
+            "Pull toward a Kills objective while hunting around it.",
+            new AcceptableValueRange<float>(0f, 20f), new ConfigurationManagerAttributes { Order = 79, IsAdvanced = true }));
         MainObjectivesLootValueTimeoutSeconds = Config.Bind(mainTune, "LootValue timeout (s)", 300f, new ConfigDescription(
-            "Safety net — a LootValue main auto-completes after this many seconds of engaged-time without cell-clean.",
-            new AcceptableValueRange<float>(30f, 1800f), new ConfigurationManagerAttributes { Order = 70 }));
+            "Safety net: a LootValue objective auto-finishes after this many seconds of engaged time.",
+            new AcceptableValueRange<float>(30f, 1800f), new ConfigurationManagerAttributes { Order = 70, IsAdvanced = true }));
         MainObjectivesCombatCallerGraceSeconds = Config.Bind(mainTune, "Combat caller grace (s)", 5f, new ConfigDescription(
-            "How long the combat-convergence override stays active after the last detected combat signal.",
-            new AcceptableValueRange<float>(0f, 60f), new ConfigurationManagerAttributes { Order = 69 }));
+            "How long the rally-to-combat pull lingers after the last shots.",
+            new AcceptableValueRange<float>(0f, 60f), new ConfigurationManagerAttributes { Order = 69, IsAdvanced = true }));
         MainObjectivesRoamSplinterRadius = Config.Bind(mainTune, "Roam splinter radius (m)", 50f, new ConfigDescription(
-            "Search radius each member uses when picking their own splinter during Kills roam / LootValue active.",
-            new AcceptableValueRange<float>(10f, 200f), new ConfigurationManagerAttributes { Order = 68 }));
-        SplinterSearchRadius = Config.Bind(mainTune, "Follower splinter search radius (m)", 30f, new ConfigDescription(
-            "When a squad reaches its objective cell, followers are dispatched to splinter POIs within this radius around the leader.",
-            new AcceptableValueRange<float>(5f, 100f), new ConfigurationManagerAttributes { Order = 67 }));
-        ScavengeSweepRadius = Config.Bind(mainTune, "Scavenge sweep radius (m)", 10f, new ConfigDescription(
-            "After finishing a loot, the bot chains to the nearest LooseLoot/Corpse within this radius. Each candidate is still gated by Loot Coverage %.",
-            new AcceptableValueRange<float>(0f, 50f), new ConfigurationManagerAttributes { Order = 66 }));
+            "How far each member spreads to pick its own spot while roaming a Kills / LootValue objective.",
+            new AcceptableValueRange<float>(10f, 200f), new ConfigurationManagerAttributes { Order = 68, IsAdvanced = true }));
         SameFloorLootYTolerance = Config.Bind(mainTune, "Same-floor sweep tolerance (m)", 2.5f, new ConfigDescription(
-            "During chain-loot sweeps, candidates within this vertical Y delta of the bot are treated as 'same floor' and preferred over cross-floor candidates. Two-pass: same-floor first, cross-floor only if nothing same-floor is in range. 0 disables the bias (chain-loot ignores floors). Stops the elevator yo-yo on Resort.",
-            new AcceptableValueRange<float>(0f, 10f), new ConfigurationManagerAttributes { Order = 65 }));
-        CrossFloorSplinterChance = Config.Bind(mainTune, "Cross-floor splinter chance", 0.2f, new ConfigDescription(
-            "Per-pick probability that a roam splinter ignores the same-floor preference and picks floor-blind. Keeps bots from vacuuming an entire floor before ever touching a staircase: they loot some of the current floor, then naturally drift up or down. 0 = never change floor until the current one is exhausted; 1 = floor-blind picking (the old staircase yo-yo).",
-            new AcceptableValueRange<float>(0f, 1f), new ConfigurationManagerAttributes { Order = 64 }));
-        TimeExtractWindowPmc = Config.Bind(mainTune, "Time extract window — PMC (%)", new Vector2(5f, 30f), new ConfigDescription(
-            "Per-squad random window (% of total raid duration remaining) at which ExtractRequested flips. Rolled once per squad. Matches SAIN's default range.",
-            null, new ConfigurationManagerAttributes { Order = 60 }));
-        TimeExtractWindowPlayerScav = Config.Bind(mainTune, "Time extract window — PlayerScav (%)", new Vector2(5f, 30f), new ConfigDescription(
-            "Same as PMC but applied to PlayerScavs.",
-            null, new ConfigurationManagerAttributes { Order = 59 }));
+            "Loot within this vertical distance counts as 'same floor' and is preferred over loot on another floor (stops the staircase yo-yo). 0 = ignore floors.",
+            new AcceptableValueRange<float>(0f, 10f), new ConfigurationManagerAttributes { Order = 65, IsAdvanced = true }));
+        CrossFloorSplinterChance = Config.Bind(mainTune, "Cross-floor splinter chance", 0.1f, new ConfigDescription(
+            "Chance a bot picks loot on another floor instead of finishing the current one, so it drifts up/down naturally. 0% = clear a floor before moving; 100% = ignore floors.",
+            new AcceptableValueRange<float>(0f, 1f), new ConfigurationManagerAttributes { Order = 64, IsAdvanced = true, ShowRangeAsPercent = true }));
+        TimeExtractWindowPmc = Config.Bind(mainTune, "Time extract window — PMC (%)", new Vector2(10f, 30f), new ConfigDescription(
+            "Random window (as % of raid time left) when a PMC squad decides to head out. Rolled once per squad.",
+            null, new ConfigurationManagerAttributes { Order = 60, IsAdvanced = true }));
         PmcLootCellCooldownSeconds = Config.Bind(mainTune, "PMC loot cell cooldown (s)", 600f, new ConfigDescription(
-            "How long after looting a cell that cell is invisible to the same PMC squad. Stops boomeranging back. 0 disables.",
-            new AcceptableValueRange<float>(0f, 3600f), new ConfigurationManagerAttributes { Order = 50 }));
+            "After looting a cell, how long before the same PMC squad will go back. Stops boomeranging. 0 = no cooldown.",
+            new AcceptableValueRange<float>(0f, 3600f), new ConfigurationManagerAttributes { Order = 50, IsAdvanced = true }));
         SyntheticVisitCooldownSeconds = Config.Bind(mainTune, "Synthetic POI cooldown (s)", 180f, new ConfigDescription(
-            "How long after finishing a Synthetic POI it's invisible to the same squad. 0 disables.",
-            new AcceptableValueRange<float>(0f, 1800f), new ConfigurationManagerAttributes { Order = 49 }));
+            "After finishing a patrol point, how long before the same squad revisits it. 0 = no cooldown.",
+            new AcceptableValueRange<float>(0f, 1800f), new ConfigurationManagerAttributes { Order = 49, IsAdvanced = true }));
         OpportunisticCorpseScanIntervalSeconds = Config.Bind(mainTune, "Opportunistic corpse scan (s)", 2.5f, new ConfigDescription(
-            "How often each squad re-runs the 'do I see a fresh corpse nearby?' raycast scan. Per-squad raycasts add up under heavy bot counts; default raised from 0.5s to 2.5s to lower the CPU baseline. Drop it back down if you want hyper-reactive corpse pickup.",
-            new AcceptableValueRange<float>(0.5f, 10f), new ConfigurationManagerAttributes { Order = 48 }));
+            "How often a squad checks for a fresh corpse nearby. Lower = snappier corpse looting but more CPU under heavy bot counts.",
+            new AcceptableValueRange<float>(0.5f, 10f), new ConfigurationManagerAttributes { Order = 48, IsAdvanced = true }));
 
-        // ── 06. Faction-mod takeover ────────────────────────────────
+        // Faction-mod takeover — shown in the Factions section, under "Advanced settings" (niche custom factions).
         HijackUntar = Config.Bind(takeover, "Take over UNTAR bots", false, new ConfigDescription(
-            "OFF (default): UNTAR bots run on their own 'Go Home' behaviour. ON: ORBIT dispatcher takes them over and routes them like PMCs.",
-            null, new ConfigurationManagerAttributes { Order = 3 }));
+            "ON: ORBIT routes UNTAR bots like PMCs. OFF (default): they run on their own 'Go Home' behaviour.",
+            null, new ConfigurationManagerAttributes { Order = -10, IsAdvanced = true }));
         HijackRuaf = Config.Bind(takeover, "Take over RUAF bots", false, new ConfigDescription(
-            "OFF (default): RUAF bots run on their own 'Come Home' behaviour. ON: ORBIT routes them like PMCs.",
-            null, new ConfigurationManagerAttributes { Order = 2 }));
+            "ON: ORBIT routes RUAF bots like PMCs. OFF (default): they run on their own 'Come Home' behaviour.",
+            null, new ConfigurationManagerAttributes { Order = -11, IsAdvanced = true }));
         HijackBlackDivision = Config.Bind(takeover, "Take over Black Division bots", false, new ConfigDescription(
-            "OFF (default): Black Division bots run on their own behaviour. ON: ORBIT routes them like PMCs.",
-            null, new ConfigurationManagerAttributes { Order = 1 }));
+            "ON: ORBIT routes Black Division bots like PMCs. OFF (default): they run on their own behaviour.",
+            null, new ConfigurationManagerAttributes { Order = -12, IsAdvanced = true }));
         HijackIsb = Config.Bind(takeover, "Take over ISB bots", true, new ConfigDescription(
-            "ON (default): ORBIT routes ISB bots like PMCs. OFF: ISB bots run on their own behaviour.",
-            null, new ConfigurationManagerAttributes { Order = 0 }));
+            "ON (default): ORBIT routes ISB bots like PMCs. OFF: they run on their own behaviour.",
+            null, new ConfigurationManagerAttributes { Order = -13, IsAdvanced = true }));
         HijackCombineSoldiers = Config.Bind(takeover, "Take over Combine Soldiers bots", false, new ConfigDescription(
-            "OFF (default): Manimal's Combine Soldiers run on their own behaviour. ON: ORBIT routes them like PMCs.",
-            null, new ConfigurationManagerAttributes { Order = -1 }));
+            "ON: ORBIT routes Manimal's Combine Soldiers like PMCs. OFF (default): they run on their own behaviour.",
+            null, new ConfigurationManagerAttributes { Order = -14, IsAdvanced = true }));
 
-        // ── 07.x SAIN personality ───────────────────────────────────
+        // ── 09.x SAIN personality ───────────────────────────────────
         BindSainPersonalityConfigs();
     }
 
-    // ── 09. Performance ─────────────────────────────────────────────
-    // Bound last so this section lands at the bottom of the list (BepInEx orders by first-bind, not by name).
+    // 04. Performance — the two tickrate knobs (the on/off toggle lives in 01. Essentials).
     private void BindPerformanceConfig()
     {
-        const string perf = "09. Performance";
-        DegradedTickrateEnabled = Config.Bind(perf, "Degraded tickrate for off-screen squads", false, new ConfigDescription(
-            "OFF (default): every squad re-runs its decision loop at the full strategy rate. ON: squads far from every player re-decide much less often (see the two knobs below) to reclaim CPU on lower-end machines. Movement, aiming, doors and stuck-handling still run every frame, so throttled bots keep moving — they just defer NEW decisions (dispatch / rally / extract). Off-screen the difference is invisible.",
-            null, new ConfigurationManagerAttributes { Order = 2 }));
+        const string perf = "05. Performance";
+        DegradedTickrateEnabled = Config.Bind("01. Essentials", "Degraded tickrate for off-screen squads", false, new ConfigDescription(
+            "ON: squads far from every player re-decide much less often to save CPU. Movement/aiming/doors still run, they just defer NEW decisions. NOTE: the gain is small — ORBIT is a thin slice of a bot's cost (SAIN/EFT combat, vision, pathing dominate), so leaving this OFF (default) is fine for most setups.",
+            null, new ConfigurationManagerAttributes { Order = 6 }));
         DegradedTickrateNearDistance = Config.Bind(perf, "Full-rate distance (m)", 200f, new ConfigDescription(
-            "Squads within this distance of any living player always run at full rate (never throttled), so nearby bots stay crisp. Beyond it, the interval below applies.",
-            new AcceptableValueRange<float>(0f, 1000f), new ConfigurationManagerAttributes { Order = 1 }));
+            "Squads within this distance of any player always run at full rate. Beyond it, the throttle below kicks in.",
+            new AcceptableValueRange<float>(0f, 1000f), new ConfigurationManagerAttributes { Order = 1, IsAdvanced = true }));
         DegradedTickrateFarIntervalSeconds = Config.Bind(perf, "Far decision interval (s)", 6f, new ConfigDescription(
-            "How often a far / off-screen squad re-runs its decision loop. Higher = more CPU saved but slower reactions for distant squads. 5-10 s is a good range.",
-            new AcceptableValueRange<float>(0.5f, 30f), new ConfigurationManagerAttributes { Order = 0 }));
+            "How often a far/off-screen squad re-decides. Higher = more CPU saved, slower reactions far away. 5–10s is a good range.",
+            new AcceptableValueRange<float>(0.5f, 30f), new ConfigurationManagerAttributes { Order = 0, IsAdvanced = true }));
     }
 
     private void BindSainPersonalityConfigs()
     {
-        const string gen = "07.0 SAIN personality - General";
-        const string timmy = "07.1 SAIN personality - Timmy";
-        const string cautio = "07.2 SAIN personality - Cautious";
-        const string averag = "07.3 SAIN personality - Average";
-        const string aggres = "07.4 SAIN personality - Aggressive";
-        const string veryag = "07.5 SAIN personality - Very aggressive";
+        const string gen = "09.0 SAIN personality - General";
+        const string timmy = "09.1 SAIN personality - Timmy";
+        const string cautio = "09.2 SAIN personality - Cautious";
+        const string averag = "09.3 SAIN personality - Average";
+        const string aggres = "09.4 SAIN personality - Aggressive";
+        const string veryag = "09.5 SAIN personality - Very aggressive";
 
         SainPersonalityEnabled = Config.Bind(gen, "Enable SAIN personality", true, new ConfigDescription(
-            "When ON (and SAIN installed), PMC squads run per-archetype values from 07.1-5 instead of the global ORBIT knobs. Scavs/PlayerScavs always use globals.",
+            "ON (default): PMC squads use the per-archetype values in 09.1–09.5 (matched from their SAIN brain) instead of the fallback knobs in section 05/06. Scavs/PlayerScavs always use the fallback.",
             null, new ConfigurationManagerAttributes { Order = 100 }));
         SainArchetypeTimmyBrains = Config.Bind(gen, "Brain names → Timmy (RESTART)", "Timmy", new ConfigDescription(
-            "Comma-separated SAIN brain names that map to Timmy (random/erratic). Case-insensitive.",
-            null, new ConfigurationManagerAttributes { Order = 95 }));
+            "SAIN brain names (comma-separated, case-insensitive) treated as Timmy (random/erratic).",
+            null, new ConfigurationManagerAttributes { Order = 95, IsAdvanced = true }));
         SainArchetypeCautiousBrains = Config.Bind(gen, "Brain names → Cautious (RESTART)", "Rat, Coward, SnappingTurtle", new ConfigDescription(
-            "Comma-separated SAIN brain names that map to Cautious (low-risk, loot-focused).",
-            null, new ConfigurationManagerAttributes { Order = 90 }));
+            "SAIN brain names treated as Cautious (low-risk, loot-focused).",
+            null, new ConfigurationManagerAttributes { Order = 90, IsAdvanced = true }));
         SainArchetypeAverageBrains = Config.Bind(gen, "Brain names → Average (RESTART)", "Normal", new ConfigDescription(
-            "Comma-separated SAIN brain names that map to Average (balanced). Any brain NOT matched in any of the 5 lists also falls back to Average.",
-            null, new ConfigurationManagerAttributes { Order = 87 }));
+            "SAIN brain names treated as Average (balanced). Any brain not listed in the five lists also falls back to Average.",
+            null, new ConfigurationManagerAttributes { Order = 87, IsAdvanced = true }));
         SainArchetypeAggressiveBrains = Config.Bind(gen, "Brain names → Aggressive (RESTART)", "Wreckless, Chad", new ConfigDescription(
-            "Comma-separated SAIN brain names that map to Aggressive.",
-            null, new ConfigurationManagerAttributes { Order = 85 }));
+            "SAIN brain names treated as Aggressive.",
+            null, new ConfigurationManagerAttributes { Order = 85, IsAdvanced = true }));
         SainArchetypeVeryAggressiveBrains = Config.Bind(gen, "Brain names → Very aggressive (RESTART)", "GigaChad", new ConfigDescription(
-            "Comma-separated SAIN brain names that map to Very aggressive.",
-            null, new ConfigurationManagerAttributes { Order = 80 }));
+            "SAIN brain names treated as Very aggressive.",
+            null, new ConfigurationManagerAttributes { Order = 80, IsAdvanced = true }));
         SainTimmyExtrasEnabled = Config.Bind(gen, "Timmy: erratic extras", true, new ConfigDescription(
-            "When ON, Timmy squads also get 20% wrong-cell pick and 5% forget-blacklist behaviours on top of their 07.1 numeric tunings.",
-            null, new ConfigurationManagerAttributes { Order = 75 }));
+            "ON: Timmy squads also get a 20% wrong-cell pick and 5% forget-blacklist quirk on top of their 09.1 numbers.",
+            null, new ConfigurationManagerAttributes { Order = 75, IsAdvanced = true }));
 
         BindArchetype(timmy,
-            mixQ: 1.0f, mixK: 1.0f, mixL: 1.5f,
+            mixQ: 0.29f, mixK: 0.29f, mixL: 0.42f,
             mainCount: new Vector2(1, 2), extract: new Vector2(100_000, 300_000), coverage: new Vector2(0.30f, 0.50f),
             sprint: 0.0f, lockedDoor: 0.10f, miniLoot: 0, sweep: 10f, splinter: 30f,
             killsRoam: new Vector2(30, 150), topLoot: 10,
@@ -667,7 +635,7 @@ public class Plugin : BaseUnityPlugin
             outKillsRoam: e => SainTimmyKillsRoamDuration = e, outTopLoot: e => SainTimmyTopLootCellsMax = e);
 
         BindArchetype(cautio,
-            mixQ: 0.8f, mixK: 0.2f, mixL: 2.5f,
+            mixQ: 0.23f, mixK: 0.06f, mixL: 0.71f,
             mainCount: new Vector2(2, 4), extract: new Vector2(200_000, 500_000), coverage: new Vector2(0.85f, 0.95f),
             sprint: 0.2f, lockedDoor: 0.10f, miniLoot: 5000, sweep: 15f, splinter: 18f,
             killsRoam: new Vector2(30, 150), topLoot: 10,
@@ -679,7 +647,7 @@ public class Plugin : BaseUnityPlugin
             outKillsRoam: e => SainCautiousKillsRoamDuration = e, outTopLoot: e => SainCautiousTopLootCellsMax = e);
 
         BindArchetype(averag,
-            mixQ: 1.0f, mixK: 1.0f, mixL: 1.0f,
+            mixQ: 0.34f, mixK: 0.33f, mixL: 0.33f,
             mainCount: new Vector2(1, 5), extract: new Vector2(500_000, 1_000_000), coverage: new Vector2(0.65f, 0.75f),
             sprint: 0.5f, lockedDoor: 0.30f, miniLoot: 10000, sweep: 10f, splinter: 30f,
             killsRoam: new Vector2(60, 300), topLoot: 10,
@@ -691,7 +659,7 @@ public class Plugin : BaseUnityPlugin
             outKillsRoam: e => SainAverageKillsRoamDuration = e, outTopLoot: e => SainAverageTopLootCellsMax = e);
 
         BindArchetype(aggres,
-            mixQ: 0.7f, mixK: 2.5f, mixL: 0.7f,
+            mixQ: 0.18f, mixK: 0.64f, mixL: 0.18f,
             mainCount: new Vector2(2, 4), extract: new Vector2(1_000_000, 1_500_000), coverage: new Vector2(0.50f, 0.60f),
             sprint: 0.8f, lockedDoor: 0.45f, miniLoot: 15000, sweep: 8f, splinter: 39f,
             killsRoam: new Vector2(90, 450), topLoot: 5,
@@ -703,7 +671,7 @@ public class Plugin : BaseUnityPlugin
             outKillsRoam: e => SainAggressiveKillsRoamDuration = e, outTopLoot: e => SainAggressiveTopLootCellsMax = e);
 
         BindArchetype(veryag,
-            mixQ: 0.3f, mixK: 4.0f, mixL: 0.5f,
+            mixQ: 0.06f, mixK: 0.83f, mixL: 0.11f,
             mainCount: new Vector2(2, 5), extract: new Vector2(1_500_000, 3_000_000), coverage: new Vector2(0.30f, 0.45f),
             sprint: 1.0f, lockedDoor: 0.60f, miniLoot: 20000, sweep: 5f, splinter: 45f,
             killsRoam: new Vector2(150, 750), topLoot: 3,
@@ -731,19 +699,19 @@ public class Plugin : BaseUnityPlugin
         Action<ConfigEntry<float>> outSweep, Action<ConfigEntry<float>> outSplinter,
         Action<ConfigEntry<Vector2>> outKillsRoam, Action<ConfigEntry<int>> outTopLoot)
     {
-        outQ(Config.Bind(section, "Main mix — Quest weight",     mixQ, new ConfigDescription("Roll weight for Quest mains. Final mix is normalized against the sum Q+K+L.", null, new ConfigurationManagerAttributes { Order = 100 })));
-        outK(Config.Bind(section, "Main mix — Kills weight",     mixK, new ConfigDescription("Roll weight for Kills mains.", null, new ConfigurationManagerAttributes { Order = 99 })));
-        outL(Config.Bind(section, "Main mix — LootValue weight", mixL, new ConfigDescription("Roll weight for LootValue mains.", null, new ConfigurationManagerAttributes { Order = 98 })));
-        outMainCount(Config.Bind(section, "Main count (min, max)", mainCount, new ConfigDescription("Number of mains rolled per squad, uniform in [min..max].", null, new ConfigurationManagerAttributes { Order = 97 })));
-        outExtract(Config.Bind(section, "Extract loot threshold (₽, min..max)", extract, new ConfigDescription("Rouble value that flips ExtractRequested. Rolled once per squad.", null, new ConfigurationManagerAttributes { Order = 96 })));
-        outCoverage(Config.Bind(section, "Loot coverage % (min..max)", coverage, new ConfigDescription("Per-POI pick probability (LootValue cell + scavenge sweep). 1.0 = vacuum, 0.3 = skips most.", null, new ConfigurationManagerAttributes { Order = 95 })));
-        outSprint(Config.Bind(section, "Sprint propensity (0..1)", sprint, new ConfigDescription("0 = never sprint, 1 = always.", null, new ConfigurationManagerAttributes { Order = 94 })));
-        outLockedDoor(Config.Bind(section, "Locked door unlock %", lockedDoor, new ConfigDescription("Probability of force-unlocking a locked door for an intermediate POI. Main-anchor POIs always roll 100%.", null, new ConfigurationManagerAttributes { Order = 93 })));
-        outMiniLoot(Config.Bind(section, "Mini-loot threshold (₽)", miniLoot, new ConfigDescription("Minimum item value the bot bothers picking up.", null, new ConfigurationManagerAttributes { Order = 92 })));
-        outSweep(Config.Bind(section, "Scavenge sweep radius (m)", sweep, new ConfigDescription("After a loot, chain to the nearest LooseLoot/Corpse within this radius.", null, new ConfigurationManagerAttributes { Order = 91 })));
-        outSplinter(Config.Bind(section, "Follower splinter radius (m)", splinter, new ConfigDescription("Non-leader members spread to splinter POIs within this radius of the leader.", null, new ConfigurationManagerAttributes { Order = 90 })));
-        outKillsRoam(Config.Bind(section, "Kills roam duration (s, min..max)", killsRoam, new ConfigDescription("Time the squad spends roaming the Kills anchor before completing.", null, new ConfigurationManagerAttributes { Order = 89 })));
-        outTopLoot(Config.Bind(section, "Top loot cells max", topLoot, new ConfigDescription("LootValue rolls are restricted to the top-N richest cells. Smaller = more concentration (more PvP).", null, new ConfigurationManagerAttributes { Order = 88 })));
+        outQ(Config.Bind(section, "Main mix — Quest %",     mixQ, new ConfigDescription("Share of Quest mains for this archetype (auto-normalized against Kills + LootValue, so they need not total exactly 100%).", new AcceptableValueRange<float>(0f, 1f), new ConfigurationManagerAttributes { Order = 100, IsAdvanced = true, ShowRangeAsPercent = true })));
+        outK(Config.Bind(section, "Main mix — Kills %",     mixK, new ConfigDescription("Share of Kills mains for this archetype.", new AcceptableValueRange<float>(0f, 1f), new ConfigurationManagerAttributes { Order = 99, IsAdvanced = true, ShowRangeAsPercent = true })));
+        outL(Config.Bind(section, "Main mix — LootValue %", mixL, new ConfigDescription("Share of LootValue mains for this archetype.", new AcceptableValueRange<float>(0f, 1f), new ConfigurationManagerAttributes { Order = 98, IsAdvanced = true, ShowRangeAsPercent = true })));
+        outMainCount(Config.Bind(section, "Main count (min, max)", mainCount, new ConfigDescription("Number of mains rolled per squad, uniform in [min..max].", null, new ConfigurationManagerAttributes { Order = 97, IsAdvanced = true })));
+        outExtract(Config.Bind(section, "Extract loot threshold (₽, min..max)", extract, new ConfigDescription("Rouble value that flips ExtractRequested. Rolled once per squad.", null, new ConfigurationManagerAttributes { Order = 96, IsAdvanced = true })));
+        outCoverage(Config.Bind(section, "Loot coverage % (min..max)", coverage, new ConfigDescription("Per-POI pick probability (LootValue cell + scavenge sweep). 1.0 = vacuum, 0.3 = skips most.", null, new ConfigurationManagerAttributes { Order = 95, IsAdvanced = true })));
+        outSprint(Config.Bind(section, "Sprint propensity (0..1)", sprint, new ConfigDescription("0 = never sprint, 1 = always.", null, new ConfigurationManagerAttributes { Order = 94, IsAdvanced = true })));
+        outLockedDoor(Config.Bind(section, "Locked door unlock %", lockedDoor, new ConfigDescription("Probability of force-unlocking a locked door for an intermediate POI. Main-anchor POIs always roll 100%.", null, new ConfigurationManagerAttributes { Order = 93, IsAdvanced = true })));
+        outMiniLoot(Config.Bind(section, "Mini-loot threshold (₽)", miniLoot, new ConfigDescription("Minimum item value the bot bothers picking up.", null, new ConfigurationManagerAttributes { Order = 92, IsAdvanced = true })));
+        outSweep(Config.Bind(section, "Scavenge sweep radius (m)", sweep, new ConfigDescription("After a loot, chain to the nearest LooseLoot/Corpse within this radius.", null, new ConfigurationManagerAttributes { Order = 91, IsAdvanced = true })));
+        outSplinter(Config.Bind(section, "Follower splinter radius (m)", splinter, new ConfigDescription("Non-leader members spread to splinter POIs within this radius of the leader.", null, new ConfigurationManagerAttributes { Order = 90, IsAdvanced = true })));
+        outKillsRoam(Config.Bind(section, "Kills roam duration (s, min..max)", killsRoam, new ConfigDescription("Time the squad spends roaming the Kills anchor before completing.", null, new ConfigurationManagerAttributes { Order = 89, IsAdvanced = true })));
+        outTopLoot(Config.Bind(section, "Top loot cells max", topLoot, new ConfigDescription("LootValue rolls are restricted to the top-N richest cells. Smaller = more concentration (more PvP).", null, new ConfigurationManagerAttributes { Order = 88, IsAdvanced = true })));
     }
 
     private static void AdvectionZoneParametersChanged(object sender, EventArgs args)

@@ -36,28 +36,41 @@ public static class LootConfig
         if (_initialized) return;
         _initialized = true;
 
-        const string section = "08. Looting";
+        const string section = "04. Looting";
 
-        LootingEnabled = config.Bind(section, "Enable looting", LootingFactionsDefault,
-            "Which factions can loot (containers, loose items, corpses). ORBIT modifies AI for these factions; other selections have no effect.");
+        LootingEnabled = config.Bind("01. Essentials", "Enable looting", LootingFactionsDefault,
+            new ConfigDescription(
+                "Which factions loot containers, loose items and corpses. Only the listed factions are affected.",
+                null, new Orbit.Config.ConfigurationManagerAttributes { Order = 10 }));
         DetectDistance = config.Bind(section, "Detect loot distance (m)", 80f,
-            "Max distance from squad leader at which a loot POI (container / loose item / corpse) is still considered. 0 = no cap.");
+            new ConfigDescription(
+                "How far from the squad leader a loot spot (container / item / corpse) is still considered. 0 = no limit.",
+                null, new Orbit.Config.ConfigurationManagerAttributes { Order = 6 }));
         CorpseRequiresSightOrSquadKill = config.Bind(section, "Corpse requires LoS or squad kill", true,
-            "When ON, a corpse POI is only assigned if the squad leader can see it OR the squad scored the kill. Stops bots magically knowing about corpses across the map.");
+            new ConfigDescription(
+                "ON (default): a corpse is only looted if the squad saw it or made the kill, so bots don't magically know about bodies across the map.",
+                null, new Orbit.Config.ConfigurationManagerAttributes { Order = 5 }));
         ExtractAllowedFor = config.Bind(section, "Extract allowed for", ExtractFaction.Pmc | ExtractFaction.PlayerScav,
-            "Which factions are allowed to be routed to an exfil. Only PMC and PlayerScav have extract dispatch logic in ORBIT.");
-        ExtractAtLootValuePlayerScav = config.Bind(section, "PlayerScav: extract at loot value (₽)", 200000f,
-            "Once a PlayerScav squad's living members have collectively looted this many roubles, the whole squad bee-lines to the nearest exfil. 0 disables.");
+            new ConfigDescription(
+                "Which factions ORBIT routes to an exfil. Only PMC and PlayerScav have extract logic.",
+                null, new Orbit.Config.ConfigurationManagerAttributes { Order = 4 }));
+        ExtractAtLootValuePlayerScav = config.Bind("03. PlayerScav", "Extract at loot value (₽)", 200000f,
+            new ConfigDescription(
+                "Once a PlayerScav squad has looted this much (₽ across living members), it heads for the nearest exfil. 0 = never.",
+                null, new Orbit.Config.ConfigurationManagerAttributes { Order = 60 }));
         SoloLootExtractChancePct = config.Bind(section, "Solo extract on own loot threshold (%)", 50,
             new ConfigDescription(
-                "When a PMC / PlayerScav member's OWN looted value crosses its OWN extract threshold, the chance it peels off to extract ALONE while the rest of the squad keeps playing. Rolled once per member. 0 = never (it stays with the squad), 100 = always. (The emergency wounded extract is a separate toggle below.)",
-                new AcceptableValueRange<int>(0, 100)));
-        EmergencyExtractEnabled = config.Bind(section, "Emergency extract when wounded", true,
-            "ON (default): a PMC / PlayerScav whose HP is actively bleeding out (a sustained drop with no recovery) or stuck below 50% for a full minute peels off to extract alone, and cancels if it heals back up. OFF: members never self-extract on health — they only leave on the loot / time / squad triggers.");
+                "When a PMC/PlayerScav's OWN loot crosses its OWN extract threshold, the chance it leaves ALONE while the squad keeps playing (rolled once per member). 0 = stay with squad, 100 = always leave. (Wounded emergency extract is separate, in Essentials.)",
+                new AcceptableValueRange<int>(0, 100), new Orbit.Config.ConfigurationManagerAttributes { Order = 2 }));
+        // Bound into "01. Essentials" (a behaviour toggle, grouped with Squad rally), not the Looting section.
+        EmergencyExtractEnabled = config.Bind("01. Essentials", "Emergency extract when wounded", true,
+            new ConfigDescription(
+                "ON (default): a badly wounded PMC / PlayerScav with no usable meds left breaks off and extracts on its own instead of dying where it stands, and rejoins the squad if it heals back up. OFF: members only leave on the loot / time / squad triggers.",
+                null, new Orbit.Config.ConfigurationManagerAttributes { Order = 8 }));
         ScavLootChancePct = config.Bind(section, "Scav: per-item loot chance (%)", 30,
             new ConfigDescription(
-                "Bot scavs (NOT PlayerScavs) skip the per-archetype loot-value gate entirely and instead roll this chance per item on corpses, containers, and loose loot. Mirrors vanilla scav behaviour — opportunistic pickups, not deliberate searches. PlayerScavs and PMCs are unaffected.",
-                new AcceptableValueRange<int>(0, 100)));
+                "Bot scavs (not PlayerScavs) skip the value gate and just roll this chance per item, like vanilla opportunistic scavs. PMCs/PlayerScavs unaffected.",
+                new AcceptableValueRange<int>(0, 100), new Orbit.Config.ConfigurationManagerAttributes { Order = 1 }));
         Log.Info($"LootConfig.Init: DONE — looting={LootingEnabled.Value}, detectDist={DetectDistance.Value}m, swapMargin={SwapMargin:F2} (const)");
     }
 }

@@ -564,14 +564,14 @@ public class LootContainerAction(AgentData dataset, WaypointSystem waypointSyste
         // blacklisted for the squad (CompletedPoiIds) so the next FindNearbySweepTarget call sees it as
         // already- consumed and returns the next closest item. Caps at a few retries to keep the loop
         // bounded.
-        var coverage = Mathf.Clamp01(Plugin.LootCoveragePct.Value);
+        var coverage = Mathf.Clamp01(Orbit.Sain.PersonalityFallback.LootCoverage);
         Waypoint next = null;
         var coverageDisabled = coverage >= 0.9999f;
         for (var attempt = 0; attempt < ScavengeSweepMaxCandidates; attempt++)
         {
             var sweepRadius = agent.Squad?.Personality != null
                 ? agent.Squad.Personality.ScavengeSweepRadius
-                : Plugin.ScavengeSweepRadius.Value;
+                : Orbit.Sain.PersonalityFallback.ScavengeSweepRadius;
             var candidate = waypointSystem.FindNearbySweepTarget(agent.Position, agent, sweepRadius);
             if (candidate == null) return false;
             if (coverageDisabled || Random.value < coverage)

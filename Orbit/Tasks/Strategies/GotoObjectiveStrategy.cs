@@ -839,7 +839,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                         squadObjective.Location, squad, excludeForLoot,
                         squad.Personality != null
                             ? squad.Personality.SplinterSearchRadius
-                            : Plugin.SplinterSearchRadius.Value);
+                            : Orbit.Sain.PersonalityFallback.SplinterSearchRadius);
                     if (splinter != null)
                     {
                         targetLoc = splinter;

@@ -1257,7 +1257,7 @@ public class WaypointSystem
         if (squad == null) return;
         var coverageRaw = squad.Personality != null
             ? squad.Personality.LootCoverage
-            : Plugin.LootCoveragePct.Value;
+            : Orbit.Sain.PersonalityFallback.LootCoverage;
         var coverage = Mathf.Clamp01(coverageRaw);
         if (coverage >= 0.9999f) return; // feature disabled
 
@@ -1730,7 +1730,7 @@ public class WaypointSystem
         var isMainAnchor = IsWaypointMainAnchorOfSquad(squad, pick);
         var intermediateRaw = squad.Personality != null
             ? squad.Personality.LockedDoorUnlockProba
-            : Plugin.MainObjectivesUnlockProbabilityIntermediate.Value;
+            : Orbit.Sain.PersonalityFallback.LockedDoorUnlockProba;
         var intermediateProba = Mathf.Clamp01(intermediateRaw);
 
         for (var i = 0; i < doors.Count; i++)
@@ -2657,7 +2657,7 @@ public class WaypointSystem
             }
         }
         cellValues.Sort((a, b) => b.Value.CompareTo(a.Value));
-        var keep = Math.Min(Plugin.MainObjectivesTopLootCellsMaxCount.Value, cellValues.Count);
+        var keep = Math.Min(Orbit.Sain.PersonalityFallback.TopLootCellsMax, cellValues.Count);
         _topLootCellsCache = new List<Vector2Int>(keep);
         for (var i = 0; i < keep; i++) _topLootCellsCache.Add(cellValues[i].Key);
         var summary = new System.Text.StringBuilder();
