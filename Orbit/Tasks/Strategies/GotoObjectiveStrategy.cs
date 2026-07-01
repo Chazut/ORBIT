@@ -98,10 +98,12 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                         squad.CorpseWatchdogLocId = corpseObj.Id;
                         squad.CorpseWatchdogSince = Time.time;
                     }
-                    else if (SquadAnyMemberInCombat(squad))
+                    else if (SquadAnyMemberInCombat(squad) || !SquadAnyMemberNearCorpse(squad, corpseObj))
                     {
-                        // Pause the clock during SAIN combat / healing: ORBIT can't move anyone toward the
-                        // body, so a bot dragged into a fight beside its own kill shouldn't lose the corpse.
+                        // Only count time actually spent STUCK on the body: keep the clock fresh while the squad
+                        // is still en route to it, or dragged into SAIN combat / healing beside it. The timeout
+                        // starts once a member is on the corpse, so travel time and combat delay never eat into
+                        // the loot window.
                         squad.CorpseWatchdogSince = Time.time;
                     }
                     else if (Time.time - squad.CorpseWatchdogSince > CorpseStuckTimeoutSeconds)
@@ -684,7 +686,17 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                                              && squadObjective.Location != null
                                              && agentObjective.SplinterParent != squadObjective.Location
                                              && !squad.CompletedPoiIds.Contains(agentObjective.Location.Id);
+            // Fix A: an agent still owed its own kill's corpse must not stay stuck on a lower-priority loot
+            // splinter (or any non-corpse objective). Resolve the re-route here so the alignment check treats it
+            // as misaligned and the dispatch block below routes it to its body. Computed once, reused there.
+            Waypoint ownKillReroute = null;
+            if (agent.OwnKillCorpseLocId != 0)
+            {
+                ownKillReroute = waypointSystem.TryGetOwnKillCorpseForAgent(squad, agent, agent.OwnKillCorpseLocId);
+                if (ownKillReroute == null) agent.OwnKillCorpseLocId = 0;
+            }
             var aligned = !splinterAlreadyDone && !leaderFinishedAnchorInRoam
+                          && (ownKillReroute == null || agentObjective.Location == ownKillReroute)
                           && (agentObjective.Location == squadObjective.Location
                               || (agentObjective.SplinterParent != null
                                   && agentObjective.SplinterParent == squadObjective.Location)
@@ -744,15 +756,9 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                 var anchorReservedForOwnKill = ownKillAgentId >= 0
                                                && squadObjective.Location != null
                                                && squadObjective.Location.Id == squad.PendingOwnKillCorpseLocId;
-                // Persistent own-kill re-route (highest priority). A killer pulled away before looting (combat /
-                // heal / solo-extract) can't be helped by the one-shot squad pending below once the anchor has
-                // drifted off the body, so agent.OwnKillCorpseLocId remembers it across the detour.
-                Waypoint ownKillReroute = null;
-                if (agent.OwnKillCorpseLocId != 0)
-                {
-                    ownKillReroute = waypointSystem.TryGetOwnKillCorpseForAgent(squad, agent, agent.OwnKillCorpseLocId);
-                    if (ownKillReroute == null) agent.OwnKillCorpseLocId = 0;
-                }
+                // Persistent own-kill re-route (highest priority): resolved above, where it also broke this
+                // agent's sticky-splinter alignment so we reach here. A killer pulled off its body by combat /
+                // heal / solo-extract is routed straight back to it.
                 if (ownKillReroute != null)
                 {
                     targetLoc = ownKillReroute;
@@ -1336,8 +1342,26 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
     // bots into locked rooms and caused infinite TP attempt loops on mains whose anchor was off-navmesh.
     private const int UnreachableBlacklistThreshold = 5;
 
-    // Normal corpse loot resolves well under this; staying glued past it force-blacklists and re-dispatches.
-    private const float CorpseStuckTimeoutSeconds = 45f;
+    // Looting a full kit with the simulated search delays is slow, so this is measured from when a member
+    // actually reaches the body (not from the squad anchoring on it). Only past this is the loot genuinely
+    // hung, so force-blacklist and re-dispatch.
+    private const float CorpseStuckTimeoutSeconds = 180f;
+
+    // A member within this range of the corpse counts as "on the body" for the stuck watchdog — generous
+    // enough to cover the nav-snap arrival radius and a bot stopped just short of the exact loot point.
+    private const float CorpseWatchdogNearDistanceSqr = 12f * 12f;
+
+    private static bool SquadAnyMemberNearCorpse(Squad squad, Waypoint corpse)
+    {
+        if (squad?.Members == null || corpse == null) return false;
+        for (var i = 0; i < squad.Members.Count; i++)
+        {
+            var m = squad.Members[i];
+            if (m?.Bot == null) continue;
+            if ((m.Position - corpse.Position).sqrMagnitude <= CorpseWatchdogNearDistanceSqr) return true;
+        }
+        return false;
+    }
 
     /// <summary>
     /// Anchor position of the first in-progress main objective on the squad's list, or <see langword="null"/>
