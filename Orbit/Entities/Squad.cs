@@ -195,6 +195,11 @@ public class Squad(int id, float[] taskScores, int targetMembersCount) : Entity(
     public string DerivedEntryPoint;
     public bool ExfilEligibilityLogged;
 
+    // Short-TTL cache for FindNearestEligibleExfil: that scan now path-checks every candidate and the
+    // extract-interrupt gate polls it each tick, so the verdict is cached. Null = no reachable exfil last eval.
+    public Waypoint NearestExfilCached;
+    public float NearestExfilCachedAt = float.NegativeInfinity;
+
     /// <summary>
     /// SAIN-resolved personality archetype for this squad's leader, captured once at squad registration.
     /// Unused for non-PMC squads. Defaults to Average when SAIN is missing or the brain doesn't resolve.

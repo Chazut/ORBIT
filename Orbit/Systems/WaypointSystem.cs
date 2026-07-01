@@ -1133,14 +1133,22 @@ public class WaypointSystem
     /// the full filter (faction + status + spawn-side entry); pass 2 drops the entry check so a squad that
     /// derived their EntryPoint wrong (or for whom no SpawnPointMarker could be resolved) still extracts.
     /// </summary>
+    private const float NearestExfilCacheTtlSeconds = 2f;
+
     public Waypoint FindNearestEligibleExfil(Squad squad)
     {
         if (squad?.Leader?.Bot == null) return null;
+
+        // The extract-interrupt gate polls this every tick and it now path-checks each candidate (below), so
+        // cache the verdict briefly. Reachability from a moving leader changes slowly; 2 s stays responsive
+        // without re-pathing every exfil each frame.
+        if (Time.time - squad.NearestExfilCachedAt < NearestExfilCacheTtlSeconds)
+            return squad.NearestExfilCached;
+
         bool? squadIsPmc = null;
         var role = squad.Leader.Bot.Profile?.Info?.Settings?.Role;
         if (role.HasValue) squadIsPmc = role.Value.IsPMC();
         var leaderPos = squad.Leader.Bot.Position;
-        var blacklist = squad.CompletedPoiIds;
 
         if (!squad.ExfilEligibilityLogged)
         {
@@ -1148,54 +1156,50 @@ public class WaypointSystem
             LogEligibleExfilsForSquad(squad, squadIsPmc);
         }
 
+        // An exfil can be open + faction-valid yet sit on a navmesh region the leader can't path to (Woods when
+        // the spawn-side exit is closed and the only open one is across a gap). Without a per-squad reachability
+        // gate the squad bee-lines to it, stops hundreds of metres short, fails, and re-picks the SAME
+        // unreachable exfil until the raid ends. IsReachableFromPosition is stateless/per-leader, so it isn't
+        // masked by IsWaypointReachable's global positive cache when another squad reached the same exfil.
+        var best = ScanNearestReachableExfil(squad, squadIsPmc, leaderPos, ignoreEntry: false);
+        if (best == null)
+        {
+            // Pass 2: drop the spawn-side entry filter so a squad whose entry derivation failed still gets out.
+            best = ScanNearestReachableExfil(squad, squadIsPmc, leaderPos, ignoreEntry: true);
+            if (best != null)
+                Log.Warning($"{squad} no spawn-side eligible exfil — falling back to nearest reachable faction-allowed exfil {best} (entry derivation may have failed)");
+        }
+
+        squad.NearestExfilCached = best;
+        squad.NearestExfilCachedAt = Time.time;
+        return best;
+    }
+
+    // Nearest exfil that is (a) not squad-blacklisted, (b) faction/status/entry-eligible, and (c) has a
+    // COMPLETE navmesh path from the leader. The path check runs only on candidates nearer than the current
+    // best, so we path at most a handful per scan.
+    private Waypoint ScanNearestReachableExfil(Squad squad, bool? squadIsPmc, Vector3 leaderPos, bool ignoreEntry)
+    {
+        var blacklist = squad.CompletedPoiIds;
         Waypoint best = null;
         var bestDist = float.MaxValue;
         for (var cx = 0; cx < _gridSize.x; cx++)
+        for (var cy = 0; cy < _gridSize.y; cy++)
         {
-            for (var cy = 0; cy < _gridSize.y; cy++)
+            var locs = _cells[cx, cy].Waypoints;
+            for (var i = 0; i < locs.Count; i++)
             {
-                var locs = _cells[cx, cy].Waypoints;
-                for (var i = 0; i < locs.Count; i++)
-                {
-                    var loc = locs[i];
-                    if (loc.Category != WaypointCategory.Exfil) continue;
-                    if (blacklist.Contains(loc.Id)) continue;
-                    if (!SquadCanUseWaypoint(squad, squadIsPmc, loc)) continue;
-                    var distSqr = (loc.Position - leaderPos).sqrMagnitude;
-                    if (distSqr < bestDist)
-                    {
-                        bestDist = distSqr;
-                        best = loc;
-                    }
-                }
+                var loc = locs[i];
+                if (loc.Category != WaypointCategory.Exfil) continue;
+                if (blacklist.Contains(loc.Id)) continue;
+                if (!(ignoreEntry ? SquadCanUseWaypointIgnoringEntry(squad, squadIsPmc, loc)
+                                  : SquadCanUseWaypoint(squad, squadIsPmc, loc))) continue;
+                var distSqr = (loc.Position - leaderPos).sqrMagnitude;
+                if (distSqr >= bestDist) continue;
+                if (!IsReachableFromPosition(leaderPos, loc.Position)) continue;
+                bestDist = distSqr;
+                best = loc;
             }
-        }
-        if (best != null) return best;
-
-        // Pass 2: faction-only fallback. Skip MatchesBotSpawnEntry so a stuck squad still gets a route out.
-        for (var cx = 0; cx < _gridSize.x; cx++)
-        {
-            for (var cy = 0; cy < _gridSize.y; cy++)
-            {
-                var locs = _cells[cx, cy].Waypoints;
-                for (var i = 0; i < locs.Count; i++)
-                {
-                    var loc = locs[i];
-                    if (loc.Category != WaypointCategory.Exfil) continue;
-                    if (blacklist.Contains(loc.Id)) continue;
-                    if (!SquadCanUseWaypointIgnoringEntry(squad, squadIsPmc, loc)) continue;
-                    var distSqr = (loc.Position - leaderPos).sqrMagnitude;
-                    if (distSqr < bestDist)
-                    {
-                        bestDist = distSqr;
-                        best = loc;
-                    }
-                }
-            }
-        }
-        if (best != null)
-        {
-            Log.Warning($"{squad} no spawn-side eligible exfil — falling back to nearest faction-allowed exfil {best} (entry derivation may have failed)");
         }
         return best;
     }
@@ -1691,12 +1695,18 @@ public class WaypointSystem
             }
         }
         ref var cell = ref _cells[coords.x, coords.y];
+        // Resolve the pick BEFORE committing congestion / advection repulsion / the assignment record: a probed
+        // cell that yields nothing must not leave a permanent PropagateForce(+1) behind. RequestNear's neighbour
+        // scan and RequestFar's map-wide sweep call this on many empty cells per tick, and that leak compounded
+        // (worst with roaming scavs — no main, no home pull, constant RequestFar) until the field blew up.
+        var pick = PickFromCell(cell, entity, coords);
+        if (pick == null) return null;
+
         cell.Congestion += 1;
         PropagateForce(coords, 1f);
         _assignments[entity] = coords;
         Log.Debug($"Assigning waypoint in {coords}");
-        var pick = PickFromCell(cell, entity, coords);
-        if (pick != null && entity is Squad squad && IsSquadPmc(squad))
+        if (entity is Squad squad && IsSquadPmc(squad))
         {
             // The squad has left its previous loot cell behind — arm the cooldown on it now so they don't get
             // pulled back next dispatch. While they remain in the same cell, loot picks chain freely.
@@ -1901,7 +1911,9 @@ public class WaypointSystem
             foreach (var ex in exhaustedFloors)
                 if (Mathf.Abs(loc.Position.y - ex) <= tolerance) { alreadyExhausted = true; break; }
             if (alreadyExhausted) continue;
-            if (loc.Category == WaypointCategory.Exfil && !squad.ExtractRequested) continue;
+            // Only the exfil FindNearestEligibleExfil already verified reachable is pickable — the extract
+            // fallback (RequestNear/RequestFar) must not re-offer an unreachable exit and restart the loop.
+            if (loc.Category == WaypointCategory.Exfil && (!squad.ExtractRequested || loc != squad.NearestExfilCached)) continue;
             if (loc.Category == WaypointCategory.Quest && !SquadOwnsQuest(squad, loc)) continue;
             if (hasBlacklist && squad.CompletedPoiIds.Contains(loc.Id)) continue;
             if (squad.RecentlyVisitedPoiCooldowns.TryGetValue(loc.Id, out var visitExpiry) && nowForVisitCheck < visitExpiry) continue;
@@ -2057,7 +2069,8 @@ public class WaypointSystem
             for (var i = 0; i < waypoints.Count; i++)
             {
                 var loc = waypoints[i];
-                if (loc.Category == WaypointCategory.Exfil && !squad.ExtractRequested)
+                if (loc.Category == WaypointCategory.Exfil
+                    && (!squad.ExtractRequested || loc != squad.NearestExfilCached))
                 {
                     skippedExfil++;
                     continue;
