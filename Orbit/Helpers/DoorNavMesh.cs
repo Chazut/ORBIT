@@ -58,6 +58,21 @@ public static class DoorNavMesh
         return true;
     }
 
+    /// <summary>
+    /// Re-asserts the navmesh cut across a door whose carver we opened, restoring the block so bots route
+    /// AROUND the still-locked door instead of pathing (and phasing) through it. Called when the squad that
+    /// opened it stops actively heading behind it (combat retreat / re-dispatch elsewhere).
+    /// </summary>
+    public static bool CloseCarver(Door door)
+    {
+        if (door == null) return false;
+        var link = GetLink(door);
+        if (link?.Carver_Closed == null) return false;
+        link.Carver_Closed.carving = true;
+        _carverOpenedDoorIds.Remove(door.GetInstanceID());
+        return true;
+    }
+
     /// <summary>True once this door's carver was opened, so the proximity handler unlocks it before any bot reaches it.</summary>
     public static bool IsCarverOpened(int doorInstanceId) => _carverOpenedDoorIds.Contains(doorInstanceId);
 

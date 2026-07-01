@@ -268,6 +268,14 @@ public class Squad(int id, float[] taskScores, int targetMembersCount) : Entity(
     public readonly HashSet<int> ForceUnlockDoorIds = new();
 
     /// <summary>
+    /// Doors this squad opened a navmesh carver on that are still Locked. The carver is re-closed (navmesh cut
+    /// restored, so bots route AROUND instead of phasing through) once the squad stops actively heading behind
+    /// the door — combat retreat or re-dispatch elsewhere. A door is dropped from here once it's actually
+    /// unlocked/opened (BSG then owns its navmesh).
+    /// </summary>
+    public readonly List<EFT.Interactive.Door> OpenCarverDoors = new();
+
+    /// <summary>
     /// Door instance IDs the squad has previously rolled <em>and lost</em> the force-unlock dice on. Persists
     /// for the rest of the raid. Read by PickFromCell to filter POIs whose path crosses a failed door.
     /// Entries become inert if another squad unlocks the door world-wide (door state flips to Shut for

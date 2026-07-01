@@ -1756,7 +1756,17 @@ public class WaypointSystem
             // HandleDoors takes the normal Open path.
             if (door.DoorState != EDoorState.Locked) continue;
             var doorId = door.GetInstanceID();
-            if (squad.ForceUnlockDoorIds.Contains(doorId)) continue; // already rolled & granted
+            if (squad.ForceUnlockDoorIds.Contains(doorId))
+            {
+                // Already granted this raid. A combat retreat / re-dispatch may have re-closed the carver via
+                // the hygiene pass — re-open it now that we're heading back behind this door.
+                if (!DoorNavMesh.IsCarverOpened(doorId))
+                {
+                    DoorNavMesh.OpenCarver(door);
+                    if (!squad.OpenCarverDoors.Contains(door)) squad.OpenCarverDoors.Add(door);
+                }
+                continue;
+            }
 
             // Already failed this door for this squad — don't re-roll.
             if (squad.FailedDoorUnlockIds.Contains(doorId))
@@ -1779,6 +1789,7 @@ public class WaypointSystem
                 // arriving PMC unlocks it, not just this squad.
                 DoorRoutingDiag.LogBefore(squad, pick, door);
                 var carverOpened = DoorNavMesh.OpenCarver(door);
+                if (carverOpened && !squad.OpenCarverDoors.Contains(door)) squad.OpenCarverDoors.Add(door);
                 Log.Info($"{squad} granted force-unlock on door {door.Id} (instance {doorId}) for {pick} — {(isMainAnchor ? "MAIN anchor (100%)" : $"intermediate ({proba:F2})")} — {(carverOpened ? "navmesh carver opened, door stays Locked until a bot arrives" : "NO NavMeshDoorLink found — carver not opened, POI may stay unreachable")}");
             }
             else

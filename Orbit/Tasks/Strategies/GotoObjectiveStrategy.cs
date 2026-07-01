@@ -122,6 +122,36 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                 }
             }
 
+            // Force-unlock carver hygiene: a carver stays open only while the squad is actively (non-combat)
+            // heading to the pick behind that door. On a SAIN-combat retreat or a re-dispatch elsewhere, re-close
+            // it so the navmesh cut is restored and bots route AROUND the still-locked door instead of phasing
+            // through it (keycard / switch doors on Labs especially). RollForceUnlockForPick re-opens it when the
+            // squad commits back to a pick behind the door.
+            if (squad.OpenCarverDoors.Count > 0)
+            {
+                var suppressCarvers = SquadAnyMemberInCombat(squad) || squadObjective.Location == null;
+                var neededDoors = suppressCarvers ? null : squadObjective.Location.LockedDoorsOnPath;
+                for (var d = squad.OpenCarverDoors.Count - 1; d >= 0; d--)
+                {
+                    var carverDoor = squad.OpenCarverDoors[d];
+                    if (carverDoor == null || carverDoor.DoorState != EFT.Interactive.EDoorState.Locked)
+                    {
+                        squad.OpenCarverDoors.RemoveAt(d); // unlocked / opened — BSG owns the navmesh now
+                        continue;
+                    }
+                    if (neededDoors != null && neededDoors.Contains(carverDoor))
+                    {
+                        // Still heading behind it — keep the carver open (another squad's retreat may have re-closed it).
+                        if (!DoorNavMesh.IsCarverOpened(carverDoor.GetInstanceID())) DoorNavMesh.OpenCarver(carverDoor);
+                    }
+                    else
+                    {
+                        DoorNavMesh.CloseCarver(carverDoor);
+                        squad.OpenCarverDoors.RemoveAt(d);
+                    }
+                }
+            }
+
             // Rolling per-squad unreachability refresh. _squadUnreachable is populated from the leader's
             // CURRENT position via NavMesh.CalculatePath; verdicts cached when the leader was
             // 500m away become wrong once they walk into the area. On
