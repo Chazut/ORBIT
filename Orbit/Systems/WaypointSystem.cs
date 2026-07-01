@@ -786,6 +786,10 @@ public class WaypointSystem
         if (squad == null || agent == null || locId == 0) return null;
         if (!WasCorpseKilledBySquad(locId, squad.Id)) return null;
         if (squad.CompletedPoiIds.Contains(locId)) return null;
+        // Value-skipped means this agent already opened the body and took nothing (full inventory / bypass
+        // item). Without this, the killer re-routes onto it every tick, re-loots, re-skips — a loop the 180s
+        // watchdog only ends much later. It's per-agent, so a squadmate with room can still be dispatched.
+        if (agent.ValueSkippedPoiIds.Contains(locId)) return null;
         if (_claims.ContainsKey(locId)) return null;
         if (!_waypointCells.TryGetValue(locId, out var coords)) return null;
         // Stale-kill gate from the KILLER's cell: don't chase a body left far behind after a long detour.
