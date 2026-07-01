@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using EFT.Interactive;
+using Orbit.Helpers;
 using UnityEngine;
 
 namespace Orbit.Systems;
@@ -20,6 +21,10 @@ public class DoorSystem
     public readonly Door[] Doors;
 
     private readonly List<(Collider bot, Collider pom)> _bots = new();
+    // Doors Locked at raid start. Used purely to log when one of them physically opens: a locked door is
+    // visually identical to a normal one in-game and a bot open never reaches the real "Open" state, so this is
+    // the reliable "a bot actually opened a locked door" signal (grep LOCKED-DOOR OPENED).
+    private readonly HashSet<int> _startedLocked = new();
 
     public DoorSystem()
     {
@@ -28,7 +33,10 @@ public class DoorSystem
         Log.Debug($"Found {Doors.Length} doors on the map");
 
         for (var i = 0; i < Doors.Length; i++)
+        {
             Doors[i].OnDoorStateChanged += HandleDoorStateChanged;
+            if (Doors[i].DoorState == EDoorState.Locked) _startedLocked.Add(Doors[i].GetInstanceID());
+        }
     }
 
     // A closed leaf (Locked / Shut) blocks the bot; an open or mid-swing (Interacting) one is passable and must
@@ -55,6 +63,14 @@ public class DoorSystem
         if (obj is not Door door || door.Collider == null) return;
         if (IsPassable(prevState) == IsPassable(nextState)) return; // collision verdict unchanged
         var passable = IsPassable(nextState);
+
+        // Verification aid: a door that STARTED the raid Locked just went visually open. This is the reliable
+        // "a bot physically opened a locked door" marker (a locked door looks identical to a normal one and a
+        // bot open never reaches the real Open state). Note whether ORBIT had carved its navmesh so a bot could
+        // reach it.
+        if (passable && _startedLocked.Contains(door.GetInstanceID()))
+            Log.Info($"LOCKED-DOOR OPENED: door {door.Id} went {prevState}→{nextState} (ORBIT carver was {(DoorNavMesh.IsCarverOpened(door.GetInstanceID()) ? "OPEN" : "closed")})");
+
         for (var i = 0; i < _bots.Count; i++)
             SetIgnored(_bots[i].bot, _bots[i].pom, door.Collider, passable);
     }
