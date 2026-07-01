@@ -378,6 +378,14 @@ public class LootContainerAction(AgentData dataset, WaypointSystem waypointSyste
         if (agent == null || agent.SoloExtractRequested || agent.SoloLootThresholdRolled) return;
         if (agent.Squad == null || agent.Squad.ExtractRequested) return;
 
+        // Respect "Extract allowed for" — None (or a set excluding this bot) blocks the solo loot-threshold
+        // extract just like the squad triggers. PlayerScavs route to their own flag (shared WildSpawnType).
+        var role = agent.Bot?.Profile?.Info?.Settings?.Role;
+        if (!role.HasValue) return;
+        var allowed = LootConfig.ExtractAllowedFor?.Value ?? ExtractFaction.All;
+        var soloIsPlayerScav = agent.Bot?.Profile != null && agent.Bot.Profile.WillBeAPlayerScav();
+        if (!(soloIsPlayerScav ? (allowed & ExtractFaction.PlayerScav) != 0 : allowed.IsBotEnabled(role.Value))) return;
+
         var chancePct = LootConfig.SoloLootExtractChancePct?.Value ?? 50;
         if (chancePct <= 0) return;
 

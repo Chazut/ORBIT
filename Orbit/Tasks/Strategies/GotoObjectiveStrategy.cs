@@ -377,12 +377,18 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
     private const float EmergencyBleedStoppedSeconds = 12f;
 
     // Only PMCs / PlayerScavs extract via exfils in ORBIT; everyone else despawns, so a solo run is moot.
+    // "Extract allowed for" gates this too — None (or a set excluding this bot) means don't peel a wounded
+    // bot off its squad for a run it can't finish. PlayerScavs share WildSpawnType.assault so route to the
+    // PlayerScav flag explicitly instead of collapsing onto Scav.
     private static bool CanSoloExtract(Agent agent)
     {
         var profile = agent.Bot?.Profile;
         var role = profile?.Info?.Settings?.Role;
         if (!role.HasValue) return false;
-        return role.Value.IsPMC() || profile.WillBeAPlayerScav();
+        var isPlayerScav = profile.WillBeAPlayerScav();
+        if (!role.Value.IsPMC() && !isPlayerScav) return false;
+        var allowed = LootConfig.ExtractAllowedFor?.Value ?? ExtractFaction.All;
+        return isPlayerScav ? (allowed & ExtractFaction.PlayerScav) != 0 : allowed.IsBotEnabled(role.Value);
     }
 
     private static void ClearEmergencyExtract(Agent agent, string reason)
