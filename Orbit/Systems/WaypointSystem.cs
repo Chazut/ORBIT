@@ -2245,11 +2245,14 @@ public class WaypointSystem
     /// main-objective generation at squad creation to skip Quest anchors that aren't reachable from the
     /// squad's spawn position (bot can't ever reach the trigger, ends up roaming the map forever).
     /// </summary>
+    // Scratch path reused across calls — this runs in bursts (exfil scans, island-rescue probes) and a fresh
+    // NavMeshPath per call was pure garbage. Main-thread only, like every navmesh query here.
+    private readonly NavMeshPath _reachabilityScratchPath = new();
+
     public bool IsReachableFromPosition(Vector3 from, Vector3 to)
     {
-        var path = new NavMeshPath();
-        return NavMesh.CalculatePath(from, to, NavMesh.AllAreas, path)
-               && path.status == NavMeshPathStatus.PathComplete;
+        return NavMesh.CalculatePath(from, to, NavMesh.AllAreas, _reachabilityScratchPath)
+               && _reachabilityScratchPath.status == NavMeshPathStatus.PathComplete;
     }
 
     private bool IsWaypointReachable(Waypoint loc, Squad squad)

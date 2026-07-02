@@ -229,6 +229,13 @@ public class Squad(int id, float[] taskScores, int targetMembersCount) : Entity(
     public float SainResolveDeadline;
 
     /// <summary>
+    /// Persistent virtual rally waypoint for the current combat caller. Recreated only once the caller has
+    /// moved >8m from it — a fresh instance per tick broke reference alignment and re-dispatched every
+    /// supporter every tick for the whole fight.
+    /// </summary>
+    public Waypoint CombatCallerWaypoint;
+
+    /// <summary>
     /// Agent.Id of the squad member who landed the most recent killing blow whose corpse is still "fresh"
     /// (not yet looted / claimed by anyone). When the strategy's own-kill priority pick has promoted the
     /// corpse to <see cref="SquadObjective.Location"/>, UpdateAgents routes THIS specific agent directly to

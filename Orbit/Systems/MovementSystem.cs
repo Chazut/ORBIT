@@ -1088,6 +1088,14 @@ public class MovementSystem
     // catch this: the bot still "arrives" at its few on-island waypoints, so it never reads as stranded-far.
     // Detect directly (parked near spawn past a grace window AND can't path to any other live agent, since the
     // rest sit on the main mesh), then teleport once onto the main mesh, clear of humans and bots.
+    // A probe pass costs up to N_agents + ~40 synchronous CalculatePath calls; without a backoff a bot that
+    // can never be rescued re-paid that EVERY FRAME (a major 1.2.0 perf regression — Streets fps tanking ~30s
+    // after raid start). Bad spawns are a raid-START problem, so retries are front-loaded: the point is to
+    // unstick the bot within seconds, then settle into a cheap steady probe for the rest of the raid — never
+    // give up outright (doors open, carvers flip, players move, fresh spawns appear as references).
+    private static float SpawnIslandRetryDelay(int attempts)
+        => attempts < 10 ? 3f : attempts < 20 ? 5f : 10f;
+
     private void TrySpawnIslandRescue(Agent agent, List<Agent> liveAgents)
     {
         var stuck = agent.Stuck;
@@ -1109,6 +1117,8 @@ public class MovementSystem
         }
 
         if (Time.time - stuck.SpawnIslandSeenAt < SpawnIslandGraceSeconds) return;
+        if (Time.time < stuck.SpawnIslandNextProbeAt) return; // scheduled backoff after a failed attempt
+        PerfMonitor.SpawnIslandProbes++;
 
         // Find the nearest live agent we CANNOT reach; reaching ANY of them means we're on the main mesh.
         Agent reference = null;
@@ -1131,9 +1141,21 @@ public class MovementSystem
             if (d < bestDistSqr) { bestDistSqr = d; reference = other; }
         }
 
-        if (reference == null) return;
+        if (reference == null)
+        {
+            // No usable far reference right now (transient — bots die/spawn): retry at the current cadence
+            // without consuming an attempt.
+            stuck.SpawnIslandNextProbeAt = Time.time + SpawnIslandRetryDelay(stuck.SpawnIslandAttempts);
+            return;
+        }
 
-        if (!TeleportSafe(agent, _humanPlayers)) return;
+        if (!TeleportSafe(agent, _humanPlayers))
+        {
+            // A human currently sees the bot (or stands too close) — transient too: retry at cadence instead
+            // of re-running the whole probe every frame until the player looks away.
+            stuck.SpawnIslandNextProbeAt = Time.time + SpawnIslandRetryDelay(stuck.SpawnIslandAttempts);
+            return;
+        }
         // Anchor reachability on the alive human player (main mesh) if there is one, else the nearest agent.
         var anchorPos = reference.Position;
         for (var i = 0; i < _humanPlayers.Count; i++)
@@ -1150,6 +1172,13 @@ public class MovementSystem
             Log.Info($"{agent} spawn-island rescue: teleported {Vector3.Distance(fromPos, wpDest):F0}m to the nearest reachable waypoint (off the disconnected spawn chunk)");
             return;
         }
+
+        // Full attempt failed (no reachable waypoint). Schedule the next one — 3s cadence for the first 10
+        // tries (unstick a badly-spawned PMC fast), 5s for the next 10, then a steady 10s for the raid.
+        stuck.SpawnIslandAttempts++;
+        var delay = SpawnIslandRetryDelay(stuck.SpawnIslandAttempts);
+        stuck.SpawnIslandNextProbeAt = Time.time + delay;
+        Log.Debug($"{agent} spawn-island rescue: attempt {stuck.SpawnIslandAttempts} found no reachable waypoint — next probe in {delay:F0}s");
     }
 
     // Nearest waypoint to fromPos that is reachable from anchorPos and clear of players/bots, so the bot lands

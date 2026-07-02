@@ -62,6 +62,8 @@ public class OrbitManager
 
     public OrbitManager(BotsController botsController, BotRoster botRoster)
     {
+        Orbit.Helpers.PerfMonitor.Reset();
+
         var gameWorld = Singleton<GameWorld>.Instance;
 
         MapId = gameWorld.LocationId;
@@ -134,6 +136,7 @@ public class OrbitManager
 
     public void Update()
     {
+        Orbit.Helpers.PerfMonitor.Tick(_liveAgents.Count);
         StrategyManager.Update();
         ActionManager.Update();
         TickEmergencyExtractWatchdog();

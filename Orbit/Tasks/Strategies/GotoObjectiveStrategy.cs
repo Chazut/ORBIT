@@ -173,8 +173,18 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                 DetectAndUpdateCombatCaller(squad);
                 if (squad.CombatCallerMemberIdx >= 0)
                 {
-                    squad.Objective.Location = waypointSystem.CreateVirtualWaypoint(
-                        squad.CombatCallerPosition, "CombatCaller");
+                    // Reuse the rally waypoint until the caller has moved meaningfully. A fresh instance every
+                    // tick broke reference alignment for every supporter, re-dispatching them all (move order +
+                    // path job) each tick for the whole fight — a large sustained cost during any engagement.
+                    // Recreating only on >8m caller movement re-paths supporters just enough to track them.
+                    if (squad.CombatCallerWaypoint == null
+                        || (squad.CombatCallerWaypoint.Position - squad.CombatCallerPosition).sqrMagnitude > 64f)
+                    {
+                        squad.CombatCallerWaypoint = waypointSystem.CreateVirtualWaypoint(
+                            squad.CombatCallerPosition, "CombatCaller");
+                        PerfMonitor.RallyWaypointsCreated++;
+                    }
+                    squad.Objective.Location = squad.CombatCallerWaypoint;
                     squad.Objective.Status = SquadObjectiveState.Active;
                     squad.Objective.StartTime = Time.time;
                     squad.Objective.Duration = 30f;

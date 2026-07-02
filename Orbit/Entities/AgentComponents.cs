@@ -188,6 +188,8 @@ public class Stuck
     public Vector3 SpawnIslandPos;
     public float SpawnIslandSeenAt;
     public bool SpawnIslandRescued;
+    public int SpawnIslandAttempts;
+    public float SpawnIslandNextProbeAt;
 
     public override string ToString() => $"Stuck(soft: {Soft} hard: {Hard})";
 }

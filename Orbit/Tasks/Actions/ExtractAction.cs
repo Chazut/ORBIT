@@ -203,6 +203,16 @@ public class ExtractAction(AgentData dataset, float hysteresis) : Task<Agent>(hy
 
     private static void DespawnAgent(Agent agent)
     {
+        // BotOwner already torn down on BSG's side (died / despawned / left while we were counting down):
+        // there is nothing left to remove from the map — drop our agent instead of NRE-retrying every cycle
+        // until raid end.
+        if (agent.Bot?.LeaveData == null)
+        {
+            Log.Warning($"{agent} ExtractAction: BotOwner/LeaveData already gone — dropping agent without RemoveFromMap");
+            Singleton<OrbitManager>.Instance?.RemoveAgent(agent);
+            return;
+        }
+
         try
         {
             var loc = agent.Objective.Location;
