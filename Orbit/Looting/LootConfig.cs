@@ -52,7 +52,7 @@ public static class LootConfig
                 null, new Orbit.Config.ConfigurationManagerAttributes { Order = 5 }));
         ExtractAllowedFor = config.Bind(section, "Extract allowed for", ExtractFaction.Pmc | ExtractFaction.PlayerScav,
             new ConfigDescription(
-                "Which factions ORBIT routes to an exfil. Only PMC and PlayerScav have extract logic.",
+                "Which factions ORBIT routes to an exfil. Gates EVERY extract — the squad loot/time triggers AND the solo emergency (wounded) and loot-threshold extracts. None = nobody extracts. Only PMC and PlayerScav have extract logic.",
                 null, new Orbit.Config.ConfigurationManagerAttributes { Order = 4 }));
         ExtractAtLootValuePlayerScav = config.Bind("03. PlayerScav", "Extract at loot value (₽)", 200000f,
             new ConfigDescription(

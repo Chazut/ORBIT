@@ -37,7 +37,7 @@ public class Plugin : BaseUnityPlugin
 {
     public const string PluginGuid = "com.chazut.orbit";
     public const string PluginName = "ORBIT";
-    public const string OrbitVersion = "1.2.0";
+    public const string OrbitVersion = "1.2.1";
 
     public static ManualLogSource LogSource;
 
@@ -57,6 +57,7 @@ public class Plugin : BaseUnityPlugin
     public static ConfigEntry<bool> SquadRally;
     public static ConfigEntry<bool> QuietLogging;
     public static ConfigEntry<OrbitLogLevel> LogLevels;
+    public static ConfigEntry<bool> PerfLogging;
     public static ConfigEntry<bool> DegradedTickrateEnabled;
     public static ConfigEntry<float> DegradedTickrateNearDistance;
     public static ConfigEntry<float> DegradedTickrateFarIntervalSeconds;
@@ -309,7 +310,9 @@ public class Plugin : BaseUnityPlugin
         // BSG's native LootPatrol layer (priority 3) steals control from OrbitBrainLayer whenever we briefly go
         // inactive post-combat, stranding bots in vanilla loot wandering. Strip it only for the brains ORBIT
         // fully owns, not the borrowed brains added below whose shared vanilla bots must stay 100% vanilla.
-        BrainManager.RemoveLayer("LootPatrol", brains);
+        // Pass a COPY: BigBrain keeps the list reference, so the brains.Add(...) below for the borrowed
+        // brains would silently extend the LootPatrol strip to them too.
+        BrainManager.RemoveLayer("LootPatrol", new List<string>(brains));
 
         // Custom factions borrow these vanilla brains, so register the layer here to drive them. The real vanilla
         // bots sharing them are excluded unconditionally in OrbitBrainLayer.IsExcludedRole, so the layer is inert
@@ -410,6 +413,9 @@ public class Plugin : BaseUnityPlugin
         LogLevels = Config.Bind(essentials, "Log levels", OrbitLogLevel.Info | OrbitLogLevel.Warning | OrbitLogLevel.Error, new ConfigDescription(
             "Which message levels ORBIT writes (used when Quiet logging is OFF). Default: everything except Debug. Tick Debug for a detailed bug-report log — it works in the release build now, not just debug builds.",
             null, new ConfigurationManagerAttributes { Order = 0 }));
+        PerfLogging = Config.Bind(essentials, "Performance logging", false, new ConfigDescription(
+            "ON: writes a one-line 'PERF' summary (fps, hitches, GC, ORBIT activity counters) to the log every 30s, regardless of the other logging settings. Turn it on before recording a raid for a performance report.",
+            null, new ConfigurationManagerAttributes { Order = -1, IsAdvanced = true }));
 
         // ── 02. Factions ────────────────────────────────────────────
         // "Disable ORBIT on X" keys are stored as "Vanilla X" so old configs aren't broken; ON = detach ORBIT

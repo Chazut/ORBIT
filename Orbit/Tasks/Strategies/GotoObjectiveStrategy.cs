@@ -98,10 +98,12 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                         squad.CorpseWatchdogLocId = corpseObj.Id;
                         squad.CorpseWatchdogSince = Time.time;
                     }
-                    else if (SquadAnyMemberInCombat(squad))
+                    else if (SquadAnyMemberInCombat(squad) || SquadAnyMemberPursuingCorpse(squad, corpseObj))
                     {
-                        // Pause the clock during SAIN combat / healing: ORBIT can't move anyone toward the
-                        // body, so a bot dragged into a fight beside its own kill shouldn't lose the corpse.
+                        // Pause only while there is genuine progress: SAIN combat / healing, or a member
+                        // actively heading to / looting the body (travel + loot time never eat the window). An
+                        // anchored corpse NOBODY is pursuing must keep counting — that dead-anchor pin is
+                        // exactly the stall this watchdog exists to break.
                         squad.CorpseWatchdogSince = Time.time;
                     }
                     else if (Time.time - squad.CorpseWatchdogSince > CorpseStuckTimeoutSeconds)
@@ -117,6 +119,36 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                 else
                 {
                     squad.CorpseWatchdogLocId = -1;
+                }
+            }
+
+            // Force-unlock carver hygiene: a carver stays open only while the squad is actively (non-combat)
+            // heading to the pick behind that door. On a SAIN-combat retreat or a re-dispatch elsewhere, re-close
+            // it so the navmesh cut is restored and bots route AROUND the still-locked door instead of phasing
+            // through it (keycard / switch doors on Labs especially). RollForceUnlockForPick re-opens it when the
+            // squad commits back to a pick behind the door.
+            if (squad.OpenCarverDoors.Count > 0)
+            {
+                var suppressCarvers = SquadAnyMemberInCombat(squad) || squadObjective.Location == null;
+                var neededDoors = suppressCarvers ? null : squadObjective.Location.LockedDoorsOnPath;
+                for (var d = squad.OpenCarverDoors.Count - 1; d >= 0; d--)
+                {
+                    var carverDoor = squad.OpenCarverDoors[d];
+                    if (carverDoor == null || carverDoor.DoorState != EFT.Interactive.EDoorState.Locked)
+                    {
+                        squad.OpenCarverDoors.RemoveAt(d); // unlocked / opened — BSG owns the navmesh now
+                        continue;
+                    }
+                    if (neededDoors != null && neededDoors.Contains(carverDoor))
+                    {
+                        // Still heading behind it — keep the carver open (another squad's retreat may have re-closed it).
+                        if (!DoorNavMesh.IsCarverOpened(carverDoor.GetInstanceID())) DoorNavMesh.OpenCarver(carverDoor);
+                    }
+                    else
+                    {
+                        DoorNavMesh.CloseCarver(carverDoor);
+                        squad.OpenCarverDoors.RemoveAt(d);
+                    }
                 }
             }
 
@@ -141,8 +173,18 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                 DetectAndUpdateCombatCaller(squad);
                 if (squad.CombatCallerMemberIdx >= 0)
                 {
-                    squad.Objective.Location = waypointSystem.CreateVirtualWaypoint(
-                        squad.CombatCallerPosition, "CombatCaller");
+                    // Reuse the rally waypoint until the caller has moved meaningfully. A fresh instance every
+                    // tick broke reference alignment for every supporter, re-dispatching them all (move order +
+                    // path job) each tick for the whole fight — a large sustained cost during any engagement.
+                    // Recreating only on >8m caller movement re-paths supporters just enough to track them.
+                    if (squad.CombatCallerWaypoint == null
+                        || (squad.CombatCallerWaypoint.Position - squad.CombatCallerPosition).sqrMagnitude > 64f)
+                    {
+                        squad.CombatCallerWaypoint = waypointSystem.CreateVirtualWaypoint(
+                            squad.CombatCallerPosition, "CombatCaller");
+                        PerfMonitor.RallyWaypointsCreated++;
+                    }
+                    squad.Objective.Location = squad.CombatCallerWaypoint;
                     squad.Objective.Status = SquadObjectiveState.Active;
                     squad.Objective.StartTime = Time.time;
                     squad.Objective.Duration = 30f;
@@ -377,12 +419,18 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
     private const float EmergencyBleedStoppedSeconds = 12f;
 
     // Only PMCs / PlayerScavs extract via exfils in ORBIT; everyone else despawns, so a solo run is moot.
+    // "Extract allowed for" gates this too — None (or a set excluding this bot) means don't peel a wounded
+    // bot off its squad for a run it can't finish. PlayerScavs share WildSpawnType.assault so route to the
+    // PlayerScav flag explicitly instead of collapsing onto Scav.
     private static bool CanSoloExtract(Agent agent)
     {
         var profile = agent.Bot?.Profile;
         var role = profile?.Info?.Settings?.Role;
         if (!role.HasValue) return false;
-        return role.Value.IsPMC() || profile.WillBeAPlayerScav();
+        var isPlayerScav = profile.WillBeAPlayerScav();
+        if (!role.Value.IsPMC() && !isPlayerScav) return false;
+        var allowed = LootConfig.ExtractAllowedFor?.Value ?? ExtractFaction.All;
+        return isPlayerScav ? (allowed & ExtractFaction.PlayerScav) != 0 : allowed.IsBotEnabled(role.Value);
     }
 
     private static void ClearEmergencyExtract(Agent agent, string reason)
@@ -678,7 +726,17 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                                              && squadObjective.Location != null
                                              && agentObjective.SplinterParent != squadObjective.Location
                                              && !squad.CompletedPoiIds.Contains(agentObjective.Location.Id);
+            // Fix A: an agent still owed its own kill's corpse must not stay stuck on a lower-priority loot
+            // splinter (or any non-corpse objective). Resolve the re-route here so the alignment check treats it
+            // as misaligned and the dispatch block below routes it to its body. Computed once, reused there.
+            Waypoint ownKillReroute = null;
+            if (agent.OwnKillCorpseLocId != 0)
+            {
+                ownKillReroute = waypointSystem.TryGetOwnKillCorpseForAgent(squad, agent, agent.OwnKillCorpseLocId);
+                if (ownKillReroute == null) agent.OwnKillCorpseLocId = 0;
+            }
             var aligned = !splinterAlreadyDone && !leaderFinishedAnchorInRoam
+                          && (ownKillReroute == null || agentObjective.Location == ownKillReroute)
                           && (agentObjective.Location == squadObjective.Location
                               || (agentObjective.SplinterParent != null
                                   && agentObjective.SplinterParent == squadObjective.Location)
@@ -738,21 +796,18 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                 var anchorReservedForOwnKill = ownKillAgentId >= 0
                                                && squadObjective.Location != null
                                                && squadObjective.Location.Id == squad.PendingOwnKillCorpseLocId;
-                // Persistent own-kill re-route (highest priority). A killer pulled away before looting (combat /
-                // heal / solo-extract) can't be helped by the one-shot squad pending below once the anchor has
-                // drifted off the body, so agent.OwnKillCorpseLocId remembers it across the detour.
-                Waypoint ownKillReroute = null;
-                if (agent.OwnKillCorpseLocId != 0)
-                {
-                    ownKillReroute = waypointSystem.TryGetOwnKillCorpseForAgent(squad, agent, agent.OwnKillCorpseLocId);
-                    if (ownKillReroute == null) agent.OwnKillCorpseLocId = 0;
-                }
+                // Persistent own-kill re-route (highest priority): resolved above, where it also broke this
+                // agent's sticky-splinter alignment so we reach here. A killer pulled off its body by combat /
+                // heal / solo-extract is routed straight back to it.
                 if (ownKillReroute != null)
                 {
                     targetLoc = ownKillReroute;
                     splinterParent = squadObjective.Location;
                     tookOwnKillCorpse = true;
-                    if (anchorReservedForOwnKill && agent.Id == ownKillAgentId)
+                    // Consume the one-shot squad pending for this same body even when the anchor hasn't flipped
+                    // onto it yet — leaving it armed re-fires a second direct-route (and a second full loot
+                    // session) on a corpse the killer has already emptied.
+                    if (agent.Id == ownKillAgentId && squad.PendingOwnKillCorpseLocId == ownKillReroute.Id)
                     {
                         squad.PendingOwnKillKillerAgentId = -1;
                         squad.PendingOwnKillCorpseLocId = 0;
@@ -854,15 +909,43 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                 }
 
                 // Single-claim a fresh squad-anchor corpse to the own-kill killer (routed above); any other
-                // member would just pile on and fail the claim, so guard in place instead. Once the body's been
-                // value-skipped it's leftovers and a lower-threshold member may return — don't block that.
+                // member would just pile on and fail the claim. Once the body's been value-skipped it's
+                // leftovers and a lower-threshold member may return — don't block that.
                 if (!tookOwnKillCorpse && targetLoc != null
                     && targetLoc.Category == WaypointCategory.Corpse
                     && squadObjective.Location != null && targetLoc.Id == squadObjective.Location.Id
                     && !CorpseValueSkippedByAnyMember(squad, targetLoc.Id))
                 {
-                    targetLoc = null;
-                    splinterParent = null;
+                    if (i == 0 && !AnyMemberDesignatedForCorpse(squad, targetLoc.Id))
+                    {
+                        // No designated killer is coming for this anchored body (own-kill memory cleared by the
+                        // distance gate, or the killer left the squad). The leader keeps it and goes to loot it —
+                        // nulling everyone here left the squad frozen around an unlooted corpse anchor it could
+                        // never complete. Keyed on the members' agent-level own-kill memory, NOT the one-shot
+                        // squad pending: that slot is consumed at the killer's FIRST dispatch, so testing it
+                        // would send the leader racing the still-travelling killer for the claim.
+                    }
+                    else
+                    {
+                        // Not this member's body to take, but don't freeze in place either: patrol / loot around
+                        // the anchor while the killer works the corpse.
+                        var aroundAnchor = waypointSystem.FindRoamSplinterForMember(
+                            agent.Position, squadObjective.Location.Position, squad,
+                            UnionWithAgentSkips(_splinterScratch, agent),
+                            Plugin.MainObjectivesRoamSplinterRadius.Value,
+                            allowLooseLoot: true, allowContainerLoot: true, allowCorpse: false, allowSynthetic: true);
+                        if (aroundAnchor != null)
+                        {
+                            targetLoc = aroundAnchor;
+                            splinterParent = squadObjective.Location;
+                            _splinterScratch.Add(aroundAnchor.Id);
+                        }
+                        else
+                        {
+                            targetLoc = null;
+                            splinterParent = null;
+                        }
+                    }
                 }
 
                 agentObjective.Location = targetLoc;
@@ -1330,8 +1413,43 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
     // bots into locked rooms and caused infinite TP attempt loops on mains whose anchor was off-navmesh.
     private const int UnreachableBlacklistThreshold = 5;
 
-    // Normal corpse loot resolves well under this; staying glued past it force-blacklists and re-dispatches.
-    private const float CorpseStuckTimeoutSeconds = 45f;
+    // Looting a full kit with the simulated search delays is slow, so this is measured from when a member
+    // actually reaches the body (not from the squad anchoring on it). Only past this is the loot genuinely
+    // hung, so force-blacklist and re-dispatch.
+    private const float CorpseStuckTimeoutSeconds = 180f;
+
+    // True when a LIVE member is designated to loot this corpse — via their agent-level own-kill memory
+    // (branch-1 re-route will take them there) or via the still-armed squad pending (branch-2 direct-route).
+    // A designation held by an agent who left the squad doesn't count: nobody is coming, the body is up for
+    // grabs by the leader.
+    private static bool AnyMemberDesignatedForCorpse(Squad squad, int locId)
+    {
+        if (squad?.Members == null) return false;
+        for (var i = 0; i < squad.Members.Count; i++)
+        {
+            var m = squad.Members[i];
+            if (m == null) continue;
+            if (m.OwnKillCorpseLocId == locId) return true;
+            if (squad.PendingOwnKillCorpseLocId == locId && squad.PendingOwnKillKillerAgentId == m.Id) return true;
+        }
+        return false;
+    }
+
+    // "Progress" for the corpse-stuck watchdog: a member whose current objective IS the corpse and who is
+    // still working it (dispatched / travelling / looting). Finished and Failed don't count — if everyone has
+    // dropped or failed the body, the anchor is dead and the timeout must run.
+    private static bool SquadAnyMemberPursuingCorpse(Squad squad, Waypoint corpse)
+    {
+        if (squad?.Members == null || corpse == null) return false;
+        for (var i = 0; i < squad.Members.Count; i++)
+        {
+            var m = squad.Members[i];
+            if (m?.Objective?.Location == null || m.Objective.Location != corpse) continue;
+            var s = m.Objective.Status;
+            if (s == ObjectiveStatus.None || s == ObjectiveStatus.Moving || s == ObjectiveStatus.Looting) return true;
+        }
+        return false;
+    }
 
     /// <summary>
     /// Anchor position of the first in-progress main objective on the squad's list, or <see langword="null"/>

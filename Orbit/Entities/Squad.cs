@@ -195,6 +195,11 @@ public class Squad(int id, float[] taskScores, int targetMembersCount) : Entity(
     public string DerivedEntryPoint;
     public bool ExfilEligibilityLogged;
 
+    // Short-TTL cache for FindNearestEligibleExfil: that scan now path-checks every candidate and the
+    // extract-interrupt gate polls it each tick, so the verdict is cached. Null = no reachable exfil last eval.
+    public Waypoint NearestExfilCached;
+    public float NearestExfilCachedAt = float.NegativeInfinity;
+
     /// <summary>
     /// SAIN-resolved personality archetype for this squad's leader, captured once at squad registration.
     /// Unused for non-PMC squads. Defaults to Average when SAIN is missing or the brain doesn't resolve.
@@ -222,6 +227,13 @@ public class Squad(int id, float[] taskScores, int targetMembersCount) : Entity(
     /// window (5 s — empirically enough for SAIN to attach).
     /// </summary>
     public float SainResolveDeadline;
+
+    /// <summary>
+    /// Persistent virtual rally waypoint for the current combat caller. Recreated only once the caller has
+    /// moved >8m from it — a fresh instance per tick broke reference alignment and re-dispatched every
+    /// supporter every tick for the whole fight.
+    /// </summary>
+    public Waypoint CombatCallerWaypoint;
 
     /// <summary>
     /// Agent.Id of the squad member who landed the most recent killing blow whose corpse is still "fresh"
@@ -261,6 +273,14 @@ public class Squad(int id, float[] taskScores, int targetMembersCount) : Entity(
     /// probability (100% if the POI is the squad's current Main anchor, F12-config probability otherwise).
     /// </summary>
     public readonly HashSet<int> ForceUnlockDoorIds = new();
+
+    /// <summary>
+    /// Doors this squad opened a navmesh carver on that are still Locked. The carver is re-closed (navmesh cut
+    /// restored, so bots route AROUND instead of phasing through) once the squad stops actively heading behind
+    /// the door — combat retreat or re-dispatch elsewhere. A door is dropped from here once it's actually
+    /// unlocked/opened (BSG then owns its navmesh).
+    /// </summary>
+    public readonly List<EFT.Interactive.Door> OpenCarverDoors = new();
 
     /// <summary>
     /// Door instance IDs the squad has previously rolled <em>and lost</em> the force-unlock dice on. Persists

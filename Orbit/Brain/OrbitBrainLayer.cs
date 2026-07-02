@@ -37,6 +37,7 @@ public class OrbitBrainLayer : CustomLayer
     private readonly OrbitManager _orbit;
     private readonly Agent _agent;
     private readonly bool _excluded;
+    private readonly Collider _botCollider;
 
     // Tracks SAIN combat layer state from OnLayerChanged. Replaces BotOwner.Memory.LastEnemyTimeSeen which
     // SAIN keeps fresh long past actual combat (sticky enemy memory), trapping ORBIT off.
@@ -143,24 +144,18 @@ public class OrbitBrainLayer : CustomLayer
         botOwner.Brain.BaseBrain.OnLayerChangedTo += OnLayerChanged;
         botOwner.GetPlayer.OnPlayerDead += OnDead;
 
-        // Make doors invisible to bot colliders — bots open them via our DoorSystem and shouldn't physically
-        // push them.
-        var botCollider = _agent.Bot.GetPlayer.CharacterController.GetCollider();
-        var pomCollider = _agent.Bot.GetPlayer.POM.Collider;
-
-        var doors = _orbit.DoorSystem.Doors;
-        for (var i = 0; i < doors.Length; i++)
-        {
-            var door = doors[i];
-            Physics.IgnoreCollision(pomCollider, door.Collider);
-            EFTPhysicsClass.IgnoreCollision(botCollider, door.Collider);
-        }
+        // Bot<->door collision is managed per door state by DoorSystem: the bot physically stops at a CLOSED
+        // leaf (so it can't phase through a carved-open locked door) and passes freely through an open / opening
+        // one so the swing never shoves it.
+        _botCollider = _agent.Bot.GetPlayer.CharacterController.GetCollider();
+        _orbit.DoorSystem.RegisterBot(_botCollider, _agent.Bot.GetPlayer.POM.Collider);
     }
 
     private void OnDead(Player player, IPlayer lastAggressor, DamageInfoStruct damageInfo, EBodyPart part)
     {
         player.OnPlayerDead -= OnDead;
         _agent.IsActive = false;
+        if (_botCollider != null) _orbit.DoorSystem.UnregisterBot(_botCollider);
         var squad = _agent.Squad;
         _orbit.RemoveAgent(_agent);
         // Re-evaluate the cumulative extract threshold without the dead member's contribution, in case

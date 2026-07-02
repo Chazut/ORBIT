@@ -33,7 +33,12 @@ public class NavJobExecutor(int batchSize = 5)
         return job;
     }
 
-    public void Submit(NavJob job) => _jobQueue.Enqueue(job);
+    public void Submit(NavJob job)
+    {
+        _jobQueue.Enqueue(job);
+        if (_jobQueue.Count > Helpers.PerfMonitor.NavJobsQueuedPeak)
+            Helpers.PerfMonitor.NavJobsQueuedPeak = _jobQueue.Count;
+    }
 
     public void Update()
     {

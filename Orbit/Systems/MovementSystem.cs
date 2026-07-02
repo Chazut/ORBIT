@@ -418,7 +418,11 @@ public class MovementSystem
             if (elapsed < DoorWatchTimeoutSeconds) continue;
 
             var currentDist = Vector3.Distance(watch.Agent.Position, watch.DoorPos);
-            if (currentDist > watch.InitDistance && currentDist >= DoorWatchMinPhaseDistance)
+            // Only a genuine phase-through: the bot moved past the door AND it's still CLOSED. Without the
+            // state gate this false-fired every raid on legitimate opens (door reached Open/Interacting and the
+            // bot simply walked through it).
+            if (currentDist > watch.InitDistance && currentDist >= DoorWatchMinPhaseDistance
+                && state != EDoorState.Open && state != EDoorState.Interacting)
             {
                 Log.Warning($"DoorWatch: {watch.Agent} PHANTOM-WALKED through door Id={watch.Door.Id} — requested {watch.Kind} {elapsed:F1}s ago, state still={state}, agent moved from {watch.InitDistance:F1}m → {currentDist:F1}m (past the door)");
             }
@@ -427,22 +431,23 @@ public class MovementSystem
                 Log.Debug($"DoorWatch: {watch.Agent} watch timeout on door Id={watch.Door.Id} after {elapsed:F1}s, state={state}, dist {watch.InitDistance:F1}m → {currentDist:F1}m — interaction may have failed but bot didn't pass through");
             }
 
-            // Bot-driven interactions never finalize the BSG door state: the animation plays and the
-            // door is visually open, but DoorState stays Interacting forever (the completion callback
-            // is tied to player-side animation events bots don't emit). Accepted desync — the visual is
-            // what matters. Settling the state back to Shut keeps the door alive: a door left on
-            // Interacting is skipped by HandleDoors (later bots would phase through silently) and shows
-            // no interaction prompt to the player.
+            // Bot-driven interactions never finalize the BSG door state: the animation plays and the door is
+            // visually open, but DoorState stays Interacting forever (the completion callback is tied to
+            // player-side animation events bots don't emit). Finalize it to Open so the leaf STAYS open instead
+            // of snapping shut 3 s after the bot walked through. We used to settle it to Shut to re-arm
+            // HandleDoors against phase-through through an Interacting-skipped door, but per-door collision now
+            // blocks that regardless of state, so leaving it open is both safe and what a just-opened door
+            // should do.
             if (state == EDoorState.Interacting)
             {
                 try
                 {
-                    watch.Door.DoorState = EDoorState.Shut;
-                    Log.Debug($"DoorWatch: reset door Id={watch.Door.Id} Interacting → Shut after {watch.Kind} window (bot interactions never finalize door state)");
+                    watch.Door.DoorState = EDoorState.Open;
+                    Log.Debug($"DoorWatch: finalized door Id={watch.Door.Id} Interacting → Open after {watch.Kind} window (bot interactions never finalize door state) — leaf stays open");
                 }
                 catch (System.Exception e)
                 {
-                    Log.Debug($"DoorWatch: failed to reset door Id={watch.Door.Id}: {e.Message}");
+                    Log.Debug($"DoorWatch: failed to finalize door Id={watch.Door.Id}: {e.Message}");
                 }
             }
             _doorWatchRemoveBuffer.Add(kv.Key);
@@ -1083,6 +1088,14 @@ public class MovementSystem
     // catch this: the bot still "arrives" at its few on-island waypoints, so it never reads as stranded-far.
     // Detect directly (parked near spawn past a grace window AND can't path to any other live agent, since the
     // rest sit on the main mesh), then teleport once onto the main mesh, clear of humans and bots.
+    // A probe pass costs up to N_agents + ~40 synchronous CalculatePath calls; without a backoff a bot that
+    // can never be rescued re-paid that EVERY FRAME (a major 1.2.0 perf regression — Streets fps tanking ~30s
+    // after raid start). Bad spawns are a raid-START problem, so retries are front-loaded: the point is to
+    // unstick the bot within seconds, then settle into a cheap steady probe for the rest of the raid — never
+    // give up outright (doors open, carvers flip, players move, fresh spawns appear as references).
+    private static float SpawnIslandRetryDelay(int attempts)
+        => attempts < 10 ? 3f : attempts < 20 ? 5f : 10f;
+
     private void TrySpawnIslandRescue(Agent agent, List<Agent> liveAgents)
     {
         var stuck = agent.Stuck;
@@ -1104,6 +1117,8 @@ public class MovementSystem
         }
 
         if (Time.time - stuck.SpawnIslandSeenAt < SpawnIslandGraceSeconds) return;
+        if (Time.time < stuck.SpawnIslandNextProbeAt) return; // scheduled backoff after a failed attempt
+        PerfMonitor.SpawnIslandProbes++;
 
         // Find the nearest live agent we CANNOT reach; reaching ANY of them means we're on the main mesh.
         Agent reference = null;
@@ -1126,9 +1141,21 @@ public class MovementSystem
             if (d < bestDistSqr) { bestDistSqr = d; reference = other; }
         }
 
-        if (reference == null) return;
+        if (reference == null)
+        {
+            // No usable far reference right now (transient — bots die/spawn): retry at the current cadence
+            // without consuming an attempt.
+            stuck.SpawnIslandNextProbeAt = Time.time + SpawnIslandRetryDelay(stuck.SpawnIslandAttempts);
+            return;
+        }
 
-        if (!TeleportSafe(agent, _humanPlayers)) return;
+        if (!TeleportSafe(agent, _humanPlayers))
+        {
+            // A human currently sees the bot (or stands too close) — transient too: retry at cadence instead
+            // of re-running the whole probe every frame until the player looks away.
+            stuck.SpawnIslandNextProbeAt = Time.time + SpawnIslandRetryDelay(stuck.SpawnIslandAttempts);
+            return;
+        }
         // Anchor reachability on the alive human player (main mesh) if there is one, else the nearest agent.
         var anchorPos = reference.Position;
         for (var i = 0; i < _humanPlayers.Count; i++)
@@ -1145,6 +1172,13 @@ public class MovementSystem
             Log.Info($"{agent} spawn-island rescue: teleported {Vector3.Distance(fromPos, wpDest):F0}m to the nearest reachable waypoint (off the disconnected spawn chunk)");
             return;
         }
+
+        // Full attempt failed (no reachable waypoint). Schedule the next one — 3s cadence for the first 10
+        // tries (unstick a badly-spawned PMC fast), 5s for the next 10, then a steady 10s for the raid.
+        stuck.SpawnIslandAttempts++;
+        var delay = SpawnIslandRetryDelay(stuck.SpawnIslandAttempts);
+        stuck.SpawnIslandNextProbeAt = Time.time + delay;
+        Log.Debug($"{agent} spawn-island rescue: attempt {stuck.SpawnIslandAttempts} found no reachable waypoint — next probe in {delay:F0}s");
     }
 
     // Nearest waypoint to fromPos that is reachable from anchorPos and clear of players/bots, so the bot lands

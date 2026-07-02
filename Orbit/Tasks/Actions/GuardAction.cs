@@ -72,6 +72,15 @@ public class GuardAction(AgentData dataset, MovementSystem movementSystem, float
 
             if (agent.Objective.Location == null || guard.CoverPoint == null)
             {
+                // Don't leave a scheduled sweep parked while the objective is gone — a pending job's TempJob
+                // arrays trip Unity's 4-frame JobTempAlloc watchdog, and leak outright if we deactivate later.
+                if (guard.AreaSweepJob != null)
+                {
+                    DrainAreaSweepJob(guard);
+                    // Re-enter through Moving so a restored objective resubmits the sweep — the Sweep case
+                    // spins forever on a null job.
+                    guard.Status = GuardStatus.Moving;
+                }
                 agent.GuardOnLootPoiSinceTime = -1f;
                 continue;
             }
@@ -167,7 +176,9 @@ public class GuardAction(AgentData dataset, MovementSystem movementSystem, float
         var guard = entity.Guard;
 
         guard.Status = GuardStatus.None;
-        guard.AreaSweepJob = null;
+        // Complete+Dispose, never just drop: nulling a pending job leaked its two TempJob NativeArrays for
+        // good (Unity's "JobTempAlloc > 4 frames" warning) every time combat preempted an agent mid-sweep.
+        DrainAreaSweepJob(guard);
         guard.WatchDirections.Clear();
         guard.WatchTimeout = 0f;
 
@@ -267,6 +278,19 @@ public class GuardAction(AgentData dataset, MovementSystem movementSystem, float
             Commands = commands,
             Hits = results,
         };
+        Orbit.Helpers.PerfMonitor.SweepJobsSubmitted++;
+    }
+
+    // Completes and disposes a scheduled-but-unconsumed sweep, discarding its results.
+    private static void DrainAreaSweepJob(Guard guard)
+    {
+        if (guard.AreaSweepJob == null) return;
+        var job = guard.AreaSweepJob.Value;
+        job.Handle.Complete();
+        job.Commands.Dispose();
+        job.Hits.Dispose();
+        guard.AreaSweepJob = null;
+        Orbit.Helpers.PerfMonitor.SweepJobsDrained++;
     }
 
     private void CompleteAreaSweepJob(Guard guard, AreaSweepJob job)
@@ -286,6 +310,9 @@ public class GuardAction(AgentData dataset, MovementSystem movementSystem, float
 
         job.Commands.Dispose();
         job.Hits.Dispose();
+        // Clear the slot so a later Deactivate drain can't double-Dispose the arrays just released.
+        guard.AreaSweepJob = null;
+        Orbit.Helpers.PerfMonitor.SweepJobsCompleted++;
 
         _sortBuffer.Sort(Comparer.Instance);
 
