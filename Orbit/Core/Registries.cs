@@ -78,11 +78,16 @@ public class BotRoster
 /// </summary>
 public class SquadRegistry(SquadData squadData, StrategyManager strategyManager, WaypointSystem waypointSystem)
 {
-    private readonly Dictionary<int, int> _squadIdMap = new(16);
+    // Keyed by the BotsGroup INSTANCE, not its int Id: BSG recycles group ids across the raid (observed with
+    // wave-spawned PMCs, e.g. ABPS PMC waves — a fresh wave can reuse the id of an earlier group). Keying by
+    // id made those new bots JOIN the earlier squad and inherit its state (canonical symptom: a
+    // freshly-spawned PMC bee-lining across walls to a corpse the old squad killed, bypassing the corpse-LoS
+    // gate). A new wave is always a new BotsGroup object, so reference identity can never collide.
+    private readonly Dictionary<BotsGroup, int> _squadIdMap = new(16);
 
     public void AddAgent(Agent agent)
     {
-        var bsgSquadId = agent.Bot.BotsGroup.Id;
+        var bsgGroup = agent.Bot.BotsGroup;
 
         Squad squad;
 
@@ -98,14 +103,14 @@ public class SquadRegistry(SquadData squadData, StrategyManager strategyManager,
         }
         else
         {
-            if (_squadIdMap.TryGetValue(bsgSquadId, out var squadId))
+            if (_squadIdMap.TryGetValue(bsgGroup, out var squadId))
             {
                 squad = squadData.Entities[squadId];
             }
             else
             {
                 squad = AddNewSquad(agent);
-                _squadIdMap.Add(bsgSquadId, squad.Id);
+                _squadIdMap.Add(bsgGroup, squad.Id);
             }
         }
 
@@ -143,7 +148,7 @@ public class SquadRegistry(SquadData squadData, StrategyManager strategyManager,
         // keyed by this id so the next squad doesn't inherit stale state (canonical case: corpse-kill
         // credits transferring to a brand-new squad that never killed anyone, bypassing the LoS gate).
         waypointSystem?.ClearSquadCorpseCredits(squad.Id);
-        _squadIdMap.Remove(agent.Bot.BotsGroup.Id);
+        if (agent.Bot?.BotsGroup != null) _squadIdMap.Remove(agent.Bot.BotsGroup);
         squadData.Entities.Remove(squad);
         strategyManager.RemoveEntity(squad);
     }
