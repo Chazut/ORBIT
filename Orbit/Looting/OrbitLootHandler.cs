@@ -595,6 +595,8 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
 
     private bool CanEquipWeaponIntoEmptySlot(Weapon weapon)
     {
+        // "Bots keep their spawn weapons": an empty slot stays empty — found weapons are bag loot only.
+        if (LootConfig.KeepSpawnWeapons is { Value: true }) return false;
         var equipment = _bot?.GetPlayer?.Inventory?.Equipment;
         if (equipment == null) return false;
         foreach (var slotKind in new[] { EquipmentSlot.FirstPrimaryWeapon, EquipmentSlot.SecondPrimaryWeapon, EquipmentSlot.Holster })

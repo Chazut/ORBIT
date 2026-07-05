@@ -52,6 +52,10 @@ public static class WeaponSwapper
     /// </summary>
     public static WouldSwapResult WouldSwap(BotOwner bot, Weapon candidate, Item rootSource)
     {
+        // "Bots keep their spawn weapons": no looted weapon is ever a swap candidate. Rejected weapons still
+        // go through the strip/bag path, and the post-swap loadout collapses to the current one so mags/ammo
+        // for the bot's OWN weapons keep bypassing the value gate.
+        if (LootConfig.KeepSpawnWeapons is { Value: true }) return WouldSwapResult.No;
         if (bot == null || candidate == null) return WouldSwapResult.No;
         var player = bot.GetPlayer;
         if (player?.InventoryController == null) return WouldSwapResult.No;
@@ -136,6 +140,7 @@ public static class WeaponSwapper
 
     public static async Task<Outcome> TryHandleAsync(BotOwner bot, Weapon candidate, Item rootSource, CancellationToken ct)
     {
+        if (LootConfig.KeepSpawnWeapons is { Value: true }) return Outcome.NotApplicable;
         if (bot == null || candidate == null) return Outcome.NotApplicable;
         var player = bot.GetPlayer;
         if (player?.InventoryController == null) return Outcome.NotApplicable;
@@ -166,6 +171,7 @@ public static class WeaponSwapper
     /// </summary>
     public static async Task<Outcome> TryEquipOnlyAsync(BotOwner bot, Weapon candidate, CancellationToken ct)
     {
+        if (LootConfig.KeepSpawnWeapons is { Value: true }) return Outcome.NotApplicable;
         if (bot == null || candidate == null) return Outcome.NotApplicable;
         var nick = bot.Profile?.Nickname ?? "(no-nick)";
         var outcome = await TryEquipIntoFirstEmptySlotAsync(bot, candidate, nick, ct);

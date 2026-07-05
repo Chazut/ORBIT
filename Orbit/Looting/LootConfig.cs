@@ -16,6 +16,7 @@ public static class LootConfig
     public static ConfigEntry<LootingFaction> LootingEnabled;
     public static ConfigEntry<float> DetectDistance;
     public static ConfigEntry<bool> CorpseRequiresSightOrSquadKill;
+    public static ConfigEntry<bool> KeepSpawnWeapons;
     public static ConfigEntry<ExtractFaction> ExtractAllowedFor;
     public static ConfigEntry<float> ExtractAtLootValuePlayerScav;
     public static ConfigEntry<int> SoloLootExtractChancePct;
@@ -49,6 +50,10 @@ public static class LootConfig
         CorpseRequiresSightOrSquadKill = config.Bind(section, "Corpse requires LoS or squad kill", true,
             new ConfigDescription(
                 "ON (default): a corpse is only looted if the squad saw it or made the kill, so bots don't magically know about bodies across the map.",
+                null, new Orbit.Config.ConfigurationManagerAttributes { Order = 5 }));
+        KeepSpawnWeapons = config.Bind(section, "Bots keep their spawn weapons", false,
+            new ConfigDescription(
+                "ON: bots never equip a weapon they find (no corpse weapon swap, no filling an empty slot). They still bag/strip weapons as loot and still grab mags & ammo for the weapons they spawned with. Use this if you see bots stuck with a looted gun they have no ammo for (SAIN doesn't always switch them to their backup).",
                 null, new Orbit.Config.ConfigurationManagerAttributes { Order = 5 }));
         ExtractAllowedFor = config.Bind(section, "Extract allowed for", ExtractFaction.Pmc | ExtractFaction.PlayerScav,
             new ConfigDescription(
