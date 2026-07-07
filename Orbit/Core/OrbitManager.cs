@@ -154,8 +154,24 @@ public class OrbitManager
         for (var i = 0; i < _liveAgents.Count; i++)
         {
             var agent = _liveAgents[i];
-            if (agent == null || !agent.SoloExtractRequested || !agent.SoloExtractIsEmergency) continue;
-            var target = agent.SoloExtractTarget;
+            if (agent == null) continue;
+            // Committed extracters (solo emergency, or squad extract with the exfil as current objective)
+            // sitting still within 12m of the exit, out of combat, are despawned past the timeout — covers
+            // partial navmesh paths that end just outside the trigger volume. SharedTimer exits (V-Ex / BTR)
+            // are excluded: their group wait+countdown flow owns the despawn.
+            Waypoint target = null;
+            if (agent.SoloExtractRequested && agent.SoloExtractIsEmergency)
+            {
+                target = agent.SoloExtractTarget;
+            }
+            else if (agent.Squad is { ExtractRequested: true }
+                     && agent.Objective.Location is { Category: WaypointCategory.Exfil } squadExfil
+                     && !(squadExfil.Target is EFT.Interactive.ExfiltrationPoint
+                          { Settings.ExfiltrationType: EFT.Interactive.EExfiltrationType.SharedTimer }))
+            {
+                target = squadExfil;
+            }
+            if (target == null) continue;
             var bot = agent.Bot;
             var inCombat = bot?.Memory != null && (bot.Memory.HaveEnemy || bot.Memory.IsUnderFire);
             var atExfil = target != null && (agent.Position - target.Position).sqrMagnitude <= EmergencyExtractExfilProximitySqr;
@@ -175,7 +191,7 @@ public class OrbitManager
         for (var i = 0; i < _emergencyExtractDespawn.Count; i++)
         {
             var agent = _emergencyExtractDespawn[i];
-            Log.Info($"{agent} emergency-extract watchdog: stuck at exfil {agent.SoloExtractTarget} for {now - agent.EmergencyExtractStillSince:F0}s without extracting — force-despawning (counts as extracted)");
+            Log.Info($"{agent} extract watchdog: stuck at exfil {(object)agent.SoloExtractTarget ?? agent.Objective.Location} for {now - agent.EmergencyExtractStillSince:F0}s without extracting — force-despawning (counts as extracted)");
             ExtractAction.ForceDespawn(agent);
         }
         _emergencyExtractDespawn.Clear();

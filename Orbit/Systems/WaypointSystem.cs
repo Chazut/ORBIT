@@ -1165,13 +1165,24 @@ public class WaypointSystem
         // gate the squad bee-lines to it, stops hundreds of metres short, fails, and re-picks the SAME
         // unreachable exfil until the raid ends. IsReachableFromPosition is stateless/per-leader, so it isn't
         // masked by IsWaypointReachable's global positive cache when another squad reached the same exfil.
-        var best = ScanNearestReachableExfil(squad, squadIsPmc, leaderPos, ignoreEntry: false);
+        var best = ScanNearestReachableExfil(squad, squadIsPmc, leaderPos, ignoreEntry: false, out var partialEntry);
         if (best == null)
         {
             // Pass 2: drop the spawn-side entry filter so a squad whose entry derivation failed still gets out.
-            best = ScanNearestReachableExfil(squad, squadIsPmc, leaderPos, ignoreEntry: true);
+            best = ScanNearestReachableExfil(squad, squadIsPmc, leaderPos, ignoreEntry: true, out var partialAny);
             if (best != null)
+            {
                 Log.Warning($"{squad} no spawn-side eligible exfil — falling back to nearest reachable faction-allowed exfil {best} (entry derivation may have failed)");
+            }
+            else
+            {
+                // No exfil has a complete path: commit to the best partial-path candidate rather than give
+                // up on extraction. The squad walks as far as the mesh allows, then the proximity despawn /
+                // 3-strike arrival machinery decides (leave if close, blacklist + re-scan otherwise).
+                best = partialEntry ?? partialAny;
+                if (best != null)
+                    Log.Info($"{squad} no fully reachable exfil — committing to partial-path exfil {best} (will walk as far as the mesh allows)");
+            }
         }
 
         squad.NearestExfilCached = best;
@@ -1180,13 +1191,16 @@ public class WaypointSystem
     }
 
     // Nearest exfil that is (a) not squad-blacklisted, (b) faction/status/entry-eligible, and (c) has a
-    // COMPLETE navmesh path from the leader. The path check runs only on candidates nearer than the current
-    // best, so we path at most a handful per scan.
-    private Waypoint ScanNearestReachableExfil(Squad squad, bool? squadIsPmc, Vector3 leaderPos, bool ignoreEntry)
+    // COMPLETE navmesh path from the leader. Also reports, via bestPartial, the eligible exfil whose partial
+    // path ends closest to it — the caller falls back to it when nothing is fully reachable. Paths every
+    // eligible candidate: exfil counts are tiny and the caller caches the verdict for 2s.
+    private Waypoint ScanNearestReachableExfil(Squad squad, bool? squadIsPmc, Vector3 leaderPos, bool ignoreEntry, out Waypoint bestPartial)
     {
         var blacklist = squad.CompletedPoiIds;
         Waypoint best = null;
         var bestDist = float.MaxValue;
+        bestPartial = null;
+        var bestPartialGapSqr = float.MaxValue;
         for (var cx = 0; cx < _gridSize.x; cx++)
         for (var cy = 0; cy < _gridSize.y; cy++)
         {
@@ -1198,11 +1212,31 @@ public class WaypointSystem
                 if (blacklist.Contains(loc.Id)) continue;
                 if (!(ignoreEntry ? SquadCanUseWaypointIgnoringEntry(squad, squadIsPmc, loc)
                                   : SquadCanUseWaypoint(squad, squadIsPmc, loc))) continue;
-                var distSqr = (loc.Position - leaderPos).sqrMagnitude;
-                if (distSqr >= bestDist) continue;
-                if (!IsReachableFromPosition(leaderPos, loc.Position)) continue;
-                bestDist = distSqr;
-                best = loc;
+                var complete = NavMesh.CalculatePath(leaderPos, loc.Position, NavMesh.AllAreas, _reachabilityScratchPath)
+                               && _reachabilityScratchPath.status == NavMeshPathStatus.PathComplete;
+                if (complete)
+                {
+                    var distSqr = (loc.Position - leaderPos).sqrMagnitude;
+                    if (distSqr < bestDist)
+                    {
+                        bestDist = distSqr;
+                        best = loc;
+                    }
+                    continue;
+                }
+                var corners = _reachabilityScratchPath.corners;
+                if (corners == null || corners.Length == 0)
+                {
+                    Log.Debug($"{squad} exfil scan: {loc} eligible but NO navmesh path at all — skipped");
+                    continue;
+                }
+                var gapSqr = (corners[corners.Length - 1] - loc.Position).sqrMagnitude;
+                Log.Debug($"{squad} exfil scan: {loc} eligible but path PARTIAL — ends {Mathf.Sqrt(gapSqr):F0}m short");
+                if (gapSqr < bestPartialGapSqr)
+                {
+                    bestPartialGapSqr = gapSqr;
+                    bestPartial = loc;
+                }
             }
         }
         return best;

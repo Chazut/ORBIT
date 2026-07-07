@@ -160,12 +160,23 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                     }
                     else if (Time.time - t.lastMoveTime > StuckEnRouteThresholdSeconds)
                     {
+                        _stuckEnRouteTracker.Remove(agent.Id);
+                        if (objective.Location.Category == WaypointCategory.Exfil)
+                        {
+                            // Exfils get the 3-strike treatment instead of a one-shot blacklist: a
+                            // partial-path trip legitimately stalls where the mesh ends, and conditions can
+                            // change between tries. At 3 strikes TrackArrivalFailure force-despawns near the
+                            // exit or blacklists the exfil.
+                            objective.Status = ObjectiveStatus.Failed;
+                            Log.Info($"{agent} stalled en-route to exfil {objective.Location} for {StuckEnRouteThresholdSeconds:F0}s — registering arrival strike");
+                            TrackArrivalFailure(agent, objective.Location);
+                            break;
+                        }
                         if (agent.Squad != null && !agent.Squad.CompletedPoiIds.Contains(objective.Location.Id))
                         {
                             agent.Squad.CompletedPoiIds.Add(objective.Location.Id);
                         }
                         objective.Status = ObjectiveStatus.Failed;
-                        _stuckEnRouteTracker.Remove(agent.Id);
                         Log.Info($"{agent} stuck en-route to {objective.Location} for {StuckEnRouteThresholdSeconds:F0}s without advancing — blacklisted for {agent.Squad}, rerouting");
                         break;
                     }
@@ -399,6 +410,10 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
     // pin the bot for the whole raid.
     private const float LoSBlockedTimeoutSeconds = 10f;
 
+    // How close a committed extracter must be to the exfil for the 3-strike arrival failure to end in a
+    // forced despawn rather than a blacklist. Matches the emergency-extract watchdog's proximity.
+    private const float ExfilForceDespawnProximitySqr = 12f * 12f;
+
     /// <summary>
     /// Track how long this agent has been "within radius but LoS blocked" on the current POI. When that window
     /// exceeds <see cref="LoSBlockedTimeoutSeconds"/>, blacklist the POI for the squad and clear the agent's
@@ -466,12 +481,20 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                 && location.Target is ExfiltrationPoint exfil
                 && (agent.Squad.ExtractRequested || agent.SoloExtractRequested))
             {
-                ActivateExfilForBot(exfil, agent);
-                agent.Objective.Status = ObjectiveStatus.Extracting;
-                Log.Info($"{agent} couldn't reach inside of {location} after 3 attempts — forcing extract from current position ({agent.Position}, exfil status={exfil.Status})");
-                agent.ConsecutiveSamePoiFailures = 0;
-                agent.LastFailedPoiId = -1;
-                return;
+                // Force the despawn only when the bot made it near the exit (blocked trigger, nav quirk on
+                // the last meters). Far away — a genuinely dead-ended partial path — blacklist this exfil
+                // instead so the next scan picks another; despawning mid-map is never acceptable.
+                if ((agent.Position - location.Position).sqrMagnitude <= ExfilForceDespawnProximitySqr)
+                {
+                    ActivateExfilForBot(exfil, agent);
+                    agent.Objective.Status = ObjectiveStatus.Extracting;
+                    Log.Info($"{agent} couldn't reach inside of {location} after 3 attempts — forcing extract from current position ({agent.Position}, exfil status={exfil.Status})");
+                    agent.ConsecutiveSamePoiFailures = 0;
+                    agent.LastFailedPoiId = -1;
+                    return;
+                }
+                Log.Info($"{agent} still {Vector3.Distance(agent.Position, location.Position):F0}m short of {location} after 3 attempts — blacklisting this exfil for {agent.Squad}, re-scanning");
+                // Fall through to the generic blacklist + pin-clearing below.
             }
 
             agent.Squad.CompletedPoiIds.Add(locId);
