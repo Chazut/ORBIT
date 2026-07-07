@@ -19,6 +19,10 @@ namespace Orbit.Tasks.Actions;
 public class GuardAction(AgentData dataset, MovementSystem movementSystem, float hysteresis) : Task<Agent>(hysteresis)
 {
     private const float UtilityBoost = 0.45f;
+
+    // Beyond this a cover point is stale or irrelevant (picked for a previous or distant anchor) and the
+    // bot guards in place — Guard movement is a local reposition, never a cross-map trip.
+    private const float MaxCoverPointDistanceSqr = 40f * 40f;
     private const float UtilityBase = 0.2f;
     private const float InnerRadiusRatio = 0.95f * 0.95f;
     private const float SweepAngle = 45f;
@@ -130,6 +134,12 @@ public class GuardAction(AgentData dataset, MovementSystem movementSystem, float
             switch (agent.Guard.Status)
             {
                 case GuardStatus.None:
+                    if ((coverPoint.Position - agent.Position).sqrMagnitude > MaxCoverPointDistanceSqr)
+                    {
+                        Log.Debug($"{agent} guarding: cover point {Vector3.Distance(coverPoint.Position, agent.Position):F0}m away — guarding in place instead");
+                        guard.Status = GuardStatus.Moving; // falls into the arrival branch next tick
+                        break;
+                    }
                     // Sprint to cover honours the same faction / personality gate as objective dispatch
                     // (scavs and Timmy never sprint).
                     var sprintAllowed = SprintGate.IsAllowedByFaction(agent);

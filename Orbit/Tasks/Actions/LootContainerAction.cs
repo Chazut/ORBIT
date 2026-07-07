@@ -133,6 +133,16 @@ public class LootContainerAction(AgentData dataset, WaypointSystem waypointSyste
                         // blacklist.
                         agent.Squad?.CompletedPoiIds.Add(location.Id);
                         Log.Debug($"{agent} blacklisted {location} for {agent.Squad} (items taken, squad memory size={agent.Squad?.CompletedPoiIds.Count})");
+                        // A fully-looted corpse anchor must not hold the squad for the rest of its wait
+                        // window: once no other member is still working the corpse, expire the wait so the
+                        // squad re-picks and moves out together.
+                        if (location.Category == WaypointCategory.Corpse
+                            && agent.Squad != null && agent.Squad.Objective.Location == location
+                            && !AnyOtherMemberWorkingCorpse(agent, location))
+                        {
+                            agent.Squad.Objective.Duration = 0;
+                            Log.Debug($"{agent.Squad} wait timer forced to expire — anchor corpse fully looted, immediate re-pick");
+                        }
                     }
                     else
                     {
@@ -206,6 +216,22 @@ public class LootContainerAction(AgentData dataset, WaypointSystem waypointSyste
             squad.Objective.DurationAdjusted = false;
             Log.Info($"{agent} corpse interrupt {(state.Success ? "looted" : "aborted")} — {squad} resuming pre-interrupt objective {resume}");
         }
+    }
+
+    // True while another squad member still has this corpse as its objective and is working it
+    // (dispatched / travelling / looting) — e.g. a second member coming for the leftovers.
+    private static bool AnyOtherMemberWorkingCorpse(Agent looter, Waypoint corpse)
+    {
+        var squad = looter.Squad;
+        if (squad?.Members == null) return false;
+        for (var i = 0; i < squad.Members.Count; i++)
+        {
+            var m = squad.Members[i];
+            if (m == null || m == looter || m.Objective?.Location != corpse) continue;
+            var s = m.Objective.Status;
+            if (s == ObjectiveStatus.None || s == ObjectiveStatus.Moving || s == ObjectiveStatus.Looting) return true;
+        }
+        return false;
     }
 
     // Max sweep candidates considered per chain. 5 keeps the loop bounded if every nearby item loses the

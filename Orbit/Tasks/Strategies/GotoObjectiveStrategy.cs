@@ -989,6 +989,13 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                     var coverPointIdx = i % squadObjective.CoverPoints.Count;
                     agent.Guard.CoverPoint = squadObjective.CoverPoints[coverPointIdx];
                 }
+                else
+                {
+                    // Anchors without cover points (runtime corpse / combat-caller waypoints): clear the
+                    // slot so Guard can't reuse a cover point picked for a previous objective and travel
+                    // back to it.
+                    agent.Guard.CoverPoint = null;
+                }
 
                 Log.Debug($"{agent} assigned objective {targetLoc}{(splinterParent != null ? $" (splinter of {splinterParent})" : "")}");
             }
