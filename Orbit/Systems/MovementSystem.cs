@@ -442,8 +442,30 @@ public class MovementSystem
             {
                 try
                 {
+                    // Fika: host-side state writes don't replicate (no door-state streaming) — route the
+                    // open through the bot's FikaPlayer.vmethod_1 override so its WorldInteractionPacket
+                    // makes every client replay it locally. Locked-origin doors (Kind=Unlock) go out as
+                    // Breach, the only interaction a client-side Locked door executes without a key.
+                    // vmethod_1 first, snap last: its host-side re-execution can transiently bounce the
+                    // state.
+                    if (Orbit.Helpers.FikaDetection.FikaLoaded
+                        && watch.Agent?.Player != null
+                        && watch.Agent.Bot?.HealthController is { IsAlive: true })
+                    {
+                        var netType = watch.Kind == "Unlock" ? EInteractionType.Breach : EInteractionType.Open;
+                        watch.Agent.Player.vmethod_1(watch.Door, new InteractionResult(netType));
+                        Log.Debug($"DoorWatch: replicated {netType} on door Id={watch.Door.Id} to Fika clients via {watch.Agent}");
+                    }
+
                     watch.Door.DoorState = EDoorState.Open;
-                    Log.Debug($"DoorWatch: finalized door Id={watch.Door.Id} Interacting → Open after {watch.Kind} window (bot interactions never finalize door state) — leaf stays open");
+                    // Physically snap the leaf to its open pose: on headless the BSG open animation never
+                    // runs for bot interactions, leaving state Open with a visually shut leaf (and the
+                    // occlusion portal open). Mirrors BSG's breach completion — DoorState + CurrentAngle +
+                    // interaction-result event.
+                    watch.Door.CurrentAngle = watch.Door.GetAngle(EDoorState.Open);
+                    GlobalEventHandlerClass.CreateEvent<EFT.GlobalEvents.InteractiveObjectInteractionResultEvent>()
+                        .Invoke(watch.Door, EDoorState.Open);
+                    Log.Debug($"DoorWatch: finalized door Id={watch.Door.Id} Interacting → Open after {watch.Kind} window (bot interactions never finalize door state) — leaf snapped open");
                 }
                 catch (System.Exception e)
                 {
