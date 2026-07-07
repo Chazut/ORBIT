@@ -401,6 +401,7 @@ No ETA, no promises, but on the list:
 
 **Tuning**
 - Faction takeover split: patrols → ORBIT, checkpoints → vanilla (RUAF / UNTAR / BlackDivision)
+- Per-map ORBIT toggle — enable/disable ORBIT map by map, e.g. keep small maps like Ground Zero or Factory vanilla where bots sweep the whole map's loot too fast (requested by Kobe Thuy & FoxHead on Discord)
 - Flip the faction-control model to opt-IN instead of opt-OUT — ORBIT only controls explicitly enabled bot types, safer for future custom-bot mods
 - Labs-specific checkpoint tuning - fewer / relocated patrol points around the security gates, which bots get stuck on (BSG gate-pathing quirk, made worse by ORBIT placing checkpoints inside the gates; reported by Firefly)
 
