@@ -86,6 +86,12 @@ public class OrbitBrainLayer : CustomLayer
             case EFT.WildSpawnType.bossGluhar:
             case EFT.WildSpawnType.followerGluharScout:
                 return true;
+            // ISB 1.0 "White Tusk" commanders (ISBBossCommander / ISBFollowerCommander). They run on the
+            // ExUsec brain with a permanent always-on Hunt layer — taking them over would break the mod's
+            // core mechanic (per Firefly, the ISB author).
+            case (EFT.WildSpawnType)13707:
+            case (EFT.WildSpawnType)13708:
+                return true;
         }
 
         if (_excludedRoleSubstrings.Count > 0)
