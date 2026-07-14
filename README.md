@@ -193,8 +193,11 @@ The stuff that makes bots feel deliberate instead of scripted:
 - No teleport rescues. If a bot can't reach something, it gives up and
   picks a new target like a real player would, instead of magically
   warping around.
-- Scavs stay around their spawn area by default; PMCs roam the whole
-  map. Both tunable.
+- Every bot Scav runs ORBIT and patrols nearby cells. By default, 20% roll
+  permission to use map-wide waypoint fallback and roam into other areas;
+  the percentage is tunable in F12. Goons and Bloodhounds have separate roaming
+  percentages that default to 100%. A 0% setting keeps that faction near its
+  spawn area without disabling ORBIT.
 
 **Doors**
 - Bots only open the doors they actually need to pass through - they

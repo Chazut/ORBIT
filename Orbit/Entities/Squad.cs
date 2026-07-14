@@ -65,12 +65,17 @@ public class Squad(int id, float[] taskScores, int targetMembersCount) : Entity(
     public readonly Dictionary<Vector2Int, float> RecentlyRefreshedCells = new();
 
     /// <summary>
-    /// Cell coordinates where this squad's leader spawned. Scavs only — biases prefDirection back toward home
-    /// so they stay in their spawn quartier even when chained loot neighbour-hops would otherwise drift them
-    /// across the map. Lazy init: null until the first RequestNear call, then frozen for the rest of the
-    /// raid.
+    /// Cell coordinates where this squad's leader spawned. Used by supported non-PMC factions that fail their
+    /// roaming roll so chained neighbour hops do not drift them across the map. Lazy init: null until the first
+    /// RequestNear call, then frozen for the rest of the raid.
     /// </summary>
     public Vector2Int? SpawnCell;
+
+    /// <summary>
+    /// Per-raid roll controlling whether this supported non-PMC squad may leave its spawn area and use
+    /// map-wide waypoint fallback. Null until first dispatch; does not control ORBIT enrollment.
+    /// </summary>
+    public bool? AreaRoamingAllowed;
 
     /// <summary>
     /// True once any member has crossed their faction's extract-at-loot- value threshold. From then on the

@@ -46,14 +46,14 @@ public class Plugin : BaseUnityPlugin
     // ╚══════════════════════════════════════════════════════════════╝
 
     // 02. Factions (faction toggles) + 01. Essentials (rally, quiet, tickrate)
-    public static ConfigEntry<bool> RoamingScavs;
-    public static ConfigEntry<bool> RoamingGoons;
+    public static ConfigEntry<int> ScavAreaRoamingChancePct;
+    public static ConfigEntry<int> GoonAreaRoamingChancePct;
+    public static ConfigEntry<int> BloodhoundAreaRoamingChancePct;
     public static ConfigEntry<bool> VanillaScavs;
     public static ConfigEntry<bool> VanillaGoons;
     public static ConfigEntry<bool> VanillaCultists;
     public static ConfigEntry<bool> VanillaRaiders;
     public static ConfigEntry<bool> VanillaBloodhounds;
-    public static ConfigEntry<bool> RoamingBloodhounds;
     public static ConfigEntry<bool> SquadRally;
     public static ConfigEntry<bool> QuietLogging;
     public static ConfigEntry<OrbitLogLevel> LogLevels;
@@ -421,7 +421,7 @@ public class Plugin : BaseUnityPlugin
         // "Disable ORBIT on X" keys are stored as "Vanilla X" so old configs aren't broken; ON = detach ORBIT
         // (vanilla brain), the DispName just shows the clearer wording.
         VanillaScavs = Config.Bind(general, "Vanilla scavs (RESTART)", false, new ConfigDescription(
-            "ON: bot scavs run BSG's vanilla brain instead of ORBIT (so 'Roaming Scavs' does nothing). OFF (default): ORBIT controls them. PlayerScavs always stay on ORBIT.",
+            "ON: bot scavs run BSG's vanilla brain instead of ORBIT (so their area roaming chance does nothing). OFF (default): ORBIT controls them. PlayerScavs always stay on ORBIT.",
             null, new ConfigurationManagerAttributes { DispName = "Disable ORBIT on scavs (RESTART)", Order = 8 }));
         VanillaGoons = Config.Bind(general, "Vanilla goons (RESTART)", false, new ConfigDescription(
             "ON: Goons (Knight, Big Pipe, Bird Eye) run BSG's vanilla brain. OFF (default): ORBIT controls them.",
@@ -432,18 +432,18 @@ public class Plugin : BaseUnityPlugin
         VanillaRaiders = Config.Bind(general, "Vanilla raiders (RESTART)", true, new ConfigDescription(
             "ON (default): Raiders (Reserve / Labs) and Rogues (Lighthouse) run BSG's vanilla brain. OFF: ORBIT controls them.",
             null, new ConfigurationManagerAttributes { DispName = "Disable ORBIT on raiders (RESTART)", Order = 5 }));
-        RoamingScavs = Config.Bind(general, "Roaming Scavs", false, new ConfigDescription(
-            "OFF (default): scavs stay near their spawn area. ON: they roam the whole map like PMCs.",
-            null, new ConfigurationManagerAttributes { Order = 1 }));
-        RoamingGoons = Config.Bind(general, "Roaming Goons", true, new ConfigDescription(
-            "ON (default): Goons roam the whole map freely. OFF: ORBIT keeps nudging them back toward their spawn area whenever they're not fighting (a steady pull toward spawn) — but they still cover a lot of ground, since Goons hear and see from very far.",
-            null, new ConfigurationManagerAttributes { Order = 0 }));
         VanillaBloodhounds = Config.Bind(general, "Vanilla bloodhounds (RESTART)", false, new ConfigDescription(
             "ON: Bloodhounds (Smugglers / arena spawns) run BSG's vanilla brain. OFF (default): ORBIT controls them.",
             null, new ConfigurationManagerAttributes { DispName = "Disable ORBIT on bloodhounds (RESTART)", Order = 4 }));
-        RoamingBloodhounds = Config.Bind(general, "Roaming Bloodhounds", true, new ConfigDescription(
-            "OFF: Bloodhounds stay near their spawn. ON (default): they roam the whole map.",
-            null, new ConfigurationManagerAttributes { Order = -2 }));
+        ScavAreaRoamingChancePct = Config.Bind(general, "Scav area roaming chance (%)", 20, new ConfigDescription(
+            "Percentage of bot scavs allowed to leave their spawn area and use map-wide waypoint fallback. All scavs still run ORBIT; PlayerScavs are unaffected.",
+            new AcceptableValueRange<int>(0, 100), new ConfigurationManagerAttributes { Order = 3 }));
+        GoonAreaRoamingChancePct = Config.Bind(general, "Goon area roaming chance (%)", 100, new ConfigDescription(
+            "Percentage of ORBIT-controlled Goon squads allowed to leave their spawn area and use map-wide waypoint fallback.",
+            new AcceptableValueRange<int>(0, 100), new ConfigurationManagerAttributes { Order = 2 }));
+        BloodhoundAreaRoamingChancePct = Config.Bind(general, "Bloodhound area roaming chance (%)", 100, new ConfigDescription(
+            "Percentage of ORBIT-controlled Bloodhound squads allowed to leave their spawn area and use map-wide waypoint fallback.",
+            new AcceptableValueRange<int>(0, 100), new ConfigurationManagerAttributes { Order = 1 }));
         // ── 03. PlayerScav ──────────────────────────────────────────
         // PlayerScavs get no SAIN archetype, so (unlike PMCs) these values actually drive their behaviour.
         MainObjectivesEnabledForPlayerScav = Config.Bind(playerScav, "Enabled (goal system)", true, new ConfigDescription(
