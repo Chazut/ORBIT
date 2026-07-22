@@ -371,7 +371,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                 continue;
 
             Log.Debug($"{squad} wait timer ran out, requesting new assignment");
-            AssignNewObjective(squad);
+            AssignNewObjective(squad, completedCurrent: true);
         }
     }
 
@@ -1477,7 +1477,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
         return null;
     }
 
-    private void AssignNewObjective(Squad squad)
+    private void AssignNewObjective(Squad squad, bool completedCurrent = false)
     {
         var objective = squad.Objective;
 
@@ -1536,6 +1536,20 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                 requestPos = leaderPos;
             }
             newLocation = waypointSystem.RequestNear(squad, requestPos, objective.LocationPrevious);
+
+            // A completed-wait re-pick landing back on the loot POI the squad just finished means the local
+            // pool has collapsed to a single exhausted candidate (value-skips are per-agent, so the POI
+            // never enters CompletedPoiIds on its own, and loot waits are zero-duration — nothing else
+            // breaks the cycle). Squad-complete it and re-pick once; en-route failures keep their own
+            // 3-strike blacklist path via completedCurrent=false.
+            if (completedCurrent && newLocation != null && objective.Location != null
+                && newLocation.Id == objective.Location.Id
+                && IsLootPoi(newLocation.Category))
+            {
+                squad.CompletedPoiIds.Add(newLocation.Id);
+                Log.Info($"{squad} re-pick returned just-visited {newLocation} — squad-completed it (memory size={squad.CompletedPoiIds.Count}), re-picking");
+                newLocation = waypointSystem.RequestNear(squad, requestPos, objective.Location);
+            }
         }
 
         if (newLocation == null)
@@ -1558,6 +1572,14 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
         ResetDuration(objective, _moveTimeout.SampleGaussian());
 
         Log.Debug($"{squad} assigned objective {objective.Location}");
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool IsLootPoi(WaypointCategory category)
+    {
+        return category == WaypointCategory.LooseLoot
+               || category == WaypointCategory.ContainerLoot
+               || category == WaypointCategory.Corpse;
     }
 
     private static void ShufflePickCoverPoints(SquadObjective objective, int count)

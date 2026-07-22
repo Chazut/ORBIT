@@ -188,6 +188,13 @@ public class Squad(int id, float[] taskScores, int targetMembersCount) : Entity(
     public Vector3 SpawnPosition;
 
     /// <summary>
+    /// Set once the spawn-island rescue relocates a member off a disconnected spawn chunk. Squad-level state
+    /// (unreachable cache, mains, current objective, SpawnPosition) is refreshed a single time even though
+    /// every member teleports within the same frame.
+    /// </summary>
+    public bool SpawnIslandRelocated;
+
+    /// <summary>
     /// Derived (or BSG-native) Infiltration name used for the spawn-side exfil filter. Computed lazily on
     /// first call when the bot's EntryPoint is empty. <see langword="null"/> = not yet resolved; empty string
     /// = resolved but no marker found.

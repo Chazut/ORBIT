@@ -1192,6 +1192,7 @@ public class MovementSystem
             ResetPath(agent);
             agent.Stuck.SpawnIslandRescued = true;
             Log.Info($"{agent} spawn-island rescue: teleported {Vector3.Distance(fromPos, wpDest):F0}m to the nearest reachable waypoint (off the disconnected spawn chunk)");
+            RefreshSquadAfterIslandRescue(agent, wpDest);
             return;
         }
 
@@ -1201,6 +1202,40 @@ public class MovementSystem
         var delay = SpawnIslandRetryDelay(stuck.SpawnIslandAttempts);
         stuck.SpawnIslandNextProbeAt = Time.time + delay;
         Log.Debug($"{agent} spawn-island rescue: attempt {stuck.SpawnIslandAttempts} found no reachable waypoint — next probe in {delay:F0}s");
+    }
+
+    // How long the squad idles before its first post-relocation dispatch, giving BSG time to re-anchor the
+    // teleported bots on the navmesh.
+    private const float PostIslandRescueCooldownSeconds = 5f;
+
+    // An islanded squad "maps" the raid from its disconnected chunk before the rescue fires: every
+    // reachability verdict lands in the per-squad unreachable cache as PathPartial, quest mains are all
+    // rejected from the island spawn position, and the current objective points at an island POI. Without
+    // this refresh the squad deadlocks after the teleport — PickFromCell keeps serving the poisoned cache
+    // and re-picks the island's own looted POI forever while every member idles in Guard.
+    private void RefreshSquadAfterIslandRescue(Agent agent, Vector3 dest)
+    {
+        var squad = agent.Squad;
+        if (squad == null) return;
+
+        // Drop the agent's own (island) objective, same as RescueInterceptPatch after a BSG rescue.
+        agent.Objective.Status = ObjectiveStatus.Failed;
+
+        if (squad.SpawnIslandRelocated) return; // whole squads teleport within the same frame — refresh once
+        squad.SpawnIslandRelocated = true;
+
+        squad.SpawnPosition = dest;
+        _waypointSystem.ClearSquadUnreachability(squad);
+        Sain.MainObjectiveBuilder.Generate(squad, _waypointSystem);
+
+        var squadObj = squad.Objective;
+        squadObj.LocationPrevious = null;
+        squadObj.Location = null;
+        squadObj.Status = SquadObjectiveState.Wait;
+        squadObj.StartTime = Time.time;
+        squadObj.Duration = PostIslandRescueCooldownSeconds;
+        squadObj.DurationAdjusted = false;
+        Log.Info($"{squad} spawn-island relocation: spawn pos re-anchored, mains re-rolled, objective reset (re-dispatch in {PostIslandRescueCooldownSeconds:F0}s)");
     }
 
     // Nearest waypoint to fromPos that is reachable from anchorPos and clear of players/bots, so the bot lands

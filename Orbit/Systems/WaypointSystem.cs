@@ -1371,6 +1371,22 @@ public class WaypointSystem
         }
     }
 
+    /// <summary>
+    /// Wipes the per-squad unreachable-waypoint cache. Called after a spawn-island rescue relocates the
+    /// squad onto the main navmesh: every cached verdict was computed from the disconnected chunk
+    /// (everything PathPartial) and would otherwise keep the whole map "unreachable" for this squad for the
+    /// rest of the raid.
+    /// </summary>
+    public void ClearSquadUnreachability(Squad squad)
+    {
+        if (squad == null) return;
+        if (_squadUnreachable.TryGetValue(squad.Id, out var set) && set.Count > 0)
+        {
+            Log.Info($"{squad} island relocation: cleared {set.Count} stale unreachable-waypoint verdict(s)");
+            set.Clear();
+        }
+    }
+
     public Waypoint FindNearbySweepTarget(Vector3 botPos, Agent agent, float radius)
     {
         var squad = agent?.Squad;
