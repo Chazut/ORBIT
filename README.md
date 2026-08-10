@@ -1,3 +1,7 @@
+# StatRewards
+![Stars](https://img.shields.io/github/stars/Chazut/ORBIT?style=flat-square&label=STARS&color=007ec6)
+![Issues](https://img.shields.io/github/issues/Chazut/ORBIT?style=flat-square&label=ISSUES&color=44cc11)
+![Downloads](https://img.shields.io/github/downloads/Chazut/ORBIT/total?style=flat-square&label=DOWNLOADS&color=44cc11)
 > ⚠️ **Heads up:** ORBIT is built on **Phobos**'s foundation (MIT-licensed).
 > Full credits at the bottom. ORBIT wouldn't exist without [Janky's](https://forge.sp-tarkov.com/user/72916/jankytheclown) work!
 
