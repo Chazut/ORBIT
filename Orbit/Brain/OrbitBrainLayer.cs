@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Text;
 using Comfort.Common;
+using EFT.Ballistics;
 using DrakiaXYZ.BigBrain.Brains;
 using EFT;
 using Orbit.Core;
@@ -157,7 +158,7 @@ public class OrbitBrainLayer : CustomLayer
         _orbit.DoorSystem.RegisterBot(_botCollider, _agent.Bot.GetPlayer.POM.Collider);
     }
 
-    private void OnDead(Player player, IPlayer lastAggressor, DamageInfoStruct damageInfo, EBodyPart part)
+    private void OnDead(Player player, IPlayer lastAggressor, DamageInfo damageInfo, EBodyPart part)
     {
         player.OnPlayerDead -= OnDead;
         _agent.IsActive = false;
@@ -172,7 +173,7 @@ public class OrbitBrainLayer : CustomLayer
         }
     }
 
-    private void OnLayerChanged(AICoreLayerClass<BotLogicDecision> layer)
+    private void OnLayerChanged(AICoreLayer<BotLogicDecision> layer)
     {
         var mover = _agent.Bot.Mover;
         var layerName = layer.Name();
@@ -190,9 +191,9 @@ public class OrbitBrainLayer : CustomLayer
                 Log.Debug($"{_agent} setting player to navmesh");
                 // Make every mover state variable reflect the current position so SetPlayerToNavMesh doesn't
                 // snap the bot back to a stale target after our layer hands the brain back to BSG.
-                mover.LastGoodCastPoint = mover.PrevSuccessLinkedFrom_1 = mover.PrevLinkPos = mover.PositionOnWayInner = _agent.Position;
-                mover.LastGoodCastPointTime = Time.time;
-                mover.PrevPosLinkedTime_1 = 0f;
+                mover._lastGoodCastPoint = mover._prevSuccessLinkedFrom = mover._prevLinkPos = mover.PositionOnWayInner = _agent.Position;
+                mover._lastGoodCastPointTime = Time.time;
+                mover._prevPosLinkedTime = 0f;
                 mover.SetPlayerToNavMesh(_agent.Position);
                 _agent.IsActive = false;
             }

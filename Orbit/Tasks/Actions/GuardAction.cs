@@ -276,7 +276,7 @@ public class GuardAction(AgentData dataset, MovementSystem movementSystem, float
         for (var i = 0; i < _candidateBuffer.Count; i++)
         {
             var direction = _candidateBuffer[i];
-            var parameters = new QueryParameters { layerMask = LayerMasksDataAbstractClass.HitMask };
+            var parameters = new QueryParameters { layerMask = EFT.Ballistics.BallisticsCalculatorConstants.HitMask };
             commands[i] = new RaycastCommand(origin, direction, parameters, 100);
         }
 

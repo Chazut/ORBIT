@@ -593,7 +593,7 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
         var direction = poiPosition - head;
         var dist = direction.magnitude;
         if (dist < 0.01f) return true; // basically on top of the POI
-        var blocked = Physics.Raycast(head, direction / dist, dist, LayerMaskClass.HighPolyWithTerrainMask);
+        var blocked = Physics.Raycast(head, direction / dist, dist, LayersMaskController.HighPolyWithTerrainMask);
         return !blocked;
     }
 

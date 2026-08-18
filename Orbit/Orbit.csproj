@@ -8,8 +8,10 @@
         <Deterministic>false</Deterministic>
         <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
         <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-        <!-- Override locally if your SPT install is elsewhere -->
-        <SptRoot Condition=" '$(SptRoot)' == '' ">C:\Games\SPT-4.0-hardcore</SptRoot>
+        <!-- Compile references: frozen copy of the SPT 4.1 client DLLs (refs/4.1, gitignored) -->
+        <SptRoot Condition=" '$(SptRoot)' == '' ">$(MSBuildProjectDirectory)\..\refs\4.1</SptRoot>
+        <!-- Deployment target: the live SPT 4.1 install -->
+        <DeployRoot Condition=" '$(DeployRoot)' == '' ">C:\Games\SPT-4.1</DeployRoot>
         <AssemblyName>ORBIT</AssemblyName>
     </PropertyGroup>
 
@@ -87,8 +89,8 @@
     </ItemGroup>
 
     <Target Name="PostBuild" AfterTargets="PostBuildEvent">
-      <MakeDir Directories="$(SptRoot)\BepInEx\plugins\$(TargetName)" />
-      <Exec Command="copy /Y &quot;$(TargetPath)&quot; &quot;$(SptRoot)\BepInEx\plugins\$(TargetName)\$(TargetFileName)&quot;&#xA;copy /Y &quot;$(TargetDir)$(TargetName).pdb&quot; &quot;$(SptRoot)\BepInEx\plugins\$(TargetName)\$(TargetName).pdb&quot;" />
+      <MakeDir Directories="$(DeployRoot)\BepInEx\plugins\$(TargetName)" />
+      <Exec Command="copy /Y &quot;$(TargetPath)&quot; &quot;$(DeployRoot)\BepInEx\plugins\$(TargetName)\$(TargetFileName)&quot;&#xA;copy /Y &quot;$(TargetDir)$(TargetName).pdb&quot; &quot;$(DeployRoot)\BepInEx\plugins\$(TargetName)\$(TargetName).pdb&quot;" />
     </Target>
 
 </Project>

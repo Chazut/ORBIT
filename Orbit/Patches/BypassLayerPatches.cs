@@ -8,10 +8,10 @@ namespace Orbit.Patches;
 
 internal static class BypassGate
 {
-    public static bool ShouldBypassForOrbitBot(BaseLogicLayerAbstractClass layer)
+    public static bool ShouldBypassForOrbitBot(BaseLogicLayerSimple layer)
     {
         var roster = Singleton<BotRoster>.Instance;
-        return roster != null && roster.IsOrbitActive(layer.BotOwner_0);
+        return roster != null && roster.IsOrbitActive(layer._owner);
     }
 }
 
@@ -20,11 +20,11 @@ public class AssaultEnemyFarBypassPatch : ModulePatch
 {
     protected override MethodBase GetTargetMethod()
     {
-        return AccessTools.Method(typeof(GClass45), nameof(GClass45.ShallUseNow));
+        return AccessTools.Method(typeof(AssaultEnemyFarLayer), nameof(AssaultEnemyFarLayer.ShallUseNow));
     }
 
     [PatchPrefix]
-    public static bool Patch(GClass45 __instance, ref bool __result)
+    public static bool Patch(AssaultEnemyFarLayer __instance, ref bool __result)
     {
         if (!BypassGate.ShouldBypassForOrbitBot(__instance)) return true;
         __result = false;
@@ -37,11 +37,11 @@ public class ExfilLayerBypassPatch : ModulePatch
 {
     protected override MethodBase GetTargetMethod()
     {
-        return AccessTools.Method(typeof(GClass75), nameof(GClass75.ShallUseNow));
+        return AccessTools.Method(typeof(ExfiltrationLayer), nameof(ExfiltrationLayer.ShallUseNow));
     }
 
     [PatchPrefix]
-    public static bool Patch(GClass75 __instance, ref bool __result)
+    public static bool Patch(ExfiltrationLayer __instance, ref bool __result)
     {
         if (!BypassGate.ShouldBypassForOrbitBot(__instance)) return true;
         __result = false;
@@ -54,11 +54,11 @@ public class PtrlBirdEyeBypassPatch : ModulePatch
 {
     protected override MethodBase GetTargetMethod()
     {
-        return AccessTools.Method(typeof(GClass79), nameof(GClass79.ShallUseNow));
+        return AccessTools.Method(typeof(BirdEyePatrolLayer), nameof(BirdEyePatrolLayer.ShallUseNow));
     }
 
     [PatchPrefix]
-    public static bool Patch(GClass79 __instance, ref bool __result)
+    public static bool Patch(BirdEyePatrolLayer __instance, ref bool __result)
     {
         if (!BypassGate.ShouldBypassForOrbitBot(__instance)) return true;
         __result = false;

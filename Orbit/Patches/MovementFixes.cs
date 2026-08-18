@@ -31,23 +31,23 @@ public class SoftTeleportTracePatch : ModulePatch
         if (!Log.DebugEnabled) return;
         try
         {
-            if (__instance is GClass493) return;
+            if (__instance is BotMoverBTR) return;
 
-            var botPosition = __instance.BotOwner_0.GetPlayer.Position;
+            var botPosition = __instance._owner.GetPlayer.Position;
             var sqrDist = (botPosition - rPosition).sqrMagnitude;
             if (sqrDist < 4f) return;
 
-            var id = __instance.BotOwner_0.Id;
-            var role = __instance.BotOwner_0.GetPlayer.Profile?.Info?.Settings?.Role;
-            var nickName = __instance.BotOwner_0.GetPlayer.Profile?.Nickname;
+            var id = __instance._owner.Id;
+            var role = __instance._owner.GetPlayer.Profile?.Info?.Settings?.Role;
+            var nickName = __instance._owner.GetPlayer.Profile?.Nickname;
 
             Log.Debug($"BotMover.Teleport (soft) id={id} role={role} name={nickName} pos={botPosition} target={rPosition} dist={Mathf.Sqrt(sqrDist):F1}");
-            Log.Debug($"  CurTime={Time.time} LastGoodCastPointTime={__instance.LastGoodCastPointTime} PrevPosLinkedTime_1={__instance.PrevPosLinkedTime_1}");
+            Log.Debug($"  CurTime={Time.time} _lastGoodCastPointTime={__instance._lastGoodCastPointTime} _prevPosLinkedTime={__instance._prevPosLinkedTime}");
             Log.Debug($"  PositionOnWayInner={__instance.PositionOnWayInner} dist={Vector3.Distance(botPosition, __instance.PositionOnWayInner)}");
-            Log.Debug($"  PositionOnWayCasted={__instance.PositionOnWayCasted} dist={Vector3.Distance(botPosition, __instance.PositionOnWayCasted)}");
-            Log.Debug($"  PrevLinkPos={__instance.PrevLinkPos} dist={Vector3.Distance(botPosition, __instance.PrevLinkPos)}");
-            Log.Debug($"  PrevSuccessLinkedFrom_1={__instance.PrevSuccessLinkedFrom_1} dist={Vector3.Distance(botPosition, __instance.PrevSuccessLinkedFrom_1)}");
-            Log.Debug($"  LastGoodCastPoint={__instance.LastGoodCastPoint} dist={Vector3.Distance(botPosition, __instance.LastGoodCastPoint)}");
+            Log.Debug($"  _positionOnWayCasted={__instance._positionOnWayCasted} dist={Vector3.Distance(botPosition, __instance._positionOnWayCasted)}");
+            Log.Debug($"  _prevLinkPos={__instance._prevLinkPos} dist={Vector3.Distance(botPosition, __instance._prevLinkPos)}");
+            Log.Debug($"  _prevSuccessLinkedFrom={__instance._prevSuccessLinkedFrom} dist={Vector3.Distance(botPosition, __instance._prevSuccessLinkedFrom)}");
+            Log.Debug($"  _lastGoodCastPoint={__instance._lastGoodCastPoint} dist={Vector3.Distance(botPosition, __instance._lastGoodCastPoint)}");
             Log.Debug($"  trace:\n{new StackTrace(true)}");
         }
         catch (System.Exception e)
@@ -58,7 +58,7 @@ public class SoftTeleportTracePatch : ModulePatch
 }
 
 /// <summary>
-/// Logs the "hard" rescue teleport BSG fires via BotMover.method_10 — the large recovery snap fired when a
+/// Logs the "hard" rescue teleport BSG fires via BotMover.CastFromPos — the large recovery snap fired when a
 /// bot is hopelessly stuck. Paired with
 /// <see cref="RescueInterceptPatch"/> which actually reacts to it.
 /// </summary>
@@ -66,7 +66,7 @@ public class HardTeleportTracePatch : ModulePatch
 {
     protected override MethodBase GetTargetMethod()
     {
-        return typeof(BotMover).GetMethod(nameof(BotMover.method_10));
+        return typeof(BotMover).GetMethod(nameof(BotMover.CastFromPos));
     }
 
     [PatchPrefix]
@@ -76,23 +76,23 @@ public class HardTeleportTracePatch : ModulePatch
         if (!Log.DebugEnabled) return;
         try
         {
-            if (__instance is GClass493) return;
+            if (__instance is BotMoverBTR) return;
 
-            var botPosition = __instance.BotOwner_0.GetPlayer.Position;
+            var botPosition = __instance._owner.GetPlayer.Position;
             var sqrDist = (botPosition - posiblePos).sqrMagnitude;
             if (sqrDist < 4f) return;
 
-            var id = __instance.BotOwner_0.Id;
-            var role = __instance.BotOwner_0.GetPlayer.Profile?.Info?.Settings?.Role;
-            var nickName = __instance.BotOwner_0.GetPlayer.Profile?.Nickname;
+            var id = __instance._owner.Id;
+            var role = __instance._owner.GetPlayer.Profile?.Info?.Settings?.Role;
+            var nickName = __instance._owner.GetPlayer.Profile?.Nickname;
 
-            Log.Debug($"BotMover.method_10 (hard) id={id} role={role} name={nickName} pos={botPosition} target={posiblePos} dist={Mathf.Sqrt(sqrDist):F1}");
-            Log.Debug($"  CurTime={Time.time} LastGoodCastPointTime={__instance.LastGoodCastPointTime} PrevPosLinkedTime_1={__instance.PrevPosLinkedTime_1}");
+            Log.Debug($"BotMover.CastFromPos (hard) id={id} role={role} name={nickName} pos={botPosition} target={posiblePos} dist={Mathf.Sqrt(sqrDist):F1}");
+            Log.Debug($"  CurTime={Time.time} _lastGoodCastPointTime={__instance._lastGoodCastPointTime} _prevPosLinkedTime={__instance._prevPosLinkedTime}");
             Log.Debug($"  PositionOnWayInner={__instance.PositionOnWayInner} dist={Vector3.Distance(botPosition, __instance.PositionOnWayInner)}");
-            Log.Debug($"  PositionOnWayCasted={__instance.PositionOnWayCasted} dist={Vector3.Distance(botPosition, __instance.PositionOnWayCasted)}");
-            Log.Debug($"  PrevLinkPos={__instance.PrevLinkPos} dist={Vector3.Distance(botPosition, __instance.PrevLinkPos)}");
-            Log.Debug($"  PrevSuccessLinkedFrom_1={__instance.PrevSuccessLinkedFrom_1} dist={Vector3.Distance(botPosition, __instance.PrevSuccessLinkedFrom_1)}");
-            Log.Debug($"  LastGoodCastPoint={__instance.LastGoodCastPoint} dist={Vector3.Distance(botPosition, __instance.LastGoodCastPoint)}");
+            Log.Debug($"  _positionOnWayCasted={__instance._positionOnWayCasted} dist={Vector3.Distance(botPosition, __instance._positionOnWayCasted)}");
+            Log.Debug($"  _prevLinkPos={__instance._prevLinkPos} dist={Vector3.Distance(botPosition, __instance._prevLinkPos)}");
+            Log.Debug($"  _prevSuccessLinkedFrom={__instance._prevSuccessLinkedFrom} dist={Vector3.Distance(botPosition, __instance._prevSuccessLinkedFrom)}");
+            Log.Debug($"  _lastGoodCastPoint={__instance._lastGoodCastPoint} dist={Vector3.Distance(botPosition, __instance._lastGoodCastPoint)}");
             Log.Debug($"  trace:\n{new StackTrace(true)}");
         }
         catch (System.Exception e)
@@ -135,7 +135,7 @@ public class ManualFixedUpdateSkipPatch : ModulePatch
     [PatchPrefix]
     public static bool PatchPrefix(BotMover __instance)
     {
-        return Singleton<BotRoster>.Instance == null || !Singleton<BotRoster>.Instance.IsOrbitActive(__instance.BotOwner_0);
+        return Singleton<BotRoster>.Instance == null || !Singleton<BotRoster>.Instance.IsOrbitActive(__instance._owner);
     }
 }
 

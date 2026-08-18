@@ -1,5 +1,6 @@
 using System;
 using System.Reflection;
+using EFT.Airdrop;
 using EFT.Interactive;
 using SPT.Reflection.Patching;
 
@@ -15,13 +16,13 @@ public class AirdropLandedPatch : ModulePatch
 
     protected override MethodBase GetTargetMethod()
     {
-        return typeof(AirdropLogicClass).GetMethod(nameof(AirdropLogicClass.method_0));
+        return typeof(ClientAirDrop).GetMethod(nameof(ClientAirDrop.PlayLandingSound));
     }
 
     [PatchPostfix]
-    public static void Postfix(AirdropLogicClass __instance)
+    public static void Postfix(ClientAirDrop __instance)
     {
-        var lootableContainer = __instance.AirdropSynchronizableObject_0.GetComponentInChildren<LootableContainer>();
+        var lootableContainer = __instance._syncObject.GetComponentInChildren<LootableContainer>();
         OnAirdropLanded?.Invoke(lootableContainer);
     }
 }

@@ -76,9 +76,9 @@ public class MovementSystem
                 continue;
             }
 
-            // Keep BSG's BotMover anchored to where the bot ACTUALLY is. BotMover.method_10 (the hard rescue
-            // teleport) snaps the bot to LastGoodCastPoint when it decides the bot is stuck. The brain layer
-            // sets LastGoodCastPoint to agent.Position only at the layer *transition* — so while we're in
+            // Keep BSG's BotMover anchored to where the bot ACTUALLY is. BotMover.CastFromPos (the hard rescue
+            // teleport) snaps the bot to _lastGoodCastPoint when it decides the bot is stuck. The brain layer
+            // sets _lastGoodCastPoint to agent.Position only at the layer *transition* — so while we're in
             // control, it stays frozen at wherever the bot was when handed off. A rescue then yeets the bot
             // back to that stale anchor (sometimes their spawn). Refreshing every frame makes any rescue land
             // as a teleport-to-self no-op.
@@ -86,9 +86,9 @@ public class MovementSystem
             if (mover != null)
             {
                 var pos = agent.Position;
-                mover.LastGoodCastPoint = pos;
-                mover.PrevSuccessLinkedFrom_1 = pos;
-                mover.PrevLinkPos = pos;
+                mover._lastGoodCastPoint = pos;
+                mover._prevSuccessLinkedFrom = pos;
+                mover._prevLinkPos = pos;
                 mover.PositionOnWayInner = pos;
             }
 
@@ -443,17 +443,17 @@ public class MovementSystem
                 try
                 {
                     // Fika: host-side state writes don't replicate (no door-state streaming) — route the
-                    // open through the bot's FikaPlayer.vmethod_1 override so its WorldInteractionPacket
+                    // open through the bot's FikaPlayer.ExecuteInteraction override so its WorldInteractionPacket
                     // makes every client replay it locally. Locked-origin doors (Kind=Unlock) go out as
                     // Breach, the only interaction a client-side Locked door executes without a key.
-                    // vmethod_1 first, snap last: its host-side re-execution can transiently bounce the
+                    // ExecuteInteraction first, snap last: its host-side re-execution can transiently bounce the
                     // state.
                     if (Orbit.Helpers.FikaDetection.FikaLoaded
                         && watch.Agent?.Player != null
                         && watch.Agent.Bot?.HealthController is { IsAlive: true })
                     {
                         var netType = watch.Kind == "Unlock" ? EInteractionType.Breach : EInteractionType.Open;
-                        watch.Agent.Player.vmethod_1(watch.Door, new InteractionResult(netType));
+                        watch.Agent.Player.ExecuteInteraction(watch.Door, new InteractionResult(netType));
                         Log.Debug($"DoorWatch: replicated {netType} on door Id={watch.Door.Id} to Fika clients via {watch.Agent}");
                     }
 
@@ -463,7 +463,7 @@ public class MovementSystem
                     // occlusion portal open). Mirrors BSG's breach completion — DoorState + CurrentAngle +
                     // interaction-result event.
                     watch.Door.CurrentAngle = watch.Door.GetAngle(EDoorState.Open);
-                    GlobalEventHandlerClass.CreateEvent<EFT.GlobalEvents.InteractiveObjectInteractionResultEvent>()
+                    EFT.GlobalEvents.GlobalEventsController.CreateEvent<EFT.GlobalEvents.InteractiveObjectInteractionResultEvent>()
                         .Invoke(watch.Door, EDoorState.Open);
                     Log.Debug($"DoorWatch: finalized door Id={watch.Door.Id} Interacting → Open after {watch.Kind} window (bot interactions never finalize door state) — leaf snapped open");
                 }
@@ -499,7 +499,7 @@ public class MovementSystem
             foundDoors = true;
 
             // Also reject doors mid-animation (state=Interacting) — the door is already opening / closing
-            // and BSG silently no-ops a second vmethod_1 call against an in-flight transition. The
+            // and BSG silently no-ops a second ExecuteInteraction call against an in-flight transition. The
             // DoorWatch diagnostic on Woods saw 3/3 interactions hit doors already in the Interacting
             // state, all 3 watch-timeouts at 3s with state still=Interacting. The original guard checked
             // InteractingPlayer != null which handles a player actively pressing F on the door, but the
@@ -516,9 +516,9 @@ public class MovementSystem
             if (!IsBotApproachingDoor(agent, doorLink)) continue;
 
             // Locked doors: only PMCs may attempt to unlock. Scavs/bosses/ raiders don't carry door keys in
-            // their loadouts, and even if vmethod_1 silently fails without a key, letting every bot poll the
+            // their loadouts, and even if ExecuteInteraction silently fails without a key, letting every bot poll the
             // interaction wastes ticks and produces unrealistic behaviour. Real unlock still gated by key
-            // inventory inside BSG's vmethod_1.
+            // inventory inside BSG's ExecuteInteraction.
             if (door.DoorState == EDoorState.Locked)
             {
                 var role = agent.Bot?.Profile?.Info?.Settings?.Role;
@@ -554,7 +554,7 @@ public class MovementSystem
                     }
 
                     // Don't route through Door.Interact(Unlock): it casts to KeyInteractionResultClass, which
-                    // dereferences a real KeyComponent, so a keyless bot NREs inside vmethod_1. Replicate
+                    // dereferences a real KeyComponent, so a keyless bot NREs inside ExecuteInteraction. Replicate
                     // ExecuteDoorInteraction by hand: read interaction params WHILE still Locked (resolves
                     // AnimationId to the DoorKeyOpen gesture from the locked state), unlock the latch directly,
                     // then drive the hands animation via SetInteractInHands.
@@ -594,7 +594,7 @@ public class MovementSystem
     /// <summary>
     /// Reset the player's "can use prop" state machine, ask BSG to construct a validated InteractionResult
     /// via <see cref="Door.Interact"/> (this is the call that checks key inventory, ownership, lock state,
-    /// and produces the proper internal transition struct), then fire vmethod_1 with THAT result. The
+    /// and produces the proper internal transition struct), then fire ExecuteInteraction with THAT result. The
     /// previous implementation built an InteractionResult by hand — BSG silently no-op'd when the missing
     /// internal fields were stale, which manifested as our PHANTOM-WALK signature on Customs dorm doors
     /// (148 interactions initiated, 0 logged successfully opened, 7 phantom-walks). Also pre-enables
@@ -605,10 +605,10 @@ public class MovementSystem
     {
         var player = agent.Player;
         if (player == null) return false;
-        // Per-door cooldown: HandleDoors runs every frame, but BSG's vmethod_1 takes a few frames to
-        // transition the door from Shut → Interacting → Open. If we re-fire vmethod_1 each frame in
+        // Per-door cooldown: HandleDoors runs every frame, but BSG's ExecuteInteraction takes a few frames to
+        // transition the door from Shut → Interacting → Open. If we re-fire ExecuteInteraction each frame in
         // that window, BSG silently no-ops the duplicate calls and the door may never finish opening
-        // (observed: re-firing vmethod_1 every frame produced well over a hundred calls in a row with
+        // (observed: re-firing ExecuteInteraction every frame produced well over a hundred calls in a row with
         // zero confirmed transitions to Open). 1.5 s is enough to cover the open / unlock animation window
         // and matches SAIN's _doorInteractionEndTime.
         var doorId = door.GetInstanceID();
@@ -620,8 +620,8 @@ public class MovementSystem
         try
         {
             // BSG won't play the door open animation unless the bot is in the right movement state at
-            // the moment vmethod_1 fires — a sprinting / proning / ADS'd bot's interaction is silently
-            // dropped, vmethod_1 returns successfully but visually nothing happens. The bot then walks
+            // the moment ExecuteInteraction fires — a sprinting / proning / ADS'd bot's interaction is silently
+            // dropped, ExecuteInteraction returns successfully but visually nothing happens. The bot then walks
             // through the collider (which we ignore for the duration) and phantom-walks. Prepare the
             // bot exactly like the vanilla door interact flow: stand, no prone, no sprint, no ADS,
             // target pose 1 (standing), normal walking speed.
@@ -644,9 +644,9 @@ public class MovementSystem
                 Log.Debug($"{agent} OpenDoor on {door.Id}: Door.Interact returned non-success — interaction rejected by BSG (likely lock / key / state)");
                 return false;
             }
-            player.vmethod_1(door, gstruct.Value);
-            // Set collision-pass AFTER vmethod_1 so the door's animation can drive the bot's traversal
-            // through the swing arc. Order matters: setting it before vmethod_1 lets the bot rush the
+            player.ExecuteInteraction(door, gstruct.Value);
+            // Set collision-pass AFTER ExecuteInteraction so the door's animation can drive the bot's traversal
+            // through the swing arc. Order matters: setting it before ExecuteInteraction lets the bot rush the
             // collider before the animation has actually started.
             if (door.Collider != null)
                 player.MovementContext.IgnoreInteractionCollision(door.Collider, true);
@@ -779,7 +779,7 @@ public class MovementSystem
                 var gstruct = Door.Interact(player, EInteractionType.Close);
                 if (gstruct.Succeeded)
                 {
-                    player.vmethod_1(door, gstruct.Value);
+                    player.ExecuteInteraction(door, gstruct.Value);
                     door.DoorState = EDoorState.Shut;
                     _doorInteractCooldown[door.GetInstanceID()] = Time.time;
                     closed++;

@@ -35,7 +35,9 @@ public static class SainPersonality
         try
         {
             _botManagerComponentType = Type.GetType("SAIN.Components.BotManagerComponent, SAIN");
-            _ePersonalityType = Type.GetType("SAIN.Models.Preset.Personalities.EPersonality, SAIN");
+            // SAIN 4.5 moved the enum to the SAIN.Preset.Shared assembly; older versions keep it in SAIN.
+            _ePersonalityType = Type.GetType("SAIN.Preset.Shared.Models.Preset.Personalities.EPersonality, SAIN.Preset.Shared")
+                                ?? Type.GetType("SAIN.Models.Preset.Personalities.EPersonality, SAIN");
             if (_botManagerComponentType == null)
             {
                 Log.Info("SainPersonality: SAIN.Components.BotManagerComponent not found — SAIN missing or version-mismatched. Every PMC will resolve to Average.");

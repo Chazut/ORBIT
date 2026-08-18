@@ -150,9 +150,9 @@ public static class BackpackSwapper
         foreach (var item in itemsToMove)
         {
             ct.ThrowIfCancellationRequested();
-            var place = InteractionsHandlerClass.QuickFindAppropriatePlace(
+            var place = ItemManipulator.QuickFindAppropriatePlace(
                 item, ic, newGrids,
-                InteractionsHandlerClass.EMoveItemOrder.PickUp, true);
+                ItemManipulator.EMoveItemOrder.PickUp, true);
             if (!place.Succeeded)
             {
                 Log.Debug($"BackpackSwap.Transfer({nick}): QFAP failed for {item.LocalizedName()} — aborting transfer");

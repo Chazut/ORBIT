@@ -5,6 +5,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Comfort.Common;
+using Diz.LanguageExtensions;
 using EFT;
 using EFT.Interactive;
 using EFT.InventoryLogic;
@@ -356,27 +357,27 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
                     containerWeapons.Add((w, entry.Path));
                     continue;
                 }
-                if (entry.Item is ArmorItemClass armorItem)
+                if (entry.Item is Armor armorItem)
                 {
                     containerArmors.Add((armorItem, entry.Path));
                     continue;
                 }
-                if (entry.Item is HeadwearItemClass helmetItem)
+                if (entry.Item is Headwear helmetItem)
                 {
                     containerHelmets.Add((helmetItem, entry.Path));
                     continue;
                 }
-                if (entry.Item is VestItemClass rigItem)
+                if (entry.Item is Vest rigItem)
                 {
                     containerRigs.Add((rigItem, entry.Path));
                     continue;
                 }
-                if (entry.Item is BackpackItemClass backpackItem)
+                if (entry.Item is Backpack backpackItem)
                 {
                     containerBackpacks.Add((backpackItem, entry.Path));
                     continue;
                 }
-                if (entry.Item is HeadphonesItemClass headsetItem)
+                if (entry.Item is Headphones headsetItem)
                 {
                     containerHeadsets.Add((headsetItem, entry.Path));
                     continue;
@@ -1315,18 +1316,18 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
         return !profile.WillBeAPlayerScav();
     }
 
-    private GStruct154<GInterface424> FindPlace(DrainEntry entry, InventoryController inventoryController, string name, float price)
+    private OperationResult<IItemOperationResult> FindPlace(DrainEntry entry, InventoryController inventoryController, string name, float price)
     {
-        var targets = inventoryController.Inventory.Equipment.ToEnumerable<InventoryEquipment>();
-        var place = InteractionsHandlerClass.QuickFindAppropriatePlace(
+        var targets = new[] { inventoryController.Inventory.Equipment };
+        var place = ItemManipulator.QuickFindAppropriatePlace(
             entry.Item, inventoryController, targets,
-            InteractionsHandlerClass.EMoveItemOrder.PickUp, true);
+            ItemManipulator.EMoveItemOrder.PickUp, true);
         if (!place.Succeeded)
             Log.Debug($"OrbitLootHandler.Pickup({Nick}): SKIP {name} at {entry.Path} ({entry.Item.Width}x{entry.Item.Height}, price={price:N0}₽, no slot found — {DescribeFreeSpace(inventoryController)})");
         return place;
     }
 
-    private async Task<bool> RunTransactionAsync(GStruct154<GInterface424> place, string name, CancellationToken ct)
+    private async Task<bool> RunTransactionAsync(OperationResult<IItemOperationResult> place, string name, CancellationToken ct)
     {
         var inventoryController = _bot.GetPlayer?.InventoryController;
         if (inventoryController == null) return false;
@@ -1409,8 +1410,8 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
     // (tactical), and dogtags (quest hand-ins). Smokes / flashes / gas grenades stay on the normal gate.
     private static bool IsValueGateBypass(Item item, out string reason)
     {
-        if (item is MoneyItemClass) { reason = "currency"; return true; }
-        if (item is ThrowWeapItemClass throwable && throwable.ThrowType == ThrowWeapType.frag_grenade)
+        if (item is Money) { reason = "currency"; return true; }
+        if (item is ThrowWeap throwable && throwable.ThrowType == ThrowWeapType.frag_grenade)
         {
             reason = "frag grenade";
             return true;
@@ -1436,7 +1437,7 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
         if (_postSwapWeapons.Count == 0) return false;
         switch (item)
         {
-            case MagazineItemClass mag:
+            case Magazine mag:
                 foreach (var w in _postSwapWeapons)
                 {
                     var slot = w.GetMagazineSlot();
@@ -1452,7 +1453,7 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
                     catch { /* BSG can throw on filter probe — treat as no-fit */ }
                 }
                 return false;
-            case AmmoItemClass ammo:
+            case Ammo ammo:
                 foreach (var w in _postSwapWeapons)
                 {
                     if (string.Equals(ammo.Caliber, w.AmmoCaliber, System.StringComparison.OrdinalIgnoreCase))

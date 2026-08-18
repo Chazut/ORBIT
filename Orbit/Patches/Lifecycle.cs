@@ -35,7 +35,7 @@ public class OrbitInitPatch : ModulePatch
 }
 
 /// <summary>
-/// Per-frame driver. AICoreControllerClass.Update is where BSG ticks the bot layer + action machinery, which
+/// Per-frame driver. AICoreController.Update is where BSG ticks the bot layer + action machinery, which
 /// is the right moment to evaluate dispatch state. Runs as a POSTFIX — running a prefix or replacing the
 /// method nulls the in-flight ActualPath inside BSG's own code, causing path jobs to be resubmitted
 /// needlessly when the brain layer gets deactivated mid-tick.
@@ -44,14 +44,14 @@ public class OrbitTickPatch : ModulePatch
 {
     protected override MethodBase GetTargetMethod()
     {
-        return typeof(AICoreControllerClass).GetMethod(nameof(AICoreControllerClass.Update));
+        return typeof(AICoreController).GetMethod(nameof(AICoreController.Update));
     }
 
     [PatchPostfix]
-    public static void Postfix(AICoreControllerClass __instance)
+    public static void Postfix(AICoreController __instance)
     {
-        // Bool_0 is BSG's IsActive flag — skip the tick when their controller hasn't enabled itself.
-        if (!__instance.Bool_0)
+        // _enable is BSG's IsActive flag — skip the tick when their controller hasn't enabled itself.
+        if (!__instance._enable)
             return;
 
         // The singleton can be absent here: released at raid end while a queued AICoreController tick

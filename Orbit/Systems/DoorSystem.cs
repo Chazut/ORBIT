@@ -79,6 +79,6 @@ public class DoorSystem
     {
         if (doorCollider == null) return;
         if (pomCollider != null) Physics.IgnoreCollision(pomCollider, doorCollider, ignore);
-        if (botCollider != null) EFTPhysicsClass.IgnoreCollision(botCollider, doorCollider, ignore);
+        if (botCollider != null) PhysicsExtensions.IgnoreCollision(botCollider, doorCollider, ignore);
     }
 }

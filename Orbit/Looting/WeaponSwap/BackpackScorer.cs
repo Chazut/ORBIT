@@ -1,3 +1,4 @@
+using EFT;
 using EFT.InventoryLogic;
 
 namespace Orbit.Looting.WeaponSwap;

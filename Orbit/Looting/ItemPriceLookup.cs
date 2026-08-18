@@ -11,7 +11,7 @@ public static class ItemPriceLookup
         if (item?.Template == null) return 0f;
         // Normal clients: read EFT's handbook directly (unchanged). On a FIKA headless client this Instance
         // is never created (issue #5), so fall back to the server-fetched price cache populated at init.
-        var handbook = Singleton<HandbookClass>.Instance;
+        var handbook = Singleton<EFT.HandBook.Handbook>.Instance;
         if (handbook != null)
         {
             try { return (float)handbook.GetBasePrice(item.Template._id); }

@@ -11,7 +11,7 @@ namespace Orbit.Patches;
 
 /// <summary>
 /// BSG has two BotMover teleport methods. We intercept the "hard" rescue —
-/// <c>BotMover.method_10(posiblePos)</c> — which snaps a stuck bot back to
+/// <c>BotMover.CastFromPos(posiblePos)</c> — which snaps a stuck bot back to
 /// its last good cast point. The public <c>Teleport</c> overload is a soft in-bounds correction we don't care
 /// about.
 ///
@@ -29,7 +29,7 @@ public class RescueInterceptPatch : ModulePatch
 
     protected override MethodBase GetTargetMethod()
     {
-        return typeof(BotMover).GetMethod(nameof(BotMover.method_10));
+        return typeof(BotMover).GetMethod(nameof(BotMover.CastFromPos));
     }
 
     [PatchPrefix]

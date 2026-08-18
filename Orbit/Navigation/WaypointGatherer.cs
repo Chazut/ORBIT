@@ -172,7 +172,7 @@ public class WaypointGatherer(float cellSize, BotsController botsController)
     {
         // Arrival radii for "real" targets. 1m euclidean — matches BSG's native interaction range.
         // Wall-through false-arrivals are prevented by the 3D Physics.Raycast (vs.
-        // LayerMaskClass.HighPolyWithTerrainMask) gate in GotoObjectiveAction, same raycast BSG uses for
+        // LayersMaskController.HighPolyWithTerrainMask) gate in GotoObjectiveAction, same raycast BSG uses for
         // cover/vision. BSG's BotMover nav-snap drift (1.5-2.5m off Waypoint.Position) is absorbed by
         // GotoObjectiveAction's nav-snap rescue path (Stopped + ≤4m + raycast clear → accept arrival).
         //

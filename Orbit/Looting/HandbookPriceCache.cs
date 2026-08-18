@@ -7,14 +7,14 @@ using SPT.Common.Http;
 namespace Orbit.Looting;
 
 /// <summary>
-/// Headless-safe item base-price cache. EFT's <c>Singleton&lt;HandbookClass&gt;</c> is built only by the
-/// main-menu / profile flow (HandbookClass ctor → PreloaderUI.MenuTaskBar.InitHandbook), which a FIKA
+/// Headless-safe item base-price cache. EFT's <c>Singleton&lt;EFT.HandBook.Handbook&gt;</c> is built only by the
+/// main-menu / profile flow (EFT.HandBook.Handbook ctor → PreloaderUI.MenuTaskBar.InitHandbook), which a FIKA
 /// headless client skips entirely — so on headless it stays null forever, every <see cref="ItemPriceLookup"/>
 /// returns 0, and bots treat all loot as worthless (issue #5). This pulls the same handbook base prices
 /// straight from the SPT server over HTTP at init (the <c>/client/handbook/templates</c> route EFT itself
 /// uses, which is alive on a headless client since it still talks to the SPT server), with the on-disk
 /// <c>handbook.json</c> as a fallback. Populated once; <see cref="ItemPriceLookup"/> only consults it when
-/// HandbookClass is absent, so normal clients are byte-for-byte unchanged.
+/// EFT.HandBook.Handbook is absent, so normal clients are byte-for-byte unchanged.
 /// </summary>
 public static class HandbookPriceCache
 {
@@ -64,11 +64,11 @@ public static class HandbookPriceCache
                 Log.Info($"HandbookPriceCache: loaded {_prices.Count} base prices from disk handbook.json");
                 return;
             }
-            Log.Error("HandbookPriceCache: no prices from server or disk — loot value falls back to HandbookClass if present, else 0");
+            Log.Error("HandbookPriceCache: no prices from server or disk — loot value falls back to EFT.HandBook.Handbook if present, else 0");
         }
         catch (Exception e)
         {
-            Log.Error($"HandbookPriceCache: disk handbook load failed ({e}) — loot value falls back to HandbookClass if present, else 0");
+            Log.Error($"HandbookPriceCache: disk handbook load failed ({e}) — loot value falls back to EFT.HandBook.Handbook if present, else 0");
         }
     }
 

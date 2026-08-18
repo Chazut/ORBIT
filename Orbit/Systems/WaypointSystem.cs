@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using EFT;
+using EFT.InventoryLogic;
 using EFT.Interactive;
 using Orbit.Config;
 using Orbit.Entities;
@@ -313,9 +314,9 @@ public class WaypointSystem
     {
         _zones.Clear();
 
-        for (var i = 0; i < _botsController.BotSpawner.AllBotZones.Length; i++)
+        for (var i = 0; i < _botsController.BotSpawner._allBotZones.Length; i++)
         {
-            var botZone = _botsController.BotSpawner.AllBotZones[i];
+            var botZone = _botsController.BotSpawner._allBotZones[i];
 
             if (!_zoneConfig.Value.BuiltinZones.TryGetValue(botZone.name, out var builtinZone))
                 continue;
@@ -821,7 +822,7 @@ public class WaypointSystem
         if (leader?.LookSensor == null) return false;
         var start = leader.LookSensor.HeadPoint;
         var direction = corpse.Position - start;
-        var blocked = Physics.Raycast(start, direction, direction.magnitude, LayerMaskClass.HighPolyWithTerrainMask);
+        var blocked = Physics.Raycast(start, direction, direction.magnitude, LayersMaskController.HighPolyWithTerrainMask);
         return !blocked;
     }
 
@@ -911,7 +912,7 @@ public class WaypointSystem
                         // LoS raycast from this member's head to the corpse.
                         var head = member.Bot.LookSensor.HeadPoint;
                         var dir = loc.Position - head;
-                        var blocked = Physics.Raycast(head, dir, dir.magnitude, LayerMaskClass.HighPolyWithTerrainMask);
+                        var blocked = Physics.Raycast(head, dir, dir.magnitude, LayersMaskController.HighPolyWithTerrainMask);
                         if (blocked) continue;
 
                         return loc;
@@ -2673,13 +2674,13 @@ public class WaypointSystem
 
     /// <summary>
     /// World positions of every map zone with a positive Force (max > 0). Builtin zones resolve through BSG's
-    /// BotSpawner.AllBotZones by name; custom zones come from the explicit Position in Config. Returns an
+    /// BotSpawner._allBotZones by name; custom zones come from the explicit Position in Config. Returns an
     /// empty list when the map has no PvP zones configured.
     /// </summary>
     public List<Vector3> GetPositiveForceZoneAnchors()
     {
         var result = new List<Vector3>();
-        var botZones = _botsController?.BotSpawner?.AllBotZones;
+        var botZones = _botsController?.BotSpawner?._allBotZones;
         if (botZones != null)
         {
             for (var i = 0; i < botZones.Length; i++)
@@ -2781,7 +2782,7 @@ public class WaypointSystem
                 return ItemPriceLookup.GetPrice(li.Item);
             }
             if (loc.Target is LootableContainer container
-                && container.ItemOwner?.RootItem is SearchableItemItemClass searchable)
+                && container.ItemOwner?.RootItem is SearchableItem searchable)
             {
                 var sum = 0f;
                 var grids = searchable.Grids;
@@ -2815,7 +2816,7 @@ public class WaypointSystem
         if (loc.Target == null) return 0f;
         if (loc.Target is LootItem li && li.Item != null) return 1f;
         if (loc.Target is LootableContainer container
-            && container.ItemOwner?.RootItem is SearchableItemItemClass searchable)
+            && container.ItemOwner?.RootItem is SearchableItem searchable)
         {
             var count = 0;
             var grids = searchable.Grids;

@@ -1,3 +1,4 @@
+using EFT;
 using System.Collections.Generic;
 using EFT.InventoryLogic;
 using UnityEngine;
@@ -105,17 +106,17 @@ public static class WeaponScorer
         if (items == null)
             return new AmmoSnapshot(0, 0, 0);
 
-        // Walk descends into mag.Cartridges, so every round is yielded as an AmmoItemClass. To count each
+        // Walk descends into mag.Cartridges, so every round is yielded as an Ammo. To count each
         // round exactly once AND only when it's usable (= loose, or sitting in a mag the weapon accepts),
         // gate on the cartridge's PARENT:
-        //   - parent is a MagazineItemClass → only count if that mag fits this weapon's mag slot.
+        //   - parent is a Magazine → only count if that mag fits this weapon's mag slot.
         //     Rounds locked in incompatible mag types (e.g. AK 7.62x39 mag vs SKS) stay invisible — a
         //     bot can't transfer them mid-combat, so they're not "usable" for this weapon.
         //   - parent is a grid (ammo box, rig pouch, etc.) → loose ammo, always count.
         //   - parent is the weapon's chamber → counted as loaded, always count.
         foreach (var item in items)
         {
-            if (item is not AmmoItemClass ammo) continue;
+            if (item is not Ammo ammo) continue;
             if (!string.Equals(ammo.Caliber, caliber, System.StringComparison.OrdinalIgnoreCase)) continue;
             if (!IsAmmoUsableByWeapon(ammo, magSlot)) continue;
             totalRounds += ammo.StackObjectsCount;
@@ -132,7 +133,7 @@ public static class WeaponScorer
         // pool's max-pen/max-dmg only when the mag is empty.
         var loadedPen = 0;
         var loadedDmg = 0;
-        var loadedAmmo = weapon.GetCurrentMagazine()?.FirstRealAmmo() as AmmoItemClass;
+        var loadedAmmo = weapon.GetCurrentMagazine()?.FirstRealAmmo() as Ammo;
         if (loadedAmmo != null) ConsiderAmmoQuality(loadedAmmo, ref loadedPen, ref loadedDmg);
         var bestPen = loadedPen > 0 ? loadedPen : fallbackPen;
         var bestDmg = loadedDmg > 0 ? loadedDmg : fallbackDmg;
@@ -147,10 +148,10 @@ public static class WeaponScorer
     /// reload-from-other-mag flow in combat — and must be filtered out so the score reflects what the
     /// weapon can actually feed.
     /// </summary>
-    private static bool IsAmmoUsableByWeapon(AmmoItemClass ammo, Slot weaponMagSlot)
+    private static bool IsAmmoUsableByWeapon(Ammo ammo, Slot weaponMagSlot)
     {
         var parent = ammo?.Parent?.Container?.ParentItem;
-        if (parent is not MagazineItemClass mag) return true; // loose ammo (grid / chamber / etc.) — usable
+        if (parent is not Magazine mag) return true; // loose ammo (grid / chamber / etc.) — usable
         if (weaponMagSlot == null) return false;
         try { return weaponMagSlot.CheckCompatibility(mag); }
         catch { return false; }
@@ -182,7 +183,7 @@ public static class WeaponScorer
         return factor;
     }
 
-    private static void ConsiderAmmoQuality(AmmoItemClass ammo, ref int bestPen, ref int bestDmg)
+    private static void ConsiderAmmoQuality(Ammo ammo, ref int bestPen, ref int bestDmg)
     {
         if (ammo == null) return;
         if (ammo.PenetrationPower > bestPen) bestPen = ammo.PenetrationPower;
@@ -225,7 +226,7 @@ public static class WeaponScorer
             // carry was invisible to candidate scoring even though the loose rounds would be perfectly
             // usable post-strip. BSG's own Equipment.GetAllItems() descends into cartridges; matching that
             // behaviour here closes the CAND-vs-PRI asymmetry on cross-platform calibers.
-            if (item is MagazineItemClass mag && mag.Cartridges?.Items != null)
+            if (item is Magazine mag && mag.Cartridges?.Items != null)
                 foreach (var round in mag.Cartridges.Items)
                     if (round != null) stack.Push(round);
         }

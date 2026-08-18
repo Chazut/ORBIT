@@ -8,7 +8,7 @@ namespace Orbit.UI;
 
 /// <summary>
 /// Suffixes EFT's bottom-left version label with " | ORBIT &lt;version&gt;" so players can see at a glance
-/// the mod is loaded. Mirrors SAIN's version- label patch — patching PreloaderUI.method_6 in PREFIX and
+/// the mod is loaded. Mirrors SAIN's version- label patch — patching PreloaderUI.RefreshCornerLabel in PREFIX and
 /// writing the suffix into both the local version string AND the LocalizedText's LocalizationKey.
 ///
 /// The LocalizationKey side is essential: EFT's UI re-reads it any time the language changes or the label
@@ -23,7 +23,7 @@ public class VersionLabelPatch : ModulePatch
 
     protected override MethodBase GetTargetMethod()
     {
-        return AccessTools.Method(typeof(PreloaderUI), nameof(PreloaderUI.method_6));
+        return AccessTools.Method(typeof(PreloaderUI), nameof(PreloaderUI.RefreshCornerLabel));
     }
 
     [PatchPrefix]

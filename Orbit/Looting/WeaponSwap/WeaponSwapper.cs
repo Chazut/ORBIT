@@ -1,3 +1,4 @@
+using Diz.LanguageExtensions;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -350,8 +351,8 @@ public static class WeaponSwapper
     // execute" build failures and main-thread stalls.
     private const int PostTransactionSettleMs = 2500;
 
-    internal static async Task<bool> RunGuardedTransactionAsync<T>(BotOwner bot, GStruct154<T> op, string label, string nick, CancellationToken ct)
-        where T : IRaiseEvents
+    internal static async Task<bool> RunGuardedTransactionAsync<T>(BotOwner bot, OperationResult<T> op, string label, string nick, CancellationToken ct)
+        where T : IOperationResult
     {
         var ic = bot.GetPlayer?.InventoryController;
         if (ic == null) return false;
@@ -394,7 +395,7 @@ public static class WeaponSwapper
 
     /// <summary>
     /// Atomic positional swap of two items in their current addresses. Uses <see
-    /// cref="InteractionsHandlerClass.Swap"/>, the same op the vanilla UI dispatches when dragging an item
+    /// cref="ItemManipulator.Swap"/>, the same op the vanilla UI dispatches when dragging an item
     /// onto an already-occupied slot. Neither slot is transiently empty during the exchange.
     /// </summary>
     internal static async Task<bool> SwapInPlaceAsync(BotOwner bot, Item itemA, Item itemB, string nick, CancellationToken ct)
@@ -410,7 +411,7 @@ public static class WeaponSwapper
         }
         var descA = DescribeAddress(addrA, bot);
         var descB = DescribeAddress(addrB, bot);
-        var op = InteractionsHandlerClass.Swap(itemA, addrB, itemB, addrA, ic, true);
+        var op = ItemManipulator.Swap(itemA, addrB, itemB, addrA, ic, true);
         if (!op.Succeeded)
         {
             Log.Warning($"WeaponSwap.Swap({nick}, {itemA.LocalizedName()}@{descA} ↔ {itemB.LocalizedName()}@{descB}): build FAILED — {op.Error}");
@@ -431,7 +432,7 @@ public static class WeaponSwapper
             return false;
         }
         var address = slot.CreateItemAddress();
-        var op = InteractionsHandlerClass.Move(item, address, ic, true);
+        var op = ItemManipulator.Move(item, address, ic, true);
         if (!op.Succeeded)
         {
             Log.Warning($"WeaponSwap.Move({nick}, {item.LocalizedName()} from {fromDesc} → {destSlotId}): build FAILED — {op.Error}");
@@ -584,7 +585,7 @@ public static class WeaponSwapper
             var pricePerSlot = ItemPriceLookup.GetPricePerSlot(mod);
             string reason = null;
             if (pricePerSlot >= threshold) reason = $"price/slot={pricePerSlot:N0}₽ ≥ {threshold:N0}₽";
-            else if (mod is MagazineItemClass mag && postSwapMagSlots.Count > 0)
+            else if (mod is Magazine mag && postSwapMagSlots.Count > 0)
             {
                 foreach (var pms in postSwapMagSlots)
                 {
@@ -608,9 +609,9 @@ public static class WeaponSwapper
             ct.ThrowIfCancellationRequested();
             try
             {
-                var place = InteractionsHandlerClass.QuickFindAppropriatePlace(
+                var place = ItemManipulator.QuickFindAppropriatePlace(
                     mod, ic, emptyGrids,
-                    InteractionsHandlerClass.EMoveItemOrder.PickUp, true);
+                    ItemManipulator.EMoveItemOrder.PickUp, true);
                 if (!place.Succeeded)
                 {
                     Log.Debug($"WeaponStrip({nick}): QFAP failed for {mod.LocalizedName()} — no room, leaving on weapon");

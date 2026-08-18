@@ -207,7 +207,7 @@ public class Plugin : BaseUnityPlugin
     {
         LogSource = Logger;
 
-        // The version-label patch must run BEFORE the delayed coroutine — EFT calls PreloaderUI.method_6
+        // The version-label patch must run BEFORE the delayed coroutine — EFT calls PreloaderUI.RefreshCornerLabel
         // during early scene init, well before our 5s delay completes. SAIN registers it immediately at boot
         // for the same reason.
         EnableSafe(new VersionLabelPatch());
@@ -232,8 +232,8 @@ public class Plugin : BaseUnityPlugin
             Log.Error($"ORBIT config bind failed (sub-systems will degrade to defaults): {ex}");
         }
 
-        // Item pricing: ItemPriceLookup prefers EFT's Singleton<HandbookClass> when present, else the
-        // server-fetched price cache below. HandbookClass is built by the main-menu/profile flow, which a
+        // Item pricing: ItemPriceLookup prefers EFT's Singleton<EFT.HandBook.Handbook> when present, else the
+        // server-fetched price cache below. EFT.HandBook.Handbook is built by the main-menu/profile flow, which a
         // FIKA headless client skips, so we can't depend on it (issue #5).
         StartCoroutine(WaitForHandbook());
 
@@ -327,23 +327,23 @@ public class Plugin : BaseUnityPlugin
 
     private IEnumerator WaitForHandbook()
     {
-        // Populate the server-backed price cache up front so headless clients (where HandbookClass never
+        // Populate the server-backed price cache up front so headless clients (where EFT.HandBook.Handbook never
         // appears) still have loot values. The SPT HTTP backend is up well before any raid; if the fetch
         // somehow fails it falls back to the on-disk handbook.json (see HandbookPriceCache).
         Looting.HandbookPriceCache.Init();
 
-        // Normal clients also get Singleton<HandbookClass> once the menu builds it; ItemPriceLookup uses it
+        // Normal clients also get Singleton<EFT.HandBook.Handbook> once the menu builds it; ItemPriceLookup uses it
         // directly when present. This is just a log — pricing already works via the cache either way, so we
         // don't block on it forever like before (headless would never satisfy the old loop).
         var attempts = 0;
-        while (Singleton<HandbookClass>.Instance == null && attempts < 60)
+        while (Singleton<EFT.HandBook.Handbook>.Instance == null && attempts < 60)
         {
             attempts++;
             yield return new WaitForSeconds(1f);
         }
-        Log.Info(Singleton<HandbookClass>.Instance != null
-            ? $"HandbookClass ready after {attempts}s — ItemPriceLookup using it directly"
-            : "HandbookClass absent (headless client?) — ItemPriceLookup using the server price cache");
+        Log.Info(Singleton<EFT.HandBook.Handbook>.Instance != null
+            ? $"EFT.HandBook.Handbook ready after {attempts}s — ItemPriceLookup using it directly"
+            : "EFT.HandBook.Handbook absent (headless client?) — ItemPriceLookup using the server price cache");
     }
 
     /// <summary>
