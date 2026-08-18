@@ -407,7 +407,7 @@ public class WaypointSystem
         var requestCoords = WorldToCell(worldPos);
 
         if (!IsValidCell(requestCoords))
-            return ScavOrIslandedLocalOnly(entity) ? null : RequestFar(entity);
+            return FactionLocalOnly(entity) ? null : RequestFar(entity);
 
         // Closeness short-circuit: if the squad is currently in the anchor cell of any pending main
         // objective, pick from THIS cell instead of scanning neighbours. Without this, the inverse-distance
@@ -488,7 +488,7 @@ public class WaypointSystem
                 var localPick = AssignWaypoint(entity, requestCoords);
                 if (localPick != null) return localPick;
             }
-            return ScavOrIslandedLocalOnly(entity) ? null : RequestFar(entity);
+            return FactionLocalOnly(entity) ? null : RequestFar(entity);
         }
 
         prefDirection.Normalize();
@@ -517,7 +517,7 @@ public class WaypointSystem
             var localPick = AssignWaypoint(entity, requestCoords);
             if (localPick != null) return localPick;
         }
-        return ScavOrIslandedLocalOnly(entity) ? null : RequestFar(entity);
+        return FactionLocalOnly(entity) ? null : RequestFar(entity);
     }
 
     // Tuning for the per-scav home-attraction force. 3.0 keeps the home vector decisively above momentum
@@ -528,9 +528,8 @@ public class WaypointSystem
     private const float HomeAttractionDistanceForFullStrength = 5f; // in cells
 
     /// <summary>
-    /// Per-squad pull back toward the squad leader's spawn cell, for scavs only (and only when Roaming Scavs
-    /// is OFF). Without this, scavs that stay 'local' via the 3x3 neighbour restriction still chain neighbour
-    /// hops indefinitely and end up far from their spawn quartier.
+    /// Per-squad pull back toward the squad leader's spawn cell for supported non-PMC squads that did not
+    /// roll map-wide roaming. Without this, local squads can chain neighbour hops out of their spawn area.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static Vector2 ComputeHomeAttraction(Entity entity, Vector2Int currentCoords)
@@ -538,15 +537,14 @@ public class WaypointSystem
         if (entity is not Squad squad) return Vector2.zero;
         var leaderBot = squad.Leader?.Bot;
         var role = leaderBot?.Profile?.Info?.Settings?.Role;
-        if (!role.HasValue || !role.Value.IsScav()) return Vector2.zero;
+        if (!role.HasValue) return Vector2.zero;
         // PlayerScavs share WildSpawnType.assault with bot scavs so IsScav() returns true for them too — but
         // the intent is PlayerScavs follow their main objectives like PMCs, not the bot-scav home-pinning.
         // Without this exclusion the home pull (up to magnitude 3.0) competes with the main-objective pull
         // (max 4.0) and PlayerScavs drift around their spawn quartier instead of biasing toward their
         // assigned mains.
         if (leaderBot?.Profile != null && leaderBot.Profile.WillBeAPlayerScav()) return Vector2.zero;
-        // When RoamingScavs is ON, scavs are free to wander like PMCs and the home pull is silenced.
-        if (Plugin.RoamingScavs.Value) return Vector2.zero;
+        if (!IsAreaRoamingFaction(role.Value) || CanFactionRoamAreas(squad, role.Value)) return Vector2.zero;
 
         if (!squad.SpawnCell.HasValue) squad.SpawnCell = currentCoords;
         var spawn = squad.SpawnCell.Value;
@@ -617,12 +615,11 @@ public class WaypointSystem
     }
 
     /// <summary>
-    /// Decides whether this entity should be denied RequestFar (the map-wide dispatch fallback). Scavs are
-    /// pinned to their spawn area by default; Goons and Bloodhounds roam by default (matching vanilla) but can
-    /// be pinned via their toggles. Everyone else (PMCs, raiders, bosses, cultists) roams freely.
+    /// Decides whether this entity should be denied RequestFar (the map-wide dispatch fallback). Supported
+    /// non-PMC factions use one cached roaming roll per squad; all other factions roam normally.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static bool ScavOrIslandedLocalOnly(Entity entity)
+    private static bool FactionLocalOnly(Entity entity)
     {
         if (entity is not Squad squad) return false;
         var leaderBot = squad.Leader?.Bot;
@@ -631,10 +628,46 @@ public class WaypointSystem
         // PlayerScavs share WildSpawnType.assault with bot scavs but are NOT pinned — they follow the same
         // main-objective dispatch as PMCs and need RequestFar to reach mains anywhere on the map.
         var isPlayerScav = leaderBot?.Profile != null && leaderBot.Profile.WillBeAPlayerScav();
-        if (role.Value.IsScav() && !isPlayerScav && !Plugin.RoamingScavs.Value) return true;
-        if (role.Value.IsGoon() && !Plugin.RoamingGoons.Value) return true;
-        if (role.Value.IsBloodhound() && !Plugin.RoamingBloodhounds.Value) return true;
+        if (isPlayerScav) return false;
+        if (IsAreaRoamingFaction(role.Value) && !CanFactionRoamAreas(squad, role.Value)) return true;
         return false;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool IsAreaRoamingFaction(WildSpawnType role)
+        => role.IsScav() || role.IsGoon() || role.IsBloodhound();
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool CanFactionRoamAreas(Squad squad, WildSpawnType role)
+    {
+        if (squad.AreaRoamingAllowed.HasValue) return squad.AreaRoamingAllowed.Value;
+
+        int chancePct;
+        string faction;
+        if (role.IsScav())
+        {
+            chancePct = Plugin.ScavAreaRoamingChancePct?.Value ?? 20;
+            faction = "scav";
+        }
+        else if (role.IsGoon())
+        {
+            chancePct = Plugin.GoonAreaRoamingChancePct?.Value ?? 100;
+            faction = "goon";
+        }
+        else if (role.IsBloodhound())
+        {
+            chancePct = Plugin.BloodhoundAreaRoamingChancePct?.Value ?? 100;
+            faction = "bloodhound";
+        }
+        else
+        {
+            return true;
+        }
+
+        var allowed = chancePct >= 100 || chancePct > 0 && Random.Range(0, 100) < chancePct;
+        squad.AreaRoamingAllowed = allowed;
+        Log.Debug($"{squad} {faction} area roaming {(allowed ? "enabled" : "disabled")} ({chancePct}% chance)");
+        return allowed;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
