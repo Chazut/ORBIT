@@ -1,4 +1,3 @@
-# StatRewards
 ![Stars](https://img.shields.io/github/stars/Chazut/ORBIT?style=flat-square&label=STARS&color=007ec6)
 ![Issues](https://img.shields.io/github/issues/Chazut/ORBIT?style=flat-square&label=ISSUES&color=44cc11)
 ![Downloads](https://img.shields.io/github/downloads/Chazut/ORBIT/total?style=flat-square&label=DOWNLOADS&color=44cc11)
