@@ -15,7 +15,6 @@ using Orbit.Core;
 using Orbit.Interop;
 using Orbit.Looting;
 using Orbit.Patches;
-using Orbit.UI;
 using SPT.Reflection.Patching;
 using UnityEngine;
 
@@ -206,11 +205,6 @@ public class Plugin : BaseUnityPlugin
     private void Awake()
     {
         LogSource = Logger;
-
-        // The version-label patch must run BEFORE the delayed coroutine — EFT calls PreloaderUI.RefreshCornerLabel
-        // during early scene init, well before our 5s delay completes. SAIN registers it immediately at boot
-        // for the same reason.
-        EnableSafe(new VersionLabelPatch());
 
         StartCoroutine(DelayedLoad());
     }
