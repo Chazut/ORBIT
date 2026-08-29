@@ -1,0 +1,171 @@
+@inherits LayoutComponentBase
+@implements IDisposable
+@inject ConfigService Configs
+@inject Orbit.Server.Zones.ZoneStoreService ZoneStore
+@inject ISnackbar Snackbar
+
+<MudThemeProvider IsDarkMode="true" Theme="_orbitTheme" />
+<MudPopoverProvider />
+<MudSnackbarProvider />
+
+<MudLayout>
+    <MudAppBar Elevation="0" Dense="true" Style="border-bottom: 1px solid var(--mud-palette-lines-default); backdrop-filter: blur(6px);">
+        <MudIconButton Icon="@Icons.Material.Filled.Menu" Color="Color.Inherit" Edge="Edge.Start" OnClick="@(() => _drawerOpen = !_drawerOpen)" />
+        <svg width="22" height="22" viewBox="0 0 24 24" style="margin-right:10px; flex-shrink:0">
+            <circle cx="12" cy="12" r="4.2" fill="#FFB454" />
+            <ellipse cx="12" cy="12" rx="10" ry="4.2" fill="none" stroke="#4FD1C5" stroke-width="1.3" transform="rotate(-24 12 12)" />
+            <circle cx="3.2" cy="16" r="1.6" fill="#4FD1C5" />
+        </svg>
+        <MudText Typo="Typo.h6" Style="letter-spacing: .35em; font-weight: 600;">ORBIT</MudText>
+        <MudText Typo="Typo.body2" Class="ml-3 d-none d-sm-flex" Style="opacity:.5">server config</MudText>
+        <MudSpacer />
+        @if (_pendingChanges.Count > 0)
+        {
+            <div class="mr-3" style="position: relative">
+                <MudButton Variant="Variant.Outlined" Color="Color.Warning" Size="Size.Small"
+                           StartIcon="@Icons.Material.Filled.EditNote"
+                           OnClick="@(() => _changesOpen = !_changesOpen)">
+                    Unsaved changes (@_pendingChanges.Count)
+                </MudButton>
+                <MudPopover Open="_changesOpen" AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight" Class="pa-0">
+                    <div class="px-4 py-2" style="max-height: 340px; overflow-y: auto; min-width: 360px">
+                        @foreach (var change in _pendingChanges)
+                        {
+                            <div class="d-flex align-center" style="gap: 8px; font-size: .8rem; padding: 3px 0; white-space: nowrap">
+                                <span style="opacity:.65">@FormatPath(change.Path)</span>
+                                <MudSpacer />
+                                <span style="opacity:.5; text-decoration: line-through">@change.From</span>
+                                <span style="opacity:.5">&rarr;</span>
+                                <span class="mud-primary-text">@change.To</span>
+                            </div>
+                        }
+                    </div>
+                    <MudDivider />
+                    <div class="d-flex px-2 py-1" style="min-width: 360px">
+                        <MudButton Size="Size.Small" StartIcon="@Icons.Material.Filled.Undo" OnClick="DiscardAll">Discard all</MudButton>
+                        <MudSpacer />
+                        <MudButton Size="Size.Small" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save" OnClick="Save">Save</MudButton>
+                    </div>
+                </MudPopover>
+            </div>
+            <MudOverlay Visible="_changesOpen" OnClick="@(() => _changesOpen = false)" ZIndex="1299" LockScroll="false" />
+        }
+        <MudTooltip Text="Saves to config.json. The game reads it at raid start: save, then start a new raid." Placement="Placement.Bottom">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save" OnClick="Save" Size="Size.Small">Save</MudButton>
+        </MudTooltip>
+        <MudLink Href="/" Color="Color.Inherit" Underline="Underline.None" Class="ml-4" Style="opacity:.6; font-size:.85rem">Server home</MudLink>
+    </MudAppBar>
+
+    <MudDrawer @bind-Open="_drawerOpen" ClipMode="DrawerClipMode.Always" Elevation="0" Breakpoint="Breakpoint.Md"
+               Style="border-right: 1px solid var(--mud-palette-lines-default);">
+        <MudNavMenu Bordered="true" Color="Color.Primary" Class="pt-2">
+            <MudNavLink Href="/orbit" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.Home">Overview</MudNavLink>
+            <MudNavLink Href="/orbit/factions" Icon="@Icons.Material.Filled.Groups">Factions</MudNavLink>
+            <MudNavLink Href="/orbit/general" Icon="@Icons.Material.Filled.Tune">General</MudNavLink>
+            <MudNavLink Href="/orbit/looting" Icon="@Icons.Material.Filled.Backpack">Looting</MudNavLink>
+            <MudNavLink Href="/orbit/extraction" Icon="@Icons.Material.Filled.ExitToApp">Extraction</MudNavLink>
+            <MudNavLink Href="/orbit/player-scav" Icon="@Icons.Material.Filled.DirectionsRun">Player Scav</MudNavLink>
+            <MudNavLink Href="/orbit/main-objectives" Icon="@Icons.Material.Filled.Flag">Main objectives</MudNavLink>
+            <MudNavLink Href="/orbit/poi-guard" Icon="@Icons.Material.Filled.Timer">POI guard</MudNavLink>
+            <MudNavLink Href="/orbit/zones" Icon="@Icons.Material.Filled.TrackChanges">Zones</MudNavLink>
+            <MudNavLink Href="/orbit/zone-editor" Icon="@Icons.Material.Filled.EditLocationAlt">Zone editor</MudNavLink>
+            <MudNavLink Href="/orbit/personalities" Icon="@Icons.Material.Filled.Psychology">Personalities</MudNavLink>
+            <MudNavLink Href="/orbit/ai-limiter" Icon="@Icons.Material.Filled.Bedtime">AI Limiter</MudNavLink>
+        </MudNavMenu>
+    </MudDrawer>
+
+    <MudMainContent Class="pa-6 pt-16">
+        @Body
+    </MudMainContent>
+</MudLayout>
+
+@code {
+    private bool _drawerOpen = true;
+
+    // ORBIT house theme: deep space navy, amber "sun" primary, teal orbit-ring secondary.
+    // Deliberately distinct from the stock MudBlazor look of the SAIN / ABPS / APBS pages.
+    private readonly MudTheme _orbitTheme = new()
+    {
+        PaletteDark = new PaletteDark
+        {
+            Primary = "#FFB454",
+            // Filled amber/teal surfaces get night-navy text: white on those light accents is unreadable.
+            PrimaryContrastText = "#0B0F1A",
+            Secondary = "#4FD1C5",
+            SecondaryContrastText = "#0B0F1A",
+            Tertiary = "#8B9BFF",
+            TertiaryContrastText = "#0B0F1A",
+            WarningContrastText = "#0B0F1A",
+            InfoContrastText = "#0B0F1A",
+            SuccessContrastText = "#0B0F1A",
+            Background = "#0B0F1A",
+            Surface = "#121826",
+            AppbarBackground = "#0B0F1ACC",
+            AppbarText = "#E6EAF2",
+            DrawerBackground = "#0E1420",
+            DrawerText = "#B9C2D4",
+            DrawerIcon = "#8A94A8",
+            TextPrimary = "#E6EAF2",
+            TextSecondary = "#9AA4B8",
+            ActionDefault = "#9AA4B8",
+            LinesDefault = "#222B3E",
+            LinesInputs = "#33405A",
+            TableLines = "#222B3E",
+            Divider = "#222B3E",
+            Info = "#4FD1C5",
+            Success = "#7BD88F",
+            Warning = "#FFB454",
+            Error = "#FF6B6B",
+            HoverOpacity = 0.08,
+        },
+        LayoutProperties = new LayoutProperties
+        {
+            DefaultBorderRadius = "10px",
+            AppbarHeight = "48px",
+        },
+    };
+
+    // The pages mutate the config object directly through their bindings, so the layout cannot be
+    // notified of edits — a 1s poll diffing against the last-saved snapshot keeps the "unsaved
+    // changes" button honest at negligible cost (one small serialize per tick).
+    private List<(string Path, string From, string To)> _pendingChanges = new();
+    private bool _changesOpen;
+    private System.Threading.Timer? _pollTimer;
+
+    protected override void OnInitialized()
+    {
+        _pollTimer = new System.Threading.Timer(_ => InvokeAsync(PollChanges), null, 1000, 1000);
+    }
+
+    public void Dispose() => _pollTimer?.Dispose();
+
+    private void PollChanges()
+    {
+        var changes = Configs.GetPendingChanges();
+        // Zone-editor edits ride the same unsaved-changes button as config edits.
+        foreach (var mapId in ZoneStore.GetPendingMaps())
+            changes.Add(($"Zone editor.{Orbit.Server.Zones.ZoneStoreService.MapLabels[mapId]}", "saved", "edited"));
+        if (changes.Count == _pendingChanges.Count && changes.SequenceEqual(_pendingChanges)) return;
+        _pendingChanges = changes;
+        if (_pendingChanges.Count == 0) _changesOpen = false;
+        StateHasChanged();
+    }
+
+    private static string FormatPath(string path) => path.Replace(".", " / ").Replace("_", " ");
+
+    private void Save()
+    {
+        Configs.Save();
+        ZoneStore.SaveAllPending();
+        PollChanges();
+        Snackbar.Add("ORBIT config saved. Takes effect next raid.", Severity.Success);
+    }
+
+    private void DiscardAll()
+    {
+        Configs.DiscardChanges();
+        ZoneStore.DiscardAllPending();
+        PollChanges();
+        Snackbar.Add("Unsaved changes discarded.", Severity.Info);
+    }
+}

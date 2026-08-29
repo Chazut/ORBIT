@@ -210,6 +210,14 @@ public class WaypointGatherer(float cellSize, BotsController botsController)
 
     private void ValidateAndAddWaypoint(List<Waypoint> collection, WaypointCategory category, string name, Vector3 position, float maxDistance = 2f, MonoBehaviour target = null)
     {
+        // Never place a POI inside a punitive border zone (minefields damage by position, dormant
+        // ghosts included). Exfils excluded: EFT owns those placements and they must stay reachable.
+        if (category != WaypointCategory.Exfil && DangerZones.IsInside(position))
+        {
+            Log.Debug($"Waypoint {category}:{name} skipped — inside a border zone (minefield)");
+            return;
+        }
+
         if (NavMesh.SamplePosition(position, out var navTarget, maxDistance, NavMesh.AllAreas))
         {
             var objective = CreateBuiltinWaypoint(category, name, navTarget.position, target);

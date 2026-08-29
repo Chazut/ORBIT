@@ -50,7 +50,7 @@ public static class PerfMonitor
         NavJobsQueuedPeak = 0;
     }
 
-    public static void Tick(int agentCount)
+    public static void Tick(int agentCount, int dormantCount)
     {
         // Toggleable (default OFF). Invalidating the window while disabled makes a mid-raid enable start a
         // clean 30s window instead of flushing a stale one.
@@ -75,7 +75,7 @@ public static class PerfMonitor
         var gc0 = GC.CollectionCount(0) - _gc0;
         // Always-level on purpose: two lines a minute, and it's the one thing every perf bug report needs —
         // Quiet logging (default ON) must not silence it.
-        Log.Always($"PERF: avg={avg:F0}fps worst={worst:F0}fps hitch50={_hitches} hitch100={_bigHitches} gc0={gc0} agents={agentCount} | islandProbes={SpawnIslandProbes} rallyWp={RallyWaypointsCreated} sweeps={SweepJobsSubmitted}s/{SweepJobsCompleted}c/{SweepJobsDrained}d navQpeak={NavJobsQueuedPeak}");
+        Log.Always($"PERF: avg={avg:F0}fps worst={worst:F0}fps hitch50={_hitches} hitch100={_bigHitches} gc0={gc0} agents={agentCount} dormant={dormantCount} | islandProbes={SpawnIslandProbes} rallyWp={RallyWaypointsCreated} sweeps={SweepJobsSubmitted}s/{SweepJobsCompleted}c/{SweepJobsDrained}d navQpeak={NavJobsQueuedPeak}");
         Reset();
     }
 }

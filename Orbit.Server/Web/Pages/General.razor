@@ -1,0 +1,27 @@
+@page "/orbit/general"
+@layout Orbit.Server.Web.Shared.MainLayout
+@inherits Orbit.Server.Web.OrbitConfigPage
+
+<PageTitle>ORBIT: General</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.Medium">
+    <PageHeader Title="General" OnReset="ResetPage" />
+
+    <SettingsCard Title="Squad behaviour" OnReset="ResetPage">
+        <OrbitSwitch @bind-Value="Cfg.General.SquadRally" Label="Squad rally"
+                     Tooltip="ON (default): when a squadmate takes fire, the others break off and converge to support (ORBIT routes them in, SAIN fights). OFF: everyone fights their own fight." />
+    </SettingsCard>
+
+    <SettingsCard Title="Client-side settings"
+                  Subtitle="Log levels, quiet logging and performance logging stay in the in-game F12 menu: they are per-machine concerns, not bot behaviour.">
+    </SettingsCard>
+</MudContainer>
+
+@code {
+    // Only the fields shown on this page (EmergencyExtractEnabled is presented on Extraction).
+    private void ResetPage()
+    {
+        var d = new OrbitServerConfig();
+        Cfg.General.SquadRally = d.General.SquadRally;
+    }
+}

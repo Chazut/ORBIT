@@ -1,0 +1,102 @@
+@* Shared editor for one SAIN personality archetype (the 13 knobs), slider edition. *@
+@inject ISnackbar Snackbar
+
+<div class="d-flex align-center mb-2">
+    <MudText Typo="Typo.subtitle2" Style="opacity:.75">Objective mix</MudText>
+    <MudSpacer />
+    <MudTooltip Text="Restore this archetype's default values. Nothing is written until you hit Save." Placement="Placement.Bottom" Arrow="true">
+        <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.RestartAlt" OnClick="DoReset">Reset archetype</MudButton>
+    </MudTooltip>
+</div>
+<MudText Typo="Typo.body2" Class="mb-2" Style="opacity:.5">
+    Shares are auto-normalized against each other, so they need not total exactly 100%.
+</MudText>
+<OrbitSlider T="float" @bind-Value="Cfg.MainMixQuest" Label="Quest share" Fmt="P0"
+             Min="0f" Max="1f" Step="0.01f"
+             Tooltip="Share of Quest mains for this archetype." />
+<OrbitSlider T="float" @bind-Value="Cfg.MainMixKills" Label="Kills share" Fmt="P0"
+             Min="0f" Max="1f" Step="0.01f"
+             Tooltip="Share of Kills mains for this archetype." />
+<OrbitSlider T="float" @bind-Value="Cfg.MainMixLootValue" Label="LootValue share" Fmt="P0"
+             Min="0f" Max="1f" Step="0.01f"
+             Tooltip="Share of LootValue mains for this archetype." />
+
+<MudText Typo="Typo.subtitle2" Class="mt-4 mb-2" Style="opacity:.75">Objectives</MudText>
+<MudGrid Spacing="4">
+    <MudItem xs="12" sm="6">
+        <OrbitSlider T="float" @bind-Value="Cfg.MainCountMin" Label="Main count min"
+                     Min="1f" Max="20f" Step="1f" Fmt="0"
+                     Tooltip="Number of mains rolled per squad, uniform between min and max." />
+    </MudItem>
+    <MudItem xs="12" sm="6">
+        <OrbitSlider T="float" @bind-Value="Cfg.MainCountMax" Label="Main count max"
+                     Min="1f" Max="20f" Step="1f" Fmt="0" />
+    </MudItem>
+    <MudItem xs="12" sm="6">
+        <OrbitSlider T="float" @bind-Value="Cfg.KillsRoamDurationMin" Label="Kills roam min" Unit="s"
+                     Min="0f" Max="900f" Step="10f" Fmt="0"
+                     Tooltip="Time the squad spends roaming the Kills anchor before completing." />
+    </MudItem>
+    <MudItem xs="12" sm="6">
+        <OrbitSlider T="float" @bind-Value="Cfg.KillsRoamDurationMax" Label="Kills roam max" Unit="s"
+                     Min="0f" Max="900f" Step="10f" Fmt="0" />
+    </MudItem>
+</MudGrid>
+
+<MudText Typo="Typo.subtitle2" Class="mt-4 mb-2" Style="opacity:.75">Looting</MudText>
+<MudGrid Spacing="4">
+    <MudItem xs="12" sm="6">
+        <OrbitSlider T="float" @bind-Value="Cfg.LootCoverageMin" Label="Loot coverage min" Fmt="P0"
+                     Min="0f" Max="1f" Step="0.05f"
+                     Tooltip="Per-POI pick probability (LootValue cell and scavenge sweep). 100% = vacuum, 30% = skips most." />
+    </MudItem>
+    <MudItem xs="12" sm="6">
+        <OrbitSlider T="float" @bind-Value="Cfg.LootCoverageMax" Label="Loot coverage max" Fmt="P0"
+                     Min="0f" Max="1f" Step="0.05f" />
+    </MudItem>
+</MudGrid>
+<OrbitSlider T="int" @bind-Value="Cfg.MiniLootThreshold" Label="Mini-loot threshold" Unit="roubles"
+             Min="0" Max="100000" Step="1000" Fmt="N0"
+             Tooltip="Minimum item value the bot bothers picking up." />
+<OrbitSlider T="float" @bind-Value="Cfg.ScavengeSweepRadius" Label="Scavenge sweep radius" Unit="m"
+             Min="0f" Max="50f" Step="1f" Fmt="0"
+             Tooltip="After a loot, chain to the nearest loose loot or corpse within this radius." />
+<OrbitSlider T="int" @bind-Value="Cfg.TopLootCellsMax" Label="Top loot cells max"
+             Min="1" Max="30" Step="1"
+             Tooltip="LootValue rolls are restricted to the top-N richest cells. Smaller = more concentration (more PvP)." />
+
+<MudText Typo="Typo.subtitle2" Class="mt-4 mb-2" Style="opacity:.75">Extraction</MudText>
+<MudGrid Spacing="4">
+    <MudItem xs="12" sm="6">
+        <OrbitSlider T="float" @bind-Value="Cfg.ExtractThresholdMin" Label="Extract threshold min" Unit="roubles"
+                     Min="0f" Max="5000000f" Step="50000f" Fmt="N0"
+                     Tooltip="Rouble value that flips the squad to extracting. Rolled once per squad, uniform between min and max." />
+    </MudItem>
+    <MudItem xs="12" sm="6">
+        <OrbitSlider T="float" @bind-Value="Cfg.ExtractThresholdMax" Label="Extract threshold max" Unit="roubles"
+                     Min="0f" Max="5000000f" Step="50000f" Fmt="N0" />
+    </MudItem>
+</MudGrid>
+
+<MudText Typo="Typo.subtitle2" Class="mt-4 mb-2" Style="opacity:.75">Movement</MudText>
+<OrbitSlider T="float" @bind-Value="Cfg.SprintPropensity" Label="Sprint propensity" Fmt="P0"
+             Min="0f" Max="1f" Step="0.05f"
+             Tooltip="0% = never sprint, 100% = always." />
+<OrbitSlider T="float" @bind-Value="Cfg.LockedDoorChance" Label="Locked door unlock chance" Fmt="P0"
+             Min="0f" Max="1f" Step="0.05f"
+             Tooltip="Probability of force-unlocking a locked door for an intermediate POI. Main-anchor POIs always roll 100%." />
+<OrbitSlider T="float" @bind-Value="Cfg.SplinterSearchRadius" Label="Follower splinter radius" Unit="m"
+             Min="0f" Max="100f" Step="1f" Fmt="0"
+             Tooltip="Non-leader members spread to splinter POIs within this radius of the leader." />
+
+@code {
+    [Parameter] public ArchetypeConfig Cfg { get; set; } = new();
+    [Parameter] public string Name { get; set; } = "";
+    [Parameter] public EventCallback OnReset { get; set; }
+
+    private async Task DoReset()
+    {
+        await OnReset.InvokeAsync();
+        Snackbar.Add($"{Name}: defaults restored. Hit Save to apply.", Severity.Info);
+    }
+}

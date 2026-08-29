@@ -1,0 +1,45 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>Orbit.Server</AssemblyName>
+    <Version>2.0.0</Version>
+    <RootNamespace>Orbit.Server</RootNamespace>
+    <!-- SPT 4.1 server root (DLL references + deploy target) -->
+    <SPT_DIR Condition=" '$(SPT_DIR)' == '' ">C:\Games\SPT-4.1\SPT_Runtime</SPT_DIR>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Per-map zone defaults, seeded from the client's compiled-in defaults (Config/Maps/Zones). -->
+    <EmbeddedResource Include="Resources\Zones\*.json" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="SPTarkov.Server.Core"><HintPath>$(SPT_DIR)\SPTarkov.Server.Core.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="SPTarkov.Server.Web"><HintPath>$(SPT_DIR)\SPTarkov.Server.Web.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="SPTarkov.DI"><HintPath>$(SPT_DIR)\SPTarkov.DI.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="SPTarkov.Common"><HintPath>$(SPT_DIR)\SPTarkov.Common.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="SemanticVersioning"><HintPath>$(SPT_DIR)\SemanticVersioning.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="MudBlazor"><HintPath>$(SPT_DIR)\MudBlazor.dll</HintPath><Private>false</Private></Reference>
+  </ItemGroup>
+
+  <Target Name="EnsureSptDir" BeforeTargets="Build">
+    <Error Condition="!Exists('$(SPT_DIR)\SPTarkov.Server.Core.dll')" Text="SPT_DIR does not point at a valid SPT 4.1 server (SPTarkov.Server.Core.dll not found)." />
+  </Target>
+
+  <PropertyGroup>
+    <ModDeployDir>$(SPT_DIR)\user\mods\ORBIT</ModDeployDir>
+  </PropertyGroup>
+
+  <Target Name="DeployMod" AfterTargets="Build" Condition="Exists('$(ModDeployDir)')">
+    <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(ModDeployDir)" SkipUnchangedFiles="true" />
+    <Message Importance="high" Text="[Orbit.Server] Deployed DLL to $(ModDeployDir)" />
+  </Target>
+
+</Project>

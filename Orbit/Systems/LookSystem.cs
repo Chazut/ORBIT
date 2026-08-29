@@ -29,6 +29,10 @@ public class LookSystem
                 continue;
             }
 
+            // Dormant body: Steering lives on the disabled GameObject, and a sleeper has no gaze to fake.
+            if (agent.IsDormant)
+                continue;
+
             var bot = agent.Bot;
             var movement = agent.Movement;
 

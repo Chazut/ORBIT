@@ -5,6 +5,7 @@ using Orbit.Entities;
 using Orbit.Sain;
 using Orbit.Systems;
 using Orbit.Tasks.Actions;
+using Orbit.Helpers;
 
 namespace Orbit.Core;
 
@@ -180,7 +181,7 @@ public class SquadRegistry(SquadData squadData, StrategyManager strategyManager,
         squad.Archetype = PersonalityArchetype.Average;
         squad.Personality = null;
         squad.SainResolutionPending = false;
-        if (isPmc && (Plugin.SainPersonalityEnabled?.Value ?? false))
+        if (isPmc && (ServerConfig.Personalities.Enabled))
         {
             squad.SainResolutionPending = true;
             squad.SainResolveDeadline = UnityEngine.Time.time + SainResolveTimeoutSeconds;

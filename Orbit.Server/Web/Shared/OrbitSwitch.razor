@@ -1,0 +1,20 @@
+@* Boolean setting: switch + optional tooltip info icon. *@
+
+<div class="d-flex align-center">
+    <MudSwitch T="bool" Value="Value" ValueChanged="OnChanged" Color="Color.Primary" Label="@Label" />
+    @if (!string.IsNullOrEmpty(Tooltip))
+    {
+        <MudTooltip Text="@Tooltip" Placement="Placement.Top" Arrow="true" Style="max-width: 340px">
+            <MudIcon Icon="@Icons.Material.Outlined.Info" Style="font-size:1rem; opacity:.45; margin-left:6px" />
+        </MudTooltip>
+    }
+</div>
+
+@code {
+    [Parameter] public string Label { get; set; } = "";
+    [Parameter] public string Tooltip { get; set; } = "";
+    [Parameter] public bool Value { get; set; }
+    [Parameter] public EventCallback<bool> ValueChanged { get; set; }
+
+    private Task OnChanged(bool v) { Value = v; return ValueChanged.InvokeAsync(v); }
+}

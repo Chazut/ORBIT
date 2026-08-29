@@ -1,0 +1,38 @@
+{
+  "BuiltinZones": {
+    "ZoneSubStorage": {
+      "Radius": {
+        "Min": 300.0,
+        "Max": 350.0
+      },
+      "Force": {
+        "Min": -0.25,
+        "Max": 0.5
+      },
+      "Decay": 1.0
+    },
+    "ZoneBarrack": {
+      "Radius": {
+        "Min": 300.0,
+        "Max": 350.0
+      },
+      "Force": {
+        "Min": -0.25,
+        "Max": 0.5
+      },
+      "Decay": 1.0
+    }
+  },
+  "CustomZones": [],
+  "Convergence": {
+    "Radius": {
+      "Min": 0.0,
+      "Max": 0.0
+    },
+    "Force": {
+      "Min": 0.0,
+      "Max": 0.0
+    },
+    "Enabled": false
+  }
+}

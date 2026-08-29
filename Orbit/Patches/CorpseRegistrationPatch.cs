@@ -46,6 +46,15 @@ public class CorpseRegistrationPatch : ModulePatch
         try
         {
             var pos = __result.transform.position;
+
+            // A corpse inside a minefield / border zone must not become a loot waypoint — it would lure
+            // looters (ghosts included) straight into the mines. The loot is simply lost.
+            if (Orbit.Navigation.DangerZones.IsInside(pos))
+            {
+                Log.Info($"CorpseRegistration: {__result.name} died inside a border zone — no loot waypoint");
+                return;
+            }
+
             var loc = new Waypoint(
                 manager.WaypointSystem.NewRuntimeWaypointId(),
                 WaypointCategory.Corpse,

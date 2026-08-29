@@ -25,7 +25,7 @@ public static class MainObjectiveBuilder
     public static void Generate(Squad squad, WaypointSystem waypointSystem)
     {
         if (squad?.Leader?.Bot?.Profile?.Info?.Settings == null) return;
-        if (!Plugin.MainObjectivesEnabled.Value)
+        if (!ServerConfig.MainObjectives.Enabled)
         {
             Log.Debug($"{squad} skipping main objectives — master toggle OFF");
             return;
@@ -40,12 +40,12 @@ public static class MainObjectiveBuilder
             Log.Info($"{squad} skipping main objectives — role {role} is not PMC or PlayerScav");
             return;
         }
-        if (isPmc && !Plugin.MainObjectivesEnabledForPmc.Value)
+        if (isPmc && !ServerConfig.MainObjectives.EnabledForPmc)
         {
             Log.Debug($"{squad} skipping main objectives — PMC opt-out toggle");
             return;
         }
-        if (isPlayerScav && !Plugin.MainObjectivesEnabledForPlayerScav.Value)
+        if (isPlayerScav && !ServerConfig.PlayerScav.Enabled)
         {
             Log.Debug($"{squad} skipping main objectives — PlayerScav opt-out toggle");
             return;
@@ -61,8 +61,8 @@ public static class MainObjectiveBuilder
         }
         else
         {
-            var rawMin = isPmc ? PersonalityFallback.PmcMainCountMin : Plugin.MainObjectivesCountMinPlayerScav.Value;
-            var rawMax = isPmc ? PersonalityFallback.PmcMainCountMax : Plugin.MainObjectivesCountMaxPlayerScav.Value;
+            var rawMin = isPmc ? PersonalityFallback.PmcMainCountMin : ServerConfig.PlayerScav.MainCountMin;
+            var rawMax = isPmc ? PersonalityFallback.PmcMainCountMax : ServerConfig.PlayerScav.MainCountMax;
             var minCount = Mathf.Max(1, rawMin);
             var maxCount = Mathf.Max(minCount, rawMax);
             count = Random.Range(minCount, maxCount + 1);
@@ -91,9 +91,9 @@ public static class MainObjectiveBuilder
         }
         else
         {
-            wQuest = Mathf.Max(0f, Plugin.MainObjectivesPlayerScavQuestWeight.Value);
-            wKills = Mathf.Max(0f, Plugin.MainObjectivesPlayerScavKillsWeight.Value);
-            wLootValue = Mathf.Max(0f, Plugin.MainObjectivesPlayerScavLootValueWeight.Value);
+            wQuest = Mathf.Max(0f, ServerConfig.PlayerScav.MainMixQuest);
+            wKills = Mathf.Max(0f, ServerConfig.PlayerScav.MainMixKills);
+            wLootValue = Mathf.Max(0f, ServerConfig.PlayerScav.MainMixLootValue);
         }
         var wSum = wQuest + wKills + wLootValue;
         if (wSum < 0.0001f) { wLootValue = 1f; wSum = 1f; } // degenerate: default LootValue

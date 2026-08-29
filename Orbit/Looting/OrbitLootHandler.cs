@@ -97,11 +97,20 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
     public LootStats Stats { get; } = new();
     public bool LootTaskRunning { get; private set; }
 
+    /// <summary>True when the last session ended through a cancel (combat interrupt, watchdog hang
+    /// cancel, external stop) rather than running to completion. BotLootState turns this into a FAILED
+    /// loot so the squad blacklists the POI — without it a hang-cancelled loose item was re-picked
+    /// forever (observed: 'doom' looping 6 times on the same sewing kit).</summary>
+    public bool LastSessionCancelled { get; private set; }
+
     public InteractableObject CurrentTarget { get; set; }
     public LootKind CurrentTargetKind { get; set; } = LootKind.None;
     public Vector3 ApproachPosition { get; set; }
     public Vector3 TargetWorldPosition { get; set; }
     public bool ForceEnabled { get; set; }
+
+    /// <summary>See <see cref="ILootHandler.DormantMode"/>. Set per session by BotLootState.</summary>
+    public bool DormantMode { get; set; }
 
     private string Nick => _bot?.GetPlayer?.Profile?.Nickname ?? "(no-bot)";
 
@@ -132,6 +141,7 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
         // RunAsync's finally block tears down the session (UnfreezeBot + log emit can take a couple
         // frames). The cancellation drives the actual cleanup; this just suppresses the spam.
         _lastLootActivityTime = Time.realtimeSinceStartup;
+        LastSessionCancelled = true;
         _cts?.Cancel();
     }
 
@@ -151,6 +161,7 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
         _cts?.Cancel();
         _cts = new CancellationTokenSource();
         LootTaskRunning = true;
+        LastSessionCancelled = false;
         Stats.LastItemsTaken = false;
         Stats.LastMaxPerSlotSeen = 0f;
         Stats.LastHadBypassItem = false;
@@ -173,8 +184,11 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
         // Pin the bot stationary for the loot session. BSG's BotMover.SetPlayerToNavMesh ticks in LateUpdate
         // and can throw on a bot whose movement state is in flux while weapon slots are being mutated; pose=0
         // + Mover.Pause keeps it quiescent.
-        FreezeBotForLootSession();
-        LookAtLootTarget(loot);
+        if (!DormantMode)
+        {
+            FreezeBotForLootSession();
+            LookAtLootTarget(loot);
+        }
         try
         {
             switch (kind)
@@ -212,9 +226,13 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
             // Session-end weapon-draw animation. Mid-drain we only refresh internal data; the animation-side
             // switch (SetSlotItem) is deferred here so it doesn't collide with the loot animation and stall
             // the main thread.
-            if (_swappedWeaponIds.Count > 0)
-                SyncBotWeaponStateAtSessionEnd();
-            UnfreezeBotAfterLootSession();
+            if (!DormantMode)
+            {
+                if (_swappedWeaponIds.Count > 0)
+                    SyncBotWeaponStateAtSessionEnd();
+                // A dormant session must NOT unfreeze: the sleep recipe owns PatrollingData/Mover state.
+                UnfreezeBotAfterLootSession();
+            }
             LootTaskRunning = false;
             var elapsed = Time.realtimeSinceStartup - sw;
             Log.Debug($"OrbitLootHandler.RunAsync({Nick}): done in {elapsed:F1}s, kind={kind}, target={loot?.name}, ItemsTaken={Stats.LastItemsTaken} (was {takenBefore})");
@@ -277,14 +295,14 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
 
     public void StopLooting()
     {
-        if (LootTaskRunning) Log.Debug($"OrbitLootHandler.StopLooting({Nick})");
+        if (LootTaskRunning) { Log.Debug($"OrbitLootHandler.StopLooting({Nick})"); LastSessionCancelled = true; }
         _cts?.Cancel();
         LootTaskRunning = false;
     }
 
     public void Cancel()
     {
-        if (LootTaskRunning) Log.Debug($"OrbitLootHandler.Cancel({Nick})");
+        if (LootTaskRunning) { Log.Debug($"OrbitLootHandler.Cancel({Nick})"); LastSessionCancelled = true; }
         _cts?.Cancel();
         LootTaskRunning = false;
     }
@@ -304,8 +322,13 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
 
         if (container.DoorState != EDoorState.Open)
         {
-            Log.Debug($"OrbitLootHandler.Container({Nick}, {container.name}): Interact(Open), waiting {ContainerOpenAnimMs}ms anim");
-            _bot.LootOpener.Interact(container, EInteractionType.Open);
+            if (!DormantMode)
+            {
+                Log.Debug($"OrbitLootHandler.Container({Nick}, {container.name}): Interact(Open), waiting {ContainerOpenAnimMs}ms anim");
+                _bot.LootOpener.Interact(container, EInteractionType.Open);
+            }
+            // Ghosts pay the same opening time, just without the animation (disabled body). Without
+            // this a ghost emptied a whole container in one continuation chain (raid 8 lesson).
             await Task.Delay(ContainerOpenAnimMs, ct);
         }
 
@@ -514,6 +537,10 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
             }
         }
 
+        // Dormant fast path: pickups only — equips/swaps mutate BSG weapon/hands state, which must not
+        // run on a disabled body. The value is already banked by the transfers above.
+        if (DormantMode) return;
+
         // Phase 4: perform up to four equips in sequence (weapon → armor → helmet → rig), each preceded by a
         // settle so the bot's BSG-side state is quiescent before the next op. These are the last BSG ops of
         // the session — no further pickup tx can collide with deferred work.
@@ -596,8 +623,9 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
 
     private bool CanEquipWeaponIntoEmptySlot(Weapon weapon)
     {
+        if (DormantMode) return false;
         // "Bots keep their spawn weapons": an empty slot stays empty — found weapons are bag loot only.
-        if (LootConfig.KeepSpawnWeapons is { Value: true }) return false;
+        if (ServerConfig.Loot.KeepSpawnWeapons) return false;
         var equipment = _bot?.GetPlayer?.Inventory?.Equipment;
         if (equipment == null) return false;
         foreach (var slotKind in new[] { EquipmentSlot.FirstPrimaryWeapon, EquipmentSlot.SecondPrimaryWeapon, EquipmentSlot.Holster })
@@ -753,7 +781,7 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
             ct.ThrowIfCancellationRequested();
             var entry = queue[i];
             var elapsedMs = (int)((Time.realtimeSinceStartup - startTime) * 1000);
-            var waitMs = entry.revealMs - elapsedMs;
+            var waitMs = entry.revealMs - elapsedMs; // ghosts pay real reveal time too
             if (waitMs > 0)
             {
                 Log.Debug($"OrbitLootHandler.Corpse({Nick}): waiting {waitMs}ms for queue[{i}] (T={entry.revealMs}ms, elapsed={elapsedMs}ms) — {entry.entry.Path}/{entry.entry.Item.LocalizedName()}");
@@ -846,6 +874,9 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
                 await TransferItemAsync(modEntry, ct);
             }
         }
+
+        // Dormant fast path: no swaps/equips on a disabled body — the drained value is already banked.
+        if (DormantMode) return;
 
         // Phase 4: perform the single best swap — last BSG-affecting op of the session.
         if (best != null)
@@ -1032,7 +1063,7 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
             BumpLootActivity(); // each drain entry is forward progress, keeps the watchdog patient
             var revealMs = System.Math.Min(InitialSearchMs + i * PerItemRevealMs, MaxRevealCapMs);
             var elapsedMs = (int)((Time.realtimeSinceStartup - startTime) * 1000);
-            var waitMs = revealMs - elapsedMs;
+            var waitMs = revealMs - elapsedMs; // ghosts pay real reveal time too
             if (waitMs > 0)
             {
                 Log.Debug($"OrbitLootHandler.Drain({Nick}): waiting {waitMs}ms for item[{i}] (T={revealMs}ms, elapsed={elapsedMs}ms) — {items[i].Path}/{items[i].Item.LocalizedName()}");
@@ -1055,7 +1086,7 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
         }
         Log.Debug($"OrbitLootHandler.Loose({Nick}, {lootItem.name}): awaiting 0.5s, item={lootItem.Item.LocalizedName()}");
         _currentSourceRoot = lootItem.Item;
-        await Task.Delay(500, ct);
+        await Task.Delay(500, ct); // ghosts included — same approach time as an awake pickup
         await PickupLooseAsync(lootItem.Item, ct);
     }
 
@@ -1087,6 +1118,11 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
             if (_allowWeaponSwapPath)
             {
                 outcome = await WeaponSwapper.TryHandleAsync(_bot, candidateWeapon, _currentSourceRoot, ct);
+            }
+            else if (DormantMode)
+            {
+                // Dormant: never equip — bag the weapon via the default placement below.
+                outcome = WeaponSwapper.Outcome.NotApplicable;
             }
             else
             {
@@ -1221,6 +1257,16 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
         var place = FindPlace(entry, inventoryController, name, price);
         if (!place.Succeeded) return false;
 
+        // Dormant fast path: the kneel animation callback would never fire on a disabled body — run the
+        // transaction directly (identical data op; the world item is consumed by the transaction).
+        if (DormantMode)
+        {
+            await Task.Delay(500, ct); // kneel-time equivalent — the animation can't play on a disabled body
+            var taken = await RunTransactionAsync(place, name, ct);
+            if (taken) RecordPickup(name, price, entry.Path);
+            return taken;
+        }
+
         var pickupReady = new TaskCompletionSource<bool>();
         try
         {
@@ -1283,7 +1329,7 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
         // looting. PlayerScavs and PMCs continue to the per-archetype gate below.
         if (IsBotScav(_bot))
         {
-            var chance = (LootConfig.ScavLootChancePct?.Value ?? 30) / 100f;
+            var chance = (ServerConfig.Loot.ScavLootChancePct) / 100f;
             var roll = Random.value;
             if (roll < chance)
             {

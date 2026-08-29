@@ -76,6 +76,18 @@ public class MovementSystem
                 continue;
             }
 
+            // Dormant body: the GameObject is disabled, so the mover / doors / stuck machinery below has
+            // nothing to drive. The ghost follower advances the transform along the planned path instead
+            // (world keeps moving); everything else waits for the wake resync in DormancySystem.
+            if (agent.IsDormant)
+            {
+                // Pinned while a simulated ghost fight plays out — nobody walks their route mid-firefight.
+                if (agent.Squad != null && Time.time < agent.Squad.GhostFightUntil) continue;
+                if (DormancySystem.GhostMovementEnabled)
+                    GhostFollowPath(agent);
+                continue;
+            }
+
             // Keep BSG's BotMover anchored to where the bot ACTUALLY is. BotMover.CastFromPos (the hard rescue
             // teleport) snaps the bot to _lastGoodCastPoint when it decides the bot is stuck. The brain layer
             // sets _lastGoodCastPoint to agent.Position only at the layer *transition* — so while we're in
@@ -157,7 +169,28 @@ public class MovementSystem
         var origin = agent.Position;
 
         if (NavMesh.SamplePosition(origin, out var hit, TargetEps, NavMesh.AllAreas))
+        {
             origin = hit.position;
+        }
+        else if (agent.IsDormant)
+        {
+            // A mid-segment ghost can sit metres off the mesh (straight-line interpolation between
+            // corners on sloped terrain). An off-mesh origin makes every new path PathInvalid, and the
+            // squad wedges forever: Failed, guard-in-place, re-dispatch, invalid again (raid-3 test:
+            // svbtext / nooky). Sample wide, else snap the body to the nearest known-on-mesh corner.
+            if (NavMesh.SamplePosition(origin, out hit, 3f, NavMesh.AllAreas))
+            {
+                origin = hit.position;
+                agent.Player.Transform.position = origin;
+            }
+            else if (agent.Movement.HasPath)
+            {
+                var corner = Mathf.Clamp(agent.Movement.CurrentCorner, 0, agent.Movement.Path.Length - 1);
+                origin = agent.Movement.Path[corner];
+                agent.Player.Transform.position = origin;
+                Log.Debug($"{agent} ghost re-path from off-mesh — snapped to corner {origin}");
+            }
+        }
 
         var job = _navJobExecutor.Submit(origin, destination);
         _moveJobs.Enqueue((agent, job));
@@ -176,8 +209,65 @@ public class MovementSystem
 
         AssignPath(agent.Movement, job);
 
-        agent.Bot.Mover.Stop();
-        agent.Bot.Mover.Pause = true;
+        // A dormant bot's BotMover sleeps with the GameObject — leave it alone, the wake resync restores
+        // the Stop+Pause state before the mover runs again.
+        if (!agent.IsDormant)
+        {
+            agent.Bot.Mover.Stop();
+            agent.Bot.Mover.Pause = true;
+        }
+    }
+
+    /// <summary>Walking speed used by the dormant ghost follower (m/s), roughly EFT walk pace.</summary>
+    private const float GhostWalkSpeed = 1.9f;
+
+    /// <summary>
+    /// Path-following for a dormant bot: the disabled GameObject's transform is still drivable, so advance
+    /// it along the computed navmesh corners at walking speed. No steering, no doors (the body phases
+    /// through closed ones — nobody is within sight range by construction), no stuck machinery (a ghost
+    /// can't wedge). Completion mirrors UpdateMovement's last-corner branch so the action layer sees the
+    /// same Stopped/retry outcomes it would from a live walk.
+    /// </summary>
+    private void GhostFollowPath(Agent agent)
+    {
+        var movement = agent.Movement;
+        if (!movement.HasPath || movement.Status != MovementStatus.Moving)
+            return;
+
+        var transform = agent.Player.Transform;
+        var pos = transform.position;
+        var step = GhostWalkSpeed * Time.deltaTime;
+
+        var corner = movement.Path[movement.CurrentCorner];
+        var toCorner = corner - pos;
+        var dist = toCorner.magnitude;
+
+        // Consume whole corners while the step is large enough (also covers tiny corner spacing).
+        while (dist <= step && movement.CurrentCorner + 1 < movement.Path.Length)
+        {
+            pos = corner;
+            step -= dist;
+            movement.CurrentCorner++;
+            corner = movement.Path[movement.CurrentCorner];
+            toCorner = corner - pos;
+            dist = toCorner.magnitude;
+        }
+
+        if (dist <= step)
+        {
+            // Final corner reached — same truncated-path retry rule as the live walker.
+            transform.position = corner;
+            if ((movement.Target - corner).sqrMagnitude > TargetEpsSqr)
+            {
+                MoveRetry(agent, movement.Target);
+                return;
+            }
+            Log.Debug($"{agent} ghost movement destination reached");
+            ResetPath(agent);
+            return;
+        }
+
+        transform.position = pos + toCorner * (step / dist);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

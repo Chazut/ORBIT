@@ -1,0 +1,44 @@
+@* Numeric setting: bounded slider + live value readout + optional tooltip info icon. *@
+@using System.Globalization
+@typeparam T where T : struct, System.Numerics.INumber<T>
+
+<div class="mb-1">
+    <div class="d-flex align-center" style="gap:6px">
+        <MudText Typo="Typo.body2">@Label</MudText>
+        @if (!string.IsNullOrEmpty(Tooltip))
+        {
+            <MudTooltip Text="@Tooltip" Placement="Placement.Top" Arrow="true" Style="max-width: 340px">
+                <MudIcon Icon="@Icons.Material.Outlined.Info" Style="font-size:.95rem; opacity:.45" />
+            </MudTooltip>
+        }
+        <MudSpacer />
+        <MudText Typo="Typo.body2" Color="Color.Primary" Style="font-variant-numeric: tabular-nums">@Display</MudText>
+    </div>
+    <MudSlider T="T" Value="Value" ValueChanged="OnChanged" Min="Min" Max="Max" Step="Step"
+               Immediate="true" Color="Color.Primary" Size="Size.Small" />
+</div>
+
+@code {
+    [Parameter] public string Label { get; set; } = "";
+    [Parameter] public string Tooltip { get; set; } = "";
+    [Parameter] public T Value { get; set; }
+    [Parameter] public EventCallback<T> ValueChanged { get; set; }
+    [Parameter] public T Min { get; set; }
+    [Parameter] public T Max { get; set; }
+    [Parameter] public T Step { get; set; }
+    /// <summary>Optional .NET format string for the readout (e.g. "N0", "P0", "0.##").</summary>
+    [Parameter] public string? Fmt { get; set; }
+    /// <summary>Optional unit suffix for the readout (e.g. "m", "s", "roubles").</summary>
+    [Parameter] public string? Unit { get; set; }
+
+    private string Display
+    {
+        get
+        {
+            var s = Fmt is null ? Value.ToString() ?? "" : Value.ToString(Fmt, CultureInfo.InvariantCulture);
+            return Unit is null ? s : $"{s} {Unit}";
+        }
+    }
+
+    private Task OnChanged(T v) { Value = v; return ValueChanged.InvokeAsync(v); }
+}

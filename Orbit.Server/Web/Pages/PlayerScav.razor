@@ -1,0 +1,62 @@
+@page "/orbit/player-scav"
+@layout Orbit.Server.Web.Shared.MainLayout
+@inherits Orbit.Server.Web.OrbitConfigPage
+
+<PageTitle>ORBIT: Player Scav</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.Medium">
+    <PageHeader Title="Player Scav" OnReset="ResetPage"
+                Description="PlayerScavs get no SAIN archetype, so these values drive their behaviour directly. Their extraction settings are on the Extraction page." />
+
+    <SettingsCard Title="Goal system" OnReset="ResetGoalSystem">
+        <OrbitSwitch @bind-Value="Cfg.PlayerScav.Enabled" Label="Enabled for PlayerScav squads"
+                     Tooltip="OFF: PlayerScav squads skip the Quest / Kills / LootValue goal system." />
+        <div class="mt-3"></div>
+        <MudGrid Spacing="4">
+            <MudItem xs="12" sm="6">
+                <OrbitSlider T="int" @bind-Value="Cfg.PlayerScav.MainCountMin" Label="Main count min"
+                             Min="1" Max="20" Step="1"
+                             Tooltip="Fewest objectives a PlayerScav squad rolls." />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <OrbitSlider T="int" @bind-Value="Cfg.PlayerScav.MainCountMax" Label="Main count max"
+                             Min="1" Max="20" Step="1"
+                             Tooltip="Most objectives a PlayerScav squad rolls." />
+            </MudItem>
+        </MudGrid>
+    </SettingsCard>
+
+    <SettingsCard Title="Objective mix" OnReset="ResetMix"
+                  Subtitle="Shares are auto-normalized against each other, so they need not total exactly 100%.">
+        <OrbitSlider T="float" @bind-Value="Cfg.PlayerScav.MainMixQuest" Label="Quest share" Fmt="P0"
+                     Min="0f" Max="1f" Step="0.01f"
+                     Tooltip="Share of Quest objectives in the PlayerScav mix." />
+        <OrbitSlider T="float" @bind-Value="Cfg.PlayerScav.MainMixKills" Label="Kills share" Fmt="P0"
+                     Min="0f" Max="1f" Step="0.01f"
+                     Tooltip="Share of Kills objectives in the PlayerScav mix." />
+        <OrbitSlider T="float" @bind-Value="Cfg.PlayerScav.MainMixLootValue" Label="LootValue share" Fmt="P0"
+                     Min="0f" Max="1f" Step="0.01f"
+                     Tooltip="Share of LootValue objectives in the PlayerScav mix." />
+    </SettingsCard>
+</MudContainer>
+
+@code {
+    // Only the fields shown on this page (the extract window / loot threshold live on Extraction).
+    private void ResetPage() { ResetGoalSystem(); ResetMix(); }
+
+    private void ResetGoalSystem()
+    {
+        var d = new PlayerScavConfig();
+        Cfg.PlayerScav.Enabled = d.Enabled;
+        Cfg.PlayerScav.MainCountMin = d.MainCountMin;
+        Cfg.PlayerScav.MainCountMax = d.MainCountMax;
+    }
+
+    private void ResetMix()
+    {
+        var d = new PlayerScavConfig();
+        Cfg.PlayerScav.MainMixQuest = d.MainMixQuest;
+        Cfg.PlayerScav.MainMixKills = d.MainMixKills;
+        Cfg.PlayerScav.MainMixLootValue = d.MainMixLootValue;
+    }
+}

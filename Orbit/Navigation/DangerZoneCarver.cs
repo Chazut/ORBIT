@@ -43,9 +43,11 @@ public static class DangerZoneCarver
         obstacle.carving = obstacle.enabled = collider.enabled;
         obstacle.center = collider.center;
 
-        // Pad by 1m world-space so bots don't graze the collider boundary.
+        // Pad by 8m world-space: the minefield DAMAGE zone is distorted beyond the BoxCollider
+        // (Minefield._zoneDistortion*), so a bot skirting the carved hole with the old 1m padding
+        // still got bitten by the waviness (observed on dormant ghosts: -12 then -143 on Birdeye).
         var colliderScale = collider.transform.lossyScale;
-        var worldSize = Vector3.Scale(collider.size, colliderScale) + Vector3.one;
+        var worldSize = Vector3.Scale(collider.size, colliderScale) + Vector3.one * 8f;
         obstacle.size = new Vector3(worldSize.x / colliderScale.x, worldSize.y / colliderScale.y, worldSize.z / colliderScale.z);
     }
 }

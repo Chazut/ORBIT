@@ -1,0 +1,78 @@
+@page "/orbit/poi-guard"
+@layout Orbit.Server.Web.Shared.MainLayout
+@inherits Orbit.Server.Web.OrbitConfigPage
+
+<PageTitle>ORBIT: POI guard</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.Medium">
+    <PageHeader Title="POI guard" OnReset="ResetPage"
+                Description="How long squads hold a spot before moving on. Higher = more static map." />
+
+    <SettingsCard Title="Base guard" OnReset="ResetBase"
+                  Subtitle="How long a squad holds a quest or cover spot before picking a new objective.">
+        <MudGrid Spacing="4">
+            <MudItem xs="12" sm="6">
+                <OrbitSlider T="float" @bind-Value="Cfg.PoiGuard.GuardDurationMin" Label="Min" Unit="s"
+                             Min="0f" Max="600f" Step="5f" Fmt="0" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <OrbitSlider T="float" @bind-Value="Cfg.PoiGuard.GuardDurationMax" Label="Max" Unit="s"
+                             Min="0f" Max="600f" Step="5f" Fmt="0" />
+            </MudItem>
+        </MudGrid>
+    </SettingsCard>
+
+    <SettingsCard Title="Patrol point guard" OnReset="ResetSynthetic"
+                  Subtitle="Same, but for virtual patrol points (no real loot or quest). Kept short so bots keep moving.">
+        <MudGrid Spacing="4">
+            <MudItem xs="12" sm="6">
+                <OrbitSlider T="float" @bind-Value="Cfg.PoiGuard.SyntheticGuardDurationMin" Label="Min" Unit="s"
+                             Min="0f" Max="30f" Step="0.5f" Fmt="0.#" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <OrbitSlider T="float" @bind-Value="Cfg.PoiGuard.SyntheticGuardDurationMax" Label="Max" Unit="s"
+                             Min="0f" Max="30f" Step="0.5f" Fmt="0.#" />
+            </MudItem>
+        </MudGrid>
+    </SettingsCard>
+
+    <SettingsCard Title="Loot / quest guard cut" OnReset="ResetCut"
+                  Subtitle="Once the whole squad has arrived at a loot or quest spot, the guard wait is cut to a random fraction in this range.">
+        <MudGrid Spacing="4">
+            <MudItem xs="12" sm="6">
+                <OrbitSlider T="float" @bind-Value="Cfg.PoiGuard.GuardDurationCutMin" Label="Min" Fmt="P0"
+                             Min="0f" Max="1f" Step="0.05f" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <OrbitSlider T="float" @bind-Value="Cfg.PoiGuard.GuardDurationCutMax" Label="Max" Fmt="P0"
+                             Min="0f" Max="1f" Step="0.05f" />
+            </MudItem>
+        </MudGrid>
+    </SettingsCard>
+</MudContainer>
+
+@code {
+    // Every PoiGuardConfig field lives on this page.
+    private void ResetPage() => Cfg.PoiGuard = new PoiGuardConfig();
+
+    private void ResetBase()
+    {
+        var d = new PoiGuardConfig();
+        Cfg.PoiGuard.GuardDurationMin = d.GuardDurationMin;
+        Cfg.PoiGuard.GuardDurationMax = d.GuardDurationMax;
+    }
+
+    private void ResetSynthetic()
+    {
+        var d = new PoiGuardConfig();
+        Cfg.PoiGuard.SyntheticGuardDurationMin = d.SyntheticGuardDurationMin;
+        Cfg.PoiGuard.SyntheticGuardDurationMax = d.SyntheticGuardDurationMax;
+    }
+
+    private void ResetCut()
+    {
+        var d = new PoiGuardConfig();
+        Cfg.PoiGuard.GuardDurationCutMin = d.GuardDurationCutMin;
+        Cfg.PoiGuard.GuardDurationCutMax = d.GuardDurationCutMax;
+    }
+}

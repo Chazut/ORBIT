@@ -1,0 +1,82 @@
+@page "/orbit/extraction"
+@layout Orbit.Server.Web.Shared.MainLayout
+@inherits Orbit.Server.Web.OrbitConfigPage
+
+<PageTitle>ORBIT: Extraction</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.Medium">
+    <PageHeader Title="Extraction" OnReset="ResetPage" />
+
+    <SettingsCard Title="Who extracts" OnReset="ResetWhoExtracts"
+                  Subtitle="Gates every extract: the squad loot and time triggers, the solo loot-threshold extract and the wounded emergency extract. Only PMCs and PlayerScavs have extract logic.">
+        <OrbitSwitch @bind-Value="Cfg.Loot.ExtractPmc" Label="PMCs may extract" />
+        <OrbitSwitch @bind-Value="Cfg.Loot.ExtractPlayerScav" Label="PlayerScavs may extract" />
+    </SettingsCard>
+
+    <SettingsCard Title="Extract triggers" OnReset="ResetTriggers">
+        <OrbitSwitch @bind-Value="Cfg.MainObjectives.ExtractOnAllCompleted" Label="Extract when all main objectives are done"
+                     Tooltip="ON (default): the squad heads for an exfil once every objective is finished." />
+        <OrbitSwitch @bind-Value="Cfg.General.EmergencyExtractEnabled" Label="Emergency extract when wounded"
+                     Tooltip="ON (default): a badly wounded PMC or PlayerScav with no usable meds left breaks off and extracts on its own instead of dying where it stands, and rejoins the squad if it heals back up. OFF: members only leave on the loot / time / squad triggers." />
+        <div class="mt-3"></div>
+        <OrbitSlider T="int" @bind-Value="Cfg.Loot.SoloLootExtractChancePct" Label="Solo extract on own loot threshold" Unit="%"
+                     Min="0" Max="100" Step="5"
+                     Tooltip="When a PMC or PlayerScav's OWN loot crosses its OWN extract threshold, the chance it leaves ALONE while the squad keeps playing (rolled once per member). 0 = stay with squad, 100 = always leave." />
+        <OrbitSlider T="float" @bind-Value="Cfg.PlayerScav.ExtractAtLootValue" Label="PlayerScav squad extract at loot value" Unit="roubles"
+                     Min="0f" Max="2000000f" Step="25000f" Fmt="N0"
+                     Tooltip="Once a PlayerScav squad has looted this much (across living members), it heads for the nearest exfil. 0 = never. PMC squads use their per-archetype extract thresholds instead (Personalities page)." />
+    </SettingsCard>
+
+    <SettingsCard Title="Time extract windows" OnReset="ResetWindows"
+                  Subtitle="Random window, as a percentage of raid time left, when a squad decides to head out. Rolled once per squad.">
+        <MudGrid Spacing="4">
+            <MudItem xs="12" sm="6">
+                <OrbitSlider T="float" @bind-Value="Cfg.MainObjectives.TimeExtractWindowMin" Label="PMC window min" Unit="%"
+                             Min="0f" Max="100f" Step="1f" Fmt="0" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <OrbitSlider T="float" @bind-Value="Cfg.MainObjectives.TimeExtractWindowMax" Label="PMC window max" Unit="%"
+                             Min="0f" Max="100f" Step="1f" Fmt="0" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <OrbitSlider T="float" @bind-Value="Cfg.PlayerScav.TimeExtractWindowMin" Label="PlayerScav window min" Unit="%"
+                             Min="0f" Max="100f" Step="1f" Fmt="0" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <OrbitSlider T="float" @bind-Value="Cfg.PlayerScav.TimeExtractWindowMax" Label="PlayerScav window max" Unit="%"
+                             Min="0f" Max="100f" Step="1f" Fmt="0" />
+            </MudItem>
+        </MudGrid>
+    </SettingsCard>
+</MudContainer>
+
+@code {
+    // Extraction is a presentation grouping over several config sections: each card resets exactly
+    // the fields it shows, nothing else from those sections.
+    private void ResetPage() { ResetWhoExtracts(); ResetTriggers(); ResetWindows(); }
+
+    private void ResetWhoExtracts()
+    {
+        var d = new LootConfig();
+        Cfg.Loot.ExtractPmc = d.ExtractPmc;
+        Cfg.Loot.ExtractPlayerScav = d.ExtractPlayerScav;
+    }
+
+    private void ResetTriggers()
+    {
+        var d = new OrbitServerConfig();
+        Cfg.MainObjectives.ExtractOnAllCompleted = d.MainObjectives.ExtractOnAllCompleted;
+        Cfg.General.EmergencyExtractEnabled = d.General.EmergencyExtractEnabled;
+        Cfg.Loot.SoloLootExtractChancePct = d.Loot.SoloLootExtractChancePct;
+        Cfg.PlayerScav.ExtractAtLootValue = d.PlayerScav.ExtractAtLootValue;
+    }
+
+    private void ResetWindows()
+    {
+        var d = new OrbitServerConfig();
+        Cfg.MainObjectives.TimeExtractWindowMin = d.MainObjectives.TimeExtractWindowMin;
+        Cfg.MainObjectives.TimeExtractWindowMax = d.MainObjectives.TimeExtractWindowMax;
+        Cfg.PlayerScav.TimeExtractWindowMin = d.PlayerScav.TimeExtractWindowMin;
+        Cfg.PlayerScav.TimeExtractWindowMax = d.PlayerScav.TimeExtractWindowMax;
+    }
+}

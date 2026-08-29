@@ -1,0 +1,81 @@
+@page "/orbit/factions"
+@layout Orbit.Server.Web.Shared.MainLayout
+@inherits Orbit.Server.Web.OrbitConfigPage
+
+<PageTitle>ORBIT: Factions</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.Medium">
+    <PageHeader Title="Factions" OnReset="ResetPage"
+                Description="This config applies wherever the bots run (including headless). Save with the button in the top bar, then start a new raid. Client-side settings (log levels, performance) stay in the in-game F12 menu." />
+
+    <SettingsCard Title="Faction-mod takeover" OnReset="ResetTakeover"
+                  Subtitle="ON: ORBIT routes these bots like PMCs. OFF: their own mod behaviour wins. Only matters when the faction mod is installed.">
+        <OrbitSwitch @bind-Value="Cfg.Factions.TakeOverUntar" Label="Take over UNTAR bots"
+                     Tooltip="UNTAR bots keep their gear and spawns but navigate the map with ORBIT instead of their own checkpoint layers." />
+        <OrbitSwitch @bind-Value="Cfg.Factions.TakeOverRuaf" Label="Take over RUAF bots"
+                     Tooltip="Covers both RUAF factions: the base RUAF roles and the RUAF Hardcore Remnant roles." />
+        <OrbitSwitch @bind-Value="Cfg.Factions.TakeOverBlackDivision" Label="Take over Black Division bots"
+                     Tooltip="OFF (default): Black Division keeps its own behaviour layers, as its author designed them." />
+        <OrbitSwitch @bind-Value="Cfg.Factions.TakeOverIsb" Label="Take over ISB bots"
+                     Tooltip="ON by default (requested by ISB's author). White Tusk commanders are always excluded so their always-on hunt behaviour stays intact." />
+        <OrbitSwitch @bind-Value="Cfg.Factions.TakeOverCombineSoldiers" Label="Take over Combine Soldiers bots"
+                     Tooltip="OFF (default): Combine Soldiers keep their own behaviour layers." />
+    </SettingsCard>
+
+    <SettingsCard Title="Vanilla behaviour" OnReset="ResetVanilla"
+                  Subtitle="ON: ORBIT leaves these bots on BSG's vanilla brain entirely.">
+        <OrbitSwitch @bind-Value="Cfg.Factions.VanillaScavs" Label="Vanilla scavs"
+                     Tooltip="Bot scavs run on BSG's vanilla brain. PlayerScavs are unaffected." />
+        <OrbitSwitch @bind-Value="Cfg.Factions.VanillaGoons" Label="Vanilla goons"
+                     Tooltip="Knight, Big Pipe and Bird Eye run on BSG's vanilla brain." />
+        <OrbitSwitch @bind-Value="Cfg.Factions.VanillaCultists" Label="Vanilla cultists"
+                     Tooltip="Priest, warriors and cursed scavs run on BSG's vanilla brain." />
+        <OrbitSwitch @bind-Value="Cfg.Factions.VanillaRaiders" Label="Vanilla raiders and rogues"
+                     Tooltip="ON (default): Raiders and Rogues keep BSG's vanilla guard behaviour." />
+        <OrbitSwitch @bind-Value="Cfg.Factions.VanillaBloodhounds" Label="Vanilla bloodhounds"
+                     Tooltip="Bloodhounds (smugglers / arena spawns) run on BSG's vanilla brain." />
+    </SettingsCard>
+
+    <SettingsCard Title="Area roaming" OnReset="ResetRoaming"
+                  Subtitle="Percentage of each faction's squads that roll permission to leave their spawn area and roam the whole map. The rest stay local, still fully ORBIT-driven. Rolled once per squad per raid. (Community contribution by Andrewgdewar.)">
+        <OrbitSlider T="int" @bind-Value="Cfg.Factions.ScavAreaRoamingPct" Label="Scavs" Unit="%" Min="0" Max="100" Step="5"
+                     Tooltip="Share of bot-scav squads allowed to roam map-wide. 0 keeps every scav in its spawn quartier; 100 makes them all roam like PMCs. PlayerScavs are unaffected." />
+        <OrbitSlider T="int" @bind-Value="Cfg.Factions.GoonAreaRoamingPct" Label="Goons" Unit="%" Min="0" Max="100" Step="5"
+                     Tooltip="Share of Goon squads allowed to roam map-wide. Default 100 matches vanilla; even local Goons cover ground, they hear and see from very far." />
+        <OrbitSlider T="int" @bind-Value="Cfg.Factions.BloodhoundAreaRoamingPct" Label="Bloodhounds" Unit="%" Min="0" Max="100" Step="5"
+                     Tooltip="Share of Bloodhound squads allowed to roam map-wide." />
+    </SettingsCard>
+</MudContainer>
+
+@code {
+    // Every FactionsConfig field lives on this page, so a fresh instance is the page's defaults.
+    private void ResetPage() => Cfg.Factions = new FactionsConfig();
+
+    private void ResetTakeover()
+    {
+        var d = new FactionsConfig();
+        Cfg.Factions.TakeOverUntar = d.TakeOverUntar;
+        Cfg.Factions.TakeOverRuaf = d.TakeOverRuaf;
+        Cfg.Factions.TakeOverBlackDivision = d.TakeOverBlackDivision;
+        Cfg.Factions.TakeOverIsb = d.TakeOverIsb;
+        Cfg.Factions.TakeOverCombineSoldiers = d.TakeOverCombineSoldiers;
+    }
+
+    private void ResetVanilla()
+    {
+        var d = new FactionsConfig();
+        Cfg.Factions.VanillaScavs = d.VanillaScavs;
+        Cfg.Factions.VanillaGoons = d.VanillaGoons;
+        Cfg.Factions.VanillaCultists = d.VanillaCultists;
+        Cfg.Factions.VanillaRaiders = d.VanillaRaiders;
+        Cfg.Factions.VanillaBloodhounds = d.VanillaBloodhounds;
+    }
+
+    private void ResetRoaming()
+    {
+        var d = new FactionsConfig();
+        Cfg.Factions.ScavAreaRoamingPct = d.ScavAreaRoamingPct;
+        Cfg.Factions.GoonAreaRoamingPct = d.GoonAreaRoamingPct;
+        Cfg.Factions.BloodhoundAreaRoamingPct = d.BloodhoundAreaRoamingPct;
+    }
+}

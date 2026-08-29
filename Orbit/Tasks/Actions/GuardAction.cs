@@ -150,6 +150,14 @@ public class GuardAction(AgentData dataset, MovementSystem movementSystem, float
                 case GuardStatus.Moving:
                     if (agent.Movement.Status == MovementStatus.Moving) continue;
 
+                    // Dormant: hold the spot without the sweep (raycasts for a sleeping body are pure
+                    // waste) — Watch with no directions idles until the strategy timer moves the squad on.
+                    if (agent.IsDormant)
+                    {
+                        guard.Status = GuardStatus.Watch;
+                        continue;
+                    }
+
                     // Arrived: crouch and submit the area sweep job.
                     if (agent.Movement.Pose > 0.3f && (coverPoint.Level != CoverLevel.Stay || Random.value > 0.5f))
                         MovementSystem.ResetGait(agent, pose: 0.25f);
@@ -166,6 +174,8 @@ public class GuardAction(AgentData dataset, MovementSystem movementSystem, float
                     Log.Debug($"{agent} guarding: completed area sweep job");
                     break;
                 case GuardStatus.Watch:
+                    // Dormant: no gaze to fake (Steering sleeps with the GameObject).
+                    if (agent.IsDormant) continue;
                     if (guard.WatchDirections.Count == 0 || guard.WatchTimeout > Time.time)
                         continue;
 

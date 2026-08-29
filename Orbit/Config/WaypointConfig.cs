@@ -68,21 +68,26 @@ public class WaypointConfig
 
     /// <summary>Zone keyed on a BSG-defined trigger name (e.g. ZoneDormitory).
     /// Position comes from the BSG trigger; we just tune radius/force/decay.</summary>
-    public class BuiltinZone(Range radius, Range? force = null, float decay = 1f)
+    public class BuiltinZone(Range radius, Range? force = null, float decay = 1f, bool killMains = true)
     {
         [JsonRequired] public Range Radius { get; set; } = radius;
         [JsonRequired] public Range Force { get; set; } = force ?? new Range(1f, 1f);
         [JsonRequired] public float Decay { get; set; } = decay;
+        // Deliberately NOT JsonRequired (files predating the flag default to true): whether Kills main
+        // objectives may anchor on this zone. OFF = pure routing hotspot, never a kill arena.
+        public bool KillMains { get; set; } = killMains;
     }
 
     /// <summary>Mod-defined zone with hand-picked world position. Used to
     /// add attractors/repellers where BSG didn't put a trigger.</summary>
-    public class CustomZone(Vector2 position, Range radius, Range? force = null, float decay = 1f)
+    public class CustomZone(Vector2 position, Range radius, Range? force = null, float decay = 1f, bool killMains = true)
     {
         [JsonRequired] public Vector2 Position { get; set; } = position;
         [JsonRequired] public Range Radius { get; set; } = radius;
         [JsonRequired] public Range Force { get; set; } = force ?? new Range(1f, 1f);
         [JsonRequired] public float Decay { get; set; } = decay;
+        // See BuiltinZone.KillMains.
+        public bool KillMains { get; set; } = killMains;
     }
 
     private static class Defaults

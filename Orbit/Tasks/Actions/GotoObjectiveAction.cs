@@ -220,7 +220,12 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                     var inRadius = false;
                     if (distanceSqr <= objective.Location.RadiusSqr)
                     {
-                        if (RequiresArrivalLoSCheck(objective.Location.Category))
+                        // Dormant ghosts skip the LoS gate: the ray fires from a frozen inactive body and
+                        // can report a wall that isn't there, and a never-acked arrival wedges the squad's
+                        // "all arrived" gate forever (observed on Quest waypoints in the limiter test raid).
+                        // In-radius is truth enough for a ghost — the LoS check exists to stop REAL bots
+                        // validating loot through walls.
+                        if (RequiresArrivalLoSCheck(objective.Location.Category) && !agent.IsDormant)
                         {
                             if (HasArrivalLineOfSight(agent, objective.Location.Position))
                             {
@@ -336,7 +341,7 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                             // back to the squad.
                             if (objective.Location.Category == WaypointCategory.Synthetic && agent.Squad != null)
                                 agent.Squad.RecentlyVisitedPoiCooldowns[objective.Location.Id] =
-                                    Time.time + Plugin.SyntheticVisitCooldownSeconds.Value;
+                                    Time.time + ServerConfig.MainObjectives.SyntheticVisitCooldownSeconds;
                             Log.Debug($"{agent} arrived at non-lootable {objective.Location} → Finished");
                         }
                         break;
@@ -605,7 +610,7 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
         {
             WaypointCategory.ContainerLoot
             or WaypointCategory.LooseLoot
-            or WaypointCategory.Corpse => (LootConfig.LootingEnabled?.Value ?? LootingFaction.None).IsBotEnabled(role),
+            or WaypointCategory.Corpse => (ServerConfig.Loot.LootingEnabled).IsBotEnabled(role),
             _ => false
         };
     }

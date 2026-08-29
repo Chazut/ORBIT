@@ -51,6 +51,16 @@ public class DoorSystem
         _bots.Add((botCollider, pomCollider));
     }
 
+    /// <summary>
+    /// Re-applies every door's current collision verdict for an already-registered bot. Needed after a
+    /// dormancy wake: Unity forgets Physics.IgnoreCollision pairs while the bot's colliders were disabled.
+    /// </summary>
+    public void ResyncBot(Collider botCollider, Collider pomCollider)
+    {
+        for (var i = 0; i < Doors.Length; i++)
+            SetIgnored(botCollider, pomCollider, Doors[i].Collider, IsPassable(Doors[i].DoorState));
+    }
+
     /// <summary>Drops a dead/removed bot so we stop toggling collision for it.</summary>
     public void UnregisterBot(Collider botCollider)
     {

@@ -1,0 +1,53 @@
+@page "/orbit/looting"
+@layout Orbit.Server.Web.Shared.MainLayout
+@inherits Orbit.Server.Web.OrbitConfigPage
+
+<PageTitle>ORBIT: Looting</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.Medium">
+    <PageHeader Title="Looting" OnReset="ResetPage" />
+
+    <SettingsCard Title="Who loots" OnReset="ResetWhoLoots"
+                  Subtitle="Which factions loot containers, loose items and corpses. Only the listed factions are affected.">
+        <OrbitSwitch @bind-Value="Cfg.Loot.LootPmc" Label="PMCs loot" />
+        <OrbitSwitch @bind-Value="Cfg.Loot.LootScav" Label="Scavs loot" />
+        <OrbitSwitch @bind-Value="Cfg.Loot.LootPlayerScav" Label="PlayerScavs loot" />
+        <OrbitSwitch @bind-Value="Cfg.Loot.LootGoons" Label="Goons loot" />
+    </SettingsCard>
+
+    <SettingsCard Title="Loot rules" OnReset="ResetLootRules">
+        <OrbitSlider T="float" @bind-Value="Cfg.Loot.DetectDistance" Label="Detect loot distance" Unit="m"
+                     Min="0f" Max="300f" Step="5f" Fmt="0"
+                     Tooltip="How far from the squad leader a loot spot (container / item / corpse) is still considered. 0 = no limit." />
+        <OrbitSlider T="int" @bind-Value="Cfg.Loot.ScavLootChancePct" Label="Scav per-item loot chance" Unit="%"
+                     Min="0" Max="100" Step="5"
+                     Tooltip="Bot scavs (not PlayerScavs) skip the value gate and just roll this chance per item, like vanilla opportunistic scavs. PMCs and PlayerScavs are unaffected." />
+        <OrbitSwitch @bind-Value="Cfg.Loot.CorpseRequiresSightOrSquadKill" Label="Corpse requires line of sight or squad kill"
+                     Tooltip="ON (default): a corpse is only looted if the squad saw it or made the kill, so bots do not magically know about bodies across the map." />
+        <OrbitSwitch @bind-Value="Cfg.Loot.KeepSpawnWeapons" Label="Bots keep their spawn weapons"
+                     Tooltip="ON: bots never equip a weapon they find (no corpse weapon swap, no filling an empty slot). They still bag and strip weapons as loot and still grab mags and ammo for the weapons they spawned with. Use this if you see bots stuck with a looted gun they have no ammo for." />
+    </SettingsCard>
+</MudContainer>
+
+@code {
+    // Only the fields shown on this page (the extraction fields of LootConfig live on Extraction).
+    private void ResetPage() { ResetWhoLoots(); ResetLootRules(); }
+
+    private void ResetWhoLoots()
+    {
+        var d = new LootConfig();
+        Cfg.Loot.LootPmc = d.LootPmc;
+        Cfg.Loot.LootScav = d.LootScav;
+        Cfg.Loot.LootPlayerScav = d.LootPlayerScav;
+        Cfg.Loot.LootGoons = d.LootGoons;
+    }
+
+    private void ResetLootRules()
+    {
+        var d = new LootConfig();
+        Cfg.Loot.DetectDistance = d.DetectDistance;
+        Cfg.Loot.ScavLootChancePct = d.ScavLootChancePct;
+        Cfg.Loot.CorpseRequiresSightOrSquadKill = d.CorpseRequiresSightOrSquadKill;
+        Cfg.Loot.KeepSpawnWeapons = d.KeepSpawnWeapons;
+    }
+}

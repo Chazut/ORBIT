@@ -33,8 +33,18 @@ public class ConfigBundle<T> where T : class
 
     public T Value { get; private set; }
 
+    // Server-side override (e.g. zones from the ORBIT server web UI). Once applied it wins over the
+    // local file, Reload() included, until the process ends — the file stays untouched as a fallback.
+    private T _override;
+
+    public void ApplyOverride(T value)
+    {
+        _override = value;
+        Value = value;
+    }
+
     public void Reload()
     {
-        Value = JsonConvert.DeserializeObject<T>(File.ReadAllText(_filePath));
+        Value = _override ?? JsonConvert.DeserializeObject<T>(File.ReadAllText(_filePath));
     }
 }

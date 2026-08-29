@@ -1,0 +1,707 @@
+@page "/orbit/zone-editor"
+@layout Orbit.Server.Web.Shared.MainLayout
+@implements IDisposable
+@using System.Globalization
+@using System.Text
+@using Microsoft.AspNetCore.Components.Forms
+@using Orbit.Server.Zones
+@using Orbit.Server.Config
+@inject ZoneStoreService ZoneStore
+@inject ConfigService Configs
+@inject ISnackbar Snackbar
+
+<PageTitle>ORBIT: Zone editor</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.ExtraLarge">
+    <div class="d-flex align-center mb-1 flex-wrap" style="gap:12px">
+        <MudText Typo="Typo.h5">Zone editor</MudText>
+        <MudChip T="string" Color="Color.Primary" Size="Size.Small" Variant="Variant.Outlined">New in 2.0</MudChip>
+        <MudSpacer />
+        <MudSelect T="string" Value="_mapId" ValueChanged="LoadMap" Label="Map" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true" Style="min-width:220px">
+            @foreach (var id in ZoneStoreService.MapIds)
+            {
+                <MudSelectItem T="string" Value="@id">@ZoneStoreService.MapLabels[id]</MudSelectItem>
+            }
+        </MudSelect>
+        <MudTooltip Text="Preview of the selected zone's pull. Arrows point where squads get nudged; length and brightness show strength. Uses the middle of the zone's min/max ranges." Arrow="true">
+            <MudSwitch T="bool" @bind-Value="_showField" Color="Color.Primary" Size="Size.Small" Label="Pull field" />
+        </MudTooltip>
+        <MudTooltip Text="Restore this map's shipped default zones (writes them immediately)." Arrow="true">
+            <MudButton Variant="Variant.Outlined" Color="Color.Warning" Size="Size.Small" StartIcon="@Icons.Material.Filled.RestartAlt" OnClick="ResetMap">Reset map</MudButton>
+        </MudTooltip>
+    </div>
+    <MudText Typo="Typo.body2" Class="mb-3" Style="opacity:.6">
+        Hotspots pull (teal) or push (red) squad routing. <b>Click</b> selects, <b>drag</b> moves a custom zone
+        (dragging empty ground pans), <b>wheel</b> zooms, <b>Ctrl+wheel</b> resizes the selection,
+        <b>double-click</b> adds a zone. Dashed ring = max radius, solid = min (sampled per raid).
+        Built-in zones (labelled) sit where BSG put them — tune them, they cannot move. Grey dots are
+        BSG zones without a tuning entry yet: click one (map or list) to start tuning it. Edits ride the
+        global Unsaved changes / Save button and apply from the next raid. Map render courtesy of tarkov.dev.
+    </MudText>
+
+    <div class="d-flex flex-wrap" style="gap:16px; align-items:flex-start">
+    @* The canvas keeps its EXACT pixel size (scroll horizontally on narrow windows): a CSS-shrunk
+       canvas breaks the offset->world math and makes drags crawl behind the cursor. *@
+    <div style="max-width:100%; overflow-x:auto; flex-shrink:1">
+    <div style="position:relative; width:@(CanvasW)px; height:@F(_canvasH)px; background:#0A0E17; border:1px solid #222B3E; border-radius:10px; overflow:hidden; touch-action:none; cursor:@CursorStyle"
+         @onpointerdown="OnPointerDown" @onpointermove="OnPointerMove" @onpointerup="OnPointerUp"
+         @onpointerleave="OnPointerUp" @ondblclick="OnDoubleClick"
+         @onwheel="OnWheel" @onwheel:preventDefault="true">
+        <svg id="orbit-zone-canvas" viewBox="@F(_panX) @F(_panY) @F(1000f / _zoom) @F(_vh / _zoom)" preserveAspectRatio="none"
+             style="position:absolute; inset:0; width:100%; height:100%">
+            <style>#orbit-zone-canvas circle, #orbit-zone-canvas line, #orbit-zone-canvas path, #orbit-zone-canvas text, #orbit-zone-canvas image { pointer-events: none; }</style>
+            @if (_view.Svg != null)
+            {
+                <image href="@_view.Svg" x="0" y="0" width="1000" height="@F(_vh)" preserveAspectRatio="none" opacity="0.85" />
+            }
+            else
+            {
+                @for (var g = 1; g < 10; g++)
+                {
+                    <line x1="@F(g * 100)" y1="0" x2="@F(g * 100)" y2="@F(_vh)" stroke="#222B3E" stroke-width="@F(0.8f / _zoom)" />
+                    <line x1="0" y1="@F(_vh * g / 10f)" x2="1000" y2="@F(_vh * g / 10f)" stroke="#222B3E" stroke-width="@F(0.8f / _zoom)" />
+                }
+            }
+            @if (_showField && !_panning && !_draggingZone)
+            {
+                @* Live preview of the advection pull — same formula as WaypointSystem, min/max ranges
+                   collapsed to their midpoint. Hidden while panning/dragging to keep interactions snappy. *@
+                @((MarkupString)string.Concat(FieldArrowPaths()))
+            }
+            @foreach (var name in _zones.BuiltinZones.Keys)
+            {
+                if (!BuiltinZonePositions.TryGet(_mapId, name, out var pos)) continue;
+                var bz = _zones.BuiltinZones[name];
+                var (px, py) = WorldToView(pos.X, pos.Z);
+                var color = (bz.Force.Min + bz.Force.Max) * 0.5f >= 0f ? "#4FD1C5" : "#FF6B6B";
+                var selected = _selectedBuiltin == name || _hoverBuiltin == name;
+                <circle cx="@F(px)" cy="@F(py)" r="@F(MetersToView(bz.Radius.Max))" fill="@color" fill-opacity="0.05"
+                        stroke="@(selected ? "#FFB454" : color)" stroke-opacity="@(selected ? "0.9" : "0.3")"
+                        stroke-width="@F((selected ? 2.2f : 1.1f) / _zoom)" stroke-dasharray="2 3" />
+                <circle cx="@F(px)" cy="@F(py)" r="@F(MetersToView(bz.Radius.Min))" fill="@color" fill-opacity="0.10"
+                        stroke="@(selected ? "#FFB454" : color)" stroke-opacity="@(selected ? "0.9" : "0.45")"
+                        stroke-width="@F((selected ? 1.8f : 1.1f) / _zoom)" stroke-dasharray="2 3" />
+                @* razor reserves <text>, so the svg label goes through MarkupString *@
+                @((MarkupString)$"<text x=\"{F(px)}\" y=\"{F(py - MetersToView(bz.Radius.Min) - 4f / _zoom)}\" text-anchor=\"middle\" font-size=\"{F(10f / _zoom)}\" fill=\"{(selected ? "#FFB454" : "#9AA4B8")}\" opacity=\"0.9\">{System.Net.WebUtility.HtmlEncode(name)}</text>")
+                <circle cx="@F(px)" cy="@F(py)" r="@F(2.5f / _zoom)" fill="@(selected ? "#FFB454" : color)" />
+            }
+            @foreach (var kv in AvailableBuiltins())
+            {
+                var (apx, apy) = WorldToView(kv.Value.X, kv.Value.Z);
+                <circle cx="@F(apx)" cy="@F(apy)" r="@F(3f / _zoom)" fill="#8A94A8" opacity="0.55" />
+                <circle cx="@F(apx)" cy="@F(apy)" r="@F(8f / _zoom)" fill="none" stroke="#8A94A8" stroke-width="@F(1f / _zoom)" opacity="0.35" stroke-dasharray="2 2" />
+                @((MarkupString)$"<text x=\"{F(apx)}\" y=\"{F(apy - 12f / _zoom)}\" text-anchor=\"middle\" font-size=\"{F(9f / _zoom)}\" fill=\"#8A94A8\" opacity=\"0.5\">{System.Net.WebUtility.HtmlEncode(kv.Key)}</text>")
+            }
+            @for (var i = 0; i < _zones.CustomZones.Count; i++)
+            {
+                var zone = _zones.CustomZones[i];
+                var (px, py) = WorldToView(zone.Position.X, zone.Position.Y);
+                var color = (zone.Force.Min + zone.Force.Max) * 0.5f >= 0f ? "#4FD1C5" : "#FF6B6B";
+                var selected = i == _selectedCustom || i == _hoverCustom;
+                <circle cx="@F(px)" cy="@F(py)" r="@F(MetersToView(zone.Radius.Max))" fill="@color" fill-opacity="0.08"
+                        stroke="@(selected ? "#FFB454" : color)" stroke-opacity="@(selected ? "0.9" : "0.35")"
+                        stroke-width="@F((selected ? 2.2f : 1.1f) / _zoom)" stroke-dasharray="6 5" />
+                <circle cx="@F(px)" cy="@F(py)" r="@F(MetersToView(zone.Radius.Min))" fill="@color" fill-opacity="0.14"
+                        stroke="@(selected ? "#FFB454" : color)" stroke-opacity="@(selected ? "0.9" : "0.55")"
+                        stroke-width="@F((selected ? 1.8f : 1.1f) / _zoom)" />
+                <circle cx="@F(px)" cy="@F(py)" r="@F(3f / _zoom)" fill="@(selected ? "#FFB454" : color)" />
+            }
+        </svg>
+        @if (_view.Svg == null)
+        {
+            <MudText Typo="Typo.caption" Style="position:absolute; top:8px; left:12px; opacity:.5; pointer-events:none">No public map render for this location — zones stay fully editable on the grid.</MudText>
+        }
+        <MudText Typo="Typo.caption" Style="position:absolute; bottom:6px; right:10px; opacity:.4; pointer-events:none">@($"zoom x{_zoom:0.#}")</MudText>
+    </div>
+    </div>
+
+    <div style="width:280px; max-height:@F(_canvasH)px; overflow-y:auto; border:1px solid #222B3E; border-radius:10px; padding:8px 6px; background:#0E1420">
+        <MudText Typo="Typo.subtitle2" Class="px-2 mb-1" Style="opacity:.7">Zones (@(_zones.BuiltinZones.Count + _zones.CustomZones.Count))</MudText>
+        @foreach (var name in _zones.BuiltinZones.Keys.OrderBy(n => n, StringComparer.OrdinalIgnoreCase))
+        {
+            var rowName = name;
+            var bz = _zones.BuiltinZones[rowName];
+            var rowColor = (bz.Force.Min + bz.Force.Max) * 0.5f >= 0f ? "#4FD1C5" : "#FF6B6B";
+            var rowSelected = _selectedBuiltin == rowName;
+            var unplacedRow = !BuiltinZonePositions.TryGet(_mapId, rowName, out _);
+            <div @onmouseover="@(() => _hoverBuiltin = rowName)" @onmouseout="@(() => _hoverBuiltin = null)"
+                 @onclick="@(() => SelectBuiltin(rowName))"
+                 style="display:flex; align-items:center; gap:8px; padding:4px 8px; border-radius:6px; cursor:pointer; background:@(rowSelected ? "rgba(255,180,84,.12)" : _hoverBuiltin == rowName ? "rgba(255,255,255,.05)" : "transparent")">
+                <span style="width:9px; height:9px; border-radius:50%; background:@rowColor; flex-shrink:0"></span>
+                <span style="font-size:.83rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap">@rowName</span>
+                <span style="margin-left:auto; font-size:.72rem; opacity:.5; flex-shrink:0">@(unplacedRow ? "?" : $"{bz.Radius.Min:F0}-{bz.Radius.Max:F0}m")</span>
+            </div>
+        }
+        @for (var i = 0; i < _zones.CustomZones.Count; i++)
+        {
+            var rowIdx = i;
+            var zone = _zones.CustomZones[rowIdx];
+            var rowColor = (zone.Force.Min + zone.Force.Max) * 0.5f >= 0f ? "#4FD1C5" : "#FF6B6B";
+            var rowSelected = _selectedCustom == rowIdx;
+            <div @onmouseover="@(() => _hoverCustom = rowIdx)" @onmouseout="@(() => _hoverCustom = -1)"
+                 @onclick="@(() => SelectCustom(rowIdx))"
+                 style="display:flex; align-items:center; gap:8px; padding:4px 8px; border-radius:6px; cursor:pointer; background:@(rowSelected ? "rgba(255,180,84,.12)" : _hoverCustom == rowIdx ? "rgba(255,255,255,.05)" : "transparent")">
+                <span style="width:9px; height:9px; border-radius:50%; background:@rowColor; border:1px dashed #E6EAF2; flex-shrink:0"></span>
+                <span style="font-size:.83rem">@($"Custom {rowIdx + 1} ({zone.Position.X:F0}, {zone.Position.Y:F0})")</span>
+                <span style="margin-left:auto; font-size:.72rem; opacity:.5; flex-shrink:0">@($"{zone.Radius.Min:F0}-{zone.Radius.Max:F0}m")</span>
+            </div>
+        }
+        @if (AvailableBuiltins().Any())
+        {
+            <MudText Typo="Typo.subtitle2" Class="px-2 mt-2 mb-1" Style="opacity:.5">Not tuned yet — click to add</MudText>
+            @foreach (var kv in AvailableBuiltins().OrderBy(k => k.Key, StringComparer.OrdinalIgnoreCase))
+            {
+                var availName = kv.Key;
+                <div @onclick="@(() => AddBuiltin(availName))"
+                     style="display:flex; align-items:center; gap:8px; padding:3px 8px; border-radius:6px; cursor:pointer; opacity:.55">
+                    <MudIcon Icon="@Icons.Material.Filled.AddCircleOutline" Style="font-size:15px" />
+                    <span style="font-size:.8rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap">@availName</span>
+                </div>
+            }
+        }
+    </div>
+    </div>
+
+    @if (_selectedCustom >= 0 && _selectedCustom < _zones.CustomZones.Count)
+    {
+        var sel = _zones.CustomZones[_selectedCustom];
+        <SettingsCard Title="@($"Custom zone — ({sel.Position.X:F0}, {sel.Position.Y:F0})")">
+            <OrbitSlider T="float" @bind-Value="sel.Radius.Min" Label="Radius min" Unit="m" Min="10f" Max="2000f" Step="10f" Fmt="0"
+                         Tooltip="The radius is rolled between min and max at raid start (most rolls land near the middle of the range). A wide range means the zone's reach changes a lot from raid to raid; set min close to max for a consistent size." />
+            <OrbitSlider T="float" @bind-Value="sel.Radius.Max" Label="Radius max" Unit="m" Min="10f" Max="2000f" Step="10f" Fmt="0"
+                         Tooltip="The radius is rolled between min and max at raid start (most rolls land near the middle of the range). A wide range means the zone's reach changes a lot from raid to raid; set min close to max for a consistent size." />
+            <OrbitSlider T="float" @bind-Value="sel.Force.Min" Label="Force min" Min="-10f" Max="10f" Step="0.05f" Fmt="0.00"
+                         Tooltip="The force is rolled between min and max at raid start (most rolls land near the middle of the range). Positive attracts squads, negative repels them. A range crossing zero flips the zone between attract and repel depending on the raid; keep min above 0 if you want the pull every raid." />
+            <OrbitSlider T="float" @bind-Value="sel.Force.Max" Label="Force max" Min="-10f" Max="10f" Step="0.05f" Fmt="0.00"
+                         Tooltip="The force is rolled between min and max at raid start (most rolls land near the middle of the range). Positive attracts squads, negative repels them." />
+            <OrbitSlider T="float" @bind-Value="sel.Decay" Label="Decay" Min="0.1f" Max="8f" Step="0.1f" Fmt="0.0"
+                         Tooltip="How the pull fades from center to edge. 1 = linear. Below 1 = stays strong almost all the way to the edge. Above 1 = squeezed into the center, the rest of the zone barely attracts." />
+            <OrbitSwitch @bind-Value="sel.KillMains" Label="Kill-main anchor"
+                         Tooltip="ON (default): squads rolling a Kills main objective can pick this zone as their hunting ground (only zones with a positive force qualify). OFF: the zone only steers routing — a pure hotspot, never a kill arena." />
+            <div class="mt-2"></div>
+            <MudButton Variant="Variant.Outlined" Color="Color.Error" Size="Size.Small" StartIcon="@Icons.Material.Filled.Delete" OnClick="DeleteSelected">Delete zone</MudButton>
+        </SettingsCard>
+    }
+    else if (_selectedBuiltin != null && _zones.BuiltinZones.TryGetValue(_selectedBuiltin, out var selBz))
+    {
+        <SettingsCard Title="@($"Built-in zone — {_selectedBuiltin}")"
+                      Subtitle="Position comes from the game (BSG spawn zone) and cannot move; radius, force and decay are yours.">
+            <OrbitSlider T="float" @bind-Value="selBz.Radius.Min" Label="Radius min" Unit="m" Min="10f" Max="2000f" Step="10f" Fmt="0"
+                         Tooltip="The radius is rolled between min and max at raid start (most rolls land near the middle of the range). A wide range means the zone's reach changes a lot from raid to raid; set min close to max for a consistent size." />
+            <OrbitSlider T="float" @bind-Value="selBz.Radius.Max" Label="Radius max" Unit="m" Min="10f" Max="2000f" Step="10f" Fmt="0"
+                         Tooltip="The radius is rolled between min and max at raid start (most rolls land near the middle of the range). A wide range means the zone's reach changes a lot from raid to raid; set min close to max for a consistent size." />
+            <OrbitSlider T="float" @bind-Value="selBz.Force.Min" Label="Force min" Min="-10f" Max="10f" Step="0.05f" Fmt="0.00"
+                         Tooltip="The force is rolled between min and max at raid start (most rolls land near the middle of the range). Positive attracts squads, negative repels them. A range crossing zero flips the zone between attract and repel depending on the raid; keep min above 0 if you want the pull every raid." />
+            <OrbitSlider T="float" @bind-Value="selBz.Force.Max" Label="Force max" Min="-10f" Max="10f" Step="0.05f" Fmt="0.00"
+                         Tooltip="The force is rolled between min and max at raid start (most rolls land near the middle of the range). Positive attracts squads, negative repels them." />
+            <OrbitSlider T="float" @bind-Value="selBz.Decay" Label="Decay" Min="0.1f" Max="8f" Step="0.1f" Fmt="0.0"
+                         Tooltip="How the pull fades from center to edge. 1 = linear. Below 1 = stays strong almost all the way to the edge. Above 1 = squeezed into the center, the rest of the zone barely attracts." />
+            <OrbitSwitch @bind-Value="selBz.KillMains" Label="Kill-main anchor"
+                         Tooltip="ON (default): squads rolling a Kills main objective can pick this zone as their hunting ground (only zones with a positive force qualify). OFF: the zone only steers routing — a pure hotspot, never a kill arena." />
+            <div class="mt-2"></div>
+            <MudTooltip Text="Remove this zone's tuning entry — ORBIT will then ignore this BSG zone entirely. It goes back to the 'not tuned yet' list." Arrow="true">
+                <MudButton Variant="Variant.Outlined" Color="Color.Error" Size="Size.Small" StartIcon="@Icons.Material.Filled.Delete" OnClick="RemoveBuiltinTuning">Remove tuning</MudButton>
+            </MudTooltip>
+        </SettingsCard>
+    }
+    else
+    {
+        <MudText Typo="Typo.body2" Class="mt-3" Style="opacity:.45">Nothing selected — click a zone on the map, or double-click empty ground to add a custom hotspot.</MudText>
+    }
+
+    <SettingsCard Title="Share zone packs"
+                  Subtitle="Export your hotspot setup as a single .json pack to publish on the Forge as an ORBIT addon, or import someone else's. Imports land as UNSAVED changes: review them on the map, then hit the global Save.">
+        <div class="d-flex flex-wrap" style="gap:32px">
+            <div style="min-width:320px; flex:1">
+                <MudText Typo="Typo.subtitle2" Class="mb-1">Export</MudText>
+                <MudTextField T="string" @bind-Value="_packName" Label="Pack name" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mb-2" />
+                <MudTextField T="string" @bind-Value="_packAuthor" Label="Author" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mb-2" />
+                <MudTextField T="string" @bind-Value="_packDescription" Label="Description" Variant="Variant.Outlined" Margin="Margin.Dense" Lines="2" Class="mb-2" />
+                <MudRadioGroup T="bool" @bind-Value="_exportAllMaps">
+                    <MudRadio T="bool" Value="false" Dense="true">Current map only (@ZoneStoreService.MapLabels[_mapId])</MudRadio>
+                    <MudRadio T="bool" Value="true" Dense="true">All maps</MudRadio>
+                </MudRadioGroup>
+                <div class="mt-2 d-flex align-center" style="gap:10px">
+                    <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.IosShare" OnClick="GeneratePack">Generate pack</MudButton>
+                    @if (_exportHref != null)
+                    {
+                        <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" StartIcon="@Icons.Material.Filled.Download"
+                                   Href="@_exportHref" UserAttributes="@(new Dictionary<string, object?> { ["download"] = _exportFileName })">@_exportFileName</MudButton>
+                    }
+                </div>
+            </div>
+            <div style="min-width:320px; flex:1">
+                <MudText Typo="Typo.subtitle2" Class="mb-1">Import</MudText>
+                <MudFileUpload T="IBrowserFile" FilesChanged="ImportPackFile" Accept=".json" MaximumFileCount="1">
+                    <ActivatorContent>
+                        <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.UploadFile">Choose a pack file (.json)</MudButton>
+                    </ActivatorContent>
+                </MudFileUpload>
+                @if (_importSummary != null)
+                {
+                    <MudText Typo="Typo.body2" Class="mt-2" Style="opacity:.7">@_importSummary</MudText>
+                }
+            </div>
+        </div>
+    </SettingsCard>
+
+</MudContainer>
+
+@code {
+    private const int CanvasW = 1160;
+
+    // svg + rotation + overlay bounds straight from the tarkov.dev interactive map configs (same data
+    // raid-review uses). Lab and Labyrinth have no public svg — they get the grid canvas.
+    private sealed record MapView(string? Svg, float Rot, float X1, float Z1, float X2, float Z2);
+
+    private static readonly Dictionary<string, MapView> Views = new()
+    {
+        ["bigmap"] = new("https://assets.tarkov.dev/maps/svg/Customs-Ground_Level.svg", 180, 698, -307, -372, 237),
+        ["factory4_day"] = new("https://assets.tarkov.dev/maps/svg/Factory-Ground_Floor.svg", 90, 77, -64.5f, -65.5f, 67.4f),
+        ["factory4_night"] = new("https://assets.tarkov.dev/maps/svg/Factory-Ground_Floor.svg", 90, 77, -64.5f, -65.5f, 67.4f),
+        ["Sandbox"] = new("https://assets.tarkov.dev/maps/svg/GroundZero-Ground_Level.svg", 180, 249, -124, -99, 364),
+        ["Sandbox_high"] = new("https://assets.tarkov.dev/maps/svg/GroundZero-Ground_Level.svg", 180, 249, -124, -99, 364),
+        ["Interchange"] = new("https://assets.tarkov.dev/maps/svg/Interchange-Ground_Level.svg", 180, 530, -439, -364, 452),
+        ["laboratory"] = new(null, 270, -80, -477, -287, -193),
+        ["Labyrinth"] = new(null, 270, -52, -37, 53, 76),
+        ["Lighthouse"] = new("https://assets.tarkov.dev/maps/svg/Lighthouse.svg", 180, 515, -998, -545, 725),
+        ["RezervBase"] = new("https://assets.tarkov.dev/maps/svg/Reserve-Ground_Level.svg", 180, 289, -293, -303, 244),
+        ["Shoreline"] = new("https://assets.tarkov.dev/maps/svg/Shoreline-Ground_Level.svg", 180, 504, -415, -1056, 618),
+        ["TarkovStreets"] = new("https://assets.tarkov.dev/maps/svg/StreetsOfTarkov-Ground_Level.svg", 180, 323, -295, -280, 532),
+        ["Woods"] = new("https://assets.tarkov.dev/maps/svg/Woods.svg", 180, 646, -914, -761, 442),
+    };
+
+    private string _mapId = "bigmap";
+    private MapZoneModel _zones = new();
+    private MapView _view = Views["bigmap"];
+    private float _minX, _maxX, _minZ, _maxZ, _spanX, _spanZ, _vh, _canvasH;
+    private float _zoom = 1f, _panX, _panY;
+    private int _selectedCustom = -1;
+    private int _hoverCustom = -1;
+    private string? _selectedBuiltin;
+    private string? _hoverBuiltin;
+    private bool _draggingZone, _panning;
+    private bool _showField = true;
+    private float _dragDx, _dragDz;
+    private double _lastOx, _lastOy;
+
+    private string CursorStyle => _draggingZone ? "grabbing" : _panning ? "move" : "crosshair";
+
+    protected override void OnInitialized()
+    {
+        ZoneStore.ZonesReplaced += OnZonesReplaced;
+        LoadMap(_mapId);
+    }
+
+    public void Dispose() => ZoneStore.ZonesReplaced -= OnZonesReplaced;
+
+    private void OnZonesReplaced()
+    {
+        // Working copies were swapped (Discard all / Reset) — re-bind and re-render.
+        InvokeAsync(() =>
+        {
+            _zones = ZoneStore.GetWorking(_mapId);
+            _selectedCustom = -1;
+            _selectedBuiltin = null;
+            StateHasChanged();
+        });
+    }
+
+    private void LoadMap(string mapId)
+    {
+        _mapId = mapId;
+        _view = Views[mapId];
+        var (rx1, rz1) = Rot(_view.X1, _view.Z1, _view.Rot);
+        var (rx2, rz2) = Rot(_view.X2, _view.Z2, _view.Rot);
+        _minX = MathF.Min(rx1, rx2);
+        _maxX = MathF.Max(rx1, rx2);
+        _minZ = MathF.Min(rz1, rz2);
+        _maxZ = MathF.Max(rz1, rz2);
+        _spanX = MathF.Max(1f, _maxX - _minX);
+        _spanZ = MathF.Max(1f, _maxZ - _minZ);
+        _vh = 1000f * _spanZ / _spanX;
+        _canvasH = CanvasW * _vh / 1000f;
+        _zoom = 1f;
+        _panX = 0f;
+        _panY = 0f;
+        _zones = ZoneStore.GetWorking(mapId);
+        _selectedCustom = -1;
+        _selectedBuiltin = null;
+        _draggingZone = _panning = false;
+    }
+
+    private void ResetMap()
+    {
+        _zones = ZoneStore.ResetWorkingToDefault(_mapId);
+        _selectedCustom = -1;
+        _selectedBuiltin = null;
+        Snackbar.Add("Zones reset to this map's shipped defaults.", Severity.Warning);
+    }
+
+    private void SelectBuiltin(string name)
+    {
+        _selectedBuiltin = name;
+        _selectedCustom = -1;
+    }
+
+    private void SelectCustom(int index)
+    {
+        _selectedCustom = index;
+        _selectedBuiltin = null;
+    }
+
+    /// <summary>BSG zones of this map (baked table) that have no tuning entry in the config yet.</summary>
+    private IEnumerable<KeyValuePair<string, (float X, float Z)>> AvailableBuiltins()
+        => BuiltinZonePositions.ByMap.TryGetValue(_mapId, out var zones)
+            ? zones.Where(kv => !_zones.BuiltinZones.ContainsKey(kv.Key))
+            : Enumerable.Empty<KeyValuePair<string, (float X, float Z)>>();
+
+    private void AddBuiltin(string name)
+    {
+        if (!_zones.BuiltinZones.ContainsKey(name))
+            _zones.BuiltinZones[name] = new BuiltinZoneModel
+            {
+                Radius = new ZoneRange { Min = 150f, Max = 250f },
+                Force = new ZoneRange { Min = 0.5f, Max = 1f },
+                Decay = 1f,
+            };
+        SelectBuiltin(name);
+    }
+
+    private void RemoveBuiltinTuning()
+    {
+        if (_selectedBuiltin == null) return;
+        _zones.BuiltinZones.Remove(_selectedBuiltin);
+        _selectedBuiltin = null;
+    }
+
+    private string? HitTestAvailable(float wx, float wz)
+    {
+        string? best = null;
+        var bestDist = float.MaxValue;
+        foreach (var kv in AvailableBuiltins())
+        {
+            var dx = kv.Value.X - wx;
+            var dz = kv.Value.Z - wz;
+            var dist = MathF.Sqrt(dx * dx + dz * dz);
+            if (dist <= 25f && dist < bestDist)
+            {
+                best = kv.Key;
+                bestDist = dist;
+            }
+        }
+        return best;
+    }
+
+    private void DeleteSelected()
+    {
+        if (_selectedCustom < 0 || _selectedCustom >= _zones.CustomZones.Count) return;
+        _zones.CustomZones.RemoveAt(_selectedCustom);
+        _selectedCustom = -1;
+    }
+
+    // ── pointer interactions (server-side hit testing, svg children are pointer-events:none) ──
+
+    private void OnPointerDown(PointerEventArgs e)
+    {
+        _lastOx = e.OffsetX;
+        _lastOy = e.OffsetY;
+        var (wx, wz) = OffsetToWorld(e.OffsetX, e.OffsetY);
+
+        var customHit = HitTestCustom(wx, wz);
+        if (customHit >= 0)
+        {
+            _selectedCustom = customHit;
+            _selectedBuiltin = null;
+            _draggingZone = true;
+            var zone = _zones.CustomZones[customHit];
+            _dragDx = zone.Position.X - wx;
+            _dragDz = zone.Position.Y - wz;
+            return;
+        }
+
+        var builtinHit = HitTestBuiltin(wx, wz);
+        if (builtinHit != null)
+        {
+            _selectedBuiltin = builtinHit;
+            _selectedCustom = -1;
+            _panning = true; // built-ins don't move — dragging pans instead
+            return;
+        }
+
+        var availableHit = HitTestAvailable(wx, wz);
+        if (availableHit != null)
+        {
+            AddBuiltin(availableHit);
+            return;
+        }
+
+        _selectedCustom = -1;
+        _selectedBuiltin = null;
+        _panning = true;
+    }
+
+    private void OnPointerMove(PointerEventArgs e)
+    {
+        if (_draggingZone && _selectedCustom >= 0 && _selectedCustom < _zones.CustomZones.Count)
+        {
+            var (wx, wz) = OffsetToWorld(e.OffsetX, e.OffsetY);
+            var zone = _zones.CustomZones[_selectedCustom];
+            (zone.Position.X, zone.Position.Y) = ClampToWorld(MathF.Round(wx + _dragDx), MathF.Round(wz + _dragDz));
+        }
+        else if (_panning)
+        {
+            var f = 1000f / _zoom / CanvasW;
+            _panX -= (float)(e.OffsetX - _lastOx) * f;
+            _panY -= (float)(e.OffsetY - _lastOy) * f;
+            ClampPan();
+        }
+        _lastOx = e.OffsetX;
+        _lastOy = e.OffsetY;
+    }
+
+    private void OnPointerUp(PointerEventArgs e)
+    {
+        _draggingZone = false;
+        _panning = false;
+    }
+
+    private void OnDoubleClick(MouseEventArgs e)
+    {
+        var (wx, wz) = OffsetToWorld(e.OffsetX, e.OffsetY);
+        if (HitTestCustom(wx, wz) >= 0) return;
+        var (ax, az) = ClampToWorld(MathF.Round(wx), MathF.Round(wz));
+        _zones.CustomZones.Add(new CustomZoneModel { Position = new ZoneVec { X = ax, Y = az } });
+        _selectedCustom = _zones.CustomZones.Count - 1;
+        _selectedBuiltin = null;
+    }
+
+    private void OnWheel(WheelEventArgs e)
+    {
+        // Ctrl+wheel resizes the selected custom zone; plain wheel zooms the view at the cursor.
+        if (e.CtrlKey && _selectedCustom >= 0 && _selectedCustom < _zones.CustomZones.Count)
+        {
+            var zone = _zones.CustomZones[_selectedCustom];
+            var factor = e.DeltaY < 0 ? 1.08f : 1f / 1.08f;
+            zone.Radius.Min = Math.Clamp(MathF.Round(zone.Radius.Min * factor), 10f, 2000f);
+            zone.Radius.Max = Math.Clamp(MathF.Round(zone.Radius.Max * factor), zone.Radius.Min, 2000f);
+            return;
+        }
+
+        var u = (float)(e.OffsetX / CanvasW);
+        var v = (float)(e.OffsetY / _canvasH);
+        var cx = _panX + u * 1000f / _zoom;
+        var cy = _panY + v * _vh / _zoom;
+        _zoom = Math.Clamp(_zoom * (e.DeltaY < 0 ? 1.2f : 1f / 1.2f), 0.4f, 10f);
+        _panX = cx - u * 1000f / _zoom;
+        _panY = cy - v * _vh / _zoom;
+        ClampPan();
+    }
+
+    // Below x1 the viewport is LARGER than the map, so the pan bounds flip sign — this shared clamp
+    // handles both regimes (zoomed-out views show the map with dark margins).
+    private void ClampPan()
+    {
+        var freeX = 1000f - 1000f / _zoom;
+        var freeY = _vh - _vh / _zoom;
+        _panX = Math.Clamp(_panX, MathF.Min(0f, freeX), MathF.Max(0f, freeX));
+        _panY = Math.Clamp(_panY, MathF.Min(0f, freeY), MathF.Max(0f, freeY));
+    }
+
+    private int HitTestCustom(float wx, float wz)
+    {
+        var best = -1;
+        var bestDist = float.MaxValue;
+        for (var i = 0; i < _zones.CustomZones.Count; i++)
+        {
+            var zone = _zones.CustomZones[i];
+            var dx = zone.Position.X - wx;
+            var dz = zone.Position.Y - wz;
+            var dist = MathF.Sqrt(dx * dx + dz * dz);
+            if (dist <= MathF.Max(zone.Radius.Max, 12f) && dist < bestDist)
+            {
+                best = i;
+                bestDist = dist;
+            }
+        }
+        return best;
+    }
+
+    private string? HitTestBuiltin(float wx, float wz)
+    {
+        string? best = null;
+        var bestDist = float.MaxValue;
+        foreach (var name in _zones.BuiltinZones.Keys)
+        {
+            if (!BuiltinZonePositions.TryGet(_mapId, name, out var pos)) continue;
+            var bz = _zones.BuiltinZones[name];
+            var dx = pos.X - wx;
+            var dz = pos.Z - wz;
+            var dist = MathF.Sqrt(dx * dx + dz * dz);
+            if (dist <= MathF.Max(bz.Radius.Max, 20f) && dist < bestDist)
+            {
+                best = name;
+                bestDist = dist;
+            }
+        }
+        return best;
+    }
+
+    // ── world <-> view transforms (tarkov.dev convention: rotate, then fit the overlay bounds) ──
+
+    private static (float x, float z) Rot(float x, float z, float deg)
+    {
+        var a = deg * MathF.PI / 180f;
+        var c = MathF.Cos(a);
+        var s = MathF.Sin(a);
+        return (x * c - z * s, x * s + z * c);
+    }
+
+    private (float px, float py) WorldToView(float x, float z)
+    {
+        var (rx, rz) = Rot(x, z, _view.Rot);
+        return ((rx - _minX) / _spanX * 1000f, (_maxZ - rz) / _spanZ * _vh);
+    }
+
+    private (float x, float z) ViewToWorld(float px, float py)
+    {
+        var rx = _minX + px / 1000f * _spanX;
+        var rz = _maxZ - py / _vh * _spanZ;
+        return Rot(rx, rz, -_view.Rot);
+    }
+
+    private (float x, float z) OffsetToWorld(double offsetX, double offsetY)
+    {
+        var px = _panX + (float)(offsetX / CanvasW) * 1000f / _zoom;
+        var py = _panY + (float)(offsetY / _canvasH) * _vh / _zoom;
+        return ViewToWorld(px, py);
+    }
+
+    private float MetersToView(float meters) => meters / _spanX * 1000f;
+
+    private (float x, float z) ClampToWorld(float x, float z) => (
+        Math.Clamp(x, MathF.Min(_view.X1, _view.X2), MathF.Max(_view.X1, _view.X2)),
+        Math.Clamp(z, MathF.Min(_view.Z1, _view.Z2), MathF.Max(_view.Z1, _view.Z2)));
+
+    private static string F(float v) => v.ToString("0.##", CultureInfo.InvariantCulture);
+
+    /// <summary>
+    /// Arrow overlay previewing the advection pull. Mirrors WaypointSystem's per-cell formula
+    /// (clamp01(1 - dist/(radius*scale)) ^ (decay*falloffScale) * force*forceScale, summed over zones,
+    /// pointing toward each zone) with min/max ranges collapsed to their midpoint. The grid follows the
+    /// current viewport so on-screen density stays constant at any zoom (~900 cells, recomputed per render:
+    /// cheap, and it makes the arrows react live while a slider is being dragged).
+    /// </summary>
+    private IEnumerable<string> FieldArrowPaths()
+    {
+        // Selected zone only: a full-map field over every zone reads as noise, one zone's pull is legible.
+        var zs = new List<(float X, float Z, float R, float Fo, float D)>();
+        if (_selectedBuiltin != null && _zones.BuiltinZones.TryGetValue(_selectedBuiltin, out var sbz)
+            && BuiltinZonePositions.TryGet(_mapId, _selectedBuiltin, out var bpos))
+        {
+            zs.Add((bpos.X, bpos.Z, (sbz.Radius.Min + sbz.Radius.Max) * 0.5f,
+                    (sbz.Force.Min + sbz.Force.Max) * 0.5f, sbz.Decay));
+        }
+        else if (_selectedCustom >= 0 && _selectedCustom < _zones.CustomZones.Count)
+        {
+            var cz = _zones.CustomZones[_selectedCustom];
+            zs.Add((cz.Position.X, cz.Position.Y, (cz.Radius.Min + cz.Radius.Max) * 0.5f,
+                    (cz.Force.Min + cz.Force.Max) * 0.5f, cz.Decay));
+        }
+        if (zs.Count == 0) yield break;
+
+        var cfg = Configs.Config.Zones;
+        var step = 30f / _zoom;
+        var yEnd = _panY + _vh / _zoom;
+        var xEnd = _panX + 1000f / _zoom;
+        for (var vy = _panY + step * 0.5f; vy < yEnd; vy += step)
+        {
+            for (var vx = _panX + step * 0.5f; vx < xEnd; vx += step)
+            {
+                var (wx, wz) = ViewToWorld(vx, vy);
+                float fx = 0f, fz = 0f;
+                foreach (var z in zs)
+                {
+                    var dx = z.X - wx;
+                    var dz = z.Z - wz;
+                    var dist = MathF.Sqrt(dx * dx + dz * dz);
+                    if (dist < 0.001f) continue;
+                    var t = 1f - dist / (z.R * cfg.ZoneRadiusScale);
+                    if (t <= 0f) continue;
+                    var f = MathF.Pow(t, z.D * cfg.ZoneFalloffScale) * z.Fo * cfg.ZoneForceScale;
+                    fx += f * dx / dist;
+                    fz += f * dz / dist;
+                }
+                var mag = MathF.Sqrt(fx * fx + fz * fz);
+                if (mag < 0.03f) continue;
+
+                // World direction -> view direction (map rotation + the vertical flip of WorldToView).
+                var (rx, rz) = Rot(fx, fz, _view.Rot);
+                var vdx = rx / _spanX * 1000f;
+                var vdy = -rz / _spanZ * _vh;
+                var vlen = MathF.Sqrt(vdx * vdx + vdy * vdy);
+                if (vlen < 0.0001f) continue;
+                vdx /= vlen;
+                vdy /= vlen;
+
+                var len = MathF.Min(5f + mag * 8f, 13f) / _zoom;
+                var tx = vx + vdx * len;
+                var ty = vy + vdy * len;
+                var hb = 3f / _zoom;
+                var bx = tx - vdx * hb;
+                var by = ty - vdy * hb;
+                var hx = -vdy * hb;
+                var hy = vdx * hb;
+                var op = Math.Clamp(0.2f + mag * 0.45f, 0.2f, 0.85f);
+                yield return $"<path d=\"M {F(vx)} {F(vy)} L {F(tx)} {F(ty)} M {F(bx + hx)} {F(by + hy)} L {F(tx)} {F(ty)} L {F(bx - hx)} {F(by - hy)}\" stroke=\"#E8C170\" stroke-opacity=\"{F(op)}\" stroke-width=\"{F(1.1f / _zoom)}\" fill=\"none\" />";
+            }
+        }
+    }
+
+    // ── zone packs (export / import) ──
+
+    private string _packName = "";
+    private string _packAuthor = "";
+    private string _packDescription = "";
+    private bool _exportAllMaps;
+    private string? _exportHref;
+    private string? _exportFileName;
+    private string? _importSummary;
+
+    private void GeneratePack()
+    {
+        var maps = _exportAllMaps ? ZoneStoreService.MapIds : new[] { _mapId };
+        var name = string.IsNullOrWhiteSpace(_packName)
+            ? (_exportAllMaps ? "orbit-zones" : $"orbit-zones-{ZoneStoreService.MapLabels[_mapId]}")
+            : _packName;
+        var json = ZoneStore.ExportPack(maps, name, _packAuthor, _packDescription);
+        var slug = new string(name.Trim().ToLowerInvariant()
+            .Select(c => char.IsLetterOrDigit(c) ? c : '-').ToArray()).Trim('-');
+        if (slug.Length == 0) slug = "orbit-zones";
+        _exportFileName = slug + ".orbitzones.json";
+        _exportHref = "data:application/json;base64," + Convert.ToBase64String(Encoding.UTF8.GetBytes(json));
+    }
+
+    private async Task ImportPackFile(IBrowserFile? file)
+    {
+        if (file == null) return;
+        try
+        {
+            using var reader = new StreamReader(file.OpenReadStream(maxAllowedSize: 5_000_000));
+            var json = await reader.ReadToEndAsync();
+            var (applied, skipped) = ZoneStore.ImportPack(json);
+            var appliedLabels = string.Join(", ", applied.Select(id => ZoneStoreService.MapLabels.TryGetValue(id, out var l) ? l : id));
+            _importSummary = applied.Count == 0
+                ? "Nothing importable in that file."
+                : $"Imported {applied.Count} map(s): {appliedLabels}."
+                  + (skipped.Count > 0 ? $" Skipped unknown: {string.Join(", ", skipped)}." : "");
+            if (applied.Count > 0)
+                Snackbar.Add($"Pack imported ({applied.Count} maps) as unsaved changes — review, then Save.", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            _importSummary = $"Import failed: {ex.Message}";
+            Snackbar.Add("Pack import failed — is this a .orbitzones.json file?", Severity.Error);
+        }
+    }
+}

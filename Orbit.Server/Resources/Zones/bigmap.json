@@ -1,0 +1,91 @@
+{
+  "BuiltinZones": {
+    "ZoneDormitory": {
+      "Radius": {
+        "Min": 250.0,
+        "Max": 300.0
+      },
+      "Force": {
+        "Min": -0.75,
+        "Max": 1.5
+      },
+      "Decay": 1.0
+    },
+    "ZoneScavBase": {
+      "Radius": {
+        "Min": 350.0,
+        "Max": 400.0
+      },
+      "Force": {
+        "Min": -0.75,
+        "Max": 1.5
+      },
+      "Decay": 1.0
+    },
+    "ZoneOldAZS": {
+      "Radius": {
+        "Min": 100.0,
+        "Max": 150.0
+      },
+      "Force": {
+        "Min": -0.25,
+        "Max": 0.25
+      },
+      "Decay": 1.0
+    },
+    "ZoneGasStation": {
+      "Radius": {
+        "Min": 200.0,
+        "Max": 250.0
+      },
+      "Force": {
+        "Min": -0.25,
+        "Max": 0.75
+      },
+      "Decay": 1.0
+    }
+  },
+  "CustomZones": [
+    {
+      "Position": {
+        "x": -200.0,
+        "y": -100.0
+      },
+      "Radius": {
+        "Min": 350.0,
+        "Max": 400.0
+      },
+      "Force": {
+        "Min": -0.25,
+        "Max": 0.5
+      },
+      "Decay": 1.0
+    },
+    {
+      "Position": {
+        "x": 550.0,
+        "y": 125.0
+      },
+      "Radius": {
+        "Min": 150.0,
+        "Max": 200.0
+      },
+      "Force": {
+        "Min": -0.25,
+        "Max": 0.5
+      },
+      "Decay": 1.0
+    }
+  ],
+  "Convergence": {
+    "Radius": {
+      "Min": 200.0,
+      "Max": 400.0
+    },
+    "Force": {
+      "Min": 0.0,
+      "Max": 0.5
+    },
+    "Enabled": true
+  }
+}

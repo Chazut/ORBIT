@@ -26,9 +26,9 @@ namespace Orbit.Tasks.Strategies;
 public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointSystem, float hysteresis) : Task<Squad>(hysteresis)
 {
     private static Range _moveTimeout = new(400, 600);
-    private Range _guardDuration = new(Plugin.ObjectiveGuardDuration.Value.x, Plugin.ObjectiveGuardDuration.Value.y);
-    private Range _guardDurationCut = new(Plugin.ObjectiveGuardDurationCut.Value.x, Plugin.ObjectiveGuardDurationCut.Value.y);
-    private Range _adjustedGuardDuration = new(Plugin.ObjectiveAdjustedGuardDuration.Value.x, Plugin.ObjectiveAdjustedGuardDuration.Value.y);
+    private Range _guardDuration = new(ServerConfig.PoiGuard.GuardDuration.x, ServerConfig.PoiGuard.GuardDuration.y);
+    private Range _guardDurationCut = new(ServerConfig.PoiGuard.GuardDurationCut.x, ServerConfig.PoiGuard.GuardDurationCut.y);
+    private Range _adjustedGuardDuration = new(ServerConfig.PoiGuard.SyntheticGuardDuration.x, ServerConfig.PoiGuard.SyntheticGuardDuration.y);
     // Scav-only idle pause at a Synthetic POI. The default 3-7s adjusted guard makes scavs look hyperactive,
     // chaining waypoints without ever stopping. 10s-120s gaussian (mean ~65s) gives a mix of short glances
     // and longer corner-camping pauses. During the wait the agent runs GuardAction (cover point + area sweeps
@@ -72,10 +72,6 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
         {
             var squad = ActiveEntities[i];
             var squadObjective = squad.Objective;
-
-            // Movement still runs every frame; only the decision loop is deferred for far-away squads.
-            if (Plugin.DegradedTickrateEnabled.Value && ShouldDeferDecisionTick(squad)) continue;
-            squad.LastDecisionTickTime = Time.time;
 
             // Deferred SAIN personality resolution. PMC squads spawn before SAIN attaches its BotComponent
             // (1-2s delay), so SquadRegistry deferred the lookup + the main-objective roll. Retry here every
@@ -168,7 +164,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
             // swapped to a virtual Waypoint at their position so realign converges everyone there to support.
             // ORBIT only routes supporters in; SAIN's combat layer (priority 20 > ORBIT 19) preempts each as
             // it acquires an enemy. Grace keeps the override stable through brief LoS breaks.
-            if (Plugin.SquadRally.Value)
+            if (ServerConfig.General.SquadRally)
             {
                 DetectAndUpdateCombatCaller(squad);
                 if (squad.CombatCallerMemberIdx >= 0)
@@ -227,7 +223,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                 && squad.CombatCallerMemberIdx < 0
                 && squad.PreInterruptObjectiveLocation == null
                 && (squadObjective.Location == null || squadObjective.Location.Category != WaypointCategory.Corpse)
-                && Time.time >= squad.LastOpportunisticCorpseScanTime + Plugin.OpportunisticCorpseScanIntervalSeconds.Value)
+                && Time.time >= squad.LastOpportunisticCorpseScanTime + ServerConfig.MainObjectives.OpportunisticCorpseScanIntervalSeconds)
             {
                 squad.LastOpportunisticCorpseScanTime = Time.time;
                 var opportunistic = waypointSystem.TryFindOpportunisticCorpse(squad);
@@ -429,7 +425,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
         if (!role.HasValue) return false;
         var isPlayerScav = profile.WillBeAPlayerScav();
         if (!role.Value.IsPMC() && !isPlayerScav) return false;
-        var allowed = LootConfig.ExtractAllowedFor?.Value ?? ExtractFaction.All;
+        var allowed = ServerConfig.Loot.ExtractAllowedFor;
         return isPlayerScav ? (allowed & ExtractFaction.PlayerScav) != 0 : allowed.IsBotEnabled(role.Value);
     }
 
@@ -449,7 +445,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
     // with meds heals naturally, so recovery cancels the extract and no explicit med check is needed.
     private static void UpdateEmergencyExtract(Agent agent)
     {
-        if (Orbit.Looting.LootConfig.EmergencyExtractEnabled is { Value: false }) return;
+        if (!ServerConfig.General.EmergencyExtractEnabled) return;
         if (!CanSoloExtract(agent)) return;
         var cur = HpFraction(agent);
 
@@ -587,26 +583,6 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
             max += h.Maximum;
         }
         return max > 0f ? cur / max : 1f;
-    }
-
-    // Degraded-tickrate gate: squads near a living human always run; ones beyond DegradedTickrateNearDistance
-    // re-decide only every DegradedTickrateFarIntervalSeconds.
-    private bool ShouldDeferDecisionTick(Squad squad)
-    {
-        var leader = squad.Leader?.Bot;
-        if (leader == null) return false;
-        var near = Plugin.DegradedTickrateNearDistance.Value;
-        var far = waypointSystem.NearestHumanDistanceSqr(leader.Position) > near * near;
-        // Log only the near<->far transition, not every deferred tick.
-        if (far != squad.DecisionThrottled)
-        {
-            squad.DecisionThrottled = far;
-            Log.Info(far
-                ? $"{squad} degraded tickrate ON — far from all players, re-deciding every {Plugin.DegradedTickrateFarIntervalSeconds.Value:F0}s"
-                : $"{squad} degraded tickrate OFF — back near a player, full-rate decisions");
-        }
-        if (!far) return false;
-        return Time.time - squad.LastDecisionTickTime < Plugin.DegradedTickrateFarIntervalSeconds.Value;
     }
 
     private int UpdateAgents(Squad squad)
@@ -847,7 +823,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                     // naturally wander up to ~50m at each re-pick. Leash: if the bot has drifted further than
                     // the search radius from the active Main's anchor (e.g. chased an enemy out of a Kills
                     // zone), swap the search centre to the anchor so the next pick snaps them back.
-                    var roamRadius = Plugin.MainObjectivesRoamSplinterRadius.Value;
+                    var roamRadius = ServerConfig.MainObjectives.RoamSplinterRadius;
                     var searchCenter = agent.Position;
                     if (activeMain != null
                         && WaypointSystem.XzDistanceSqr(agent.Position, activeMain.Position) > roamRadius * roamRadius)
@@ -932,7 +908,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                         var aroundAnchor = waypointSystem.FindRoamSplinterForMember(
                             agent.Position, squadObjective.Location.Position, squad,
                             UnionWithAgentSkips(_splinterScratch, agent),
-                            Plugin.MainObjectivesRoamSplinterRadius.Value,
+                            ServerConfig.MainObjectives.RoamSplinterRadius,
                             allowLooseLoot: true, allowContainerLoot: true, allowCorpse: false, allowSynthetic: true);
                         if (aroundAnchor != null)
                         {
@@ -1094,7 +1070,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
             // Bump the revision so raid-review re-snapshots immediately rather than at its next periodic poll.
             if (main.Completed) Orbit.Api.OrbitTelemetry.MainObjectivesRevision++;
         }
-        if (allDone && !squad.ExtractRequested && Plugin.MainObjectivesExtractOnAllCompleted.Value)
+        if (allDone && !squad.ExtractRequested && ServerConfig.MainObjectives.ExtractOnAllCompleted)
         {
             squad.ExtractRequested = true;
             squad.ExtractRequestedReason = "all mains done";
@@ -1145,7 +1121,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                         {
                             main.LootValueStartedAt = now;
                             main.LootValueEnteredAt = now;
-                            Log.Info($"{squad} LootValue main at {main.CellCoords} cell entered (member {i}) — {Plugin.MainObjectivesLootValueTimeoutSeconds.Value:F0}s timeout armed, cleanup engaged");
+                            Log.Info($"{squad} LootValue main at {main.CellCoords} cell entered (member {i}) — {ServerConfig.MainObjectives.LootValueTimeoutSeconds:F0}s timeout armed, cleanup engaged");
                             // Apply the per-POI coverage roll exactly once, on cell entry.
                             waypointSystem.ApplyLootCoverageRollForCell(squad, main.CellCoords);
                             // Force the squad to re-pick on the very next strategy tick. Without this the bot
@@ -1182,7 +1158,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                         if (main.LootValueInterrupted)
                         {
                             main.LootValueInterrupted = false;
-                            Log.Info($"{squad} LootValue main at {main.CellCoords} resumed (engaged-time so far {main.LootValueElapsedEngaged:F0}s / {Plugin.MainObjectivesLootValueTimeoutSeconds.Value:F0}s)");
+                            Log.Info($"{squad} LootValue main at {main.CellCoords} resumed (engaged-time so far {main.LootValueElapsedEngaged:F0}s / {ServerConfig.MainObjectives.LootValueTimeoutSeconds:F0}s)");
                         }
                     }
                     else
@@ -1196,7 +1172,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                         }
                     }
 
-                    if (main.LootValueElapsedEngaged >= Plugin.MainObjectivesLootValueTimeoutSeconds.Value)
+                    if (main.LootValueElapsedEngaged >= ServerConfig.MainObjectives.LootValueTimeoutSeconds)
                     {
                         main.Completed = true;
                         Log.Info($"{squad} LootValue main at {main.CellCoords} completed by engaged-time timeout ({main.LootValueElapsedEngaged:F0}s of in-cell non-combat looting)");
@@ -1373,7 +1349,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
             }
         }
         else if (squad.CombatCallerMemberIdx >= 0
-                 && now - squad.CombatCallerLastSeenAt > Plugin.MainObjectivesCombatCallerGraceSeconds.Value)
+                 && now - squad.CombatCallerLastSeenAt > ServerConfig.MainObjectives.CombatCallerGraceSeconds)
         {
             Log.Info($"{squad} combat caller cleared (grace elapsed)");
             squad.CombatCallerMemberIdx = -1;
@@ -1388,7 +1364,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
         var role = leaderBot.Profile.Info.Settings.Role;
         // Eligibility: same gate as the loot-value trigger — only factions permitted to extract bother to
         // roll a threshold.
-        if (!(LootConfig.ExtractAllowedFor?.Value ?? ExtractFaction.All).IsBotEnabled(role)) return;
+        if (!(ServerConfig.Loot.ExtractAllowedFor).IsBotEnabled(role)) return;
 
         // Lazy-roll the threshold the first time we evaluate this squad.
         if (float.IsNaN(squad.TimeExtractThresholdSeconds))
@@ -1408,7 +1384,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
     private static float RollExtractThreshold(BotOwner leaderBot)
     {
         var isPlayerScav = leaderBot?.Profile != null && leaderBot.Profile.WillBeAPlayerScav();
-        var windowPct = isPlayerScav ? Plugin.TimeExtractWindowPlayerScav.Value : Plugin.TimeExtractWindowPmc.Value;
+        var windowPct = isPlayerScav ? ServerConfig.PlayerScav.TimeExtractWindow : ServerConfig.MainObjectives.TimeExtractWindow;
         var totalRaidSeconds = (float)(Singleton<AbstractGame>.Instance?.GameTimer?.SessionTime?.TotalSeconds ?? 0d);
         if (totalRaidSeconds <= 0f) return 0f;
         return totalRaidSeconds * Random.Range(windowPct.x, windowPct.y) / 100f;
@@ -1488,7 +1464,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
             && objective.Location.Category == WaypointCategory.Synthetic)
         {
             squad.RecentlyVisitedPoiCooldowns[objective.Location.Id] =
-                Time.time + Plugin.SyntheticVisitCooldownSeconds.Value;
+                Time.time + ServerConfig.MainObjectives.SyntheticVisitCooldownSeconds;
         }
 
         Waypoint newLocation;
@@ -1523,7 +1499,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
             Vector3 requestPos;
             if (pinAnchor.HasValue)
             {
-                var leash = Plugin.MainObjectivesRoamSplinterRadius.Value;
+                var leash = ServerConfig.MainObjectives.RoamSplinterRadius;
                 // XZ-only — anchor.Y is 0 by construction (cell centre / custom zone), so 3D Euclidean would
                 // wrongly snap the leader back the moment a height mismatch crosses the leash threshold (a
                 // bot looting in a Resort basement is "50m away" from the cell anchor at Y=0 in 3D, but 0m

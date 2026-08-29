@@ -1,0 +1,30 @@
+@* Page title + optional description + per-page reset button. *@
+@inject ISnackbar Snackbar
+
+<div class="d-flex align-center mb-1" style="gap:12px">
+    <MudText Typo="Typo.h5">@Title</MudText>
+    <MudSpacer />
+    <MudTooltip Text="Restore this page's default values. Nothing is written until you hit Save." Placement="Placement.Bottom" Arrow="true">
+        <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.RestartAlt" OnClick="DoReset">Reset page</MudButton>
+    </MudTooltip>
+</div>
+@if (!string.IsNullOrEmpty(Description))
+{
+    <MudText Typo="Typo.body2" Class="mb-4" Style="opacity:.6">@Description</MudText>
+}
+else
+{
+    <div class="mb-4"></div>
+}
+
+@code {
+    [Parameter] public string Title { get; set; } = "";
+    [Parameter] public string Description { get; set; } = "";
+    [Parameter] public EventCallback OnReset { get; set; }
+
+    private async Task DoReset()
+    {
+        await OnReset.InvokeAsync();
+        Snackbar.Add($"{Title}: defaults restored. Hit Save to apply.", Severity.Info);
+    }
+}

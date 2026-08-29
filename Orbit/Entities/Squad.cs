@@ -65,12 +65,19 @@ public class Squad(int id, float[] taskScores, int targetMembersCount) : Entity(
     public readonly Dictionary<Vector2Int, float> RecentlyRefreshedCells = new();
 
     /// <summary>
-    /// Cell coordinates where this squad's leader spawned. Scavs only — biases prefDirection back toward home
-    /// so they stay in their spawn quartier even when chained loot neighbour-hops would otherwise drift them
-    /// across the map. Lazy init: null until the first RequestNear call, then frozen for the rest of the
-    /// raid.
+    /// Cell coordinates where this squad's leader spawned. Used by supported non-PMC factions that fail
+    /// their roaming roll — biases prefDirection back toward home so they stay in their spawn quartier
+    /// even when chained loot neighbour-hops would otherwise drift them across the map. Lazy init: null
+    /// until the first RequestNear call, then frozen for the rest of the raid.
     /// </summary>
     public Vector2Int? SpawnCell;
+
+    /// <summary>
+    /// Per-raid roll controlling whether this supported non-PMC squad may leave its spawn area and
+    /// use the map-wide waypoint fallback. Null until first dispatch; does not control ORBIT
+    /// enrollment. (Community PR #18 by Andrewgdewar.)
+    /// </summary>
+    public bool? AreaRoamingAllowed;
 
     /// <summary>
     /// True once any member has crossed their faction's extract-at-loot- value threshold. From then on the
@@ -78,6 +85,18 @@ public class Squad(int id, float[] taskScores, int targetMembersCount) : Entity(
     /// One-way flag — stays true for the rest of the raid.
     /// </summary>
     public bool ExtractRequested;
+
+    /// <summary>
+    /// AI-limiter temporal hysteresis (DormancySystem): Time.time of the squad's last wake and last
+    /// sleep entry. Fields on the squad rather than a DormancySystem dictionary on purpose — squad ids
+    /// are recycled, so id-based equality would bleed one squad's cooldowns into its successor.
+    /// </summary>
+    public float DormancyWokeAt = -999f;
+    public float DormancySleptAt = -999f;
+
+    /// <summary>Time.time until which this squad is pinned in a simulated ghost fight — ghost movement
+    /// holds position for the window (you don't walk your route mid-firefight).</summary>
+    public float GhostFightUntil = -999f;
 
     /// <summary>
     /// Short human-readable string describing WHY this squad flipped
@@ -168,15 +187,6 @@ public class Squad(int id, float[] taskScores, int targetMembersCount) : Entity(
     /// </summary>
     public int CorpseWatchdogLocId = -1;
     public float CorpseWatchdogSince;
-
-    /// <summary>
-    /// Time.time the decision loop last ran. Drives the degraded-tickrate throttle: squads far from every player
-    /// re-decide on a longer interval instead of every strategy tick.
-    /// </summary>
-    public float LastDecisionTickTime;
-
-    // Tracked only so we can log the near/far transition once each, not on every throttled tick.
-    public bool DecisionThrottled;
 
     /// <summary>
     /// World position where this squad's leader spawned (captured once at squad creation). Used by the

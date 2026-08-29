@@ -1,0 +1,93 @@
+@page "/orbit/main-objectives"
+@layout Orbit.Server.Web.Shared.MainLayout
+@inherits Orbit.Server.Web.OrbitConfigPage
+
+<PageTitle>ORBIT: Main objectives</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.Medium">
+    <PageHeader Title="Main objectives" OnReset="ResetPage"
+                Description="Global knobs of the goal system. PMC squads with a SAIN personality (the default) use their per-archetype values from the Personalities page on top of these." />
+
+    <SettingsCard Title="Goal system" OnReset="ResetGoalSystem">
+        <OrbitSwitch @bind-Value="Cfg.MainObjectives.Enabled" Label="Enabled (master switch)"
+                     Tooltip="Master switch for the goal system (Quest / Kills / LootValue objectives). OFF = plain dispatch." />
+        <OrbitSwitch @bind-Value="Cfg.MainObjectives.EnabledForPmc" Label="Enabled for PMC squads"
+                     Tooltip="OFF: PMC squads skip the goal system." />
+    </SettingsCard>
+
+    <SettingsCard Title="Pull strengths" OnReset="ResetPulls">
+        <OrbitSlider T="float" @bind-Value="Cfg.MainObjectives.AttractionMagnitude" Label="Main pull strength"
+                     Min="0f" Max="20f" Step="0.5f" Fmt="0.#"
+                     Tooltip="How hard squads commit to their objectives. Larger = more goal-focused." />
+        <OrbitSlider T="float" @bind-Value="Cfg.MainObjectives.KillsRoamForceMagnitude" Label="Kills roam pull strength"
+                     Min="0f" Max="20f" Step="0.5f" Fmt="0.#"
+                     Tooltip="Pull toward a Kills objective while hunting around it." />
+    </SettingsCard>
+
+    <SettingsCard Title="Timers and cooldowns" OnReset="ResetTimers">
+        <OrbitSlider T="float" @bind-Value="Cfg.MainObjectives.LootValueTimeoutSeconds" Label="LootValue timeout" Unit="s"
+                     Min="30f" Max="1800f" Step="30f" Fmt="0"
+                     Tooltip="Safety net: a LootValue objective auto-finishes after this many seconds of engaged time." />
+        <OrbitSlider T="float" @bind-Value="Cfg.MainObjectives.CombatCallerGraceSeconds" Label="Combat caller grace" Unit="s"
+                     Min="0f" Max="60f" Step="1f" Fmt="0"
+                     Tooltip="How long the rally-to-combat pull lingers after the last shots." />
+        <OrbitSlider T="float" @bind-Value="Cfg.MainObjectives.PmcLootCellCooldownSeconds" Label="PMC loot cell cooldown" Unit="s"
+                     Min="0f" Max="3600f" Step="60f" Fmt="0"
+                     Tooltip="After looting a cell, how long before the same PMC squad will go back. Stops boomeranging. 0 = no cooldown." />
+        <OrbitSlider T="float" @bind-Value="Cfg.MainObjectives.SyntheticVisitCooldownSeconds" Label="Patrol point cooldown" Unit="s"
+                     Min="0f" Max="1800f" Step="30f" Fmt="0"
+                     Tooltip="After finishing a patrol point, how long before the same squad revisits it. 0 = no cooldown." />
+        <OrbitSlider T="float" @bind-Value="Cfg.MainObjectives.OpportunisticCorpseScanIntervalSeconds" Label="Opportunistic corpse scan" Unit="s"
+                     Min="0.5f" Max="10f" Step="0.5f" Fmt="0.#"
+                     Tooltip="How often a squad checks for a fresh corpse nearby. Lower = snappier corpse looting but more CPU under heavy bot counts." />
+    </SettingsCard>
+
+    <SettingsCard Title="Movement and spread" OnReset="ResetMovement">
+        <OrbitSlider T="float" @bind-Value="Cfg.MainObjectives.RoamSplinterRadius" Label="Roam splinter radius" Unit="m"
+                     Min="10f" Max="200f" Step="5f" Fmt="0"
+                     Tooltip="How far each member spreads to pick its own spot while roaming a Kills / LootValue objective." />
+        <OrbitSlider T="float" @bind-Value="Cfg.MainObjectives.SameFloorLootYTolerance" Label="Same-floor sweep tolerance" Unit="m"
+                     Min="0f" Max="10f" Step="0.5f" Fmt="0.#"
+                     Tooltip="Loot within this vertical distance counts as same floor and is preferred over loot on another floor (stops the staircase yo-yo). 0 = ignore floors." />
+        <OrbitSlider T="float" @bind-Value="Cfg.MainObjectives.CrossFloorSplinterChance" Label="Cross-floor splinter chance" Fmt="P0"
+                     Min="0f" Max="1f" Step="0.05f"
+                     Tooltip="Chance a bot picks loot on another floor instead of finishing the current one, so it drifts up and down naturally. 0% = clear a floor before moving; 100% = ignore floors." />
+    </SettingsCard>
+</MudContainer>
+
+@code {
+    // Only the fields shown on this page (ExtractOnAllCompleted and the time windows live on Extraction).
+    private void ResetPage() { ResetGoalSystem(); ResetPulls(); ResetTimers(); ResetMovement(); }
+
+    private void ResetGoalSystem()
+    {
+        var d = new MainObjectivesConfig();
+        Cfg.MainObjectives.Enabled = d.Enabled;
+        Cfg.MainObjectives.EnabledForPmc = d.EnabledForPmc;
+    }
+
+    private void ResetPulls()
+    {
+        var d = new MainObjectivesConfig();
+        Cfg.MainObjectives.AttractionMagnitude = d.AttractionMagnitude;
+        Cfg.MainObjectives.KillsRoamForceMagnitude = d.KillsRoamForceMagnitude;
+    }
+
+    private void ResetTimers()
+    {
+        var d = new MainObjectivesConfig();
+        Cfg.MainObjectives.LootValueTimeoutSeconds = d.LootValueTimeoutSeconds;
+        Cfg.MainObjectives.CombatCallerGraceSeconds = d.CombatCallerGraceSeconds;
+        Cfg.MainObjectives.PmcLootCellCooldownSeconds = d.PmcLootCellCooldownSeconds;
+        Cfg.MainObjectives.SyntheticVisitCooldownSeconds = d.SyntheticVisitCooldownSeconds;
+        Cfg.MainObjectives.OpportunisticCorpseScanIntervalSeconds = d.OpportunisticCorpseScanIntervalSeconds;
+    }
+
+    private void ResetMovement()
+    {
+        var d = new MainObjectivesConfig();
+        Cfg.MainObjectives.RoamSplinterRadius = d.RoamSplinterRadius;
+        Cfg.MainObjectives.SameFloorLootYTolerance = d.SameFloorLootYTolerance;
+        Cfg.MainObjectives.CrossFloorSplinterChance = d.CrossFloorSplinterChance;
+    }
+}

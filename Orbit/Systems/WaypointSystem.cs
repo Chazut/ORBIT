@@ -112,6 +112,10 @@ public class WaypointSystem
     {
         _mapId = mapId;
         _zoneConfig = waypointConfig.MapZones[mapId];
+        // Zone editor (server web UI): the server's per-map zones override the local JSON for the
+        // whole session; without a reachable server mod the local files stay authoritative.
+        if (ServerConfig.TryGetZoneOverride(mapId, out var serverZones))
+            _zoneConfig.ApplyOverride(serverZones);
         _botsController = botsController;
         _humanPlayers = humanPlayers;
 
@@ -249,7 +253,7 @@ public class WaypointSystem
 
     /// <summary>Effective on/off: the F12 master toggle (default OFF) AND the per-map JSON Enabled flag
     /// both have to agree.</summary>
-    private bool ConvergenceActive => (Plugin.ConvergenceEnabled?.Value ?? false) && _convergence.Enabled;
+    private bool ConvergenceActive => ServerConfig.Zones.ConvergenceEnabled && _convergence.Enabled;
 
     public void CalculateConvergence()
     {
@@ -284,8 +288,8 @@ public class WaypointSystem
             return;
         }
 
-        var normRadius = Plugin.ConvergenceRadiusScale.Value * _convergenceRadius;
-        var forceScale = Plugin.ConvergenceForceScale.Value * _convergenceForce;
+        var normRadius = ServerConfig.Zones.ConvergenceRadiusScale * _convergenceRadius;
+        var forceScale = ServerConfig.Zones.ConvergenceForceScale * _convergenceForce;
 
         for (var x = 0; x < _gridSize.x; x++)
         {
@@ -327,7 +331,7 @@ public class WaypointSystem
                 throw new ArgumentException("The zone radius must be greater than or equal to 1");
 
             var zone = new Zone(
-                WorldToCell(botZone.CenterOfSpawnPoints),
+                WorldToCellCentered(new Vector2(botZone.CenterOfSpawnPoints.x, botZone.CenterOfSpawnPoints.z)),
                 builtinZone.Radius.SampleGaussian(),
                 builtinZone.Force.SampleGaussian(),
                 builtinZone.Decay
@@ -353,7 +357,7 @@ public class WaypointSystem
             }
 
             var zone = new Zone(
-                coords,
+                WorldToCellCentered(customZone.Position),
                 customZone.Radius.SampleGaussian(),
                 customZone.Force.SampleGaussian(),
                 customZone.Decay
@@ -372,11 +376,11 @@ public class WaypointSystem
                 for (var i = 0; i < _zones.Count; i++)
                 {
                     var zone = _zones[i];
-                    var zoneCoords = (Vector2)zone.Coords;
+                    var zoneCoords = zone.Coords;
                     var worldDist = Vector2.Distance(zoneCoords, cellCoords) * _cellSize;
-                    var force = Mathf.Clamp01(1f - worldDist / (zone.Radius * Plugin.AdvectionZoneRadiusScale.Value));
-                    force = Mathf.Pow(force, zone.Decay * Plugin.AdvectionZoneRadiusDecayScale.Value);
-                    force *= zone.Force * Plugin.AdvectionZoneForceScale.Value;
+                    var force = Mathf.Clamp01(1f - worldDist / (zone.Radius * ServerConfig.Zones.ZoneRadiusScale));
+                    force = Mathf.Pow(force, zone.Decay * ServerConfig.Zones.ZoneFalloffScale);
+                    force *= zone.Force * ServerConfig.Zones.ZoneForceScale;
                     _advectionField[x, y] += force * (zoneCoords - cellCoords).normalized;
                 }
             }
@@ -408,7 +412,7 @@ public class WaypointSystem
         var requestCoords = WorldToCell(worldPos);
 
         if (!IsValidCell(requestCoords))
-            return ScavOrIslandedLocalOnly(entity) ? null : RequestFar(entity);
+            return FactionLocalOnly(entity) ? null : RequestFar(entity);
 
         // Closeness short-circuit: if the squad is currently in the anchor cell of any pending main
         // objective, pick from THIS cell instead of scanning neighbours. Without this, the inverse-distance
@@ -489,7 +493,7 @@ public class WaypointSystem
                 var localPick = AssignWaypoint(entity, requestCoords);
                 if (localPick != null) return localPick;
             }
-            return ScavOrIslandedLocalOnly(entity) ? null : RequestFar(entity);
+            return FactionLocalOnly(entity) ? null : RequestFar(entity);
         }
 
         prefDirection.Normalize();
@@ -518,7 +522,7 @@ public class WaypointSystem
             var localPick = AssignWaypoint(entity, requestCoords);
             if (localPick != null) return localPick;
         }
-        return ScavOrIslandedLocalOnly(entity) ? null : RequestFar(entity);
+        return FactionLocalOnly(entity) ? null : RequestFar(entity);
     }
 
     // Tuning for the per-scav home-attraction force. 3.0 keeps the home vector decisively above momentum
@@ -529,9 +533,9 @@ public class WaypointSystem
     private const float HomeAttractionDistanceForFullStrength = 5f; // in cells
 
     /// <summary>
-    /// Per-squad pull back toward the squad leader's spawn cell, for scavs only (and only when Roaming Scavs
-    /// is OFF). Without this, scavs that stay 'local' via the 3x3 neighbour restriction still chain neighbour
-    /// hops indefinitely and end up far from their spawn quartier.
+    /// Per-squad pull back toward the squad leader's spawn cell, for supported non-PMC squads that did NOT
+    /// roll map-wide roaming. Without this, 'local' squads still chain neighbour hops indefinitely and end
+    /// up far from their spawn quartier.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static Vector2 ComputeHomeAttraction(Entity entity, Vector2Int currentCoords)
@@ -539,15 +543,15 @@ public class WaypointSystem
         if (entity is not Squad squad) return Vector2.zero;
         var leaderBot = squad.Leader?.Bot;
         var role = leaderBot?.Profile?.Info?.Settings?.Role;
-        if (!role.HasValue || !role.Value.IsScav()) return Vector2.zero;
+        if (!role.HasValue) return Vector2.zero;
         // PlayerScavs share WildSpawnType.assault with bot scavs so IsScav() returns true for them too — but
         // the intent is PlayerScavs follow their main objectives like PMCs, not the bot-scav home-pinning.
         // Without this exclusion the home pull (up to magnitude 3.0) competes with the main-objective pull
         // (max 4.0) and PlayerScavs drift around their spawn quartier instead of biasing toward their
         // assigned mains.
         if (leaderBot?.Profile != null && leaderBot.Profile.WillBeAPlayerScav()) return Vector2.zero;
-        // When RoamingScavs is ON, scavs are free to wander like PMCs and the home pull is silenced.
-        if (Plugin.RoamingScavs.Value) return Vector2.zero;
+        // Squads that rolled map-wide roaming wander like PMCs — the home pull is silenced for them.
+        if (!IsAreaRoamingFaction(role.Value) || CanFactionRoamAreas(squad, role.Value)) return Vector2.zero;
 
         if (!squad.SpawnCell.HasValue) squad.SpawnCell = currentCoords;
         var spawn = squad.SpawnCell.Value;
@@ -594,7 +598,7 @@ public class WaypointSystem
     {
         if (entity is not Squad squad || squad.MainObjectives == null) return Vector2.zero;
         var sum = Vector2.zero;
-        var roamForce = Plugin.MainObjectivesKillsRoamForceMagnitude.Value;
+        var roamForce = ServerConfig.MainObjectives.KillsRoamForceMagnitude;
         for (var i = 0; i < squad.MainObjectives.Count; i++)
         {
             var main = squad.MainObjectives[i];
@@ -612,18 +616,18 @@ public class WaypointSystem
             sum += (delta / dist) * (1f / dist);
         }
         var mag = sum.magnitude;
-        var maxMag = Plugin.MainObjectivesAttractionMagnitude.Value;
+        var maxMag = ServerConfig.MainObjectives.AttractionMagnitude;
         if (mag > maxMag) sum *= maxMag / mag;
         return sum;
     }
 
     /// <summary>
-    /// Decides whether this entity should be denied RequestFar (the map-wide dispatch fallback). Scavs are
-    /// pinned to their spawn area by default; Goons and Bloodhounds roam by default (matching vanilla) but can
-    /// be pinned via their toggles. Everyone else (PMCs, raiders, bosses, cultists) roams freely.
+    /// Decides whether this entity should be denied RequestFar (the map-wide dispatch fallback). Supported
+    /// non-PMC factions use one cached roaming roll per squad (see CanFactionRoamAreas); all other factions
+    /// roam normally. (Community PR #18 by Andrewgdewar.)
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static bool ScavOrIslandedLocalOnly(Entity entity)
+    private static bool FactionLocalOnly(Entity entity)
     {
         if (entity is not Squad squad) return false;
         var leaderBot = squad.Leader?.Bot;
@@ -632,10 +636,47 @@ public class WaypointSystem
         // PlayerScavs share WildSpawnType.assault with bot scavs but are NOT pinned — they follow the same
         // main-objective dispatch as PMCs and need RequestFar to reach mains anywhere on the map.
         var isPlayerScav = leaderBot?.Profile != null && leaderBot.Profile.WillBeAPlayerScav();
-        if (role.Value.IsScav() && !isPlayerScav && !Plugin.RoamingScavs.Value) return true;
-        if (role.Value.IsGoon() && !Plugin.RoamingGoons.Value) return true;
-        if (role.Value.IsBloodhound() && !Plugin.RoamingBloodhounds.Value) return true;
+        if (isPlayerScav) return false;
+        if (IsAreaRoamingFaction(role.Value) && !CanFactionRoamAreas(squad, role.Value)) return true;
         return false;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool IsAreaRoamingFaction(WildSpawnType role)
+        => role.IsScav() || role.IsGoon() || role.IsBloodhound();
+
+    /// <summary>One roaming roll per squad per raid, cached on the squad (never re-rolled, so a squad
+    /// that stayed local doesn't suddenly sprint across the map mid-raid).</summary>
+    private static bool CanFactionRoamAreas(Squad squad, WildSpawnType role)
+    {
+        if (squad.AreaRoamingAllowed.HasValue) return squad.AreaRoamingAllowed.Value;
+
+        int chancePct;
+        string faction;
+        if (role.IsScav())
+        {
+            chancePct = ServerConfig.Factions.ScavAreaRoamingPct;
+            faction = "scav";
+        }
+        else if (role.IsGoon())
+        {
+            chancePct = ServerConfig.Factions.GoonAreaRoamingPct;
+            faction = "goon";
+        }
+        else if (role.IsBloodhound())
+        {
+            chancePct = ServerConfig.Factions.BloodhoundAreaRoamingPct;
+            faction = "bloodhound";
+        }
+        else
+        {
+            return true;
+        }
+
+        var allowed = chancePct >= 100 || (chancePct > 0 && Random.Range(0, 100) < chancePct);
+        squad.AreaRoamingAllowed = allowed;
+        Log.Debug($"{squad} {faction} area roaming {(allowed ? "enabled" : "disabled")} ({chancePct}% chance)");
+        return allowed;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -847,11 +888,11 @@ public class WaypointSystem
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static bool CorpseRequiresSightOrSquadKillForSquad(Squad squad)
-        => LootConfig.CorpseRequiresSightOrSquadKill?.Value ?? false;
+        => ServerConfig.Loot.CorpseRequiresSightOrSquadKill;
 
     /// <summary>
     /// Looks for an unlooted Corpse waypoint any squad member can see within <see
-    /// cref="LootConfig.DetectDistance"/>. Returns the first match or null if no opportunistic loot target
+    /// cref="ServerConfig.LootSection.DetectDistance"/>. Returns the first match or null if no opportunistic loot target
     /// exists.
     /// </summary>
     public Waypoint TryFindOpportunisticCorpse(Squad squad)
@@ -859,9 +900,9 @@ public class WaypointSystem
         if (squad == null || squad.Members.Count == 0) return null;
         var leaderRole = squad.Leader?.Bot?.Profile?.Info?.Settings?.Role;
         if (!leaderRole.HasValue) return null;
-        if (!(LootConfig.LootingEnabled?.Value ?? LootingFaction.None).IsBotEnabled(leaderRole.Value)) return null;
+        if (!(ServerConfig.Loot.LootingEnabled).IsBotEnabled(leaderRole.Value)) return null;
 
-        var maxDist = LootConfig.DetectDistance?.Value ?? 0f;
+        var maxDist = ServerConfig.Loot.DetectDistance;
         var maxDistSqr = maxDist * maxDist;
 
         for (var m = 0; m < squad.Members.Count; m++)
@@ -966,7 +1007,7 @@ public class WaypointSystem
         // equally likely on each re-dispatch and bots yo-yo up and down the staircases for the whole
         // LootValue phase (seen in multi-floor buildings).
         const float selfExclusionDistSqr = 3f * 3f;
-        var yTolerance = Plugin.SameFloorLootYTolerance?.Value ?? 0f;
+        var yTolerance = ServerConfig.MainObjectives.SameFloorLootYTolerance;
         var preferSameFloor = yTolerance > 0f;
         Waypoint bestSameFloor = null;
         var sameFloorCandidates = 0;
@@ -1034,7 +1075,7 @@ public class WaypointSystem
         // it's vacuumed clean before ever touching a staircase. A small per-pick chance ignores the
         // preference for this ONE pick (uniform across all floors in radius) — bots loot some of the
         // current floor, then drift up or down naturally. Floor exhaustion still forces the change.
-        if (bestSameFloor != null && Random.value < (Plugin.CrossFloorSplinterChance?.Value ?? 0f))
+        if (bestSameFloor != null && Random.value < ServerConfig.MainObjectives.CrossFloorSplinterChance)
         {
             Log.Debug($"FindRoamSplinterForMember: cross-floor roll — picking floor-blind {best} (member Y={memberPos.y:F1}, pick Y={best.Position.y:F1})");
             return best;
@@ -1397,7 +1438,7 @@ public class WaypointSystem
         // Same-floor preference: track nearest same-floor and nearest overall in parallel, return same-floor
         // when present. Without this, Resort sweeps yo-yo across floors because a basement candidate at low
         // XZ but high Y delta wins on 3D distance.
-        var yTolerance = Plugin.SameFloorLootYTolerance?.Value ?? 0f;
+        var yTolerance = ServerConfig.MainObjectives.SameFloorLootYTolerance;
         var preferSameFloor = yTolerance > 0f;
         Waypoint bestSame = null;
         var bestSameDist = float.MaxValue;
@@ -1687,6 +1728,14 @@ public class WaypointSystem
         return new Vector2Int(x, y);
     }
 
+    /// <summary>Continuous, CENTER-referenced cell index of a world point: a point at the centre of
+    /// cell (x, y) maps to exactly (x, y). Used for zone anchors so the advection field keeps
+    /// sub-cell precision (a flooring here snapped every zone to its cell, which both blurred small
+    /// zones in-game and drew them up to half a cell away in raid-review's overlay, whose world
+    /// reconstruction is min + (c + 0.5) * cellSize).</summary>
+    private Vector2 WorldToCellCentered(Vector2 worldPos)
+        => new((worldPos.x - _worldMin.x) / _cellSize - 0.5f, (worldPos.y - _worldMin.y) / _cellSize - 0.5f);
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public Vector3 CellToWorld(Vector2Int cell)
     {
@@ -1739,7 +1788,7 @@ public class WaypointSystem
         // Simulates a noob bot getting confused about which way they meant to go. PMC-only.
         if (entity is Squad sqWander
             && sqWander.Archetype == PersonalityArchetype.Timmy
-            && (Plugin.SainTimmyExtrasEnabled?.Value ?? false)
+            && ServerConfig.Personalities.TimmyExtrasEnabled
             && Random.value < TimmyWrongCellProba)
         {
             var alt = PickRandomAdjacentValidCell(coords);
@@ -1772,7 +1821,7 @@ public class WaypointSystem
             if (squad.LastLootCell.HasValue && squad.LastLootCell.Value != coords
                 && !HasActiveKillsRoamMain(squad))
             {
-                squad.LootCellCooldowns[squad.LastLootCell.Value] = Time.time + Plugin.PmcLootCellCooldownSeconds.Value;
+                squad.LootCellCooldowns[squad.LastLootCell.Value] = Time.time + ServerConfig.MainObjectives.PmcLootCellCooldownSeconds;
                 squad.LastLootCell = null;
             }
             if (IsLootCategory(pick.Category))
@@ -2049,7 +2098,7 @@ public class WaypointSystem
             // squad already cleared.
             if (hasBlacklist
                 && squad.Archetype == PersonalityArchetype.Timmy
-                && (Plugin.SainTimmyExtrasEnabled?.Value ?? false)
+                && ServerConfig.Personalities.TimmyExtrasEnabled
                 && Random.value < TimmyForgetBlacklistProba)
             {
                 hasBlacklist = false;
@@ -2070,7 +2119,7 @@ public class WaypointSystem
             // hasn't already committed to a floor, pick one at random — keeps cleaning order varied between
             // bots/raids. Once committed, all picks below filter to that floor. When that floor is exhausted
             // (no eligible candidate left within tolerance) the next call re-rolls a new floor.
-            var floorTolerance = Plugin.SameFloorLootYTolerance?.Value ?? 0f;
+            var floorTolerance = ServerConfig.MainObjectives.SameFloorLootYTolerance;
             var floorY = ResolveSquadFloor(squad, coords, waypoints, floorTolerance);
             var floorFilterActive = floorTolerance > 0f && floorY.HasValue;
 
@@ -2434,7 +2483,7 @@ public class WaypointSystem
             case WaypointCategory.ContainerLoot:
             case WaypointCategory.LooseLoot:
             case WaypointCategory.Corpse:
-                maxDist = LootConfig.DetectDistance?.Value ?? float.MaxValue;
+                maxDist = ServerConfig.Loot.DetectDistance;
                 break;
             default:
                 return true; // Quest/Synthetic/Exfil aren't loot — no detour cap
@@ -2486,7 +2535,7 @@ public class WaypointSystem
         var leaderBot = squad?.Leader?.Bot;
         var role = leaderBot?.Profile?.Info?.Settings?.Role;
         if (!role.HasValue) return false;
-        var allowedFactions = LootConfig.ExtractAllowedFor?.Value ?? ExtractFaction.All;
+        var allowedFactions = ServerConfig.Loot.ExtractAllowedFor;
         var isPlayerScavLeader = leaderBot?.Profile != null && leaderBot.Profile.WillBeAPlayerScav();
         if (isPlayerScavLeader)
         {
@@ -2576,7 +2625,7 @@ public class WaypointSystem
         var leaderBot = squad?.Leader?.Bot;
         var role = leaderBot?.Profile?.Info?.Settings?.Role;
         if (!role.HasValue) return false;
-        var allowedFactions = LootConfig.ExtractAllowedFor?.Value ?? ExtractFaction.All;
+        var allowedFactions = ServerConfig.Loot.ExtractAllowedFor;
         var isPlayerScavLeader = leaderBot?.Profile != null && leaderBot.Profile.WillBeAPlayerScav();
         if (isPlayerScavLeader)
         {
@@ -2689,6 +2738,7 @@ public class WaypointSystem
                 if (botZone == null) continue;
                 if (!_zoneConfig.Value.BuiltinZones.TryGetValue(botZone.name, out var builtin)) continue;
                 if (builtin.Force.Max <= 0f) continue;
+                if (!builtin.KillMains) continue; // routing-only hotspot, never a kill arena
                 result.Add(botZone.CenterOfSpawnPoints);
             }
         }
@@ -2696,6 +2746,7 @@ public class WaypointSystem
         {
             var customZone = _zoneConfig.Value.CustomZones[i];
             if (customZone.Force.Max <= 0f) continue;
+            if (!customZone.KillMains) continue; // routing-only hotspot, never a kill arena
             // CustomZone.Position is (x, z) in world coords; y unused (NavMesh-sample at consumption time if
             // needed). Force attraction is purely 2D anyway.
             result.Add(new Vector3(customZone.Position.x, 0f, customZone.Position.y));
@@ -2904,6 +2955,11 @@ public class WaypointSystem
                 if (IsTooCloseToBuiltinPoi(cell, hit.position, poiExclusionRadiusSqr))
                     continue;
 
+                // No patrol points inside minefields / border zones — that is how dormant ghosts kept
+                // walking into the map-edge mines.
+                if (Orbit.Navigation.DangerZones.IsInside(hit.position))
+                    continue;
+
                 RegisterWaypointInCell(cellCoords, _waypointGatherer.CreateSyntheticWaypoint(hit.position));
                 pointsFound++;
             }
@@ -2934,9 +2990,9 @@ public class WaypointSystem
         return false;
     }
 
-    public readonly struct Zone(Vector2Int coords, float radius, float force, float decay)
+    public readonly struct Zone(Vector2 coords, float radius, float force, float decay)
     {
-        public readonly Vector2Int Coords = coords;
+        public readonly Vector2 Coords = coords;
         public readonly float Radius = radius;
         public readonly float Force = force;
         public readonly float Decay = decay;

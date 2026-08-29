@@ -1,0 +1,51 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
+        <TargetFramework>netstandard2.1</TargetFramework>
+        <Nullable>disable</Nullable>
+        <LangVersion>default</LangVersion>
+        <Deterministic>false</Deterministic>
+        <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+        <!-- Compile references: frozen copy of the SPT 4.1 client DLLs (refs/4.1, gitignored) -->
+        <SptRoot Condition=" '$(SptRoot)' == '' ">$(MSBuildProjectDirectory)\..\refs\4.1</SptRoot>
+        <!-- Fika.Core built from source (github.com/project-fika/Fika-Plugin, cloned next to ORBIT) -->
+        <FikaRef Condition=" '$(FikaRef)' == '' ">C:\Dev\Fika-Plugin\Fika.Core\bin\Release\netstandard2.1\Fika.Core.dll</FikaRef>
+        <AssemblyName>Orbit.Fika</AssemblyName>
+    </PropertyGroup>
+
+    <ItemGroup>
+      <ProjectReference Include="..\Orbit\Orbit.csproj">
+        <Private>false</Private>
+      </ProjectReference>
+      <Reference Include="Fika.Core">
+        <HintPath>$(FikaRef)</HintPath>
+        <Private>false</Private>
+      </Reference>
+      <Reference Include="Assembly-CSharp">
+        <HintPath>$(SptRoot)\EscapeFromTarkov_Data\Managed\Assembly-CSharp.dll</HintPath>
+        <Private>false</Private>
+      </Reference>
+      <Reference Include="BepInEx">
+        <HintPath>$(SptRoot)\BepInEx\core\BepInEx.dll</HintPath>
+        <Private>false</Private>
+      </Reference>
+      <Reference Include="Comfort">
+        <HintPath>$(SptRoot)\EscapeFromTarkov_Data\Managed\Comfort.dll</HintPath>
+        <Private>false</Private>
+      </Reference>
+      <Reference Include="UnityEngine">
+        <HintPath>$(SptRoot)\EscapeFromTarkov_Data\Managed\UnityEngine.dll</HintPath>
+        <Private>false</Private>
+      </Reference>
+      <Reference Include="UnityEngine.CoreModule">
+        <HintPath>$(SptRoot)\EscapeFromTarkov_Data\Managed\UnityEngine.CoreModule.dll</HintPath>
+        <Private>false</Private>
+      </Reference>
+      <Reference Include="UnityEngine.AudioModule">
+        <HintPath>$(SptRoot)\EscapeFromTarkov_Data\Managed\UnityEngine.AudioModule.dll</HintPath>
+        <Private>false</Private>
+      </Reference>
+    </ItemGroup>
+
+</Project>

@@ -26,6 +26,47 @@ public static class OrbitTelemetry
     public static int MainObjectivesRevision;
 
     /// <summary>
+    /// True while the AI limiter has this bot dormant (body asleep, ORBIT still driving it). Static-set
+    /// lookup, no OrbitManager needed — safe and cheap to call per position sample.
+    /// </summary>
+    public static bool IsBotDormant(string profileId)
+        => Orbit.Systems.DormancySystem.IsDormantProfile(profileId);
+
+    // ── Simulated ghost fights (AI limiter) ─────────────────────────────
+
+    private static readonly List<OrbitGhostFight> PendingGhostFights = new();
+
+    /// <summary>Called by the limiter each time a simulated fight window opens.</summary>
+    internal static void PushGhostFight(OrbitGhostFight fight)
+    {
+        lock (PendingGhostFights)
+        {
+            // A poller that died mid-raid must not leak unbounded memory.
+            if (PendingGhostFights.Count < 256) PendingGhostFights.Add(fight);
+        }
+    }
+
+    internal static void ClearGhostFights()
+    {
+        lock (PendingGhostFights) PendingGhostFights.Clear();
+    }
+
+    /// <summary>
+    /// Drains the simulated ghost fights resolved since the last call (null when none). Poll-friendly:
+    /// raid-review calls this from its tracking loop and renders the fight windows in the replay.
+    /// </summary>
+    public static List<OrbitGhostFight> DrainGhostFights()
+    {
+        lock (PendingGhostFights)
+        {
+            if (PendingGhostFights.Count == 0) return null;
+            var drained = new List<OrbitGhostFight>(PendingGhostFights);
+            PendingGhostFights.Clear();
+            return drained;
+        }
+    }
+
+    /// <summary>
     /// Resolve a bot's current objective by profile id. Returns null when no ORBIT-managed agent matches, the
     /// agent is inactive, or it has no objective. Lookup is O(N) over the live agent list — fine at the
     /// pacing raid-review uses but caller may want to batch.
@@ -232,8 +273,8 @@ public class OrbitFieldCell
 
 public class OrbitFieldZone
 {
-    public int X;
-    public int Y;
+    public float X;
+    public float Y;
     public float Radius;
     public float Force;
     public float Decay;
@@ -263,4 +304,18 @@ public class OrbitMainObjective
     public bool LootValueInterrupted;
     public string QuestTriggerId;
     public string QuestTitle;
+}
+
+/// <summary>One simulated ghost fight (AI limiter): two dormant units exchanged fire between PosA and
+/// PosB for Duration seconds, producing Casualties deaths (0 = a bloodless exchange).</summary>
+public class OrbitGhostFight
+{
+    public float AX;
+    public float AY;
+    public float AZ;
+    public float BX;
+    public float BY;
+    public float BZ;
+    public float Duration;
+    public int Casualties;
 }

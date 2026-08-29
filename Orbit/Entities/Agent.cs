@@ -19,6 +19,25 @@ public class Agent(int id, BotOwner bot, float[] taskScores) : Entity(id, taskSc
     public bool IsLeader;
     public Squad Squad;
 
+    /// <summary>
+    /// AI-limiter dormancy: the bot's GameObject is disabled (no BSG/SAIN cost) while ORBIT keeps thinking
+    /// for it. Set exclusively by DormancySystem, squad-atomically. Dormant agents keep IsActive=true —
+    /// dispatch and strategies continue; only the body-level systems (mover, look, doors, loot animations)
+    /// branch on this flag.
+    /// </summary>
+    public bool IsDormant;
+
+    /// <summary>Total HP captured at sleep entry. The dormancy poll wakes the squad the moment current HP
+    /// drops below this (mines and other position-based damage still land on inactive bodies, and a
+    /// sleeper can't heal — observed bleeding out over 10 minutes in the limiter test raid).</summary>
+    public float DormantHpBaseline;
+
+    /// <summary>Awake-side HP drop tracker (DormancySystem): last polled total HP and the Time.time of the
+    /// last observed drop. A squad with a recent drop (active bleed, fresh wound) never sleeps — re-sleeping
+    /// a bleeder before SAIN finished healing created a lethal wake/sleep loop in the second test raid.</summary>
+    public float LastPollHp;
+    public float LastHpDropTime = -999f;
+
     public readonly BotOwner Bot = bot;
     public readonly Player Player = bot.Mover._player;
 

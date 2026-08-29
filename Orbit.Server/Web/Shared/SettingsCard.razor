@@ -1,0 +1,33 @@
+@* One themed card per settings group, with an optional per-section reset. *@
+@inject ISnackbar Snackbar
+
+<MudPaper Class="pa-4 mb-4" Outlined="true">
+    <div class="d-flex align-center mb-1" style="gap:12px">
+        <MudText Typo="Typo.h6" Style="letter-spacing:.02em">@Title</MudText>
+        <MudSpacer />
+        @if (OnReset.HasDelegate)
+        {
+            <MudTooltip Text="Restore this section's default values. Nothing is written until you hit Save." Placement="Placement.Bottom" Arrow="true">
+                <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.RestartAlt" OnClick="DoReset">Reset</MudButton>
+            </MudTooltip>
+        }
+    </div>
+    @if (!string.IsNullOrEmpty(Subtitle))
+    {
+        <MudText Typo="Typo.body2" Class="mb-3" Style="opacity:.6">@Subtitle</MudText>
+    }
+    @ChildContent
+</MudPaper>
+
+@code {
+    [Parameter] public string Title { get; set; } = "";
+    [Parameter] public string Subtitle { get; set; } = "";
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+    [Parameter] public EventCallback OnReset { get; set; }
+
+    private async Task DoReset()
+    {
+        await OnReset.InvokeAsync();
+        Snackbar.Add($"{Title}: defaults restored. Hit Save to apply.", Severity.Info);
+    }
+}

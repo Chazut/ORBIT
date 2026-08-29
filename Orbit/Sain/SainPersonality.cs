@@ -3,6 +3,7 @@ using System.Collections;
 using System.Reflection;
 using Comfort.Common;
 using EFT;
+using Orbit.Helpers;
 
 namespace Orbit.Sain;
 
@@ -175,14 +176,14 @@ public static class SainPersonality
     public static PersonalityArchetype MapBrainToArchetype(string brainName)
     {
         if (string.IsNullOrWhiteSpace(brainName)) return PersonalityArchetype.Average;
-        if (ContainsToken(Plugin.SainArchetypeTimmyBrains?.Value, brainName)) return PersonalityArchetype.Timmy;
-        if (ContainsToken(Plugin.SainArchetypeCautiousBrains?.Value, brainName)) return PersonalityArchetype.Cautious;
-        if (ContainsToken(Plugin.SainArchetypeAggressiveBrains?.Value, brainName)) return PersonalityArchetype.Aggressive;
-        if (ContainsToken(Plugin.SainArchetypeVeryAggressiveBrains?.Value, brainName)) return PersonalityArchetype.VeryAggressive;
+        if (ContainsToken(ServerConfig.Personalities.BrainsTimmy, brainName)) return PersonalityArchetype.Timmy;
+        if (ContainsToken(ServerConfig.Personalities.BrainsCautious, brainName)) return PersonalityArchetype.Cautious;
+        if (ContainsToken(ServerConfig.Personalities.BrainsAggressive, brainName)) return PersonalityArchetype.Aggressive;
+        if (ContainsToken(ServerConfig.Personalities.BrainsVeryAggressive, brainName)) return PersonalityArchetype.VeryAggressive;
         // Explicit Average mapping (default "Normal") — keeps the fallback semantic but lets the user surface
         // specific brain names in the F12 list. Unknown brains still fall through to Average via the return
         // below.
-        if (ContainsToken(Plugin.SainArchetypeAverageBrains?.Value, brainName)) return PersonalityArchetype.Average;
+        if (ContainsToken(ServerConfig.Personalities.BrainsAverage, brainName)) return PersonalityArchetype.Average;
         return PersonalityArchetype.Average;
     }
 

@@ -26,7 +26,10 @@ public class Entity(int id, float[] taskScores) : IEquatable<Entity>
     {
         if (obj is null) return false;
         if (ReferenceEquals(this, obj)) return true;
-        return obj.GetType() == GetType() && Equals((Agent)obj);
+        // (Entity), NOT (Agent): this base-class override runs for every subtype, and the old hard cast
+        // to Agent threw InvalidCastException the first time two Squads landed in the same hash bucket
+        // (squad ids are recycled, so same-id collisions are routine).
+        return obj.GetType() == GetType() && Equals((Entity)obj);
     }
 
     public override int GetHashCode() => Id;

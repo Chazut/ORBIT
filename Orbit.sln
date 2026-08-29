@@ -5,6 +5,8 @@ VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Orbit", "Orbit\Orbit.csproj", "{4FED2C36-3B90-49D3-8C6D-30A0C55E2240}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Orbit.Server", "Orbit.Server\Orbit.Server.csproj", "{579D70EA-58A1-4A8B-96D1-580CECE15FDC}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -27,6 +29,18 @@ Global
 		{4FED2C36-3B90-49D3-8C6D-30A0C55E2240}.Release|x64.Build.0 = Release|Any CPU
 		{4FED2C36-3B90-49D3-8C6D-30A0C55E2240}.Release|x86.ActiveCfg = Release|Any CPU
 		{4FED2C36-3B90-49D3-8C6D-30A0C55E2240}.Release|x86.Build.0 = Release|Any CPU
+		{579D70EA-58A1-4A8B-96D1-580CECE15FDC}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{579D70EA-58A1-4A8B-96D1-580CECE15FDC}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{579D70EA-58A1-4A8B-96D1-580CECE15FDC}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{579D70EA-58A1-4A8B-96D1-580CECE15FDC}.Debug|x64.Build.0 = Debug|Any CPU
+		{579D70EA-58A1-4A8B-96D1-580CECE15FDC}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{579D70EA-58A1-4A8B-96D1-580CECE15FDC}.Debug|x86.Build.0 = Debug|Any CPU
+		{579D70EA-58A1-4A8B-96D1-580CECE15FDC}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{579D70EA-58A1-4A8B-96D1-580CECE15FDC}.Release|Any CPU.Build.0 = Release|Any CPU
+		{579D70EA-58A1-4A8B-96D1-580CECE15FDC}.Release|x64.ActiveCfg = Release|Any CPU
+		{579D70EA-58A1-4A8B-96D1-580CECE15FDC}.Release|x64.Build.0 = Release|Any CPU
+		{579D70EA-58A1-4A8B-96D1-580CECE15FDC}.Release|x86.ActiveCfg = Release|Any CPU
+		{579D70EA-58A1-4A8B-96D1-580CECE15FDC}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

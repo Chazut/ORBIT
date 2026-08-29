@@ -1,0 +1,55 @@
+@page "/orbit/zones"
+@layout Orbit.Server.Web.Shared.MainLayout
+@inherits Orbit.Server.Web.OrbitConfigPage
+
+<PageTitle>ORBIT: Zones</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.Medium">
+    <PageHeader Title="Zones and convergence" OnReset="ResetPage"
+                Description="Fine-tuning of the per-map force field. 1.0 = author defaults." />
+
+    <SettingsCard Title="Advection zones" OnReset="ResetAdvection">
+        <OrbitSlider T="float" @bind-Value="Cfg.Zones.ZoneRadiusScale" Label="Zone radius scale"
+                     Min="0f" Max="10f" Step="0.1f" Fmt="0.0"
+                     Tooltip="Multiplier on the per-map advection zone radius." />
+        <OrbitSlider T="float" @bind-Value="Cfg.Zones.ZoneForceScale" Label="Zone force scale"
+                     Min="-10f" Max="10f" Step="0.1f" Fmt="0.0"
+                     Tooltip="Multiplier on advection force. Negative flips attractors and repulsors; 0 disables advection." />
+        <OrbitSlider T="float" @bind-Value="Cfg.Zones.ZoneFalloffScale" Label="Zone falloff scale"
+                     Min="0f" Max="5f" Step="0.1f" Fmt="0.0"
+                     Tooltip="How fast a zone's force fades with distance. Larger = tighter to the zone." />
+    </SettingsCard>
+
+    <SettingsCard Title="Player convergence" OnReset="ResetConvergence">
+        <OrbitSwitch @bind-Value="Cfg.Zones.ConvergenceEnabled" Label="Player convergence"
+                     Tooltip="ON: the world gently drifts toward the human player(s), bringing more action your way. OFF (default): no pull." />
+        <div class="mt-3"></div>
+        <OrbitSlider T="float" @bind-Value="Cfg.Zones.ConvergenceRadiusScale" Label="Convergence radius scale"
+                     Min="0f" Max="10f" Step="0.1f" Fmt="0.0"
+                     Tooltip="Multiplier on how far the pull toward players reaches." />
+        <OrbitSlider T="float" @bind-Value="Cfg.Zones.ConvergenceForceScale" Label="Convergence force scale"
+                     Min="-10f" Max="10f" Step="0.1f" Fmt="0.0"
+                     Tooltip="Multiplier on how strongly bots are pulled toward players. Negative pushes them AWAY; 0 disables." />
+    </SettingsCard>
+</MudContainer>
+
+@code {
+    // Every ZonesConfig field lives on this page.
+    private void ResetPage() => Cfg.Zones = new ZonesConfig();
+
+    private void ResetAdvection()
+    {
+        var d = new ZonesConfig();
+        Cfg.Zones.ZoneRadiusScale = d.ZoneRadiusScale;
+        Cfg.Zones.ZoneForceScale = d.ZoneForceScale;
+        Cfg.Zones.ZoneFalloffScale = d.ZoneFalloffScale;
+    }
+
+    private void ResetConvergence()
+    {
+        var d = new ZonesConfig();
+        Cfg.Zones.ConvergenceEnabled = d.ConvergenceEnabled;
+        Cfg.Zones.ConvergenceRadiusScale = d.ConvergenceRadiusScale;
+        Cfg.Zones.ConvergenceForceScale = d.ConvergenceForceScale;
+    }
+}

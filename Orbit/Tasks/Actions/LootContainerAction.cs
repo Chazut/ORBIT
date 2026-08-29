@@ -90,6 +90,9 @@ public class LootContainerAction(AgentData dataset, WaypointSystem waypointSyste
             return;
         }
 
+        // Dormant bots loot for real since phase 2: BotLootState flips the handler into DormantMode
+        // (pure data transfers, no animations/delays/equips), so ghost squads bank loot value and the
+        // world state matches what an awake bot would have produced.
         if (!_states.TryGetValue(agent.Id, out var state))
         {
             Log.Debug($"{agent} LootContainerAction: starting loot on {location} (target={location.Target?.GetType().Name ?? "null"})");
@@ -353,7 +356,7 @@ public class LootContainerAction(AgentData dataset, WaypointSystem waypointSyste
         // BotType resolver collapses onto the Scav flag, but ExtractFaction only exposes Pmc / PlayerScav.
         // Without this special case, every PlayerScav fails the gate and the loot-value trigger never arms —
         // even when they loot a 4.5M-rouble Mona Lisa.
-        var allowedFactions = LootConfig.ExtractAllowedFor?.Value ?? ExtractFaction.All;
+        var allowedFactions = ServerConfig.Loot.ExtractAllowedFor;
         var isPlayerScav = agent.Bot?.Profile != null && agent.Bot.Profile.WillBeAPlayerScav();
         if (isPlayerScav)
         {
@@ -408,11 +411,11 @@ public class LootContainerAction(AgentData dataset, WaypointSystem waypointSyste
         // extract just like the squad triggers. PlayerScavs route to their own flag (shared WildSpawnType).
         var role = agent.Bot?.Profile?.Info?.Settings?.Role;
         if (!role.HasValue) return;
-        var allowed = LootConfig.ExtractAllowedFor?.Value ?? ExtractFaction.All;
+        var allowed = ServerConfig.Loot.ExtractAllowedFor;
         var soloIsPlayerScav = agent.Bot?.Profile != null && agent.Bot.Profile.WillBeAPlayerScav();
         if (!(soloIsPlayerScav ? (allowed & ExtractFaction.PlayerScav) != 0 : allowed.IsBotEnabled(role.Value))) return;
 
-        var chancePct = LootConfig.SoloLootExtractChancePct?.Value ?? 50;
+        var chancePct = ServerConfig.Loot.SoloLootExtractChancePct;
         if (chancePct <= 0) return;
 
         var ownThreshold = GetOrResolveAgentExtractThreshold(agent);
@@ -501,7 +504,7 @@ public class LootContainerAction(AgentData dataset, WaypointSystem waypointSyste
         if (!role.HasValue) return ResolveFallbackThreshold(agent);
 
         var isPmc = role.Value.IsPMC();
-        if (isPmc && (Plugin.SainPersonalityEnabled?.Value ?? false))
+        if (isPmc && (ServerConfig.Personalities.Enabled))
         {
             var brainName = SainPersonality.GetBrainName(agent.Bot);
             if (string.IsNullOrEmpty(brainName)) return ResolveFallbackThreshold(agent);
@@ -545,7 +548,7 @@ public class LootContainerAction(AgentData dataset, WaypointSystem waypointSyste
         var isPmc = role.Value.IsPMC();
         var isPlayerScav = agent.Bot.Profile != null && agent.Bot.Profile.WillBeAPlayerScav();
 
-        if (isPmc && (Plugin.SainPersonalityEnabled?.Value ?? false))
+        if (isPmc && (ServerConfig.Personalities.Enabled))
         {
             var brainName = SainPersonality.GetBrainName(agent.Bot);
             if (!string.IsNullOrEmpty(brainName))
@@ -576,7 +579,7 @@ public class LootContainerAction(AgentData dataset, WaypointSystem waypointSyste
         }
         if (isPlayerScav)
         {
-            agent.OwnExtractLootThreshold = LootConfig.ExtractAtLootValuePlayerScav?.Value ?? 0f;
+            agent.OwnExtractLootThreshold = ServerConfig.PlayerScav.ExtractAtLootValue;
             return agent.OwnExtractLootThreshold;
         }
         return 0f; // non-PMC non-playerscav — extract feature off
@@ -721,6 +724,17 @@ internal class BotLootState
 
     public void Begin()
     {
+        // Ghost looting OFF: the sleeping squad walks its route but never opens anything. Success=false
+        // routes through the failed-loot path, which blacklists the POI for the squad so the strategy
+        // re-picks instead of looping on it.
+        if (_agent.IsDormant && !ServerConfig.AiLimiter.GhostLooting)
+        {
+            Log.Debug($"{_agent} BotLootState.Begin: ghost looting disabled, skipping {_location}");
+            IsDone = true;
+            Success = false;
+            return;
+        }
+
         var lootKind = _location.Category switch
         {
             WaypointCategory.Corpse => LootKind.Corpse,
@@ -758,6 +772,10 @@ internal class BotLootState
         _brain.TargetWorldPosition = loot.transform.position;
         _brain.ForceEnabled = true;
 
+        // Phase-2 dormant looting: the session runs data-only (no animations, delays or equips) when the
+        // agent sleeps. Re-set every session — the same handler serves awake sessions later.
+        _brain.DormantMode = _agent.IsDormant;
+
         // Snapshot cumulative looted value so we can tell at the end whether the bot actually pocketed
         // anything (vs. opening the container and skipping everything because items were below the value
         // threshold).
@@ -765,15 +783,19 @@ internal class BotLootState
 
         // Immersion: crouch and face the loot before kicking off the transaction. Wrapped defensively because
         // some BotOwner specialisations (boss followers, event bots) don't expose every steering/mover hook.
-        try
+        // Pointless on a dormant (disabled) body.
+        if (!_agent.IsDormant)
         {
-            _agent.Bot.SetPose(0.25f);
-            _agent.Bot.Steering.LookToPoint(loot.transform.position);
-            if (_agent.Bot.Mover != null) _agent.Bot.Mover.Sprint(false);
-        }
-        catch (System.Exception e)
-        {
-            Log.Debug($"{_agent} BotLootState.Begin: posture/look setup failed (non-fatal): {e.Message}");
+            try
+            {
+                _agent.Bot.SetPose(0.25f);
+                _agent.Bot.Steering.LookToPoint(loot.transform.position);
+                if (_agent.Bot.Mover != null) _agent.Bot.Mover.Sprint(false);
+            }
+            catch (System.Exception e)
+            {
+                Log.Debug($"{_agent} BotLootState.Begin: posture/look setup failed (non-fatal): {e.Message}");
+            }
         }
 
         _brain.StartLooting();
@@ -826,9 +848,12 @@ internal class BotLootState
         {
             var lootedNow = _brain.Stats != null ? _brain.Stats.TotalGained : 0f;
             ItemsTaken = lootedNow > _lootedAtStart;
-            Log.Debug($"{_agent} BotLootState.Tick: brain.LootTaskRunning=false → done, lootedDelta={(lootedNow - _lootedAtStart):N0}₽, ItemsTaken={ItemsTaken}");
+            // A cancelled session with nothing taken is a FAILURE (hang watchdog, external stop): the
+            // success path would value-skip instead of squad-blacklisting, and the same broken POI got
+            // re-picked forever. A cancel that still grabbed items counts as success.
+            Success = ItemsTaken || !_brain.LastSessionCancelled;
+            Log.Debug($"{_agent} BotLootState.Tick: brain.LootTaskRunning=false → done, lootedDelta={(lootedNow - _lootedAtStart):N0}₽, ItemsTaken={ItemsTaken}, cancelled={_brain.LastSessionCancelled}, success={Success}");
             IsDone = true;
-            Success = true;
             CleanupBrainTarget();
         }
     }

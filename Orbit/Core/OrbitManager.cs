@@ -44,6 +44,7 @@ public class OrbitManager
     public readonly LookSystem LookSystem;
     public readonly WaypointSystem WaypointSystem;
     public readonly DoorSystem DoorSystem;
+    public readonly DormancySystem DormancySystem;
 
     public readonly ActionManager ActionManager;
     public readonly StrategyManager StrategyManager;
@@ -52,6 +53,7 @@ public class OrbitManager
 
     private readonly BotRoster _botRoster;
     private readonly List<Agent> _liveAgents;
+    private readonly List<Squad> _liveSquads;
 
     private const float EmergencyExtractExfilProximitySqr = 12f * 12f;
     private const float EmergencyExtractStuckMoveRadiusSqr = 2f * 2f;
@@ -84,6 +86,7 @@ public class OrbitManager
         SquadData = new SquadData();
 
         _liveAgents = AgentData.Entities.Values;
+        _liveSquads = SquadData.Entities.Values;
 
         NavJobExecutor = new NavJobExecutor();
 
@@ -91,6 +94,7 @@ public class OrbitManager
         MovementSystem = new MovementSystem(NavJobExecutor, humanPlayers, WaypointSystem);
         LookSystem = new LookSystem();
         DoorSystem = new DoorSystem();
+        DormancySystem = new DormancySystem(MovementSystem, DoorSystem, botRoster);
 
         RegisterComponents();
         var actions = RegisterActions();
@@ -128,6 +132,10 @@ public class OrbitManager
         // is still the live registration; the first pass nulls the roster slot and later passes no-op.
         if (_botRoster.GetAgent(agent.Bot) != agent) return;
 
+        // First, so a dormant body is re-activated before teardown (corpses must never stay hidden
+        // inside an inactive GameObject).
+        DormancySystem.OnAgentRemoved(agent);
+
         AgentData.RemoveEntity(agent);
         SquadRegistry.RemoveAgent(agent);
         ActionManager.RemoveEntity(agent);
@@ -136,10 +144,12 @@ public class OrbitManager
 
     public void Update()
     {
-        Orbit.Helpers.PerfMonitor.Tick(_liveAgents.Count);
+        Orbit.Helpers.PerfMonitor.Tick(_liveAgents.Count, DormancySystem.DormantCount);
         StrategyManager.Update();
         ActionManager.Update();
         TickEmergencyExtractWatchdog();
+        // Sleep/wake decisions before movement so this frame's mover tick sees fresh dormancy state.
+        DormancySystem.Update(_liveAgents, _liveSquads);
         MovementSystem.Update(_liveAgents);
         LookSystem.Update(_liveAgents);
         WaypointSystem.Update();

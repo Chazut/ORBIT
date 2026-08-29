@@ -1,0 +1,154 @@
+@page "/orbit"
+@layout Orbit.Server.Web.Shared.MainLayout
+@using System.Text
+@using Microsoft.AspNetCore.Components.Forms
+@using Orbit.Server.Config
+@inject ConfigService Configs
+@inject ISnackbar Snackbar
+
+<PageTitle>ORBIT</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.Medium">
+
+    <div class="d-flex flex-column align-center text-center mt-10 mb-10">
+        <svg width="110" height="110" viewBox="0 0 24 24" class="mb-4">
+            <circle cx="12" cy="12" r="4.2" fill="#FFB454" />
+            <ellipse cx="12" cy="12" rx="10" ry="4.2" fill="none" stroke="#4FD1C5" stroke-width="1.3" transform="rotate(-24 12 12)" />
+            <circle cx="3.2" cy="16" r="1.6" fill="#4FD1C5" />
+        </svg>
+        <MudText Typo="Typo.h3" Style="letter-spacing:.45em; font-weight:600; margin-left:.45em">ORBIT</MudText>
+        <MudChip T="string" Color="Color.Primary" Size="Size.Small" Variant="Variant.Outlined" Class="mt-2">@("v" + Version)</MudChip>
+        <MudText Typo="Typo.subtitle1" Class="mt-4" Style="opacity:.7; max-width:600px">
+            A living world for SPT. Bot squads patrol, quest, loot, fight and extract on their own,
+            raid after raid, whether you are there to see it or not.
+        </MudText>
+    </div>
+
+    <MudGrid Spacing="3" Class="mb-2">
+        <MudItem xs="12" md="4">
+            <MudPaper Outlined="true" Class="pa-4 d-flex flex-column" Style="height:100%">
+                <div class="d-flex align-center mb-2" style="gap:8px">
+                    <MudIcon Icon="@Icons.Material.Filled.Bedtime" Color="Color.Primary" />
+                    <MudText Typo="Typo.h6">AI Limiter</MudText>
+                    <MudChip T="string" Color="Color.Primary" Size="Size.Small" Variant="Variant.Outlined">2.0</MudChip>
+                </div>
+                <MudText Typo="Typo.body2" Style="opacity:.7" Class="flex-grow-1">
+                    Sleeps far-away bots body-first while ORBIT keeps thinking for them: squads keep
+                    walking, looting and even fighting as ghosts. Big performance, world still alive.
+                </MudText>
+                <MudButton Variant="Variant.Outlined" Size="Size.Small" Class="mt-3 align-self-start" Href="/orbit/ai-limiter">Configure</MudButton>
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="12" md="4">
+            <MudPaper Outlined="true" Class="pa-4 d-flex flex-column" Style="height:100%">
+                <div class="d-flex align-center mb-2" style="gap:8px">
+                    <MudIcon Icon="@Icons.Material.Filled.EditLocationAlt" Color="Color.Secondary" />
+                    <MudText Typo="Typo.h6">Zone editor</MudText>
+                    <MudChip T="string" Color="Color.Primary" Size="Size.Small" Variant="Variant.Outlined">2.0</MudChip>
+                </div>
+                <MudText Typo="Typo.body2" Style="opacity:.7" Class="flex-grow-1">
+                    Draw the hotspots that pull or push squad routing, straight on the map. Tune BSG's
+                    own zones, add your own, and share the result as an importable zone pack.
+                </MudText>
+                <MudButton Variant="Variant.Outlined" Size="Size.Small" Class="mt-3 align-self-start" Href="/orbit/zone-editor">Open the editor</MudButton>
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="12" md="4">
+            <MudPaper Outlined="true" Class="pa-4 d-flex flex-column" Style="height:100%">
+                <div class="d-flex align-center mb-2" style="gap:8px">
+                    <MudIcon Icon="@Icons.Material.Filled.Tune" Color="Color.Tertiary" />
+                    <MudText Typo="Typo.h6">All config, here</MudText>
+                    <MudChip T="string" Color="Color.Primary" Size="Size.Small" Variant="Variant.Outlined">2.0</MudChip>
+                </div>
+                <MudText Typo="Typo.body2" Style="opacity:.7" Class="flex-grow-1">
+                    Every behaviour setting moved out of the F12 menu into this UI, so it applies
+                    wherever the bots run, headless included. Browse the sections in the left menu.
+                </MudText>
+                <MudButton Variant="Variant.Outlined" Size="Size.Small" Class="mt-3 align-self-start" Href="/orbit/factions">Start with Factions</MudButton>
+            </MudPaper>
+        </MudItem>
+    </MudGrid>
+
+    <SettingsCard Title="What ORBIT does">
+        <MudList T="string" Dense="true" ReadOnly="true">
+            <MudListItem Icon="@Icons.Material.Filled.Check" IconColor="Color.Secondary">Squads with real objectives: quest spots, valuable loot, PvP hotspots, weighted by their SAIN personality</MudListItem>
+            <MudListItem Icon="@Icons.Material.Filled.Check" IconColor="Color.Secondary">Full looting: containers, corpses and loose items actually end up in their inventories</MudListItem>
+            <MudListItem Icon="@Icons.Material.Filled.Check" IconColor="Color.Secondary">Extraction with reasons: loot threshold reached, mains done, wounded emergency, raid time low</MudListItem>
+            <MudListItem Icon="@Icons.Material.Filled.Check" IconColor="Color.Secondary">Squad life: rally, dead-member loot recovery, doors, faction-mod support</MudListItem>
+            <MudListItem Icon="@Icons.Material.Filled.Check" IconColor="Color.Secondary">And with the limiter: dormant squads ghost-walk their routes, loot, and resolve off-screen firefights you can hear and third-party</MudListItem>
+        </MudList>
+    </SettingsCard>
+
+    <SettingsCard Title="Good to know">
+        <MudList T="string" Dense="true" ReadOnly="true">
+            <MudListItem Icon="@Icons.Material.Filled.Save" IconColor="Color.Primary">Save (top right) writes the server config; the game fetches it at every raid start, so changes apply from the NEXT raid</MudListItem>
+            <MudListItem Icon="@Icons.Material.Filled.EditNote" IconColor="Color.Primary">Unsaved edits (zone editor included) show up next to the Save button, with a per-change diff and a discard</MudListItem>
+            <MudListItem Icon="@Icons.Material.Filled.Keyboard" IconColor="Color.Primary">Client-side knobs (logging, performance) stay in the in-game F12 menu, which has a button back to this page</MudListItem>
+            <MudListItem Icon="@Icons.Material.Filled.Warning" IconColor="Color.Warning">Do not combine ORBIT with other AI limiter, questing, looting or bot-culling mods</MudListItem>
+        </MudList>
+    </SettingsCard>
+
+    <SettingsCard Title="Backup &amp; share"
+                  Subtitle="Export every setting as one .json to back up or share your tuning, or import someone else's. Imports land as UNSAVED changes: review the diff next to the Save button, then Save. Zones travel separately as zone packs (see the zone editor).">
+        <div class="d-flex flex-wrap align-center" style="gap:12px">
+            <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.IosShare" OnClick="GenerateExport">Generate export</MudButton>
+            @if (_exportHref != null)
+            {
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" StartIcon="@Icons.Material.Filled.Download"
+                           Href="@_exportHref" UserAttributes="@(new Dictionary<string, object?> { ["download"] = _exportFileName })">@_exportFileName</MudButton>
+            }
+            <MudFileUpload T="IBrowserFile" FilesChanged="ImportConfigFile" Accept=".json" MaximumFileCount="1">
+                <ActivatorContent>
+                    <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.UploadFile">Import a config (.json)</MudButton>
+                </ActivatorContent>
+            </MudFileUpload>
+        </div>
+        @if (_importSummary != null)
+        {
+            <MudText Typo="Typo.body2" Class="mt-2" Style="opacity:.7">@_importSummary</MudText>
+        }
+    </SettingsCard>
+
+</MudContainer>
+
+@code {
+    private static readonly string Version =
+        typeof(Home).Assembly.GetName().Version?.ToString(3) ?? "2.0.0";
+
+    private string? _exportHref;
+    private string? _exportFileName;
+    private string? _importSummary;
+
+    private void GenerateExport()
+    {
+        var json = Configs.ToJson();
+        _exportFileName = "orbit-config.json";
+        _exportHref = "data:application/json;base64," + Convert.ToBase64String(Encoding.UTF8.GetBytes(json));
+    }
+
+    private async Task ImportConfigFile(IBrowserFile? file)
+    {
+        if (file == null) return;
+        try
+        {
+            using var reader = new StreamReader(file.OpenReadStream(maxAllowedSize: 5_000_000));
+            var json = await reader.ReadToEndAsync();
+            if (!Configs.ImportJson(json))
+            {
+                _importSummary = "Nothing importable in that file.";
+                return;
+            }
+            var changes = Configs.GetPendingChanges().Count;
+            _importSummary = changes == 0
+                ? "Imported — identical to your current saved config, nothing to change."
+                : $"Imported — {changes} setting(s) differ from your saved config.";
+            if (changes > 0)
+                Snackbar.Add($"Config imported ({changes} changes) as unsaved changes — review, then Save.", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            _importSummary = $"Import failed: {ex.Message}";
+            Snackbar.Add("Config import failed — is this an ORBIT config .json?", Severity.Error);
+        }
+    }
+}

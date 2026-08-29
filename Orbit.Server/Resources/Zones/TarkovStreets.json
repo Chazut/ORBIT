@@ -1,0 +1,15 @@
+{
+  "BuiltinZones": {},
+  "CustomZones": [],
+  "Convergence": {
+    "Radius": {
+      "Min": 150.0,
+      "Max": 300.0
+    },
+    "Force": {
+      "Min": 0.0,
+      "Max": 0.5
+    },
+    "Enabled": true
+  }
+}

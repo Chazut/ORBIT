@@ -1,0 +1,101 @@
+@page "/orbit/personalities"
+@layout Orbit.Server.Web.Shared.MainLayout
+@inherits Orbit.Server.Web.OrbitConfigPage
+
+<PageTitle>ORBIT: Personalities</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.Medium">
+    <PageHeader Title="SAIN personalities" OnReset="ResetPage"
+                Description="PMC squads are matched to an archetype from their SAIN brain and use its values. Scavs and PlayerScavs always use the fallback values. Reset page restores everything here, including all five archetypes." />
+
+    <SettingsCard Title="General" OnReset="ResetGeneral">
+        <OrbitSwitch @bind-Value="Cfg.Personalities.Enabled" Label="Enable SAIN personality"
+                     Tooltip="ON (default): PMC squads use the per-archetype values below, matched from their SAIN brain. OFF: PMCs use the global fallback values." />
+        <OrbitSwitch @bind-Value="Cfg.Personalities.TimmyExtrasEnabled" Label="Timmy erratic extras"
+                     Tooltip="ON (default): Timmy squads also get a 20% wrong-cell pick and a 5% forget-blacklist quirk on top of their archetype numbers." />
+    </SettingsCard>
+
+    <SettingsCard Title="Brain name mapping" OnReset="ResetBrains"
+                  Subtitle="SAIN brain names (comma-separated, case-insensitive) mapped to each archetype. Unlisted brains fall back to Average. Changing these needs a game restart.">
+        <MudGrid Spacing="3">
+            <MudItem xs="12" sm="6">
+                <MudTextField T="string" @bind-Value="Cfg.Personalities.BrainsTimmy" Label="Timmy"
+                              HelperText="Random / erratic archetype" Variant="Variant.Outlined" Margin="Margin.Dense" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudTextField T="string" @bind-Value="Cfg.Personalities.BrainsCautious" Label="Cautious"
+                              HelperText="Low-risk, loot-focused archetype" Variant="Variant.Outlined" Margin="Margin.Dense" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudTextField T="string" @bind-Value="Cfg.Personalities.BrainsAverage" Label="Average"
+                              HelperText="Balanced archetype, also the fallback" Variant="Variant.Outlined" Margin="Margin.Dense" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudTextField T="string" @bind-Value="Cfg.Personalities.BrainsAggressive" Label="Aggressive"
+                              HelperText="Kill-focused archetype" Variant="Variant.Outlined" Margin="Margin.Dense" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudTextField T="string" @bind-Value="Cfg.Personalities.BrainsVeryAggressive" Label="Very aggressive"
+                              HelperText="Maximum-aggression archetype" Variant="Variant.Outlined" Margin="Margin.Dense" />
+            </MudItem>
+        </MudGrid>
+    </SettingsCard>
+
+    <SettingsCard Title="Archetype tuning" OnReset="ResetArchetypes">
+        <MudTabs Elevation="0" Rounded="true" ApplyEffectsToContainer="true" PanelClass="pt-4" Color="Color.Primary">
+            <MudTabPanel Text="Timmy">
+                <ArchetypeEditor Cfg="Cfg.Personalities.Timmy" Name="Timmy"
+                                 OnReset="@(() => Cfg.Personalities.Timmy = new PersonalitiesConfig().Timmy)" />
+            </MudTabPanel>
+            <MudTabPanel Text="Cautious">
+                <ArchetypeEditor Cfg="Cfg.Personalities.Cautious" Name="Cautious"
+                                 OnReset="@(() => Cfg.Personalities.Cautious = new PersonalitiesConfig().Cautious)" />
+            </MudTabPanel>
+            <MudTabPanel Text="Average">
+                <ArchetypeEditor Cfg="Cfg.Personalities.Average" Name="Average"
+                                 OnReset="@(() => Cfg.Personalities.Average = new PersonalitiesConfig().Average)" />
+            </MudTabPanel>
+            <MudTabPanel Text="Aggressive">
+                <ArchetypeEditor Cfg="Cfg.Personalities.Aggressive" Name="Aggressive"
+                                 OnReset="@(() => Cfg.Personalities.Aggressive = new PersonalitiesConfig().Aggressive)" />
+            </MudTabPanel>
+            <MudTabPanel Text="Very aggressive">
+                <ArchetypeEditor Cfg="Cfg.Personalities.VeryAggressive" Name="Very aggressive"
+                                 OnReset="@(() => Cfg.Personalities.VeryAggressive = new PersonalitiesConfig().VeryAggressive)" />
+            </MudTabPanel>
+        </MudTabs>
+    </SettingsCard>
+</MudContainer>
+
+@code {
+    // Every PersonalitiesConfig field lives on this page, archetypes included.
+    private void ResetPage() => Cfg.Personalities = new PersonalitiesConfig();
+
+    private void ResetGeneral()
+    {
+        var d = new PersonalitiesConfig();
+        Cfg.Personalities.Enabled = d.Enabled;
+        Cfg.Personalities.TimmyExtrasEnabled = d.TimmyExtrasEnabled;
+    }
+
+    private void ResetBrains()
+    {
+        var d = new PersonalitiesConfig();
+        Cfg.Personalities.BrainsTimmy = d.BrainsTimmy;
+        Cfg.Personalities.BrainsCautious = d.BrainsCautious;
+        Cfg.Personalities.BrainsAverage = d.BrainsAverage;
+        Cfg.Personalities.BrainsAggressive = d.BrainsAggressive;
+        Cfg.Personalities.BrainsVeryAggressive = d.BrainsVeryAggressive;
+    }
+
+    // All five archetypes at once; each tab also has its own single-archetype reset.
+    private void ResetArchetypes()
+    {
+        var d = new PersonalitiesConfig();
+        Cfg.Personalities.Timmy = d.Timmy;
+        Cfg.Personalities.Cautious = d.Cautious;
+        Cfg.Personalities.Average = d.Average;
+        Cfg.Personalities.Aggressive = d.Aggressive;
+        Cfg.Personalities.VeryAggressive = d.VeryAggressive;
+    }
+}

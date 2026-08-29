@@ -2,6 +2,7 @@ using System.Reflection;
 using Comfort.Common;
 using EFT;
 using Orbit.Core;
+using Orbit.Helpers;
 using Orbit.Navigation;
 using SPT.Reflection.Patching;
 
@@ -23,6 +24,13 @@ public class OrbitInitPatch : ModulePatch
     public static void Postfix(BotsController __instance)
     {
         Log.Debug("Initializing ORBIT runtime");
+
+        // Re-fetch the server config before anything reads it this raid, so a Save in the server
+        // web UI applies on the next raid without restarting the game.
+        ServerConfig.Fetch();
+
+        // Border zones (minefields) must be known before the waypoint gatherer runs below.
+        DangerZones.Refresh();
 
         DangerZoneCarver.AddNavmeshCutter();
 
@@ -94,6 +102,9 @@ public class OrbitDisposePatch : ModulePatch
 
             var roster = Singleton<BotRoster>.Instance;
             if (roster != null) Singleton<BotRoster>.Release(roster);
+
+            // Stale dormant profile ids would hide next-raid bots from the vision patch's point of view.
+            Orbit.Systems.DormancySystem.ClearStatics();
 
             Plugin.LogSource.LogInfo("Dispose complete");
         }

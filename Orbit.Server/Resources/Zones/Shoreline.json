@@ -1,0 +1,76 @@
+{
+  "BuiltinZones": {},
+  "CustomZones": [
+    {
+      "Position": {
+        "x": -250.0,
+        "y": -100.0
+      },
+      "Radius": {
+        "Min": 500.0,
+        "Max": 600.0
+      },
+      "Force": {
+        "Min": -0.25,
+        "Max": 0.75
+      },
+      "Decay": 1.0
+    },
+    {
+      "Position": {
+        "x": 160.0,
+        "y": -270.0
+      },
+      "Radius": {
+        "Min": 500.0,
+        "Max": 600.0
+      },
+      "Force": {
+        "Min": 0.0,
+        "Max": 0.25
+      },
+      "Decay": 1.0
+    },
+    {
+      "Position": {
+        "x": -345.0,
+        "y": 455.0
+      },
+      "Radius": {
+        "Min": 500.0,
+        "Max": 600.0
+      },
+      "Force": {
+        "Min": -0.25,
+        "Max": 0.75
+      },
+      "Decay": 1.0
+    },
+    {
+      "Position": {
+        "x": -925.0,
+        "y": 275.0
+      },
+      "Radius": {
+        "Min": 500.0,
+        "Max": 600.0
+      },
+      "Force": {
+        "Min": -0.25,
+        "Max": 0.75
+      },
+      "Decay": 1.0
+    }
+  ],
+  "Convergence": {
+    "Radius": {
+      "Min": 750.0,
+      "Max": 1500.0
+    },
+    "Force": {
+      "Min": 0.25,
+      "Max": 0.75
+    },
+    "Enabled": true
+  }
+}
