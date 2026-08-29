@@ -29,7 +29,7 @@ Built on [Phobos](https://discord.com/channels/875684761291599922/13371314278039
 limiter** that turns far-away squads into ghosts instead of freezing the
 world, and a visual **zone editor** to draw your own hotspots on the map.
 
-[📷 Screenshot](https://i.imgur.com/WSWqb8d.png) · Pair with [Raid Review](https://forge.sp-tarkov.com/mod/1479/raid-review) to replay it all · Questions & feedback: [ORBIT Discord thread](https://discord.com/channels/875684761291599922/1509314495019745451)
+[📷 Screenshot](https://i.imgur.com/WSWqb8d.png) · Pair with [Raid Review]([https://forge.sp-tarkov.com/mod/1479/raid-review](https://sp-mod.com/mod/1479/raid-review)) to replay it all · Questions & feedback: [ORBIT Discord thread](https://discord.com/channels/875684761291599922/1509314495019745451)
 
 ## What a raid looks like
 
