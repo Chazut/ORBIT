@@ -19,25 +19,21 @@ public struct OrbitGhostFightPacket : INetSerializable
 
     public readonly void Serialize(NetDataWriter writer)
     {
-        writer.Put(PosA.x);
-        writer.Put(PosA.y);
-        writer.Put(PosA.z);
-        writer.Put(PosB.x);
-        writer.Put(PosB.y);
-        writer.Put(PosB.z);
+        writer.PutUnmanaged(PosA);
+        writer.PutUnmanaged(PosB);
         writer.Put(ProfileA ?? string.Empty);
         writer.Put(ProfileB ?? string.Empty);
-        writer.Put(Shots);
-        writer.Put(Duration);
+        writer.PutUnmanaged(Shots);
+        writer.PutUnmanaged(Duration);
     }
 
     public void Deserialize(NetDataReader reader)
     {
-        PosA = new Vector3(reader.GetFloat(), reader.GetFloat(), reader.GetFloat());
-        PosB = new Vector3(reader.GetFloat(), reader.GetFloat(), reader.GetFloat());
+        PosA = reader.GetUnmanaged<Vector3>();
+        PosB = reader.GetUnmanaged<Vector3>();
         ProfileA = reader.GetString();
         ProfileB = reader.GetString();
-        Shots = reader.GetInt();
-        Duration = reader.GetFloat();
+        Shots = reader.GetUnmanaged<int>();
+        Duration = reader.GetUnmanaged<float>();
     }
 }
