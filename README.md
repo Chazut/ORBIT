@@ -23,7 +23,7 @@ like players, upgrade their gear along the way, and head for extract when
 they're done. Kill one late in the raid and his backpack tells the story
 of where he's been.
 
-Built on [Phobos](https://discord.com/channels/875684761291599922/1337131427803955200)'s foundations (MIT, with [Janky's](https://forge.sp-tarkov.com/user/72916/jankytheclown) blessing - full credits below).
+Built on [Phobos](https://discord.com/channels/875684761291599922/1337131427803955200)'s foundations (MIT, with Janky's blessing - full credits below).
 
 **2.0** adds a server **web UI** for every setting, a built-in **AI
 limiter** that turns far-away squads into ghosts instead of freezing the
