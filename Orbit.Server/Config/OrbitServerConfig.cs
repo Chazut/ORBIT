@@ -33,7 +33,8 @@ public class OrbitServerConfig
 /// </summary>
 public class AiLimiterConfig
 {
-    // RC ONLY: ON by default to gather feedback. Flip back to default-OFF for the stable release.
+    // ON by default — decided after the 2.0 RC: unanimous community feedback, and the limiter is
+    // the release's headline feature. Release notes call it out with where to turn it off.
     public bool Enabled { get; set; } = true;
     public bool GhostMovement { get; set; } = true;
     // "simulated" (statistical resolution, zero cost) | "real" (wake both units on contact and let

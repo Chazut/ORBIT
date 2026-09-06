@@ -123,7 +123,8 @@ public static class ServerConfig
 
     public sealed class AiLimiterSection
     {
-        // RC ONLY: ON by default (must match the server default). Flip back for the stable release.
+        // ON by default (must match the server default) — decided after the 2.0 RC: unanimous
+        // community feedback, and the limiter is the release's headline feature.
         [JsonProperty("enabled")] public bool Enabled = true;
         [JsonProperty("ghost_movement")] public bool GhostMovement = true;
         [JsonProperty("ghost_fights_mode")] public string GhostFightsMode = "simulated";
