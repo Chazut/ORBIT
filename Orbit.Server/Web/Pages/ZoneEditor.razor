@@ -26,6 +26,9 @@
         <MudTooltip Text="Preview of the selected zone's pull. Arrows point where squads get nudged; length and brightness show strength. Uses the middle of the zone's min/max ranges." Arrow="true">
             <MudSwitch T="bool" @bind-Value="_showField" Color="Color.Primary" Size="Size.Small" Label="Pull field" />
         </MudTooltip>
+        <MudTooltip Text="Scale reference for player convergence: bots inside the rings get pulled toward the player (solid = min roll, dashed = max, scaled by the global convergence radius scale). In game the rings follow the player; here they sit at the view center just to show their size on this map." Arrow="true">
+            <MudSwitch T="bool" @bind-Value="_showConvergence" Color="Color.Secondary" Size="Size.Small" Label="Convergence ring" />
+        </MudTooltip>
         <MudTooltip Text="Restore this map's shipped default zones (writes them immediately)." Arrow="true">
             <MudButton Variant="Variant.Outlined" Color="Color.Warning" Size="Size.Small" StartIcon="@Icons.Material.Filled.RestartAlt" OnClick="ResetMap">Reset map</MudButton>
         </MudTooltip>
@@ -43,9 +46,14 @@
     @* The canvas keeps its EXACT pixel size (scroll horizontally on narrow windows): a CSS-shrunk
        canvas breaks the offset->world math and makes drags crawl behind the cursor. *@
     <div style="max-width:100%; overflow-x:auto; flex-shrink:1">
-    <div style="position:relative; width:@(CanvasW)px; height:@F(_canvasH)px; background:#0A0E17; border:1px solid #222B3E; border-radius:10px; overflow:hidden; touch-action:none; cursor:@CursorStyle"
+    @* user-select:none + dragstart preventDefault: without them a drag natively SELECTS the svg
+       labels behind (visible highlight), and the NEXT drag starting inside that selection becomes a
+       browser drag-of-selection that cancels our pointer events — the RC "second drag does nothing"
+       report. Synthetic-event tests can't reproduce it, only real mouse gestures do. *@
+    <div style="position:relative; width:@(CanvasW)px; height:@F(_canvasH)px; background:#0A0E17; border:1px solid #222B3E; border-radius:10px; overflow:hidden; touch-action:none; user-select:none; -webkit-user-select:none; cursor:@CursorStyle"
          @onpointerdown="OnPointerDown" @onpointermove="OnPointerMove" @onpointerup="OnPointerUp"
          @onpointerleave="OnPointerUp" @ondblclick="OnDoubleClick"
+         @ondragstart:preventDefault="true"
          @onwheel="OnWheel" @onwheel:preventDefault="true">
         <svg id="orbit-zone-canvas" viewBox="@F(_panX) @F(_panY) @F(1000f / _zoom) @F(_vh / _zoom)" preserveAspectRatio="none"
              style="position:absolute; inset:0; width:100%; height:100%">
@@ -67,6 +75,20 @@
                 @* Live preview of the advection pull — same formula as WaypointSystem, min/max ranges
                    collapsed to their midpoint. Hidden while panning/dragging to keep interactions snappy. *@
                 @((MarkupString)string.Concat(FieldArrowPaths()))
+            }
+            @if (_showConvergence && _zones.Convergence != null)
+            {
+                var ccx = _panX + 500f / _zoom;
+                var ccy = _panY + _vh * 0.5f / _zoom;
+                var cScale = Configs.Config.Zones.ConvergenceRadiusScale;
+                var crMin = MetersToView(_zones.Convergence.Radius.Min * cScale);
+                var crMax = MetersToView(_zones.Convergence.Radius.Max * cScale);
+                <circle cx="@F(ccx)" cy="@F(ccy)" r="@F(crMax)" fill="#9F7AEA" fill-opacity="0.04"
+                        stroke="#9F7AEA" stroke-opacity="0.55" stroke-width="@F(1.4f / _zoom)" stroke-dasharray="8 6" />
+                <circle cx="@F(ccx)" cy="@F(ccy)" r="@F(crMin)" fill="none"
+                        stroke="#9F7AEA" stroke-opacity="0.75" stroke-width="@F(1.4f / _zoom)" />
+                <circle cx="@F(ccx)" cy="@F(ccy)" r="@F(2.5f / _zoom)" fill="#9F7AEA" />
+                @((MarkupString)$"<text x=\"{F(ccx)}\" y=\"{F(ccy - crMax - 5f / _zoom)}\" text-anchor=\"middle\" font-size=\"{F(11f / _zoom)}\" fill=\"#9F7AEA\" opacity=\"0.85\">player convergence ({F(_zones.Convergence.Radius.Min * cScale)}-{F(_zones.Convergence.Radius.Max * cScale)}m)</text>")
             }
             @foreach (var name in _zones.BuiltinZones.Keys)
             {
@@ -166,9 +188,9 @@
     {
         var sel = _zones.CustomZones[_selectedCustom];
         <SettingsCard Title="@($"Custom zone — ({sel.Position.X:F0}, {sel.Position.Y:F0})")">
-            <OrbitSlider T="float" @bind-Value="sel.Radius.Min" Label="Radius min" Unit="m" Min="10f" Max="2000f" Step="10f" Fmt="0"
+            <OrbitSlider T="float" @bind-Value="sel.Radius.Min" Label="Radius min" Unit="m" Min="10f" Max="2000f" Step="1f" Fmt="0"
                          Tooltip="The radius is rolled between min and max at raid start (most rolls land near the middle of the range). A wide range means the zone's reach changes a lot from raid to raid; set min close to max for a consistent size." />
-            <OrbitSlider T="float" @bind-Value="sel.Radius.Max" Label="Radius max" Unit="m" Min="10f" Max="2000f" Step="10f" Fmt="0"
+            <OrbitSlider T="float" @bind-Value="sel.Radius.Max" Label="Radius max" Unit="m" Min="10f" Max="2000f" Step="1f" Fmt="0"
                          Tooltip="The radius is rolled between min and max at raid start (most rolls land near the middle of the range). A wide range means the zone's reach changes a lot from raid to raid; set min close to max for a consistent size." />
             <OrbitSlider T="float" @bind-Value="sel.Force.Min" Label="Force min" Min="-10f" Max="10f" Step="0.05f" Fmt="0.00"
                          Tooltip="The force is rolled between min and max at raid start (most rolls land near the middle of the range). Positive attracts squads, negative repels them. A range crossing zero flips the zone between attract and repel depending on the raid; keep min above 0 if you want the pull every raid." />
@@ -186,9 +208,9 @@
     {
         <SettingsCard Title="@($"Built-in zone — {_selectedBuiltin}")"
                       Subtitle="Position comes from the game (BSG spawn zone) and cannot move; radius, force and decay are yours.">
-            <OrbitSlider T="float" @bind-Value="selBz.Radius.Min" Label="Radius min" Unit="m" Min="10f" Max="2000f" Step="10f" Fmt="0"
+            <OrbitSlider T="float" @bind-Value="selBz.Radius.Min" Label="Radius min" Unit="m" Min="10f" Max="2000f" Step="1f" Fmt="0"
                          Tooltip="The radius is rolled between min and max at raid start (most rolls land near the middle of the range). A wide range means the zone's reach changes a lot from raid to raid; set min close to max for a consistent size." />
-            <OrbitSlider T="float" @bind-Value="selBz.Radius.Max" Label="Radius max" Unit="m" Min="10f" Max="2000f" Step="10f" Fmt="0"
+            <OrbitSlider T="float" @bind-Value="selBz.Radius.Max" Label="Radius max" Unit="m" Min="10f" Max="2000f" Step="1f" Fmt="0"
                          Tooltip="The radius is rolled between min and max at raid start (most rolls land near the middle of the range). A wide range means the zone's reach changes a lot from raid to raid; set min close to max for a consistent size." />
             <OrbitSlider T="float" @bind-Value="selBz.Force.Min" Label="Force min" Min="-10f" Max="10f" Step="0.05f" Fmt="0.00"
                          Tooltip="The force is rolled between min and max at raid start (most rolls land near the middle of the range). Positive attracts squads, negative repels them. A range crossing zero flips the zone between attract and repel depending on the raid; keep min above 0 if you want the pull every raid." />
@@ -282,6 +304,9 @@
     private string? _hoverBuiltin;
     private bool _draggingZone, _panning;
     private bool _showField = true;
+    private bool _showConvergence;
+    private bool _builtinDragHintShown;
+    private double _panStartOx, _panStartOy;
     private float _dragDx, _dragDz;
     private double _lastOx, _lastOy;
 
@@ -426,6 +451,8 @@
             _selectedBuiltin = builtinHit;
             _selectedCustom = -1;
             _panning = true; // built-ins don't move — dragging pans instead
+            _panStartOx = e.OffsetX;
+            _panStartOy = e.OffsetY;
             return;
         }
 
@@ -451,6 +478,14 @@
         }
         else if (_panning)
         {
+            // Dragging a built-in pans (they can't move) — RC feedback showed nobody discovers that
+            // from the hint text alone, so the first real drag attempt on one says it out loud.
+            if (!_builtinDragHintShown && _selectedBuiltin != null
+                && Math.Abs(e.OffsetX - _panStartOx) + Math.Abs(e.OffsetY - _panStartOy) > 25)
+            {
+                _builtinDragHintShown = true;
+                Snackbar.Add("Built-in zones sit where BSG placed them and cannot move (dragging pans the map). Their radius, force and decay are yours to tune. Need a hotspot elsewhere? Double-click empty ground to add a custom zone.", Severity.Info);
+            }
             var f = 1000f / _zoom / CanvasW;
             _panX -= (float)(e.OffsetX - _lastOx) * f;
             _panY -= (float)(e.OffsetY - _lastOy) * f;
