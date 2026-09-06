@@ -1,0 +1,167 @@
+@using Orbit.Server.Zones
+@using System.Globalization
+@implements IDisposable
+@inject ZoneStoreService ZoneStore
+
+@* Per-map convergence tuning + scale reference: the map at full fit with just the convergence ring,
+   draggable anywhere so its reach can be compared against real landmarks. The ring follows the
+   player in game — the canvas is purely a size preview (FoxHead's RC request). Edits mutate the
+   zone-store working set, so they ride the global Unsaved changes / Save button like zone edits. *@
+
+<div class="d-flex align-center mb-1 mt-2 flex-wrap" style="gap:12px">
+    <MudSelect T="string" Value="_mapId" ValueChanged="LoadMap" Label="Map" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true" Style="min-width:220px">
+        @foreach (var id in ZoneStoreService.MapIds)
+        {
+            <MudSelectItem T="string" Value="@id">@ZoneStoreService.MapLabels[id]</MudSelectItem>
+        }
+    </MudSelect>
+    <MudText Typo="Typo.caption" Style="opacity:.55">
+        Each map has its own convergence reach, editable below. Solid ring = min roll, dashed = max:
+        the actual reach is rolled between the two at every raid start. Drag the ring around to
+        compare it with the map; in game it follows the player.
+    </MudText>
+</div>
+
+@if (_conv == null)
+{
+    <MudText Typo="Typo.body2" Class="mb-2" Style="opacity:.55">This map has no convergence entry yet (it uses the client's compiled defaults).</MudText>
+    <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.Add" OnClick="CreateEntry">Create a convergence entry</MudButton>
+}
+else
+{
+    <OrbitSwitch @bind-Value="_conv.Enabled" Label="@($"Convergence on {ZoneStoreService.MapLabels[_mapId]}")"
+                 Tooltip="Per-map switch. The master 'Player convergence' toggle above must also be ON." />
+    <OrbitSlider T="float" @bind-Value="_conv.Radius.Min" Label="Radius min" Unit="m" Min="0f" Max="2000f" Step="10f" Fmt="0"
+                 Tooltip="Lowest possible reach roll for this map, in meters (before the global radius scale)." />
+    <OrbitSlider T="float" @bind-Value="_conv.Radius.Max" Label="Radius max" Unit="m" Min="0f" Max="2000f" Step="10f" Fmt="0"
+                 Tooltip="Highest possible reach roll for this map, in meters (before the global radius scale)." />
+
+    @if (_conv.Enabled && _conv.Radius.Max > 0f)
+    {
+        var rMin = _conv.Radius.Min * RadiusScale;
+        var rMax = _conv.Radius.Max * RadiusScale;
+        var (px, py) = WorldToView(_ringX, _ringZ);
+        <div class="mt-2" style="max-width:100%; overflow-x:auto">
+        <div style="position:relative; width:@(CanvasW)px; height:@F(_canvasH)px; background:#0A0E17; border:1px solid #222B3E; border-radius:10px; overflow:hidden; touch-action:none; user-select:none; -webkit-user-select:none; cursor:@(_dragging ? "grabbing" : "grab")"
+             @onpointerdown="OnPointerDown" @onpointermove="OnPointerMove" @onpointerup="OnPointerUp"
+             @onpointerleave="OnPointerUp" @ondragstart:preventDefault="true">
+            <svg viewBox="0 0 1000 @F(_vh)" preserveAspectRatio="none" style="position:absolute; inset:0; width:100%; height:100%; pointer-events:none">
+                @if (_view.Svg != null)
+                {
+                    <image href="@_view.Svg" x="0" y="0" width="1000" height="@F(_vh)" preserveAspectRatio="none" opacity="0.85" />
+                }
+                <circle cx="@F(px)" cy="@F(py)" r="@F(MetersToView(rMax))" fill="#9F7AEA" fill-opacity="0.05"
+                        stroke="#9F7AEA" stroke-opacity="0.55" stroke-width="1.4" stroke-dasharray="8 6" />
+                <circle cx="@F(px)" cy="@F(py)" r="@F(MetersToView(rMin))" fill="none"
+                        stroke="#9F7AEA" stroke-opacity="0.75" stroke-width="1.4" />
+                <circle cx="@F(px)" cy="@F(py)" r="3" fill="#9F7AEA" />
+                @((MarkupString)$"<text x=\"{F(px)}\" y=\"{F(py - MetersToView(rMax) - 6f)}\" text-anchor=\"middle\" font-size=\"12\" fill=\"#9F7AEA\" opacity=\"0.85\">player convergence ({F(rMin)}-{F(rMax)}m)</text>")
+            </svg>
+        </div>
+        </div>
+    }
+    else
+    {
+        <MudText Typo="Typo.body2" Class="mt-1" Style="opacity:.55">Convergence is disabled on this map — enable it (and give it a radius) to preview the ring.</MudText>
+    }
+}
+
+@code {
+    private const int CanvasW = 640;
+
+    /// <summary>Live multiplier from the Zones page sliders — the rings resize as it moves.</summary>
+    [Parameter] public float RadiusScale { get; set; } = 1f;
+
+    private string _mapId = "bigmap";
+    private MapView _view = MapViews.Views["bigmap"];
+    private ConvergenceModel? _conv;
+    private float _minX, _maxX, _minZ, _maxZ, _spanX, _spanZ, _vh, _canvasH;
+    private float _ringX, _ringZ;
+    private bool _dragging;
+
+    protected override void OnInitialized()
+    {
+        ZoneStore.ZonesReplaced += OnZonesReplaced;
+        LoadMap(_mapId);
+    }
+
+    public void Dispose() => ZoneStore.ZonesReplaced -= OnZonesReplaced;
+
+    private void OnZonesReplaced()
+    {
+        // Working copies were swapped (Discard all / Reset) — re-bind and re-render.
+        InvokeAsync(() =>
+        {
+            _conv = ZoneStore.GetWorking(_mapId).Convergence;
+            StateHasChanged();
+        });
+    }
+
+    private void LoadMap(string mapId)
+    {
+        _mapId = mapId;
+        _view = MapViews.Views[mapId];
+        var (rx1, rz1) = MapViews.Rot(_view.X1, _view.Z1, _view.Rot);
+        var (rx2, rz2) = MapViews.Rot(_view.X2, _view.Z2, _view.Rot);
+        _minX = MathF.Min(rx1, rx2);
+        _maxX = MathF.Max(rx1, rx2);
+        _minZ = MathF.Min(rz1, rz2);
+        _maxZ = MathF.Max(rz1, rz2);
+        _spanX = MathF.Max(1f, _maxX - _minX);
+        _spanZ = MathF.Max(1f, _maxZ - _minZ);
+        _vh = 1000f * _spanZ / _spanX;
+        _canvasH = CanvasW * _vh / 1000f;
+        _conv = ZoneStore.GetWorking(mapId).Convergence;
+        (_ringX, _ringZ) = ViewToWorld(500f, _vh * 0.5f);
+        _dragging = false;
+    }
+
+    private void CreateEntry()
+    {
+        var model = ZoneStore.GetWorking(_mapId);
+        model.Convergence = new ConvergenceModel
+        {
+            Enabled = false,
+            Radius = new ZoneRange { Min = 200f, Max = 400f },
+            Force = new ZoneRange { Min = 0f, Max = 0.5f },
+        };
+        _conv = model.Convergence;
+    }
+
+    private void OnPointerDown(PointerEventArgs e)
+    {
+        _dragging = true;
+        MoveRing(e);
+    }
+
+    private void OnPointerMove(PointerEventArgs e)
+    {
+        if (_dragging) MoveRing(e);
+    }
+
+    private void OnPointerUp(PointerEventArgs e) => _dragging = false;
+
+    private void MoveRing(PointerEventArgs e)
+    {
+        var (wx, wz) = ViewToWorld((float)(e.OffsetX / CanvasW) * 1000f, (float)(e.OffsetY / _canvasH) * _vh);
+        _ringX = Math.Clamp(wx, MathF.Min(_view.X1, _view.X2), MathF.Max(_view.X1, _view.X2));
+        _ringZ = Math.Clamp(wz, MathF.Min(_view.Z1, _view.Z2), MathF.Max(_view.Z1, _view.Z2));
+    }
+
+    private (float px, float py) WorldToView(float x, float z)
+    {
+        var (rx, rz) = MapViews.Rot(x, z, _view.Rot);
+        return ((rx - _minX) / _spanX * 1000f, (_maxZ - rz) / _spanZ * _vh);
+    }
+
+    private (float x, float z) ViewToWorld(float px, float py)
+    {
+        var rx = _minX + px / 1000f * _spanX;
+        var rz = _maxZ - py / _vh * _spanZ;
+        return MapViews.Rot(rx, rz, -_view.Rot);
+    }
+
+    private float MetersToView(float meters) => meters / _spanX * 1000f;
+
+    private static string F(float v) => v.ToString("0.##", CultureInfo.InvariantCulture);
+}

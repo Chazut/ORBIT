@@ -1,4 +1,4 @@
-@page "/orbit/zones"
+@page "/orbit/zones-config"
 @layout Orbit.Server.Web.Shared.MainLayout
 @inherits Orbit.Server.Web.OrbitConfigPage
 
@@ -30,6 +30,10 @@
         <OrbitSlider T="float" @bind-Value="Cfg.Zones.ConvergenceForceScale" Label="Convergence force scale"
                      Min="-10f" Max="10f" Step="0.1f" Fmt="0.0"
                      Tooltip="Multiplier on how strongly bots are pulled toward players. Negative pushes them AWAY; 0 disables." />
+        @if (Cfg.Zones.ConvergenceEnabled)
+        {
+            <ConvergenceMapPreview RadiusScale="Cfg.Zones.ConvergenceRadiusScale" />
+        }
     </SettingsCard>
 </MudContainer>
 

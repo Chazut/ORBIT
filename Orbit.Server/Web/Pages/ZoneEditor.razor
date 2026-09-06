@@ -26,9 +26,6 @@
         <MudTooltip Text="Preview of the selected zone's pull. Arrows point where squads get nudged; length and brightness show strength. Uses the middle of the zone's min/max ranges." Arrow="true">
             <MudSwitch T="bool" @bind-Value="_showField" Color="Color.Primary" Size="Size.Small" Label="Pull field" />
         </MudTooltip>
-        <MudTooltip Text="Scale reference for player convergence: bots inside the rings get pulled toward the player (solid = min roll, dashed = max, scaled by the global convergence radius scale). In game the rings follow the player; here they sit at the view center just to show their size on this map." Arrow="true">
-            <MudSwitch T="bool" @bind-Value="_showConvergence" Color="Color.Secondary" Size="Size.Small" Label="Convergence ring" />
-        </MudTooltip>
         <MudTooltip Text="Restore this map's shipped default zones (writes them immediately)." Arrow="true">
             <MudButton Variant="Variant.Outlined" Color="Color.Warning" Size="Size.Small" StartIcon="@Icons.Material.Filled.RestartAlt" OnClick="ResetMap">Reset map</MudButton>
         </MudTooltip>
@@ -75,20 +72,6 @@
                 @* Live preview of the advection pull — same formula as WaypointSystem, min/max ranges
                    collapsed to their midpoint. Hidden while panning/dragging to keep interactions snappy. *@
                 @((MarkupString)string.Concat(FieldArrowPaths()))
-            }
-            @if (_showConvergence && _zones.Convergence != null)
-            {
-                var ccx = _panX + 500f / _zoom;
-                var ccy = _panY + _vh * 0.5f / _zoom;
-                var cScale = Configs.Config.Zones.ConvergenceRadiusScale;
-                var crMin = MetersToView(_zones.Convergence.Radius.Min * cScale);
-                var crMax = MetersToView(_zones.Convergence.Radius.Max * cScale);
-                <circle cx="@F(ccx)" cy="@F(ccy)" r="@F(crMax)" fill="#9F7AEA" fill-opacity="0.04"
-                        stroke="#9F7AEA" stroke-opacity="0.55" stroke-width="@F(1.4f / _zoom)" stroke-dasharray="8 6" />
-                <circle cx="@F(ccx)" cy="@F(ccy)" r="@F(crMin)" fill="none"
-                        stroke="#9F7AEA" stroke-opacity="0.75" stroke-width="@F(1.4f / _zoom)" />
-                <circle cx="@F(ccx)" cy="@F(ccy)" r="@F(2.5f / _zoom)" fill="#9F7AEA" />
-                @((MarkupString)$"<text x=\"{F(ccx)}\" y=\"{F(ccy - crMax - 5f / _zoom)}\" text-anchor=\"middle\" font-size=\"{F(11f / _zoom)}\" fill=\"#9F7AEA\" opacity=\"0.85\">player convergence ({F(_zones.Convergence.Radius.Min * cScale)}-{F(_zones.Convergence.Radius.Max * cScale)}m)</text>")
             }
             @foreach (var name in _zones.BuiltinZones.Keys)
             {
@@ -272,30 +255,9 @@
 @code {
     private const int CanvasW = 1160;
 
-    // svg + rotation + overlay bounds straight from the tarkov.dev interactive map configs (same data
-    // raid-review uses). Lab and Labyrinth have no public svg — they get the grid canvas.
-    private sealed record MapView(string? Svg, float Rot, float X1, float Z1, float X2, float Z2);
-
-    private static readonly Dictionary<string, MapView> Views = new()
-    {
-        ["bigmap"] = new("https://assets.tarkov.dev/maps/svg/Customs-Ground_Level.svg", 180, 698, -307, -372, 237),
-        ["factory4_day"] = new("https://assets.tarkov.dev/maps/svg/Factory-Ground_Floor.svg", 90, 77, -64.5f, -65.5f, 67.4f),
-        ["factory4_night"] = new("https://assets.tarkov.dev/maps/svg/Factory-Ground_Floor.svg", 90, 77, -64.5f, -65.5f, 67.4f),
-        ["Sandbox"] = new("https://assets.tarkov.dev/maps/svg/GroundZero-Ground_Level.svg", 180, 249, -124, -99, 364),
-        ["Sandbox_high"] = new("https://assets.tarkov.dev/maps/svg/GroundZero-Ground_Level.svg", 180, 249, -124, -99, 364),
-        ["Interchange"] = new("https://assets.tarkov.dev/maps/svg/Interchange-Ground_Level.svg", 180, 530, -439, -364, 452),
-        ["laboratory"] = new(null, 270, -80, -477, -287, -193),
-        ["Labyrinth"] = new(null, 270, -52, -37, 53, 76),
-        ["Lighthouse"] = new("https://assets.tarkov.dev/maps/svg/Lighthouse.svg", 180, 515, -998, -545, 725),
-        ["RezervBase"] = new("https://assets.tarkov.dev/maps/svg/Reserve-Ground_Level.svg", 180, 289, -293, -303, 244),
-        ["Shoreline"] = new("https://assets.tarkov.dev/maps/svg/Shoreline-Ground_Level.svg", 180, 504, -415, -1056, 618),
-        ["TarkovStreets"] = new("https://assets.tarkov.dev/maps/svg/StreetsOfTarkov-Ground_Level.svg", 180, 323, -295, -280, 532),
-        ["Woods"] = new("https://assets.tarkov.dev/maps/svg/Woods.svg", 180, 646, -914, -761, 442),
-    };
-
     private string _mapId = "bigmap";
     private MapZoneModel _zones = new();
-    private MapView _view = Views["bigmap"];
+    private MapView _view = MapViews.Views["bigmap"];
     private float _minX, _maxX, _minZ, _maxZ, _spanX, _spanZ, _vh, _canvasH;
     private float _zoom = 1f, _panX, _panY;
     private int _selectedCustom = -1;
@@ -304,7 +266,6 @@
     private string? _hoverBuiltin;
     private bool _draggingZone, _panning;
     private bool _showField = true;
-    private bool _showConvergence;
     private bool _builtinDragHintShown;
     private double _panStartOx, _panStartOy;
     private float _dragDx, _dragDz;
@@ -335,7 +296,7 @@
     private void LoadMap(string mapId)
     {
         _mapId = mapId;
-        _view = Views[mapId];
+        _view = MapViews.Views[mapId];
         var (rx1, rz1) = Rot(_view.X1, _view.Z1, _view.Rot);
         var (rx2, rz2) = Rot(_view.X2, _view.Z2, _view.Rot);
         _minX = MathF.Min(rx1, rx2);
@@ -584,13 +545,7 @@
 
     // ── world <-> view transforms (tarkov.dev convention: rotate, then fit the overlay bounds) ──
 
-    private static (float x, float z) Rot(float x, float z, float deg)
-    {
-        var a = deg * MathF.PI / 180f;
-        var c = MathF.Cos(a);
-        var s = MathF.Sin(a);
-        return (x * c - z * s, x * s + z * c);
-    }
+    private static (float x, float z) Rot(float x, float z, float deg) => MapViews.Rot(x, z, deg);
 
     private (float px, float py) WorldToView(float x, float z)
     {
