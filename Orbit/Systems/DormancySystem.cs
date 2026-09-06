@@ -156,6 +156,9 @@ public class DormancySystem
     // Best-optic magnification cache per bot (skirmish reach). Weapons rarely change; 60s TTL.
     private readonly Dictionary<BotOwner, (float mag, float at)> _opticCache = new();
 
+    // Weapon effective-kill-range cache per player (skirmish casualties). Same 60s TTL rationale.
+    private readonly Dictionary<Player, (float range, float at)> _killRangeCache = new();
+
     // Simulated-fight gunfire: shots queued at resolution time and played over the following seconds
     // through BetterAudio's own sources (the fighters' bodies stay inactive — we only read their
     // weapons' sound banks), so the player hears WHERE the off-screen activity is and can go look.
@@ -197,6 +200,7 @@ public class DormancySystem
         public string Label;
         public bool IsSavage;
         public float Reach;
+        public float KillRange; // best member weapon's effective kill distance (bEffDist, buckshot capped)
         public Squad Squad;          // ORBIT units
         public object VanillaKey;    // vanilla units
         public readonly List<Agent> Agents = new();        // ORBIT members (empty for vanilla units)
@@ -978,6 +982,7 @@ public class DormancySystem
             {
                 unit.Agents.Add(squad.Members[m]);
                 unit.Reach = Mathf.Max(unit.Reach, UnitMemberReach(squad.Members[m].Bot));
+                unit.KillRange = Mathf.Max(unit.KillRange, WeaponKillRange(squad.Members[m].Player));
             }
             _ghostUnits.Add(unit);
         }
@@ -999,6 +1004,7 @@ public class DormancySystem
             {
                 unit.VanillaBots.Add(group[m]);
                 unit.Reach = Mathf.Max(unit.Reach, UnitMemberReach(group[m]));
+                unit.KillRange = Mathf.Max(unit.KillRange, WeaponKillRange(group[m].GetPlayer));
             }
             _ghostUnits.Add(unit);
         }
@@ -1051,6 +1057,40 @@ public class DormancySystem
         _opticCache[bot] = (mag, Time.time);
         return Mathf.Min(SkirmishReachCap, SkirmishBaseDetectRange * mag);
     }
+
+    /// <summary>
+    /// Effective kill distance of the weapon in a member's hands: the game's own per-weapon
+    /// bEffDist (what LookSensor uses for real shooting decisions), hard-capped when the LOADED
+    /// round is multi-projectile — buckshot must never credit a 300m kill no matter the shotgun.
+    /// Generous fallback when the weapon or ammo can't be read, so nothing new gets blocked.
+    /// </summary>
+    private float WeaponKillRange(Player p)
+    {
+        if (p == null) return DefaultKillRange;
+        if (_killRangeCache.TryGetValue(p, out var cached) && Time.time - cached.at < 60f)
+            return cached.range;
+
+        var range = DefaultKillRange;
+        try
+        {
+            if (p.HandsController?.Item is Weapon weapon)
+            {
+                range = Mathf.Max(25f, weapon.Template.bEffDist);
+                var ammo = weapon.CurrentAmmoTemplate;
+                if (ammo != null && ammo.ProjectileCount > 1)
+                    range = Mathf.Min(range, BuckshotKillRangeCap);
+            }
+        }
+        catch
+        {
+            // Disposed/edge-case inventory — keep the permissive default.
+        }
+        _killRangeCache[p] = (range, Time.time);
+        return range;
+    }
+
+    private const float DefaultKillRange = 400f;
+    private const float BuckshotKillRangeCap = 50f;
 
     /// <summary>Strength: per member, a difficulty-scaled base point (an impossible bot fights like 1.3
     /// easy ones) plus up to 1.5 for inventory worth; the total shaded by the squad's SAIN archetype.</summary>
@@ -1157,8 +1197,12 @@ public class DormancySystem
         // duel (its reach covers the distance, the other side's does not) and loses its edge up close.
         var rangeA = Mathf.Clamp(a.Reach / Mathf.Max(distance, 25f), 0.25f, 1.5f);
         var rangeB = Mathf.Clamp(b.Reach / Mathf.Max(distance, 25f), 0.25f, 1.5f);
-        var rollA = UnitStrength(a) * rangeA * Random.Range(0.7f, 1.3f);
-        var rollB = UnitStrength(b) * rangeB * Random.Range(0.7f, 1.3f);
+        // Weapon fitness: the loaded gun's effective kill distance (bEffDist, buckshot hard-capped)
+        // vs the duel distance — a buckshot squad at 300m fights at a fraction of its strength.
+        var gunA = Mathf.Lerp(0.3f, 1f, Mathf.Clamp01(a.KillRange * 1.3f / Mathf.Max(distance, 10f)));
+        var gunB = Mathf.Lerp(0.3f, 1f, Mathf.Clamp01(b.KillRange * 1.3f / Mathf.Max(distance, 10f)));
+        var rollA = UnitStrength(a) * rangeA * gunA * Random.Range(0.7f, 1.3f);
+        var rollB = UnitStrength(b) * rangeB * gunB * Random.Range(0.7f, 1.3f);
         var winner = rollA >= rollB ? a : b;
         var loser = rollA >= rollB ? b : a;
         var ratio = Mathf.Max(rollA, rollB) / Mathf.Max(0.1f, Mathf.Min(rollA, rollB));
@@ -1225,7 +1269,7 @@ public class DormancySystem
         if (loser.Squad != null) loser.Squad.GhostFightUntil = fight.EndsAt;
 
         _windowFights++;
-        Log.Info($"GHOST SKIRMISH at {distance:F0}m: {a.Label} (str {rollA:F1}, reach {a.Reach:F0}m) vs {b.Label} (str {rollB:F1}, reach {b.Reach:F0}m), {winner.Label} wins over {duration:F0}s, {loserDeaths + winnerDeaths} killed");
+        Log.Info($"GHOST SKIRMISH at {distance:F0}m: {a.Label} (str {rollA:F1}, reach {a.Reach:F0}m, gun {a.KillRange:F0}m) vs {b.Label} (str {rollB:F1}, reach {b.Reach:F0}m, gun {b.KillRange:F0}m), {winner.Label} wins over {duration:F0}s, {loserDeaths + winnerDeaths} killed");
 
         QueueFightSounds(a, posA, b, posB, loserDeaths + winnerDeaths, duration, shotsPerSecond);
     }
@@ -1600,7 +1644,7 @@ public class DormancySystem
             }
             return;
         }
-        Log.Debug($"GHOST SKIRMISH: no line-of-sight killer/victim pair between {opposing.Label} and {unit.Label} — casualty dropped");
+        Log.Debug($"GHOST SKIRMISH: no in-range line-of-sight killer/victim pair between {opposing.Label} and {unit.Label} — casualty dropped");
     }
 
     /// <summary>Strict fight line-of-sight: three rays (head height, chest height, head height
@@ -1619,7 +1663,7 @@ public class DormancySystem
         return !Physics.Raycast(from, d.normalized, d.magnitude, LayersMaskController.HighPolyWithTerrainMask);
     }
 
-    private static Player ClosestVisibleSurvivor(GhostUnit unit, Vector3 targetPos)
+    private Player ClosestVisibleSurvivor(GhostUnit unit, Vector3 targetPos)
     {
         Player best = null;
         var bestSqr = float.MaxValue;
@@ -1629,6 +1673,10 @@ public class DormancySystem
             if (p == null) continue;
             var d = (p.Position - targetPos).sqrMagnitude;
             if (d >= bestSqr) continue;
+            // The credited killer's own gun must plausibly make that shot: a buckshot shotgun never
+            // gets a 300m kill even when its SVD squadmate is dead — the kill falls to whoever CAN.
+            var maxShot = WeaponKillRange(p) * 1.3f;
+            if (d > maxShot * maxShot) continue;
             if (!ClearFightLos(p.Position, targetPos)) continue;
             best = p;
             bestSqr = d;
