@@ -25,9 +25,12 @@ of where he's been.
 
 Built on [Phobos](https://discord.com/channels/875684761291599922/1337131427803955200)'s foundations (MIT, with Janky's blessing - full credits below).
 
-**2.0** adds a server **web UI** for every setting, a built-in **AI
-limiter** that turns far-away squads into ghosts instead of freezing the
-world, and a visual **zone editor** to draw your own hotspots on the map.
+**2.0's headliner is 👻 Ghost Mode**: far-away bots go dormant to free
+your CPU while ORBIT keeps playing them. The fps gains are massive
+(+45% average in my heavy-population benchmark, testers report +50 to
++100%) and the world stays alive instead of freezing. 2.0 also adds
+a server **web UI** for every setting and a visual **zone editor** to
+draw your own hotspots on the map.
 
 [📷 Screenshot](https://i.imgur.com/WSWqb8d.png) · Pair with [Raid Review]([https://forge.sp-tarkov.com/mod/1479/raid-review](https://sp-mod.com/mod/1479/raid-review)) to replay it all · Questions & feedback: [ORBIT Discord thread](https://discord.com/channels/875684761291599922/1509314495019745451)
 
@@ -45,6 +48,36 @@ world, and a visual **zone editor** to draw your own hotspots on the map.
   arrive.
 
 ## The pillars
+
+### 👻 Ghost Mode (2.0) - the fps game changer
+
+The biggest fps upgrade a bot-heavy raid can get. My heavy-population
+Shoreline benchmark measured **+45% average fps** with far fewer
+stutters; RC testers reported anywhere from **+50 to +100%** depending
+on map, modlist and hardware, and "buttery smooth" frametimes across
+the board. Ships **ON by default** - one switch in the web UI turns it
+off.
+
+Classic limiters freeze distant bots and kill the living world with
+them. Ghost Mode puts only the **body** to sleep - the expensive
+EFT machinery - while ORBIT keeps thinking. Ghost squads keep
+walking their routes and keep looting in real time. When two hostile
+ghosts spot each other (optic-scaled range, terrain and forests block
+line of sight), the fight plays out over a real window with audible
+distant gunfire, real casualties and wounded survivors. Get close while
+it's still going and it escalates into an actual firefight.
+
+Waking is seamless: proximity, damage, or aiming through a scope (the
+wake range stretches with your magnification). Everything is tunable,
+down to which bot types sleep by default and how bloody ghost fights
+get.
+
+*Coming in 2.1: ghost movement for the bots ORBIT doesn't drive
+(vanilla scavs, raiders and rogues, bosses and followers, UNTAR / RUAF
+and other faction mods) - today those sleep frozen in place.*
+
+*Fika: designed for co-op (an optional `Orbit.Fika` addon syncs the
+fight sounds to every client) but untested so far.*
 
 ### 🎯 Objectives and extraction
 
@@ -91,25 +124,6 @@ picking up, how much of a room gets covered, who hunts and who rats, how
 early they extract, whether they force locked doors, even how strong a
 ghost squad fights off-screen. Two squads never play the same raid.
 
-### 👻 The ghost world (AI limiter, 2.0)
-
-Classic limiters freeze distant bots and kill the living world with
-them. ORBIT's limiter puts only the **body** to sleep - the expensive
-EFT machinery - while ORBIT keeps thinking. Ghost squads keep
-walking their routes and keep looting in real time. When two hostile
-ghosts spot each other (optic-scaled range, terrain and forests block
-line of sight), the fight plays out over a real window with audible
-distant gunfire, real casualties and wounded survivors. Get close while
-it's still going and it escalates into an actual firefight.
-
-Waking is seamless: proximity, damage, or aiming through a scope (the
-wake range stretches with your magnification). Everything is tunable,
-down to which bot types sleep by default and how bloody ghost fights
-get.
-
-*Fika: designed for co-op (an optional `Orbit.Fika` addon syncs the
-fight sounds to every client) but untested so far.*
-
 ### 🗺️ Your raid, your rules (2.0)
 
 Every behaviour setting lives in a **web UI** on your SPT server
@@ -126,8 +140,7 @@ someone else's.
 
 1. Install the dependencies: [BigBrain](https://forge.sp-tarkov.com/mod/902/bigbrain) · [Waypoints](https://forge.sp-tarkov.com/mod/827/waypoints-expanded-navmesh) · [SAIN](https://forge.sp-tarkov.com/mod/791/sain-solarints-ai-modifications-full-ai-combat-system-replacement)
 2. Extract the zip into your SPT root folder (client plugin + server mod).
-3. Launch. `ORBIT 2.0.0` shows in the bottom-left version label.
-4. Configure from the web UI: F12 → **Open web config UI** (or browse to
+3. Configure from the web UI: F12 → **Open web config UI** (or browse to
    `https://127.0.0.1:6969/orbit`).
 
 <details>
@@ -177,6 +190,10 @@ first). Then come say hi on the [ORBIT thread](https://discord.com/channels/8756
 
 ## Roadmap highlights
 
+**Next (2.1)**: Ghost Mode moves the bots ORBIT doesn't drive (vanilla
+scavs, raiders, rogues, bosses and followers, UNTAR / RUAF and other
+faction mods), so nothing on the map sleeps frozen anymore.
+
 No ETA, no promises: camp & ambush decisions, post-combat self-heal,
 squad splitting with radio comms, boss hunting and faction rivalries
 (Firefly's idea), airdrop ambushes, a "rally flare" item that pulls the
@@ -187,7 +204,7 @@ toggle. Suggestions land on the Discord thread.
 
 ## Known issues
 
-- The AI limiter and zone editor are brand new in 2.0: expect tuning
+- Ghost Mode and the zone editor are brand new in 2.0: expect tuning
   passes. Fika support for the limiter is designed in but untested.
 - Most Reserve exfils need switches ORBIT can't operate yet.
 - Faction-mod takeover (RUAF / UNTAR / Black Division) can misbehave;

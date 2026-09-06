@@ -13,7 +13,7 @@ using UnityEngine;
 namespace Orbit.Systems;
 
 /// <summary>
-/// The built-in AI limiter. Sleeps the BODY of far-away squads, not their brain: all ORBIT logic
+/// Ghost Mode, the built-in AI limiter. Sleeps the BODY of far-away squads, not their brain: all ORBIT logic
 /// (dispatch, strategies, timers) lives outside the bot's GameObject, so <c>SetActive(false)</c> kills the
 /// per-bot BSG/SAIN cost while the squad keeps thinking and (via MovementSystem's ghost follower) keeps
 /// moving along its planned routes. Neither AILimit nor Questing Bots can do this: their own logic runs on
@@ -114,7 +114,7 @@ public class DormancySystem
     private readonly float _lethality;
     private readonly bool _scopedWakeEnabled;
     private readonly float _scopedWakeMax;
-    private readonly ServerConfig.AiLimiterSection _cfg;
+    private readonly ServerConfig.GhostModeSection _cfg;
     private readonly int _minAwakeBots;
     private readonly float _sleepDistanceSqr;
     private readonly float _scavSleepDistanceSqr;
@@ -232,7 +232,7 @@ public class DormancySystem
 
         // Config is read once per raid: ServerConfig is re-fetched in OrbitInitPatch right before this
         // system is constructed, so a web-UI Save applies on the next raid, and values never move mid-raid.
-        var cfg = ServerConfig.AiLimiter;
+        var cfg = ServerConfig.GhostMode;
         _cfg = cfg;
         _enabled = cfg.Enabled;
         _fightsMode = (cfg.GhostFightsMode ?? "simulated").ToLowerInvariant() switch
@@ -265,7 +265,7 @@ public class DormancySystem
         _summaryWindowStart = Time.time;
 
         if (_enabled)
-            Log.Always($"AI limiter ON — sleep>{sleepDist:F0}m (default-dormant>{scavSleepDist:F0}m) wake<{cfg.WakeDistance:F0}m hostileWake<{cfg.HostileWakeDistance:F0}m minAwake={_minAwakeBots} ghost={(cfg.GhostMovement ? "on" : "off")} ghostLoot={B(cfg.GhostLooting)} fights={_fightsMode.ToString().ToLowerInvariant()}/{freq} lethality={_lethality:F1}x scopedWake={(_scopedWakeEnabled ? $"{_scopedWakeMax:F0}m" : "off")} dormantTypes=[scav={B(cfg.DormantScavs)} goon={B(cfg.DormantGoons)} boss={B(cfg.DormantBosses)} cultist={B(cfg.DormantCultists)} raider={B(cfg.DormantRaiders)} bloodhound={B(cfg.DormantBloodhounds)} other={B(cfg.DormantOthers)}]");
+            Log.Always($"Ghost Mode ON — sleep>{sleepDist:F0}m (default-dormant>{scavSleepDist:F0}m) wake<{cfg.WakeDistance:F0}m hostileWake<{cfg.HostileWakeDistance:F0}m minAwake={_minAwakeBots} ghost={(cfg.GhostMovement ? "on" : "off")} ghostLoot={B(cfg.GhostLooting)} fights={_fightsMode.ToString().ToLowerInvariant()}/{freq} lethality={_lethality:F1}x scopedWake={(_scopedWakeEnabled ? $"{_scopedWakeMax:F0}m" : "off")} dormantTypes=[scav={B(cfg.DormantScavs)} goon={B(cfg.DormantGoons)} boss={B(cfg.DormantBosses)} cultist={B(cfg.DormantCultists)} raider={B(cfg.DormantRaiders)} bloodhound={B(cfg.DormantBloodhounds)} other={B(cfg.DormantOthers)}]");
     }
 
     private static string B(bool v) => v ? "on" : "off";
@@ -311,7 +311,7 @@ public class DormancySystem
         {
             _pollErrors++;
             if (_pollErrors <= 5 || _pollErrors % 200 == 0)
-                Log.Error($"AI limiter poll failed (#{_pollErrors}) — skipping this tick, limiter stays alive: {e}");
+                Log.Error($"Ghost Mode poll failed (#{_pollErrors}) — skipping this tick, limiter stays alive: {e}");
         }
     }
 

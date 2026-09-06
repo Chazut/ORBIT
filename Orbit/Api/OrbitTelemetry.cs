@@ -26,13 +26,13 @@ public static class OrbitTelemetry
     public static int MainObjectivesRevision;
 
     /// <summary>
-    /// True while the AI limiter has this bot dormant (body asleep, ORBIT still driving it). Static-set
+    /// True while Ghost Mode has this bot dormant (body asleep, ORBIT still driving it). Static-set
     /// lookup, no OrbitManager needed — safe and cheap to call per position sample.
     /// </summary>
     public static bool IsBotDormant(string profileId)
         => Orbit.Systems.DormancySystem.IsDormantProfile(profileId);
 
-    // ── Simulated ghost fights (AI limiter) ─────────────────────────────
+    // ── Simulated ghost fights (Ghost Mode) ─────────────────────────────
 
     private static readonly List<OrbitGhostFight> PendingGhostFights = new();
 
@@ -306,7 +306,7 @@ public class OrbitMainObjective
     public string QuestTitle;
 }
 
-/// <summary>One simulated ghost fight (AI limiter): two dormant units exchanged fire between PosA and
+/// <summary>One simulated ghost fight (Ghost Mode): two dormant units exchanged fire between PosA and
 /// PosB for Duration seconds, producing Casualties deaths (0 = a bloodless exchange).</summary>
 public class OrbitGhostFight
 {

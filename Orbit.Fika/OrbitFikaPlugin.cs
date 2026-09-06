@@ -13,7 +13,7 @@ using UnityEngine;
 namespace Orbit.Fika;
 
 /// <summary>
-/// Optional ORBIT companion for Fika co-op: replicates the AI limiter's simulated ghost-fight
+/// Optional ORBIT companion for Fika co-op: replicates Ghost Mode's simulated ghost-fight
 /// gunfire to every player. The machine that owns the bots (host or headless) resolves the fights
 /// and broadcasts one packet per fight; each client replays the burst through its own BetterAudio
 /// with its own listener distance, so the whole party hears the off-screen action correctly

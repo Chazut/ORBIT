@@ -121,7 +121,7 @@ public static class ServerConfig
         [JsonIgnore] public Vector2 GuardDurationCut => new Vector2(GuardDurationCutMin, GuardDurationCutMax);
     }
 
-    public sealed class AiLimiterSection
+    public sealed class GhostModeSection
     {
         // ON by default (must match the server default) — decided after the 2.0 RC: unanimous
         // community feedback, and the limiter is the release's headline feature.
@@ -263,7 +263,7 @@ public static class ServerConfig
         [JsonProperty("poi_guard")] public PoiGuardSection PoiGuard = new PoiGuardSection();
         [JsonProperty("zones")] public ZonesSection Zones = new ZonesSection();
         [JsonProperty("personalities")] public PersonalitiesSection Personalities = new PersonalitiesSection();
-        [JsonProperty("ai_limiter")] public AiLimiterSection AiLimiter = new AiLimiterSection();
+        [JsonProperty("ai_limiter")] public GhostModeSection GhostMode = new GhostModeSection();
     }
 
     public static FactionsSection Factions { get; private set; } = new FactionsSection();
@@ -274,7 +274,7 @@ public static class ServerConfig
     public static PoiGuardSection PoiGuard { get; private set; } = new PoiGuardSection();
     public static ZonesSection Zones { get; private set; } = new ZonesSection();
     public static PersonalitiesSection Personalities { get; private set; } = new PersonalitiesSection();
-    public static AiLimiterSection AiLimiter { get; private set; } = new AiLimiterSection();
+    public static GhostModeSection GhostMode { get; private set; } = new GhostModeSection();
     public static bool Fetched { get; private set; }
 
     /// <summary>
@@ -298,7 +298,7 @@ public static class ServerConfig
                 PoiGuard = root.PoiGuard ?? PoiGuard;
                 Zones = root.Zones ?? Zones;
                 Personalities = root.Personalities ?? Personalities;
-                AiLimiter = root.AiLimiter ?? AiLimiter;
+                GhostMode = root.GhostMode ?? GhostMode;
                 if (!Fetched)
                     Log.Always($"Server config fetched (v{root.ConfigVersion}) - settings applied from the server web UI (/orbit)");
                 Fetched = true;

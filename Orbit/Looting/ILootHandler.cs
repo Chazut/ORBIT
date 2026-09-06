@@ -15,7 +15,7 @@ public interface ILootHandler
     Vector3 TargetWorldPosition { get; set; }
     bool ForceEnabled { get; set; }
 
-    /// <summary>Dormant fast path (AI limiter): the body is a disabled GameObject, so the session skips
+    /// <summary>Dormant fast path (Ghost Mode): the body is a disabled GameObject, so the session skips
     /// every animation, delay, freeze and equip/swap — pure data transfers only.</summary>
     bool DormantMode { get; set; }
 

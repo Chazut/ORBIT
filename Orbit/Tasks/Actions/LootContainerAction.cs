@@ -727,7 +727,7 @@ internal class BotLootState
         // Ghost looting OFF: the sleeping squad walks its route but never opens anything. Success=false
         // routes through the failed-loot path, which blacklists the POI for the squad so the strategy
         // re-picks instead of looping on it.
-        if (_agent.IsDormant && !ServerConfig.AiLimiter.GhostLooting)
+        if (_agent.IsDormant && !ServerConfig.GhostMode.GhostLooting)
         {
             Log.Debug($"{_agent} BotLootState.Begin: ghost looting disabled, skipping {_location}");
             IsDone = true;

@@ -1,12 +1,12 @@
-@page "/orbit/ai-limiter"
+@page "/orbit/ghost-mode"
 @layout Orbit.Server.Web.Shared.MainLayout
 @inherits Orbit.Server.Web.OrbitConfigPage
 
-<PageTitle>ORBIT: AI Limiter</PageTitle>
+<PageTitle>ORBIT: Ghost Mode</PageTitle>
 
 <MudContainer MaxWidth="MaxWidth.Medium">
     <div class="d-flex align-center mb-1" style="gap:12px">
-        <MudText Typo="Typo.h5">AI Limiter</MudText>
+        <MudText Typo="Typo.h5">Ghost Mode</MudText>
         <MudChip T="string" Color="Color.Primary" Size="Size.Small" Variant="Variant.Outlined">New in 2.0</MudChip>
         <MudSpacer />
         <MudTooltip Text="Restore this page's default values. Nothing is written until you hit Save." Placement="Placement.Bottom" Arrow="true">
@@ -19,48 +19,48 @@
         along their routes, so the world stays alive instead of freezing in place.
     </MudText>
     <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-4">
-        Do not combine with other AI limiter mods.
+        Do not combine with AI-limiter or bot-culling mods (AI Limit, Adaptive Bot Culling, QuestingBots sleeping...).
         <br />Fika: untested. The wake logic tracks every human player, but client-side visuals and sounds have not been validated yet.
     </MudAlert>
 
     <SettingsCard Title="Limiter" OnReset="ResetLimiter">
-        <OrbitSwitch @bind-Value="Cfg.AiLimiter.Enabled" Label="Enable AI limiter"
+        <OrbitSwitch @bind-Value="Cfg.GhostMode.Enabled" Label="Enable Ghost Mode"
                      Tooltip="Sleeps far-away bots body-first while ORBIT keeps thinking for them. Covers both ORBIT-driven bots (they keep moving while asleep) and vanilla ones (frozen in place), per the type toggles below. PMCs and PlayerScavs use the standard distance rules; the BTR is never touched." />
-        <OrbitSwitch @bind-Value="Cfg.AiLimiter.GhostMovement" Label="Ghost movement"
+        <OrbitSwitch @bind-Value="Cfg.GhostMode.GhostMovement" Label="Ghost movement"
                      Tooltip="ON: sleeping ORBIT squads keep advancing along their planned routes at walking speed, so the raid keeps evolving off-screen. OFF: sleepers hold their position (AILimit-style freeze)." />
-        <OrbitSwitch @bind-Value="Cfg.AiLimiter.GhostLooting" Label="Ghost looting"
+        <OrbitSwitch @bind-Value="Cfg.GhostMode.GhostLooting" Label="Ghost looting"
                      Tooltip="ON (default): sleeping ORBIT squads keep looting containers, corpses and loose items along their routes, so the raid economy keeps evolving off-screen. OFF: sleepers walk past everything and the loot waits for you." />
-        <MudSelect T="string" @bind-Value="Cfg.AiLimiter.GhostFightsMode" Label="Ghost fights" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mt-3" Style="max-width: 380px"
+        <MudSelect T="string" @bind-Value="Cfg.GhostMode.GhostFightsMode" Label="Ghost fights" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mt-3" Style="max-width: 380px"
                    HelperText="Hostile dormant units detect each other at a range scaled by their best optic (up to 400 m, terrain blocks line of sight). Scav-family units never fight each other.">
             <MudSelectItem T="string" Value="@("simulated")">Simulated: statistical resolution, zero cost (default)</MudSelectItem>
             <MudSelectItem T="string" Value="@("real")">Real fights: wake both units and let the AI fight it out</MudSelectItem>
             <MudSelectItem T="string" Value="@("off")">Off: ghosts ignore each other</MudSelectItem>
         </MudSelect>
-        @if (Cfg.AiLimiter.GhostFightsMode != "off")
+        @if (Cfg.GhostMode.GhostFightsMode != "off")
         {
-            <MudSelect T="string" @bind-Value="Cfg.AiLimiter.GhostFightFrequency" Label="Ghost fight frequency" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mt-3" Style="max-width: 380px"
+            <MudSelect T="string" @bind-Value="Cfg.GhostMode.GhostFightFrequency" Label="Ghost fight frequency" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mt-3" Style="max-width: 380px"
                        HelperText="Scales the contact odds and the cooldown between rematches, never the outcome. In short: frequency = how often the shooting starts, lethality = how many body bags per firefight.">
                 <MudSelectItem T="string" Value="@("rare")">Rare: lower contact odds, longer cooldown between rematches</MudSelectItem>
                 <MudSelectItem T="string" Value="@("normal")">Normal (default)</MudSelectItem>
                 <MudSelectItem T="string" Value="@("frequent")">Frequent: higher contact odds, shorter cooldown</MudSelectItem>
             </MudSelect>
         }
-        @if (Cfg.AiLimiter.GhostFightsMode == "simulated")
+        @if (Cfg.GhostMode.GhostFightsMode == "simulated")
         {
             <div class="mt-2"></div>
-            <OrbitSlider T="float" @bind-Value="Cfg.AiLimiter.GhostFightLethality" Label="Ghost fight lethality" Unit="x"
+            <OrbitSlider T="float" @bind-Value="Cfg.GhostMode.GhostFightLethality" Label="Ghost fight lethality" Unit="x"
                          Min="0.5f" Max="2f" Step="0.1f" Fmt="0.0"
                          Tooltip="Casualty multiplier for simulated fights. At 0.5x a fight that would kill 1 bot flips a coin between 0 and 1 (shots heard, everyone walks away); at 2x it kills 2. In short: frequency = how often the shooting starts, lethality = how many body bags per firefight." />
             <div class="mt-1"></div>
-            <OrbitSwitch @bind-Value="Cfg.AiLimiter.GhostFightSounds" Label="Ghost fight sounds"
+            <OrbitSwitch @bind-Value="Cfg.GhostMode.GhostFightSounds" Label="Ghost fight sounds"
                          Tooltip="ON (default): a simulated fight plays a burst of distant gunfire at its location, using the fighters' real weapon sounds, so you can hear where the off-screen action is and go investigate. Only plays when you are close enough to hear it." />
         }
-        <OrbitSwitch @bind-Value="Cfg.AiLimiter.FullSleep" Label="Let everyone sleep"
+        <OrbitSwitch @bind-Value="Cfg.GhostMode.FullSleep" Label="Let everyone sleep"
                      Tooltip="ON (default): no population floor — far from every human, the whole map may sleep. Maximum performance. OFF: the minimum below is kept awake as a permanent real-world backdrop." />
-        @if (!Cfg.AiLimiter.FullSleep)
+        @if (!Cfg.GhostMode.FullSleep)
         {
             <div class="mt-3"></div>
-            <OrbitSlider T="int" @bind-Value="Cfg.AiLimiter.MinAwakeBots" Label="Minimum awake bots"
+            <OrbitSlider T="int" @bind-Value="Cfg.GhostMode.MinAwakeBots" Label="Minimum awake bots"
                          Min="0" Max="30" Step="1"
                          Tooltip="Population floor: keeps at least this many bots awake, meaning PMCs, PlayerScavs, and any type whose default-dormant toggle below is OFF. Default-dormant types never take a floor slot. On small maps the floor self-caps so everything can still sleep." />
         }
@@ -68,33 +68,33 @@
 
     <SettingsCard Title="Default-dormant bot types" OnReset="ResetTypes"
                   Subtitle="These types sleep by default and wake when a player or an awake bot gets close. ORBIT-driven bots keep moving while asleep; vanilla ones freeze in place.">
-        <OrbitSwitch @bind-Value="Cfg.AiLimiter.DormantScavs" Label="Scavs" />
-        <OrbitSwitch @bind-Value="Cfg.AiLimiter.DormantGoons" Label="Goons" />
-        <OrbitSwitch @bind-Value="Cfg.AiLimiter.DormantBosses" Label="Bosses and followers" />
-        <OrbitSwitch @bind-Value="Cfg.AiLimiter.DormantCultists" Label="Cultists" />
-        <OrbitSwitch @bind-Value="Cfg.AiLimiter.DormantRaiders" Label="Raiders and rogues" />
-        <OrbitSwitch @bind-Value="Cfg.AiLimiter.DormantBloodhounds" Label="Bloodhounds" />
-        <OrbitSwitch @bind-Value="Cfg.AiLimiter.DormantOthers" Label="Other factions (modded and unrecognised)" />
+        <OrbitSwitch @bind-Value="Cfg.GhostMode.DormantScavs" Label="Scavs" />
+        <OrbitSwitch @bind-Value="Cfg.GhostMode.DormantGoons" Label="Goons" />
+        <OrbitSwitch @bind-Value="Cfg.GhostMode.DormantBosses" Label="Bosses and followers" />
+        <OrbitSwitch @bind-Value="Cfg.GhostMode.DormantCultists" Label="Cultists" />
+        <OrbitSwitch @bind-Value="Cfg.GhostMode.DormantRaiders" Label="Raiders and rogues" />
+        <OrbitSwitch @bind-Value="Cfg.GhostMode.DormantBloodhounds" Label="Bloodhounds" />
+        <OrbitSwitch @bind-Value="Cfg.GhostMode.DormantOthers" Label="Other factions (modded and unrecognised)" />
     </SettingsCard>
 
     <SettingsCard Title="Distances" OnReset="ResetDistances"
                   Subtitle="Sleep and wake use different distances on purpose (hysteresis), so bots at the edge do not flap between states. Aiming through an optic stretches the wake range forward with the scope's magnification (capped by the slider below), so long-range sniping still finds live targets. Designed to also cover Fika clients and headless from their replicated aim state (untested).">
-        <OrbitSlider T="float" @bind-Value="Cfg.AiLimiter.SleepDistance" Label="Sleep beyond" Unit="m"
+        <OrbitSlider T="float" @bind-Value="Cfg.GhostMode.SleepDistance" Label="Sleep beyond" Unit="m"
                      Min="100f" Max="500f" Step="10f" Fmt="0"
                      Tooltip="A squad farther than this from every human player goes to sleep." />
-        <OrbitSlider T="float" @bind-Value="Cfg.AiLimiter.WakeDistance" Label="Wake within" Unit="m"
+        <OrbitSlider T="float" @bind-Value="Cfg.GhostMode.WakeDistance" Label="Wake within" Unit="m"
                      Min="50f" Max="450f" Step="10f" Fmt="0"
                      Tooltip="A sleeping squad closer than this to any human player wakes up." />
-        <OrbitSlider T="float" @bind-Value="Cfg.AiLimiter.HostileWakeDistance" Label="Awake-bot wake within" Unit="m"
+        <OrbitSlider T="float" @bind-Value="Cfg.GhostMode.HostileWakeDistance" Label="Awake-bot wake within" Unit="m"
                      Min="0f" Max="150f" Step="5f" Fmt="0"
                      Tooltip="An awake bot closer than this to a sleeper blocks its sleep or wakes it, so an active scav crossing a dormant PMC squad still turns into a fight." />
         <div class="mt-1"></div>
-        <OrbitSwitch @bind-Value="Cfg.AiLimiter.ScopedWake" Label="Scoped wake"
+        <OrbitSwitch @bind-Value="Cfg.GhostMode.ScopedWake" Label="Scoped wake"
                      Tooltip="ON (default): aiming through a magnified optic wakes bots ahead of you, in a cone wider than the scope view so they never pop in at the reticle. OFF: only the normal wake ring applies." />
-        @if (Cfg.AiLimiter.ScopedWake)
+        @if (Cfg.GhostMode.ScopedWake)
         {
             <div class="mt-3"></div>
-            <OrbitSlider T="float" @bind-Value="Cfg.AiLimiter.ScopedWakeMaxDistance" Label="Scoped wake up to" Unit="m"
+            <OrbitSlider T="float" @bind-Value="Cfg.GhostMode.ScopedWakeMaxDistance" Label="Scoped wake up to" Unit="m"
                          Min="200f" Max="1500f" Step="50f" Fmt="0"
                          Tooltip="Hard cap on the optic-stretched wake distance, whatever the magnification." />
         }
@@ -119,37 +119,37 @@
 
     private void ResetLimiter()
     {
-        var d = new AiLimiterConfig();
-        Cfg.AiLimiter.Enabled = d.Enabled;
-        Cfg.AiLimiter.GhostMovement = d.GhostMovement;
-        Cfg.AiLimiter.GhostLooting = d.GhostLooting;
-        Cfg.AiLimiter.GhostFightsMode = d.GhostFightsMode;
-        Cfg.AiLimiter.GhostFightFrequency = d.GhostFightFrequency;
-        Cfg.AiLimiter.GhostFightLethality = d.GhostFightLethality;
-        Cfg.AiLimiter.GhostFightSounds = d.GhostFightSounds;
-        Cfg.AiLimiter.FullSleep = d.FullSleep;
-        Cfg.AiLimiter.MinAwakeBots = d.MinAwakeBots;
+        var d = new GhostModeConfig();
+        Cfg.GhostMode.Enabled = d.Enabled;
+        Cfg.GhostMode.GhostMovement = d.GhostMovement;
+        Cfg.GhostMode.GhostLooting = d.GhostLooting;
+        Cfg.GhostMode.GhostFightsMode = d.GhostFightsMode;
+        Cfg.GhostMode.GhostFightFrequency = d.GhostFightFrequency;
+        Cfg.GhostMode.GhostFightLethality = d.GhostFightLethality;
+        Cfg.GhostMode.GhostFightSounds = d.GhostFightSounds;
+        Cfg.GhostMode.FullSleep = d.FullSleep;
+        Cfg.GhostMode.MinAwakeBots = d.MinAwakeBots;
     }
 
     private void ResetTypes()
     {
-        var d = new AiLimiterConfig();
-        Cfg.AiLimiter.DormantScavs = d.DormantScavs;
-        Cfg.AiLimiter.DormantGoons = d.DormantGoons;
-        Cfg.AiLimiter.DormantBosses = d.DormantBosses;
-        Cfg.AiLimiter.DormantCultists = d.DormantCultists;
-        Cfg.AiLimiter.DormantRaiders = d.DormantRaiders;
-        Cfg.AiLimiter.DormantBloodhounds = d.DormantBloodhounds;
-        Cfg.AiLimiter.DormantOthers = d.DormantOthers;
+        var d = new GhostModeConfig();
+        Cfg.GhostMode.DormantScavs = d.DormantScavs;
+        Cfg.GhostMode.DormantGoons = d.DormantGoons;
+        Cfg.GhostMode.DormantBosses = d.DormantBosses;
+        Cfg.GhostMode.DormantCultists = d.DormantCultists;
+        Cfg.GhostMode.DormantRaiders = d.DormantRaiders;
+        Cfg.GhostMode.DormantBloodhounds = d.DormantBloodhounds;
+        Cfg.GhostMode.DormantOthers = d.DormantOthers;
     }
 
     private void ResetDistances()
     {
-        var d = new AiLimiterConfig();
-        Cfg.AiLimiter.SleepDistance = d.SleepDistance;
-        Cfg.AiLimiter.WakeDistance = d.WakeDistance;
-        Cfg.AiLimiter.HostileWakeDistance = d.HostileWakeDistance;
-        Cfg.AiLimiter.ScopedWake = d.ScopedWake;
-        Cfg.AiLimiter.ScopedWakeMaxDistance = d.ScopedWakeMaxDistance;
+        var d = new GhostModeConfig();
+        Cfg.GhostMode.SleepDistance = d.SleepDistance;
+        Cfg.GhostMode.WakeDistance = d.WakeDistance;
+        Cfg.GhostMode.HostileWakeDistance = d.HostileWakeDistance;
+        Cfg.GhostMode.ScopedWake = d.ScopedWake;
+        Cfg.GhostMode.ScopedWakeMaxDistance = d.ScopedWakeMaxDistance;
     }
 }

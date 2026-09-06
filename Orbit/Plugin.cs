@@ -111,7 +111,7 @@ public class Plugin : BaseUnityPlugin
         EnableSafe(new BotVaultingPatch());
         EnableSafe(new ManualFixedUpdateSkipPatch());
 
-        // AI limiter: awake bots must not raycast dormant (deactivated) ones. Inert while the limiter is
+        // Ghost Mode: awake bots must not raycast dormant (deactivated) ones. Inert while the limiter is
         // OFF — the dormant set stays empty and the prefix falls through.
         EnableSafe(new DormantVisionPatch());
 
@@ -262,7 +262,7 @@ public class Plugin : BaseUnityPlugin
         const string essentials = "01. Essentials";
 
         Config.Bind(essentials, "Server config", string.Empty, new ConfigDescription(
-            "Every behaviour setting (factions, looting, extraction, AI limiter...) lives in the ORBIT server web UI.",
+            "Every behaviour setting (factions, looting, extraction, Ghost Mode...) lives in the ORBIT server web UI.",
             null, new ConfigurationManagerAttributes { Category = "", Order = 2, HideDefaultButton = true, CustomDrawer = DrawWebConfigButton }));
 
         QuietLogging = Config.Bind(essentials, "Quiet logging", true, new ConfigDescription(

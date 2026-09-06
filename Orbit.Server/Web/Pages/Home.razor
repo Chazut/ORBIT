@@ -28,15 +28,15 @@
         <MudItem xs="12" md="4">
             <MudPaper Outlined="true" Class="pa-4 d-flex flex-column" Style="height:100%">
                 <div class="d-flex align-center mb-2" style="gap:8px">
-                    <MudIcon Icon="@Icons.Material.Filled.Bedtime" Color="Color.Primary" />
-                    <MudText Typo="Typo.h6">AI Limiter</MudText>
+                    <MudIcon Icon="@Orbit.Server.Web.OrbitIcons.Ghost" Color="Color.Primary" />
+                    <MudText Typo="Typo.h6">Ghost Mode</MudText>
                     <MudChip T="string" Color="Color.Primary" Size="Size.Small" Variant="Variant.Outlined">2.0</MudChip>
                 </div>
                 <MudText Typo="Typo.body2" Style="opacity:.7" Class="flex-grow-1">
-                    Sleeps far-away bots body-first while ORBIT keeps thinking for them: squads keep
-                    walking, looting and even fighting as ghosts. Big performance, world still alive.
+                    Far-away bots go dormant to free your CPU, but ORBIT keeps playing them: squads
+                    keep walking, looting and even fighting as ghosts. Big performance, world still alive.
                 </MudText>
-                <MudButton Variant="Variant.Outlined" Size="Size.Small" Class="mt-3 align-self-start" Href="/orbit/ai-limiter">Configure</MudButton>
+                <MudButton Variant="Variant.Outlined" Size="Size.Small" Class="mt-3 align-self-start" Href="/orbit/ghost-mode">Configure</MudButton>
             </MudPaper>
         </MudItem>
         <MudItem xs="12" md="4">
@@ -75,7 +75,7 @@
             <MudListItem Icon="@Icons.Material.Filled.Check" IconColor="Color.Secondary">Full looting: containers, corpses and loose items actually end up in their inventories</MudListItem>
             <MudListItem Icon="@Icons.Material.Filled.Check" IconColor="Color.Secondary">Extraction with reasons: loot threshold reached, mains done, wounded emergency, raid time low</MudListItem>
             <MudListItem Icon="@Icons.Material.Filled.Check" IconColor="Color.Secondary">Squad life: rally, dead-member loot recovery, doors, faction-mod support</MudListItem>
-            <MudListItem Icon="@Icons.Material.Filled.Check" IconColor="Color.Secondary">And with the limiter: dormant squads ghost-walk their routes, loot, and resolve off-screen firefights you can hear and third-party</MudListItem>
+            <MudListItem Icon="@Icons.Material.Filled.Check" IconColor="Color.Secondary">And with Ghost Mode: dormant squads ghost-walk their routes, loot, and resolve off-screen firefights you can hear and third-party</MudListItem>
         </MudList>
     </SettingsCard>
 
@@ -84,7 +84,7 @@
             <MudListItem Icon="@Icons.Material.Filled.Save" IconColor="Color.Primary">Save (top right) writes the server config; the game fetches it at every raid start, so changes apply from the NEXT raid</MudListItem>
             <MudListItem Icon="@Icons.Material.Filled.EditNote" IconColor="Color.Primary">Unsaved edits (zone editor included) show up next to the Save button, with a per-change diff and a discard</MudListItem>
             <MudListItem Icon="@Icons.Material.Filled.Keyboard" IconColor="Color.Primary">Client-side knobs (logging, performance) stay in the in-game F12 menu, which has a button back to this page</MudListItem>
-            <MudListItem Icon="@Icons.Material.Filled.Warning" IconColor="Color.Warning">Do not combine ORBIT with other AI limiter, questing, looting or bot-culling mods</MudListItem>
+            <MudListItem Icon="@Icons.Material.Filled.Warning" IconColor="Color.Warning">Do not combine ORBIT with AI-limiter, questing, looting or bot-culling mods</MudListItem>
         </MudList>
     </SettingsCard>
 

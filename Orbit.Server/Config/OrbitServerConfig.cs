@@ -22,16 +22,19 @@ public class OrbitServerConfig
     public PoiGuardConfig PoiGuard { get; set; } = new();
     public ZonesConfig Zones { get; set; } = new();
     public PersonalitiesConfig Personalities { get; set; } = new();
-    public AiLimiterConfig AiLimiter { get; set; } = new();
+    // Serialized as "ai_limiter": the wire/file key predates the Ghost Mode rename and RC2 configs
+    // must keep loading as-is.
+    [System.Text.Json.Serialization.JsonPropertyName("ai_limiter")]
+    public GhostModeConfig GhostMode { get; set; } = new();
 }
 
 /// <summary>
-/// The built-in AI limiter: far-away ORBIT squads sleep body-first (the bot GameObject is disabled,
-/// killing the per-bot BSG/SAIN cost) while ORBIT keeps thinking for them. OFF by default while the
-/// feature gathers feedback. Not compatible with external limiters (AILimit) or Questing Bots
+/// Ghost Mode (serialized "ai_limiter"): far-away ORBIT squads sleep body-first (the bot GameObject is disabled,
+/// killing the per-bot BSG/SAIN cost) while ORBIT keeps thinking for them. ON by default since the
+/// 2.0 RC. Not compatible with external limiters (AILimit) or Questing Bots
 /// sleeping: two SetActive owners fight each other.
 /// </summary>
-public class AiLimiterConfig
+public class GhostModeConfig
 {
     // ON by default — decided after the 2.0 RC: unanimous community feedback, and the limiter is
     // the release's headline feature. Release notes call it out with where to turn it off.

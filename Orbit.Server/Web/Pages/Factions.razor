@@ -53,7 +53,7 @@
     private void ResetPage() => Cfg.Factions = new FactionsConfig();
 
     // Turning a vanilla toggle ON asks for confirmation first: bots ORBIT does not drive have no
-    // route to replay while dormant, so with the AI limiter they FREEZE in place as ghosts instead
+    // route to replay while dormant, so with Ghost Mode they FREEZE in place as ghosts instead
     // of moving (ghost patrol for them is on the roadmap). Cancel leaves the toggle untouched.
     private async Task SetVanilla(bool on, Action<bool> apply)
     {
@@ -63,7 +63,7 @@
         if (!on) return;
         var ok = await DialogService.ShowMessageBoxAsync(
             "Disable ORBIT on these bots?",
-            "With the AI limiter, bots ORBIT does not drive can still go dormant, but they will FREEZE in place instead of moving around as ghosts (ORBIT has no route to replay for them). They wake up and behave normally as soon as anyone \"active\" gets close.",
+            "With Ghost Mode, bots ORBIT does not drive can still go dormant, but they will FREEZE in place instead of moving around as ghosts (ORBIT has no route to replay for them). They wake up and behave normally as soon as anyone \"active\" gets close.",
             yesText: "Disable ORBIT here", cancelText: "Cancel");
         if (ok != true) apply(false);
     }
