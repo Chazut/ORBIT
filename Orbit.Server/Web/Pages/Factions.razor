@@ -1,6 +1,7 @@
 @page "/orbit/factions"
 @layout Orbit.Server.Web.Shared.MainLayout
 @inherits Orbit.Server.Web.OrbitConfigPage
+@inject IDialogService DialogService
 
 <PageTitle>ORBIT: Factions</PageTitle>
 
@@ -24,15 +25,15 @@
 
     <SettingsCard Title="Vanilla behaviour" OnReset="ResetVanilla"
                   Subtitle="ON: ORBIT leaves these bots on BSG's vanilla brain entirely.">
-        <OrbitSwitch @bind-Value="Cfg.Factions.VanillaScavs" Label="Vanilla scavs"
+        <OrbitSwitch Value="Cfg.Factions.VanillaScavs" ValueChanged="@((bool v) => SetVanilla(v, x => Cfg.Factions.VanillaScavs = x))" Label="Vanilla scavs"
                      Tooltip="Bot scavs run on BSG's vanilla brain. PlayerScavs are unaffected." />
-        <OrbitSwitch @bind-Value="Cfg.Factions.VanillaGoons" Label="Vanilla goons"
+        <OrbitSwitch Value="Cfg.Factions.VanillaGoons" ValueChanged="@((bool v) => SetVanilla(v, x => Cfg.Factions.VanillaGoons = x))" Label="Vanilla goons"
                      Tooltip="Knight, Big Pipe and Bird Eye run on BSG's vanilla brain." />
-        <OrbitSwitch @bind-Value="Cfg.Factions.VanillaCultists" Label="Vanilla cultists"
+        <OrbitSwitch Value="Cfg.Factions.VanillaCultists" ValueChanged="@((bool v) => SetVanilla(v, x => Cfg.Factions.VanillaCultists = x))" Label="Vanilla cultists"
                      Tooltip="Priest, warriors and cursed scavs run on BSG's vanilla brain." />
-        <OrbitSwitch @bind-Value="Cfg.Factions.VanillaRaiders" Label="Vanilla raiders and rogues"
+        <OrbitSwitch Value="Cfg.Factions.VanillaRaiders" ValueChanged="@((bool v) => SetVanilla(v, x => Cfg.Factions.VanillaRaiders = x))" Label="Vanilla raiders and rogues"
                      Tooltip="ON (default): Raiders and Rogues keep BSG's vanilla guard behaviour." />
-        <OrbitSwitch @bind-Value="Cfg.Factions.VanillaBloodhounds" Label="Vanilla bloodhounds"
+        <OrbitSwitch Value="Cfg.Factions.VanillaBloodhounds" ValueChanged="@((bool v) => SetVanilla(v, x => Cfg.Factions.VanillaBloodhounds = x))" Label="Vanilla bloodhounds"
                      Tooltip="Bloodhounds (smugglers / arena spawns) run on BSG's vanilla brain." />
     </SettingsCard>
 
@@ -50,6 +51,22 @@
 @code {
     // Every FactionsConfig field lives on this page, so a fresh instance is the page's defaults.
     private void ResetPage() => Cfg.Factions = new FactionsConfig();
+
+    // Turning a vanilla toggle ON asks for confirmation first: bots ORBIT does not drive have no
+    // route to replay while dormant, so with the AI limiter they FREEZE in place as ghosts instead
+    // of moving (ghost patrol for them is on the roadmap). Cancel leaves the toggle untouched.
+    private async Task SetVanilla(bool on, Action<bool> apply)
+    {
+        // Applied optimistically, reverted on cancel: the bound value must actually CHANGE both
+        // ways or the switch component never re-renders and stays visually stuck ON.
+        apply(on);
+        if (!on) return;
+        var ok = await DialogService.ShowMessageBoxAsync(
+            "Disable ORBIT on these bots?",
+            "With the AI limiter, bots ORBIT does not drive can still go dormant, but they will FREEZE in place instead of moving around as ghosts (ORBIT has no route to replay for them). They wake up and behave normally as soon as anyone \"active\" gets close.",
+            yesText: "Disable ORBIT here", cancelText: "Cancel");
+        if (ok != true) apply(false);
+    }
 
     private void ResetTakeover()
     {
