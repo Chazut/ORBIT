@@ -1474,16 +1474,27 @@ public class DormancySystem
             return;
         }
 
-        Log.Info($"GHOST FIGHT SOUNDS: queueing {shots} shots over {duration:F1}s, closest human {listenerDist:F0}m");
-        for (var i = 0; i < shots; i++)
+        Log.Info($"GHOST FIGHT SOUNDS: queueing up to {shots} shots over {duration:F1}s, closest human {listenerDist:F0}m");
+        // Each side fires its own schedule shaped by its weapon's capability (bursts for autos,
+        // aimed singles for semi/bolt) — a shared uniform spray made SVDs sound full-auto (RC report).
+        var budgetA = shots / 2;
+        var budgetB = shots - budgetA;
+        if (soundA == null) { budgetB = shots; budgetA = 0; }
+        if (soundB == null) { budgetA = shots; budgetB = 0; }
+        QueueSideShots(soundA, posA, budgetA, duration);
+        QueueSideShots(soundB, posB, budgetB, duration);
+    }
+
+    private void QueueSideShots(WeaponSoundPlayer sound, Vector3 pos, int budget, float duration)
+    {
+        if (sound == null || budget <= 0) return;
+        var times = Api.GhostShotScheduler.Schedule(sound.IsAutoWeapon, budget, duration);
+        for (var i = 0; i < times.Count; i++)
         {
-            var sideA = Random.value < 0.5f;
-            var sound = sideA ? soundA : soundB;
-            if (sound == null) { sound = sideA ? soundB : soundA; }
             _pendingShots.Add(new PendingShot
             {
-                At = Time.time + Random.Range(0.1f, duration),
-                Pos = (sideA ? posA : posB) + new Vector3(Random.Range(-3f, 3f), 0f, Random.Range(-3f, 3f)),
+                At = Time.time + times[i],
+                Pos = pos + new Vector3(Random.Range(-3f, 3f), 0f, Random.Range(-3f, 3f)),
                 Sound = sound,
             });
         }
@@ -1530,8 +1541,14 @@ public class DormancySystem
             _pendingShots.RemoveAt(i);
             try
             {
-                // The tail bank IS what a distant gunshot sounds like in EFT; body as fallback.
-                var bank = shot.Sound.Tail != null ? shot.Sound.Tail : shot.Sound.Body;
+                // The tail bank IS what a distant gunshot sounds like in EFT; body as fallback. A
+                // suppressed weapon's sound player is flagged IsSilenced by the game, so its ghost
+                // shots use the silenced banks and stay authentically quiet.
+                var bank = shot.Sound.IsSilenced
+                    ? (shot.Sound.TailSilenced != null ? shot.Sound.TailSilenced
+                        : shot.Sound.BodySilenced != null ? shot.Sound.BodySilenced
+                        : shot.Sound.Tail != null ? shot.Sound.Tail : shot.Sound.Body)
+                    : (shot.Sound.Tail != null ? shot.Sound.Tail : shot.Sound.Body);
                 if (bank == null) continue;
                 var listenerDist = Mathf.Sqrt(MinSqrDistanceToHumans(shot.Pos));
                 audio.PlayAtPointDistant(shot.Pos, bank, listenerDist, 1f);

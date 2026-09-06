@@ -115,17 +115,26 @@ public class OrbitFikaPlugin : BaseUnityPlugin
 
         _log.LogInfo($"{PluginName}: replaying ghost fight, {packet.Shots} shots over {packet.Duration:F1}s at {Mathf.Min(distA, distB):F0}m");
 
-        // Same burst shape as the limiter's local playback: shots alternate sides with positional
-        // jitter, spread over the fight's duration.
-        for (var i = 0; i < packet.Shots; i++)
+        // Same shape as the limiter's local playback: each side fires a schedule matching its
+        // weapon's capability (bursts for autos, aimed singles for semi/bolt).
+        var budgetA = packet.Shots / 2;
+        var budgetB = packet.Shots - budgetA;
+        if (soundA == null) { budgetB = packet.Shots; budgetA = 0; }
+        if (soundB == null) { budgetA = packet.Shots; budgetB = 0; }
+        QueueSideShots(soundA, packet.PosA, budgetA, packet.Duration);
+        QueueSideShots(soundB, packet.PosB, budgetB, packet.Duration);
+    }
+
+    private static void QueueSideShots(WeaponSoundPlayer sound, Vector3 pos, int budget, float duration)
+    {
+        if (sound == null || budget <= 0) return;
+        var times = Orbit.Api.GhostShotScheduler.Schedule(sound.IsAutoWeapon, budget, duration);
+        for (var i = 0; i < times.Count; i++)
         {
-            var sideA = Random.value < 0.5f;
-            var sound = sideA ? soundA : soundB;
-            if (sound == null) sound = sideA ? soundB : soundA;
             _pending.Add(new PendingShot
             {
-                At = Time.time + Random.Range(0.1f, packet.Duration),
-                Pos = (sideA ? packet.PosA : packet.PosB) + new Vector3(Random.Range(-3f, 3f), 0f, Random.Range(-3f, 3f)),
+                At = Time.time + times[i],
+                Pos = pos + new Vector3(Random.Range(-3f, 3f), 0f, Random.Range(-3f, 3f)),
                 Sound = sound,
             });
         }
@@ -166,7 +175,11 @@ public class OrbitFikaPlugin : BaseUnityPlugin
             try
             {
                 // The tail bank IS what a distant gunshot sounds like in EFT; body as fallback.
-                var bank = shot.Sound.Tail != null ? shot.Sound.Tail : shot.Sound.Body;
+                var bank = shot.Sound.IsSilenced
+                    ? (shot.Sound.TailSilenced != null ? shot.Sound.TailSilenced
+                        : shot.Sound.BodySilenced != null ? shot.Sound.BodySilenced
+                        : shot.Sound.Tail != null ? shot.Sound.Tail : shot.Sound.Body)
+                    : (shot.Sound.Tail != null ? shot.Sound.Tail : shot.Sound.Body);
                 if (bank == null) continue;
                 audio.PlayAtPointDistant(shot.Pos, bank, Vector3.Distance(listenerPos, shot.Pos), 1f);
             }
