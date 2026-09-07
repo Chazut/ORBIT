@@ -78,7 +78,9 @@ and other faction mods) - today those sleep frozen in place. Until
 that ships, for faction-mod bots I recommend either enabling their
 "Take over" toggle (Factions page, they become ORBIT-driven and ghost
 properly) or disabling Ghost Mode for their bot type (the "Dormant"
-toggles on the Ghost Mode page), so you never run into frozen bots.*
+toggles on the Ghost Mode page), so you never run into frozen bots.
+Awake bots wake any ghost they come across, so those encounters play
+out as real fights instead of simulated ones.*
 
 *Fika: designed for co-op (an optional `Orbit.Fika` addon syncs the
 fight sounds to every client) but untested so far.*
@@ -210,6 +212,11 @@ toggle. Suggestions land on the Discord thread.
 
 - Ghost Mode and the zone editor are brand new in 2.0: expect tuning
   passes. Fika support for the limiter is designed in but untested.
+- Bots ORBIT doesn't drive (vanilla scavs, raiders/rogues, bosses and
+  followers, faction mods) sleep FROZEN in place under Ghost Mode
+  (ghost movement for them comes in 2.1). Workarounds for faction
+  bots: enable their "Take over" toggle, or turn OFF the Dormant
+  toggle for their bot type.
 - Most Reserve exfils need switches ORBIT can't operate yet.
 - Faction-mod takeover (RUAF / UNTAR / Black Division) can misbehave;
   leave those toggles OFF if it does. ISB takeover works.
