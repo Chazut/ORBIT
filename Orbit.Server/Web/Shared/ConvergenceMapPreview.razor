@@ -29,41 +29,46 @@
 }
 else
 {
-    <OrbitSwitch @bind-Value="_conv.Enabled" Label="@($"Convergence on {ZoneStoreService.MapLabels[_mapId]}")"
+    <OrbitSwitch Value="_conv.Enabled" ValueChanged="OnEnabledChanged" Label="@($"Convergence on {ZoneStoreService.MapLabels[_mapId]}")"
                  Tooltip="Per-map switch. The master 'Player convergence' toggle above must also be ON." />
     <OrbitSlider T="float" @bind-Value="_conv.Radius.Min" Label="Radius min" Unit="m" Min="0f" Max="2000f" Step="10f" Fmt="0"
                  Tooltip="Lowest possible reach roll for this map, in meters (before the global radius scale)." />
     <OrbitSlider T="float" @bind-Value="_conv.Radius.Max" Label="Radius max" Unit="m" Min="0f" Max="2000f" Step="10f" Fmt="0"
                  Tooltip="Highest possible reach roll for this map, in meters (before the global radius scale)." />
 
-    @if (_conv.Enabled && _conv.Radius.Max > 0f)
-    {
-        var rMin = _conv.Radius.Min * RadiusScale;
-        var rMax = _conv.Radius.Max * RadiusScale;
-        var (px, py) = WorldToView(_ringX, _ringZ);
-        <div class="mt-2" style="max-width:100%; overflow-x:auto">
-        <div style="position:relative; width:@(CanvasW)px; height:@F(_canvasH)px; background:#0A0E17; border:1px solid #222B3E; border-radius:10px; overflow:hidden; touch-action:none; user-select:none; -webkit-user-select:none; cursor:@(_dragging ? "grabbing" : "grab")"
-             @onpointerdown="OnPointerDown" @onpointermove="OnPointerMove" @onpointerup="OnPointerUp"
-             @onpointerleave="OnPointerUp" @ondragstart:preventDefault="true">
-            <svg viewBox="0 0 1000 @F(_vh)" preserveAspectRatio="none" style="position:absolute; inset:0; width:100%; height:100%; pointer-events:none">
-                @if (_view.Svg != null)
-                {
-                    <image href="@_view.Svg" x="0" y="0" width="1000" height="@F(_vh)" preserveAspectRatio="none" opacity="0.85" />
-                }
+    var showRing = _conv.Enabled && _conv.Radius.Max > 0f;
+    var rMin = _conv.Radius.Min * RadiusScale;
+    var rMax = _conv.Radius.Max * RadiusScale;
+    var (px, py) = WorldToView(_ringX, _ringZ);
+    <div class="mt-2" style="max-width:100%; overflow-x:auto">
+    <div style="position:relative; width:@(CanvasW)px; height:@F(_canvasH)px; background:#0A0E17; border:1px solid #222B3E; border-radius:10px; overflow:hidden; touch-action:none; user-select:none; -webkit-user-select:none; cursor:@(showRing ? _dragging ? "grabbing" : "grab" : "default")"
+         @onpointerdown="OnPointerDown" @onpointermove="OnPointerMove" @onpointerup="OnPointerUp"
+         @onpointerleave="OnPointerUp" @ondragstart:preventDefault="true">
+        <svg viewBox="0 0 1000 @F(_vh)" preserveAspectRatio="none" style="position:absolute; inset:0; width:100%; height:100%; pointer-events:none">
+            @if (_view.Svg != null)
+            {
+                <image href="@_view.Svg" x="0" y="0" width="1000" height="@F(_vh)" preserveAspectRatio="none" opacity="0.85" />
+            }
+            @if (showRing)
+            {
                 <circle cx="@F(px)" cy="@F(py)" r="@F(MetersToView(rMax))" fill="#9F7AEA" fill-opacity="0.05"
                         stroke="#9F7AEA" stroke-opacity="0.55" stroke-width="1.4" stroke-dasharray="8 6" />
                 <circle cx="@F(px)" cy="@F(py)" r="@F(MetersToView(rMin))" fill="none"
                         stroke="#9F7AEA" stroke-opacity="0.75" stroke-width="1.4" />
                 <circle cx="@F(px)" cy="@F(py)" r="3" fill="#9F7AEA" />
                 @((MarkupString)$"<text x=\"{F(px)}\" y=\"{F(py - MetersToView(rMax) - 6f)}\" text-anchor=\"middle\" font-size=\"12\" fill=\"#9F7AEA\" opacity=\"0.85\">player convergence ({F(rMin)}-{F(rMax)}m)</text>")
-            </svg>
-        </div>
-        </div>
-    }
-    else
-    {
-        <MudText Typo="Typo.body2" Class="mt-1" Style="opacity:.55">Convergence is disabled on this map — enable it (and give it a radius) to preview the ring.</MudText>
-    }
+            }
+        </svg>
+        @if (!showRing)
+        {
+            <div style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; background:rgba(10,14,23,.45); pointer-events:none">
+                <MudText Typo="Typo.body2" Style="opacity:.75">
+                    @(_conv.Enabled ? "Radius is 0, raise it to preview the ring." : $"Convergence is OFF on {ZoneStoreService.MapLabels[_mapId]}.")
+                </MudText>
+            </div>
+        }
+    </div>
+    </div>
 }
 
 @code {
@@ -128,8 +133,21 @@ else
         _conv = model.Convergence;
     }
 
+    private void OnEnabledChanged(bool enabled)
+    {
+        _conv!.Enabled = enabled;
+        // Maps shipped with convergence off carry 0-0 radius and force; enabling them as-is would
+        // preview (and roll) nothing, so seed the same starter ranges CreateEntry uses.
+        if (enabled && _conv.Radius.Max <= 0f)
+            _conv.Radius = new ZoneRange { Min = 200f, Max = 400f };
+        if (enabled && _conv.Force is { Min: 0f, Max: 0f })
+            _conv.Force = new ZoneRange { Min = 0f, Max = 0.5f };
+    }
+
     private void OnPointerDown(PointerEventArgs e)
     {
+        if (_conv is not { Enabled: true } || _conv.Radius.Max <= 0f)
+            return;
         _dragging = true;
         MoveRing(e);
     }
