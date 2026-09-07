@@ -74,7 +74,11 @@ get.
 
 *Coming in 2.1: ghost movement for the bots ORBIT doesn't drive
 (vanilla scavs, raiders and rogues, bosses and followers, UNTAR / RUAF
-and other faction mods) - today those sleep frozen in place.*
+and other faction mods) - today those sleep frozen in place. Until
+that ships, for faction-mod bots I recommend either enabling their
+"Take over" toggle (Factions page, they become ORBIT-driven and ghost
+properly) or disabling Ghost Mode for their bot type (the "Dormant"
+toggles on the Ghost Mode page), so you never run into frozen bots.*
 
 *Fika: designed for co-op (an optional `Orbit.Fika` addon syncs the
 fight sounds to every client) but untested so far.*
@@ -159,7 +163,7 @@ SAIN's config is a web UI too since 4.1: browse to
 (Heads up for [Twitch Player](https://forge.sp-tarkov.com/mod/1895/sain-twitch-players) users: it zeroes several of these by default.)
 
 **2. Extract layer** - let ORBIT own extraction. Same UI,
-**Global Settings → Extract**: turn **SAIN Extract Behavior** Off, then
+**Global Settings → General → Extract**: turn **SAIN Extract Behavior** Off, then
 Save (editing a built-in preset creates an editable copy).
 </details>
 
