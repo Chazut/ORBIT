@@ -198,7 +198,10 @@ first). Then come say hi on the [ORBIT thread](https://discord.com/channels/8756
 
 **Next (2.1)**: Ghost Mode moves the bots ORBIT doesn't drive (vanilla
 scavs, raiders, rogues, bosses and followers, UNTAR / RUAF and other
-faction mods), so nothing on the map sleeps frozen anymore.
+faction mods), so nothing on the map sleeps frozen anymore. Also for
+the zone editor: zones filtered by faction or bot type, per-floor
+zones (Reserve bunkers, Techlight...), and names on custom zones.
+Per-map Ghost Mode settings are on the maybe list.
 
 No ETA, no promises: camp & ambush decisions, post-combat self-heal,
 squad splitting with radio comms, boss hunting and faction rivalries
