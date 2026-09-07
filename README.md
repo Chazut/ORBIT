@@ -36,16 +36,13 @@ draw your own hotspots on the map.
 
 ## What a raid looks like
 
-- A 4-man PMC squad rolls "clean out Resort": the leader picks the rooms,
-  the wingmen fan out around him, they skip loot their personality finds
-  cheap, force a locked door or two, and push for extract once the bags
-  are worth it.
-- The squad's Rat happily grabs the 5k mag his Chad teammate walked past.
-- Scavs hold their home quartier; roughly one squad in five rolls the
-  right to wander across the map instead.
-- Distant gunfire crackles behind a hill: two ghost squads are settling
-  it off-screen. Rotate on the sound and the fight turns real before you
-  arrive.
+- A 4-man squad rolls "clean out Resort", splits the rooms, opens a
+  locked door or two, and extracts once the bags are worth it.
+- The squad's Rat grabs the 5k mag his Chad walked past: personalities
+  decide everything.
+- Scavs hold their turf; a lucky few roam the whole map.
+- Gunfire behind a hill: two ghost squads settling it off-screen. Push
+  the sound and the fight turns real.
 
 ## The pillars
 
@@ -64,7 +61,8 @@ EFT machinery - while ORBIT keeps thinking. Ghost squads keep
 walking their routes and keep looting in real time. When two hostile
 ghosts spot each other (optic-scaled range, terrain and forests block
 line of sight), the fight plays out over a real window with audible
-distant gunfire, real casualties and wounded survivors. Get close while
+distant gunfire matching each side's real weapons (suppressors
+included), real casualties and wounded survivors. Get close while
 it's still going and it escalates into an actual firefight.
 
 Waking is seamless: proximity, damage, or aiming through a scope (the
@@ -134,7 +132,8 @@ ghost squad fights off-screen. Two squads never play the same raid.
 
 Every behaviour setting lives in a **web UI** on your SPT server
 (`/orbit`, one button away from the F12 menu). It applies at the next
-raid and works headless.
+raid and works headless. Full-config export/import included, to back
+up or share your tuning.
 
 The **zone editor** renders each map and lets you draw the hotspots
 that steer squad routing: drag, resize, attract or repel, tune BSG's
