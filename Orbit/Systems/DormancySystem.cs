@@ -1585,14 +1585,17 @@ public class DormancySystem
             _pendingShots.RemoveAt(i);
             try
             {
-                // The tail bank IS what a distant gunshot sounds like in EFT; body as fallback. A
-                // suppressed weapon's sound player is flagged IsSilenced by the game, so its ghost
-                // shots use the silenced banks and stay authentically quiet.
+                // Distant gunshots in EFT come from the BODY bank: it blends its clips by
+                // distance (PickClips inside PlayAtPointDistant picks the far "crack" variants),
+                // exactly like FireBullet does for real shots. Tails are only the close-range
+                // reverb layer — playing them alone at distance sounds dull and identical for
+                // every weapon (community report: "everything sounds like .50BMG"). A suppressed
+                // weapon's sound player is flagged IsSilenced by the game, so its ghost shots
+                // use the silenced body and stay authentically quiet.
                 var bank = shot.Sound.IsSilenced
-                    ? (shot.Sound.TailSilenced != null ? shot.Sound.TailSilenced
-                        : shot.Sound.BodySilenced != null ? shot.Sound.BodySilenced
-                        : shot.Sound.Tail != null ? shot.Sound.Tail : shot.Sound.Body)
-                    : (shot.Sound.Tail != null ? shot.Sound.Tail : shot.Sound.Body);
+                    ? (shot.Sound.BodySilenced != null ? shot.Sound.BodySilenced
+                        : shot.Sound.Body != null ? shot.Sound.Body : shot.Sound.TailSilenced)
+                    : (shot.Sound.Body != null ? shot.Sound.Body : shot.Sound.Tail);
                 if (bank == null) continue;
                 var listenerDist = Mathf.Sqrt(MinSqrDistanceToHumans(shot.Pos));
                 audio.PlayAtPointDistant(shot.Pos, bank, listenerDist, 1f);

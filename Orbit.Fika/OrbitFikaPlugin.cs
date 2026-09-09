@@ -174,12 +174,12 @@ public class OrbitFikaPlugin : BaseUnityPlugin
             _pending.RemoveAt(i);
             try
             {
-                // The tail bank IS what a distant gunshot sounds like in EFT; body as fallback.
+                // Distant gunshots come from the BODY bank (distance-blended clips, same as
+                // FireBullet); tails alone sound dull and identical for every weapon.
                 var bank = shot.Sound.IsSilenced
-                    ? (shot.Sound.TailSilenced != null ? shot.Sound.TailSilenced
-                        : shot.Sound.BodySilenced != null ? shot.Sound.BodySilenced
-                        : shot.Sound.Tail != null ? shot.Sound.Tail : shot.Sound.Body)
-                    : (shot.Sound.Tail != null ? shot.Sound.Tail : shot.Sound.Body);
+                    ? (shot.Sound.BodySilenced != null ? shot.Sound.BodySilenced
+                        : shot.Sound.Body != null ? shot.Sound.Body : shot.Sound.TailSilenced)
+                    : (shot.Sound.Body != null ? shot.Sound.Body : shot.Sound.Tail);
                 if (bank == null) continue;
                 audio.PlayAtPointDistant(shot.Pos, bank, Vector3.Distance(listenerPos, shot.Pos), 1f);
             }
