@@ -2,7 +2,8 @@ namespace Orbit.Server.Web;
 
 /// <summary>One map render: svg + rotation + overlay bounds straight from the tarkov.dev interactive
 /// map configs (same data raid-review uses). Null svg = no public render, callers draw a grid.</summary>
-public sealed record MapView(string? Svg, float Rot, float X1, float Z1, float X2, float Z2);
+/// <param name="HideLayers">Group ids to hide when the file stacks several floors (see <see cref="MapRenders"/>).</param>
+public sealed record MapView(string? Svg, float Rot, float X1, float Z1, float X2, float Z2, string[]? HideLayers = null);
 
 /// <summary>Map render metadata + world/view transforms shared by the zone editor and the
 /// convergence preview on the Zones page.</summary>
@@ -16,9 +17,14 @@ public static class MapViews
         ["Sandbox"] = new("https://assets.tarkov.dev/maps/svg/GroundZero-Ground_Level.svg", 180, 249, -124, -99, 364),
         ["Sandbox_high"] = new("https://assets.tarkov.dev/maps/svg/GroundZero-Ground_Level.svg", 180, 249, -124, -99, 364),
         ["Interchange"] = new("https://assets.tarkov.dev/maps/svg/Interchange-Ground_Level.svg", 180, 530, -439, -364, 452),
+        // Interchange Rework (LennoxP90): tarkov.dev's current Interchange.svg is the 1.0 layout, with the
+        // mall floors as sibling groups; the upper two are hidden so the ground level stays visible.
+        ["Interchange@rework"] = new("https://assets.tarkov.dev/maps/svg/Interchange.svg", 180, 598, -442, -433, 426, ["First_Floor", "Second_Floor"]),
         ["laboratory"] = new(null, 270, -80, -477, -287, -193),
         ["Labyrinth"] = new(null, 270, -52, -37, 53, 76),
         ["Lighthouse"] = new("https://assets.tarkov.dev/maps/svg/Lighthouse.svg", 180, 515, -998, -545, 725),
+        // Lighthouse 1.0 backport (Manimal): same footprint, same public render for now.
+        ["Lighthouse@rework"] = new("https://assets.tarkov.dev/maps/svg/Lighthouse.svg", 180, 515, -998, -545, 725),
         ["RezervBase"] = new("https://assets.tarkov.dev/maps/svg/Reserve-Ground_Level.svg", 180, 289, -293, -303, 244),
         ["Shoreline"] = new("https://assets.tarkov.dev/maps/svg/Shoreline-Ground_Level.svg", 180, 504, -415, -1056, 618),
         ["TarkovStreets"] = new("https://assets.tarkov.dev/maps/svg/StreetsOfTarkov-Ground_Level.svg", 180, 323, -295, -280, 532),

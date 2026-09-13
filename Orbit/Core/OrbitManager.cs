@@ -33,6 +33,10 @@ public class OrbitManager
     public static RegisterStrategiesDelegate OnRegisterStrategies;
 
     public readonly string MapId;
+    /// <summary>"" on the vanilla layout, else the rework suffix detected by <see cref="Orbit.Helpers.MapVariants"/>.</summary>
+    public readonly string MapVariant;
+    /// <summary><see cref="MapId"/>, or "MapId@variant" on a rework: the key zones, geometry and renders are read under.</summary>
+    public readonly string ZoneKey;
     public readonly WaypointConfig Waypoints;
 
     public readonly AgentData AgentData;
@@ -69,6 +73,10 @@ public class OrbitManager
         var gameWorld = Singleton<GameWorld>.Instance;
 
         MapId = gameWorld.LocationId;
+        MapVariant = Orbit.Helpers.MapVariants.Detect(MapId);
+        ZoneKey = Orbit.Helpers.MapVariants.ZoneKey(MapId, MapVariant);
+        if (MapVariant.Length > 0)
+            Log.Always($"Map variant '{MapVariant}' detected on {MapId}: zones and geometry come from '{ZoneKey}' (base map as fallback)");
         Waypoints = new WaypointConfig();
 
         // Human players list — passed to MovementSystem's stuck-rescue path so teleports never happen within
@@ -90,7 +98,7 @@ public class OrbitManager
 
         NavJobExecutor = new NavJobExecutor();
 
-        WaypointSystem = new WaypointSystem(MapId, Waypoints, botsController, humanPlayers);
+        WaypointSystem = new WaypointSystem(MapId, ZoneKey, Waypoints, botsController, humanPlayers);
         MovementSystem = new MovementSystem(NavJobExecutor, humanPlayers, WaypointSystem);
         LookSystem = new LookSystem();
         DoorSystem = new DoorSystem();

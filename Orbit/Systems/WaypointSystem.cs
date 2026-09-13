@@ -51,6 +51,7 @@ public class WaypointSystem
     private readonly List<Zone> _zones;
     private readonly Vector2[,] _advectionField;
     private readonly string _mapId;
+    private readonly string _zoneKey;
 
     // Player convergence: a per-cell pull toward the living human player(s), refreshed every 30s as
     // they move. Folded into RequestNear's preferred-direction sum alongside advection / home / main.
@@ -108,13 +109,16 @@ public class WaypointSystem
     public Vector2[,] ConvergenceField => _convergenceField;
     public List<Zone> Zones => _zones;
 
-    public WaypointSystem(string mapId, WaypointConfig waypointConfig, BotsController botsController, List<Player> humanPlayers)
+    public WaypointSystem(string mapId, string zoneKey, WaypointConfig waypointConfig, BotsController botsController, List<Player> humanPlayers)
     {
         _mapId = mapId;
-        _zoneConfig = waypointConfig.MapZones[mapId];
+        _zoneKey = zoneKey;
+        _zoneConfig = waypointConfig.ResolveZones(zoneKey, mapId);
         // Zone editor (server web UI): the server's per-map zones override the local JSON for the
-        // whole session; without a reachable server mod the local files stay authoritative.
-        if (ServerConfig.TryGetZoneOverride(mapId, out var serverZones))
+        // whole session; without a reachable server mod the local files stay authoritative. A map
+        // variant reads its own key first, then the base map's (older server mods only know the base).
+        if (ServerConfig.TryGetZoneOverride(zoneKey, out var serverZones)
+            || (zoneKey != mapId && ServerConfig.TryGetZoneOverride(mapId, out serverZones)))
             _zoneConfig.ApplyOverride(serverZones);
         _botsController = botsController;
         _humanPlayers = humanPlayers;
@@ -123,7 +127,7 @@ public class WaypointSystem
         // radii from it.
         // map= is parsed by dashboard/parse_log.py for the per-raid index — keep the format in sync.
         Log.Info($"Calculating world geometry (map={mapId})");
-        var geometryConfig = waypointConfig.MapGeometries.Value[mapId];
+        var geometryConfig = waypointConfig.ResolveGeometry(zoneKey, mapId);
         _cellSize = geometryConfig.CellSize;
         _cellSubSize = _cellSize / 2f;
 
@@ -217,7 +221,7 @@ public class WaypointSystem
 
         // Convergence — null in the zone JSON (file predates the restore) falls back to the compiled-in
         // per-map default; radius/force are sampled once per raid from their ranges.
-        _convergence = _zoneConfig.Value.Convergence ?? WaypointConfig.DefaultConvergenceFor(mapId);
+        _convergence = _zoneConfig.Value.Convergence ?? WaypointConfig.DefaultConvergenceFor(zoneKey, mapId);
         _convergenceRadius = _convergence.Radius.SampleUniform();
         _convergenceForce = _convergence.Force.SampleUniform();
         _convergenceField = new Vector2[_gridSize.x, _gridSize.y];
@@ -232,7 +236,7 @@ public class WaypointSystem
     public void ReloadConfig()
     {
         _zoneConfig.Reload();
-        _convergence = _zoneConfig.Value.Convergence ?? WaypointConfig.DefaultConvergenceFor(_mapId);
+        _convergence = _zoneConfig.Value.Convergence ?? WaypointConfig.DefaultConvergenceFor(_zoneKey, _mapId);
         _convergenceRadius = _convergence.Radius.SampleUniform();
         _convergenceForce = _convergence.Force.SampleUniform();
         CalculateConvergence();

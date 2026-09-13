@@ -49,6 +49,23 @@ public static class BuiltinZonePositions
             ["ZoneRoad"] = (264.5f, 27.7f),
             ["ZoneTrucks"] = (-157.0f, 155.7f),
         },
+        // Interchange Rework (LennoxP90), from the mod's own spawn data: the vanilla zones plus the two the
+        // 1.0 layout adds (BEAR camp, Tagilla's yard). Keyed on the variant id the client reports.
+        ["Interchange@rework"] = new()
+        {
+            ["ZoneBearCamp"] = (490.9f, 121.2f),
+            ["ZoneCenter"] = (47.4f, -68.9f),
+            ["ZoneCenterBot"] = (9.9f, -26.5f),
+            ["ZoneGoshan"] = (-128.7f, -60.3f),
+            ["ZoneIDEA"] = (-48.9f, -237.5f),
+            ["ZoneIDEAPark"] = (175.5f, -262.3f),
+            ["ZoneOLI"] = (-37.4f, 120.7f),
+            ["ZoneOLIPark"] = (-27.1f, 77.3f),
+            ["ZonePowerStation"] = (-228.0f, -352.8f),
+            ["ZoneRoad"] = (264.5f, 27.7f),
+            ["ZoneTagilla"] = (-162.6f, -143.0f),
+            ["ZoneTrucks"] = (-176.5f, 151.9f),
+        },
         ["laboratory"] = new()
         {
             ["BotZoneBasement"] = (-166.2f, -384.4f),
@@ -165,6 +182,14 @@ public static class BuiltinZonePositions
     public static bool TryGet(string mapId, string zoneName, out (float X, float Z) pos)
     {
         pos = default;
-        return ByMap.TryGetValue(mapId, out var zones) && zones.TryGetValue(zoneName, out pos);
+        // A variant with its own table wins; otherwise it shares the base map's baked positions.
+        return ZonesFor(mapId) is { } zones && zones.TryGetValue(zoneName, out pos);
+    }
+
+    /// <summary>The baked table for a map id or variant key, falling back to the base map's.</summary>
+    public static Dictionary<string, (float X, float Z)>? ZonesFor(string mapId)
+    {
+        if (ByMap.TryGetValue(mapId, out var zones)) return zones;
+        return ByMap.TryGetValue(ZoneStoreService.BaseMapId(mapId), out zones) ? zones : null;
     }
 }

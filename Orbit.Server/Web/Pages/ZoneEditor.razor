@@ -55,7 +55,11 @@
         <svg id="orbit-zone-canvas" viewBox="@F(_panX) @F(_panY) @F(1000f / _zoom) @F(_vh / _zoom)" preserveAspectRatio="none"
              style="position:absolute; inset:0; width:100%; height:100%">
             <style>#orbit-zone-canvas circle, #orbit-zone-canvas line, #orbit-zone-canvas path, #orbit-zone-canvas text, #orbit-zone-canvas image { pointer-events: none; }</style>
-            @if (_view.Svg != null)
+            @if (_inlineSvg != null)
+            {
+                @((MarkupString)MapRenders.Wrap(_inlineSvg, _vh))
+            }
+            else if (_view.Svg != null)
             {
                 <image href="@_view.Svg" x="0" y="0" width="1000" height="@F(_vh)" preserveAspectRatio="none" opacity="0.85" />
             }
@@ -258,6 +262,7 @@
     private string _mapId = "bigmap";
     private MapZoneModel _zones = new();
     private MapView _view = MapViews.Views["bigmap"];
+    private MapRenders.InlineRender? _inlineSvg;
     private float _minX, _maxX, _minZ, _maxZ, _spanX, _spanZ, _vh, _canvasH;
     private float _zoom = 1f, _panX, _panY;
     private int _selectedCustom = -1;
@@ -293,10 +298,22 @@
         });
     }
 
+    // Multi-floor tarkov.dev renders are inlined with the upper floors hidden; until the fetch lands
+    // (or when it fails) the plain <image> keeps drawing the stacked file.
+    private async Task LoadInlineRenderAsync(string mapId, MapView view)
+    {
+        var render = await MapRenders.InlineSvgAsync(mapId, view);
+        if (render == null || _mapId != mapId) return;
+        _inlineSvg = render;
+        await InvokeAsync(StateHasChanged);
+    }
+
     private void LoadMap(string mapId)
     {
         _mapId = mapId;
         _view = MapViews.Views[mapId];
+        _inlineSvg = null;
+        if (_view.HideLayers is { Length: > 0 }) _ = LoadInlineRenderAsync(mapId, _view);
         var (rx1, rz1) = Rot(_view.X1, _view.Z1, _view.Rot);
         var (rx2, rz2) = Rot(_view.X2, _view.Z2, _view.Rot);
         _minX = MathF.Min(rx1, rx2);
@@ -338,7 +355,7 @@
 
     /// <summary>BSG zones of this map (baked table) that have no tuning entry in the config yet.</summary>
     private IEnumerable<KeyValuePair<string, (float X, float Z)>> AvailableBuiltins()
-        => BuiltinZonePositions.ByMap.TryGetValue(_mapId, out var zones)
+        => BuiltinZonePositions.ZonesFor(_mapId) is { } zones
             ? zones.Where(kv => !_zones.BuiltinZones.ContainsKey(kv.Key))
             : Enumerable.Empty<KeyValuePair<string, (float X, float Z)>>();
 

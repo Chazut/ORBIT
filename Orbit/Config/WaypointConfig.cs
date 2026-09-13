@@ -60,11 +60,35 @@ public class WaypointConfig
     }
 
     /// <summary>Compiled-in convergence default for a map — the fallback when a zone JSON predates the
-    /// convergence key. Unknown map ids resolve to disabled.</summary>
-    public static Convergence DefaultConvergenceFor(string mapId)
-        => Defaults.MapZones.TryGetValue(mapId, out var zone) && zone.Convergence != null
-            ? zone.Convergence
-            : new Convergence();
+    /// convergence key. Variant keys ("Interchange@rework") fall back to the base id; unknown ids resolve
+    /// to disabled.</summary>
+    public static Convergence DefaultConvergenceFor(string zoneKey, string mapId = null)
+    {
+        if (Defaults.MapZones.TryGetValue(zoneKey, out var zone) && zone.Convergence != null) return zone.Convergence;
+        if (mapId != null && mapId != zoneKey && Defaults.MapZones.TryGetValue(mapId, out zone) && zone.Convergence != null) return zone.Convergence;
+        return new Convergence();
+    }
+
+    /// <summary>Zone bundle for a variant key, then the base id. Unknown ids get an empty set backed by
+    /// its own file, so a map mod with a new location id runs on a plain grid instead of throwing.</summary>
+    public ConfigBundle<MapZone> ResolveZones(string zoneKey, string mapId)
+    {
+        if (MapZones.TryGetValue(zoneKey, out var bundle) || MapZones.TryGetValue(mapId, out bundle)) return bundle;
+        Log.Warning($"No zone defaults for map '{mapId}': starting with an empty zone set (Config/Maps/Zones/{mapId}.json)");
+        bundle = new ConfigBundle<MapZone>($"Maps/Zones/{mapId}.json", new MapZone(new Dictionary<string, BuiltinZone>(), [], new Convergence()));
+        MapZones[mapId] = bundle;
+        return bundle;
+    }
+
+    /// <summary>Grid geometry for a variant key, then the base id. Unknown ids get a 75m grid that the
+    /// waypoint system fits to the waypoints it finds in the scene.</summary>
+    public MapGeometry ResolveGeometry(string zoneKey, string mapId)
+    {
+        var geometries = MapGeometries.Value;
+        if (geometries.TryGetValue(zoneKey, out var geometry) || geometries.TryGetValue(mapId, out geometry)) return geometry;
+        Log.Warning($"No grid geometry for map '{mapId}': using a 75m grid fitted to the scene's waypoints");
+        return new MapGeometry(Vector2.zero, Vector2.zero, 75f);
+    }
 
     /// <summary>Zone keyed on a BSG-defined trigger name (e.g. ZoneDormitory).
     /// Position comes from the BSG trigger; we just tune radius/force/decay.</summary>
@@ -100,9 +124,13 @@ public class WaypointConfig
             { "Sandbox", new MapGeometry(new Vector2(-99, -124), new Vector2(249, 364), 50) },
             { "Sandbox_high", new MapGeometry(new Vector2(-99, -124), new Vector2(249, 364), 50) },
             { "Interchange", new MapGeometry(new Vector2(-364, -443), new Vector2(534, 452), 75) },
+            // Interchange Rework (LennoxP90): the 1.0 layout, bounds from the tarkov.dev interactive map.
+            { "Interchange@rework", new MapGeometry(new Vector2(-433, -442), new Vector2(598, 426), 75) },
             { "laboratory", new MapGeometry(new Vector2(-292, -441), new Vector2(96, 223), 50) },
             { "Labyrinth", new MapGeometry(new Vector2(-53, -37), new Vector2(51, 76), 25) },
             { "Lighthouse", new MapGeometry(new Vector2(-545, -998), new Vector2(512, 721), 125) },
+            // Lighthouse 1.0 backport (Manimal): same footprint as vanilla.
+            { "Lighthouse@rework", new MapGeometry(new Vector2(-545, -998), new Vector2(512, 721), 125) },
             { "RezervBase", new MapGeometry(new Vector2(-304, -275), new Vector2(292, 272), 50) },
             { "Shoreline", new MapGeometry(new Vector2(-1060, -415), new Vector2(508, 622), 125) },
             { "TarkovStreets", new MapGeometry(new Vector2(-279, -299), new Vector2(324, 533), 50) },
@@ -141,10 +169,36 @@ public class WaypointConfig
                     new Convergence(new Range(300, 500), new Range(0f, 0.5f))
                 )
             },
+            // Seed for the rework variant: same tuning as the vanilla layout, edited separately.
+            {
+                "Interchange@rework", new MapZone(
+                    new()
+                    {
+                        { "ZoneCenter", new BuiltinZone(new Range(500, 650), new Range(-0.25f, 1.0f), decay: 0.75f) }
+                    },
+                    [],
+                    new Convergence(new Range(300, 500), new Range(0f, 0.5f))
+                )
+            },
             { "laboratory", new MapZone([], [], new Convergence()) },
             { "Labyrinth", new MapZone([], [], new Convergence()) },
             {
                 "Lighthouse", new MapZone(
+                    new()
+                    {
+                        { "Zone_Chalet", new BuiltinZone(new Range(300, 350), new Range(-0.5f, 1.25f)) },
+                        { "Zone_Village", new BuiltinZone(new Range(400, 450), new Range(-0.5f, 1.25f)) }
+                    },
+                    [
+                        new CustomZone(new Vector2(0, 475), new Range(500, 600), new Range(-0.25f, 0.75f)),
+                        new CustomZone(new Vector2(-55, -775), new Range(400, 450), new Range(-0.25f, 0.75f))
+                    ],
+                    new Convergence(new Range(250, 1000), new Range(0.25f, 0.75f))
+                )
+            },
+            // Seed for the rework variant: same tuning as the vanilla layout, edited separately.
+            {
+                "Lighthouse@rework", new MapZone(
                     new()
                     {
                         { "Zone_Chalet", new BuiltinZone(new Range(300, 350), new Range(-0.5f, 1.25f)) },

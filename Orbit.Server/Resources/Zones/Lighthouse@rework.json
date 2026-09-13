@@ -1,0 +1,69 @@
+{
+  "BuiltinZones": {
+    "Zone_Chalet": {
+      "Radius": {
+        "Min": 300.0,
+        "Max": 350.0
+      },
+      "Force": {
+        "Min": -0.5,
+        "Max": 1.25
+      },
+      "Decay": 1.0
+    },
+    "Zone_Village": {
+      "Radius": {
+        "Min": 400.0,
+        "Max": 450.0
+      },
+      "Force": {
+        "Min": -0.5,
+        "Max": 1.25
+      },
+      "Decay": 1.0
+    }
+  },
+  "CustomZones": [
+    {
+      "Position": {
+        "x": 0.0,
+        "y": 475.0
+      },
+      "Radius": {
+        "Min": 500.0,
+        "Max": 600.0
+      },
+      "Force": {
+        "Min": -0.25,
+        "Max": 0.75
+      },
+      "Decay": 1.0
+    },
+    {
+      "Position": {
+        "x": -55.0,
+        "y": -775.0
+      },
+      "Radius": {
+        "Min": 400.0,
+        "Max": 450.0
+      },
+      "Force": {
+        "Min": -0.25,
+        "Max": 0.75
+      },
+      "Decay": 1.0
+    }
+  ],
+  "Convergence": {
+    "Radius": {
+      "Min": 250.0,
+      "Max": 1000.0
+    },
+    "Force": {
+      "Min": 0.25,
+      "Max": 0.75
+    },
+    "Enabled": true
+  }
+}

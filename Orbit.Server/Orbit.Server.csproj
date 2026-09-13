@@ -17,7 +17,7 @@
 
   <ItemGroup>
     <!-- Per-map zone defaults, seeded from the client's compiled-in defaults (Config/Maps/Zones). -->
-    <EmbeddedResource Include="Resources\Zones\*.json" />
+    <EmbeddedResource Include="Resources\Zones\*.json" LogicalName="Orbit.Server.Resources.Zones.%(Filename)%(Extension)" />
   </ItemGroup>
 
   <ItemGroup>

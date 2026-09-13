@@ -17,8 +17,8 @@ public class ZoneStoreService(ISptLogger<ZoneStoreService> logger)
     // ORBIT map ids (BSG location ids as the client sees them).
     public static readonly string[] MapIds =
     [
-        "bigmap", "factory4_day", "factory4_night", "Interchange", "laboratory", "Labyrinth",
-        "Lighthouse", "RezervBase", "Sandbox", "Sandbox_high", "Shoreline", "TarkovStreets", "Woods",
+        "bigmap", "factory4_day", "factory4_night", "Interchange", "Interchange@rework", "laboratory", "Labyrinth",
+        "Lighthouse", "Lighthouse@rework", "RezervBase", "Sandbox", "Sandbox_high", "Shoreline", "TarkovStreets", "Woods",
     ];
 
     public static readonly Dictionary<string, string> MapLabels = new()
@@ -27,9 +27,11 @@ public class ZoneStoreService(ISptLogger<ZoneStoreService> logger)
         ["factory4_day"] = "Factory (day)",
         ["factory4_night"] = "Factory (night)",
         ["Interchange"] = "Interchange",
+        ["Interchange@rework"] = "Interchange (1.0 rework)",
         ["laboratory"] = "The Lab",
         ["Labyrinth"] = "Labyrinth",
         ["Lighthouse"] = "Lighthouse",
+        ["Lighthouse@rework"] = "Lighthouse (1.0 rework)",
         ["RezervBase"] = "Reserve",
         ["Sandbox"] = "Ground Zero",
         ["Sandbox_high"] = "Ground Zero (21+)",
@@ -37,6 +39,15 @@ public class ZoneStoreService(ISptLogger<ZoneStoreService> logger)
         ["TarkovStreets"] = "Streets of Tarkov",
         ["Woods"] = "Woods",
     };
+
+    /// <summary>"Interchange@rework" -> "Interchange": map reworks that keep BSG's location id are keyed
+    /// "{id}@{variant}" (detected per raid by the client); the base id serves display-only data such as
+    /// the baked BotZone positions.</summary>
+    public static string BaseMapId(string mapId)
+    {
+        var at = mapId.IndexOf('@');
+        return at < 0 ? mapId : mapId[..at];
+    }
 
     // Client-contract serialization: exact member names (see ZoneModels.cs).
     private static readonly JsonSerializerOptions _json = new()

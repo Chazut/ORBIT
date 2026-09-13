@@ -1,0 +1,27 @@
+{
+  "BuiltinZones": {
+    "ZoneCenter": {
+      "Radius": {
+        "Min": 500.0,
+        "Max": 650.0
+      },
+      "Force": {
+        "Min": -0.25,
+        "Max": 1.0
+      },
+      "Decay": 0.75
+    }
+  },
+  "CustomZones": [],
+  "Convergence": {
+    "Radius": {
+      "Min": 300.0,
+      "Max": 500.0
+    },
+    "Force": {
+      "Min": 0.0,
+      "Max": 0.5
+    },
+    "Enabled": true
+  }
+}
