@@ -117,6 +117,8 @@ public class Plugin : BaseUnityPlugin
         EnableSafe(new DormantBrainThrottlePatch());
         EnableSafe(new DormantDamageProbePatch());
         EnableSafe(new DormantGroundCollisionPatch());
+        EnableSafe(new DormantAvoidDangerBypassPatch());
+        EnableSafe(new DormantBoarAvoidDangerBypassPatch());
 
         // Inventory subsystem patches
         EnableSafe(new AirdropLandedPatch());

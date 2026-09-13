@@ -214,6 +214,10 @@ public class OrbitBrainLayer : CustomLayer
         }
         else
         {
+            // Should no longer happen for AvoidDanger (DormantDangerLayerBypassPatch); any other BSG layer
+            // grabbing a sleeper is worth a visible line, the body cannot act on it.
+            if (_agent.IsDormant)
+                Log.Info($"{_agent} dormant body handed to BSG layer {layerName} (priority {layer.Priority})");
             if (_agent.IsActive)
             {
                 Log.Debug($"{_agent} setting player to navmesh");

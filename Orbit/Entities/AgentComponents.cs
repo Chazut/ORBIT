@@ -191,5 +191,8 @@ public class Stuck
     public int SpawnIslandAttempts;
     public float SpawnIslandNextProbeAt;
 
+    // Ghost rescue: consecutive PathInvalid results while dormant (see MovementSystem.TrackGhostPathInvalid).
+    public int GhostInvalidPathStreak;
+
     public override string ToString() => $"Stuck(soft: {Soft} hard: {Hard})";
 }

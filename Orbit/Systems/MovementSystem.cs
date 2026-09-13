@@ -62,6 +62,7 @@ public class MovementSystem
                     continue;
 
                 StartMovement(agent, job);
+                TrackGhostPathInvalid(agent, job);
             }
         }
 
@@ -196,6 +197,33 @@ public class MovementSystem
         _moveJobs.Enqueue((agent, job));
     }
 
+    private const int GhostInvalidPathRescueStreak = 3;
+
+    /// <summary>
+    /// A ghost parked on a navmesh patch cut off by the danger-zone carvers (or on an islanded chunk) gets
+    /// PathInvalid on every request, and the awake-bot rescues never see it: the hard-stuck machine needs a
+    /// path to time out, and the idle-island watchdog re-arms every time the action flips to guard-in-place
+    /// (Woods raid: AdeknieJadek, 15 minutes of Failed / guard / Failed). Three invalid paths in a row from
+    /// the same spot: move the inactive body to a connected point, the same way the island rescues do.
+    /// </summary>
+    private void TrackGhostPathInvalid(Agent agent, NavJob job)
+    {
+        if (!agent.IsDormant) return;
+        var stuck = agent.Stuck;
+        if (job.Status != NavMeshPathStatus.PathInvalid)
+        {
+            stuck.GhostInvalidPathStreak = 0;
+            return;
+        }
+        if (++stuck.GhostInvalidPathStreak < GhostInvalidPathRescueStreak) return;
+        stuck.GhostInvalidPathStreak = 0;
+        var from = agent.Position;
+        if (RescueTeleportToConnectedPoint(agent, job.Target) || RescueTeleportNearSquadmate(agent))
+            Log.Info($"{agent} ghost rescue: {GhostInvalidPathRescueStreak} invalid paths in a row from {from}, body moved to a connected navmesh point");
+        else
+            Log.Warning($"{agent} ghost rescue: {GhostInvalidPathRescueStreak} invalid paths in a row from {from} and no rescue point found");
+    }
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void StartMovement(Agent agent, NavJob job)
     {
@@ -267,7 +295,32 @@ public class MovementSystem
             return;
         }
 
-        transform.position = pos + toCorner * (step / dist);
+        var next = pos + toCorner * (step / dist);
+        if (Orbit.Navigation.DangerZones.IsInside(next))
+        {
+            SkipGhostDangerSegment(agent, movement, next);
+            return;
+        }
+        transform.position = next;
+    }
+
+    // The carvers keep paths out of minefields and sniper zones, but the trigger volumes are wider than the
+    // carve boxes and a corner-to-corner segment can still clip one. BSG's AvoidDanger layer then hijacks the
+    // sleeper (it cannot run, the body is inactive) and the ghost freezes for good. Jump ahead to the first
+    // corner clear of every zone instead; nobody is within sight range of a ghost by construction.
+    private void SkipGhostDangerSegment(Agent agent, Movement movement, Vector3 blocked)
+    {
+        for (var i = movement.CurrentCorner; i < movement.Path.Length; i++)
+        {
+            var corner = movement.Path[i];
+            if (Orbit.Navigation.DangerZones.IsInside(corner)) continue;
+            Log.Debug($"{agent} ghost walk clipped a danger zone at {blocked}: jumped {Vector3.Distance(agent.Position, corner):F0}m to corner {i}");
+            agent.Player.Transform.position = corner;
+            movement.CurrentCorner = Mathf.Min(i + 1, movement.Path.Length - 1);
+            return;
+        }
+        Log.Debug($"{agent} ghost walk: every remaining corner sits in a danger zone, dropping the path");
+        ResetPath(agent, MovementStatus.Failed);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
