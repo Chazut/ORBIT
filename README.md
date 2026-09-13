@@ -17,7 +17,7 @@
 
 ---
 
-Every bot squad in your raid spawns with a plan: a rich area to strip, a
+Every bot squad in your raid follows a plan: a rich area to strip, a
 PvP hotspot to hunt, a quest spot to visit. They work it as a team, loot
 like players, upgrade their gear along the way, and head for extract when
 they're done. Kill one late in the raid and his backpack tells the story
@@ -140,6 +140,10 @@ that steer squad routing: drag, resize, attract or repel, tune BSG's
 own zones, mark which ones can host kill hunts. Export your setup as a
 **zone pack** and publish it on the Forge as an ORBIT addon, or import
 someone else's.
+
+Map reworks that keep the vanilla location id (Interchange Rework, the
+Lighthouse 1.0 backport) are detected per raid and get their own zone
+set and render, listed as "Interchange (1.0 rework)" in the editor.
 
 ## Install
 
