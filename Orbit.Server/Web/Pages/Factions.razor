@@ -12,7 +12,7 @@
     <SettingsCard Title="Faction-mod takeover" OnReset="ResetTakeover"
                   Subtitle="ON: ORBIT routes these bots like PMCs. OFF: their own mod behaviour wins. Only matters when the faction mod is installed.">
         <OrbitSwitch @bind-Value="Cfg.Factions.TakeOverUntar" Label="Take over UNTAR bots"
-                     Tooltip="UNTAR bots keep their gear and spawns but navigate the map with ORBIT instead of their own checkpoint layers." />
+                     Tooltip="UNTAR bots keep their gear and spawns but navigate the map with ORBIT instead of their own checkpoint layers. Includes the raider hunt squads UNTAR orders through MoreBotsAPI (they are not vanilla raiders)." />
         <OrbitSwitch @bind-Value="Cfg.Factions.TakeOverRuaf" Label="Take over RUAF bots"
                      Tooltip="Covers both RUAF factions: the base RUAF roles and the RUAF Hardcore Remnant roles." />
         <OrbitSwitch @bind-Value="Cfg.Factions.TakeOverBlackDivision" Label="Take over Black Division bots"
@@ -32,7 +32,7 @@
         <OrbitSwitch Value="Cfg.Factions.VanillaCultists" ValueChanged="@((bool v) => SetVanilla(v, x => Cfg.Factions.VanillaCultists = x))" Label="Vanilla cultists"
                      Tooltip="Priest, warriors and cursed scavs run on BSG's vanilla brain." />
         <OrbitSwitch Value="Cfg.Factions.VanillaRaiders" ValueChanged="@((bool v) => SetVanilla(v, x => Cfg.Factions.VanillaRaiders = x))" Label="Vanilla raiders and rogues"
-                     Tooltip="ON (default): Raiders and Rogues keep BSG's vanilla guard behaviour." />
+                     Tooltip="ON (default): Raiders and Rogues keep BSG's vanilla guard behaviour. Faction hunt squads spawned through MoreBotsAPI (UNTAR, RUAF) are not vanilla raiders and follow their faction toggle instead." />
         <OrbitSwitch Value="Cfg.Factions.VanillaBloodhounds" ValueChanged="@((bool v) => SetVanilla(v, x => Cfg.Factions.VanillaBloodhounds = x))" Label="Vanilla bloodhounds"
                      Tooltip="Bloodhounds (smugglers / arena spawns) run on BSG's vanilla brain." />
     </SettingsCard>

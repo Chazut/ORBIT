@@ -73,6 +73,20 @@ public class OrbitBrainLayer : CustomLayer
     public static void SetVanillaRaiderExclusion(bool excluded) => _vanillaRaiders = excluded;
     public static void SetVanillaBloodhoundExclusion(bool excluded) => _vanillaBloodhounds = excluded;
 
+    /// <summary>The spawn id of a MoreBotsAPI hunt squad member, null for everything else.</summary>
+    private static string HuntSpawnId(BotOwner botOwner)
+    {
+        try
+        {
+            var id = botOwner?.SpawnProfileData?.SpawnParams?.Id_spawn;
+            return id != null && id.IndexOf("hunt", StringComparison.OrdinalIgnoreCase) >= 0 ? id : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     private static bool IsExcludedRole(BotOwner botOwner)
     {
         var role = botOwner?.Profile?.Info?.Settings?.Role;
@@ -93,6 +107,20 @@ public class OrbitBrainLayer : CustomLayer
             case (EFT.WildSpawnType)13707:
             case (EFT.WildSpawnType)13708:
                 return true;
+        }
+
+        // MoreBotsAPI "hunt" squads (UNTAR Go Home's raider hunts, RUAF's) are plain pmcBot spawns tagged
+        // only by their spawn id (MoreBotsAPI HuntManager.OnBotCreated matches "hunt" in Id_spawn). They
+        // belong to the mod that ordered the hunt, not to BSG's raider population, so they follow the
+        // faction toggles (matched on the spawn id) and never the vanilla-raider one: with that toggle ON
+        // they used to freeze as vanilla sleepers while the rest of their faction ghost-walked.
+        if (role.Value == EFT.WildSpawnType.pmcBot && HuntSpawnId(botOwner) is { } huntId)
+        {
+            foreach (var sub in _excludedRoleSubstrings)
+            {
+                if (huntId.IndexOf(sub, StringComparison.OrdinalIgnoreCase) >= 0) return true;
+            }
+            return false;
         }
 
         if (_excludedRoleSubstrings.Count > 0)
