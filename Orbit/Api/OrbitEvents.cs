@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace Orbit.Api;
@@ -19,14 +20,27 @@ public static class OrbitEvents
     /// </summary>
     public static event Action<GhostFightSounds> GhostFightSoundsResolved;
 
+    /// <summary>One firing member of a simulated fight: whose weapon sound banks to use, from where,
+    /// and how many shots of the fight's budget are its own.</summary>
+    public struct GhostShooter
+    {
+        public string ProfileId;
+        public Vector3 Position;
+        public int Shots;
+    }
+
     public struct GhostFightSounds
     {
         public Vector3 PosA;
         public Vector3 PosB;
+        /// <summary>First shooter of each side, kept for pre-2.1 consumers.</summary>
         public string ProfileA;
         public string ProfileB;
         public int Shots;
         public float Duration;
+        /// <summary>Per-member breakdown of the budget (2.1+): every member fires its own gun from its
+        /// own spot. Null or empty from an older host: fall back to ProfileA / ProfileB.</summary>
+        public List<GhostShooter> Shooters;
     }
 
     internal static void RaiseGhostFightSounds(in GhostFightSounds data)

@@ -38,6 +38,10 @@ public class Agent(int id, BotOwner bot, float[] taskScores) : Entity(id, taskSc
     public float LastPollHp;
     public float LastHpDropTime = -999f;
 
+    /// <summary>Time.time of the last simulated patch-up (DormancySystem): a far, out-of-combat bot whose HP
+    /// keeps dropping gets its negative effects stripped so the bleed gate can clear and it can sleep.</summary>
+    public float LastGhostPatchUpAt = -999f;
+
     public readonly BotOwner Bot = bot;
     public readonly Player Player = bot.Mover._player;
 
