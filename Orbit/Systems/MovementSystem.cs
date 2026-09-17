@@ -29,11 +29,13 @@ public class MovementSystem
     private readonly StuckRemediation _stuckRemediation;
     private readonly List<Player> _humanPlayers;
     private readonly WaypointSystem _waypointSystem;
+    private readonly DoorSystem _doorSystem;
     private readonly NavMeshPath _rescuePath = new();
     private readonly List<Waypoint> _wpScratch = new();
 
-    public MovementSystem(NavJobExecutor navJobExecutor, List<Player> humanPlayers, WaypointSystem waypointSystem)
+    public MovementSystem(NavJobExecutor navJobExecutor, List<Player> humanPlayers, WaypointSystem waypointSystem, DoorSystem doorSystem)
     {
+        _doorSystem = doorSystem;
         _navJobExecutor = navJobExecutor;
         _moveJobs = new Queue<(Agent, NavJob)>(20);
         _stuckRemediation = new StuckRemediation(this, humanPlayers);
@@ -44,6 +46,7 @@ public class MovementSystem
     public void Update(List<Agent> liveAgents)
     {
         TickDoorOpenWatches();
+        TickGhostPendingDoors();
 
         if (_moveJobs.Count > 0)
         {
@@ -251,10 +254,11 @@ public class MovementSystem
 
     /// <summary>
     /// Path-following for a dormant bot: the disabled GameObject's transform is still drivable, so advance
-    /// it along the computed navmesh corners at walking speed. No steering, no doors (the body phases
-    /// through closed ones — nobody is within sight range by construction), no stuck machinery (a ghost
-    /// can't wedge). Completion mirrors UpdateMovement's last-corner branch so the action layer sees the
-    /// same Stopped/retry outcomes it would from a live walk.
+    /// it along the computed navmesh corners at walking speed. No steering, no stuck machinery (a ghost
+    /// can't wedge). Doors on the heading are unlocked / opened world-side by <see cref="GhostHandleDoors"/>
+    /// so the ghost leaves the map in the state a live walk would (nobody is within sight range by
+    /// construction, so no hands animation is needed). Completion mirrors UpdateMovement's last-corner
+    /// branch so the action layer sees the same Stopped/retry outcomes it would from a live walk.
     /// </summary>
     private void GhostFollowPath(Agent agent)
     {
@@ -301,6 +305,7 @@ public class MovementSystem
             SkipGhostDangerSegment(agent, movement, next);
             return;
         }
+        GhostHandleDoors(agent, pos, toCorner / dist);
         transform.position = next;
     }
 
@@ -321,6 +326,193 @@ public class MovementSystem
         }
         Log.Debug($"{agent} ghost walk: every remaining corner sits in a danger zone, dropping the path");
         ResetPath(agent, MovementStatus.Failed);
+    }
+
+    // Ghost door handling. A sleeping body has no BSG mover, no voxel door links and no hands, so the live
+    // HandleDoors path cannot run for it. Instead the ghost follower scans the map doors on its heading a few
+    // times per second and drives the DOOR object directly: Unlock() (latch coroutine on the door, no key
+    // animation) for a Locked door the squad was routed behind, Open() (the door's own swing coroutine +
+    // sound) for a Shut one. The door GameObject is always active, so its coroutines run even though the
+    // bot's do not. Fika: host-side only, like every other door state write here (a client sees the door
+    // closed until someone interacts with it locally).
+    private const float GhostDoorCheckInterval = 0.25f;
+    private const float GhostDoorScanRadiusSqr = 3f * 3f;
+    private const float GhostDoorLookahead = 1.5f;
+    private const float GhostDoorBoundsPadding = 0.25f;
+    private const float GhostUnlockTimeoutSeconds = 4f;
+    private const float GhostOpenTimeoutSeconds = 3f;      // swing never started (leaf angle unchanged)
+    private const float GhostSwingTimeoutSeconds = 10f;    // swing started but never settled to Open
+    private const float GhostSwingAngleEpsilon = 1f;       // degrees: leaf moved => BSG's coroutine is running
+
+    private enum GhostDoorStage { AwaitUnlock, AwaitOpen }
+
+    private struct GhostPendingDoor
+    {
+        public Door Door;
+        public Agent Agent;
+        public float Deadline;
+        public GhostDoorStage Stage;
+        public float StartAngle;
+    }
+
+    private readonly List<GhostPendingDoor> _ghostPendingDoors = new();
+
+    private void GhostHandleDoors(Agent agent, Vector3 pos, Vector3 dir)
+    {
+        if (_doorSystem == null) return;
+        if (!(dir.sqrMagnitude > 0.5f)) return; // degenerate step (paused frame): no heading to scan along
+        var movement = agent.Movement;
+        if (Time.time < movement.NextGhostDoorCheck) return;
+        movement.NextGhostDoorCheck = Time.time + GhostDoorCheckInterval;
+
+        var doors = _doorSystem.Doors;
+        var ray = new Ray(pos, dir);
+        for (var i = 0; i < doors.Length; i++)
+        {
+            var door = doors[i];
+            if (door == null) continue;
+            var state = door.DoorState;
+            if (state != EDoorState.Locked && state != EDoorState.Shut) continue; // open or mid-swing: passable
+            if ((door.transform.position - pos).sqrMagnitude > GhostDoorScanRadiusSqr) continue;
+            var collider = door.Collider;
+            if (collider == null) continue;
+            // "Crossing" = the leaf's bounds sit on the ghost's heading within a short lookahead (or the ghost is
+            // already inside them). Doors merely brushed past in a corridor are left alone.
+            var bounds = collider.bounds;
+            bounds.Expand(GhostDoorBoundsPadding);
+            if (!bounds.Contains(pos) && !(bounds.IntersectRay(ray, out var hitDist) && hitDist <= GhostDoorLookahead)) continue;
+            if (!door.enabled || !door.Operatable || door.InteractingPlayer != null) continue;
+            if (IsGhostDoorPending(door)) continue;
+
+            if (state == EDoorState.Locked) GhostUnlockDoor(agent, door);
+            else GhostOpenDoor(agent, door, "on its route", respectCooldown: true);
+        }
+    }
+
+    private bool IsGhostDoorPending(Door door)
+    {
+        for (var i = 0; i < _ghostPendingDoors.Count; i++)
+            if (_ghostPendingDoors[i].Door == door) return true;
+        return false;
+    }
+
+    private void GhostUnlockDoor(Agent agent, Door door)
+    {
+        var doorId = door.GetInstanceID();
+        // Same gate as the live walker: only PMCs carry keys, and only a door ORBIT routed the squad behind
+        // (force-unlock granted at pick time / carver opened) may be unlocked. Anything else stays locked and the
+        // ghost phases through as before.
+        var role = agent.Bot?.Profile?.Info?.Settings?.Role;
+        if (!role.HasValue || !role.Value.IsPMC()) return;
+        if (!((agent.Squad != null && agent.Squad.ForceUnlockDoorIds.Contains(doorId)) || DoorNavMesh.IsCarverOpened(doorId))) return;
+        if (_doorInteractCooldown.TryGetValue(doorId, out var last) && Time.time - last < DoorInteractCooldownSeconds) return;
+        try
+        {
+            door.Unlock(); // latch coroutine on the door object: DoorState flips to Shut once the lock handle finishes
+        }
+        catch (Exception e)
+        {
+            Log.Debug($"{agent} ghost unlock on {door.Id} threw (non-fatal): {e.Message}");
+            return;
+        }
+        _doorInteractCooldown[doorId] = Time.time;
+        _ghostPendingDoors.Add(new GhostPendingDoor { Door = door, Agent = agent, Deadline = Time.time + GhostUnlockTimeoutSeconds, Stage = GhostDoorStage.AwaitUnlock });
+        Log.Info($"{agent} ghost unlocked door {door.Id} on its route (no key animation, body asleep)");
+    }
+
+    private void GhostOpenDoor(Agent agent, Door door, string why, bool respectCooldown)
+    {
+        var doorId = door.GetInstanceID();
+        if (door.DoorState != EDoorState.Shut) return;
+        if (respectCooldown && _doorInteractCooldown.TryGetValue(doorId, out var last) && Time.time - last < DoorInteractCooldownSeconds) return;
+        try
+        {
+            // The door drives its own swing (leaf animation + open sound) and settles to Open by itself; a
+            // bot-driven interaction never finalises but this is the door's own routine, not the bot's.
+            door.Open();
+        }
+        catch (Exception e)
+        {
+            Log.Debug($"{agent} ghost open on {door.Id} threw ({e.Message}), snapping the leaf open");
+            SnapDoorOpen(door);
+        }
+        _doorInteractCooldown[doorId] = Time.time;
+        _ghostPendingDoors.Add(new GhostPendingDoor { Door = door, Agent = agent, Deadline = Time.time + GhostOpenTimeoutSeconds, Stage = GhostDoorStage.AwaitOpen, StartAngle = door.CurrentAngle });
+        Log.Info($"{agent} ghost opened door {door.Id} {why}");
+    }
+
+    /// <summary>Same settle as the DoorWatch finaliser: state, leaf angle, interaction-result event.</summary>
+    private static void SnapDoorOpen(Door door)
+    {
+        try
+        {
+            door.DoorState = EDoorState.Open;
+            door.CurrentAngle = door.GetAngle(EDoorState.Open);
+            EFT.GlobalEvents.GlobalEventsController.CreateEvent<EFT.GlobalEvents.InteractiveObjectInteractionResultEvent>()
+                .Invoke(door, EDoorState.Open);
+        }
+        catch (Exception e)
+        {
+            Log.Debug($"ghost door snap-open on {door.Id} failed: {e.Message}");
+        }
+    }
+
+    private void TickGhostPendingDoors()
+    {
+        if (_ghostPendingDoors.Count == 0) return;
+        var now = Time.time;
+        for (var i = _ghostPendingDoors.Count - 1; i >= 0; i--)
+        {
+            var pending = _ghostPendingDoors[i];
+            var door = pending.Door;
+            if (door == null) { _ghostPendingDoors.RemoveAt(i); continue; }
+            var state = door.DoorState;
+            switch (pending.Stage)
+            {
+                case GhostDoorStage.AwaitUnlock:
+                    if (state == EDoorState.Shut)
+                    {
+                        // Latch released: swing it open right away (no cooldown, this is our own sequence).
+                        _ghostPendingDoors.RemoveAt(i);
+                        GhostOpenDoor(pending.Agent, door, "after unlocking it", respectCooldown: false);
+                    }
+                    else if (state == EDoorState.Open || (state == EDoorState.Interacting && now > pending.Deadline))
+                    {
+                        _ghostPendingDoors.RemoveAt(i); // someone else opened it, or a swing is already running
+                    }
+                    else if (now > pending.Deadline)
+                    {
+                        Log.Debug($"{pending.Agent} ghost unlock on door {door.Id}: still {state} after {GhostUnlockTimeoutSeconds:F0}s, giving up");
+                        _ghostPendingDoors.RemoveAt(i);
+                    }
+                    break;
+                case GhostDoorStage.AwaitOpen:
+                    if (state == EDoorState.Open)
+                    {
+                        Log.Debug($"{pending.Agent} ghost door {door.Id} swung open (BSG animation settled)");
+                        _ghostPendingDoors.RemoveAt(i);
+                    }
+                    else if (Mathf.Abs(Mathf.DeltaAngle(door.CurrentAngle, pending.StartAngle)) > GhostSwingAngleEpsilon)
+                    {
+                        // Leaf is moving: BSG's swing coroutine owns the door (DoorState flips to Open only at its
+                        // end). Wait for it, snap only if it hangs.
+                        if (now > pending.Deadline + GhostSwingTimeoutSeconds)
+                        {
+                            Log.Debug($"{pending.Agent} ghost open on door {door.Id}: swing started but state still {state} after {GhostOpenTimeoutSeconds + GhostSwingTimeoutSeconds:F0}s, snapping open");
+                            SnapDoorOpen(door);
+                            _ghostPendingDoors.RemoveAt(i);
+                        }
+                    }
+                    else if (now > pending.Deadline)
+                    {
+                        // Leaf never moved: Open() was refused by BSG's interaction gate. Settle it by hand.
+                        Log.Debug($"{pending.Agent} ghost open on door {door.Id}: swing never started, state {state} after {GhostOpenTimeoutSeconds:F0}s, snapping open");
+                        SnapDoorOpen(door);
+                        _ghostPendingDoors.RemoveAt(i);
+                    }
+                    break;
+            }
+        }
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

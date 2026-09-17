@@ -97,6 +97,10 @@ public class Movement
     /// pushing forward through the doorway.</summary>
     public float DoorInteractHoldUntil = -1f;
 
+    /// <summary>Next Time.time the ghost follower scans the doors on its heading (throttled scan of every
+    /// map door, see MovementSystem.GhostHandleDoors).</summary>
+    public float NextGhostDoorCheck;
+
     public bool HasPath
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
