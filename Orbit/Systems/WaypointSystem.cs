@@ -1461,6 +1461,8 @@ public class WaypointSystem
                     // All loot categories chain through sweep — excluding containers broke the chain and
                     // zigzagged the bot to a cell-wide random pick after each container loot.
                     if (!IsLootCategory(loc.Category)) continue;
+                    // A pooled LootItem (picked up, Item restored to null) is not a sweep target.
+                    if (loc.Target is LootItem li && li.Item == null) continue;
                     if (squad != null && squad.CompletedPoiIds.Contains(loc.Id)) continue;
                     if (agentSkips != null && agentSkips.Contains(loc.Id)) continue;
                     if (_claims.ContainsKey(loc.Id)) continue;

@@ -90,6 +90,19 @@ public class LootContainerAction(AgentData dataset, WaypointSystem waypointSyste
             return;
         }
 
+        // A loose item whose GameObject is alive but empty: someone picked it up, BSG returned the LootItem
+        // to the asset pool and the pool restored the component's original state (Item = null). A session
+        // on it ends within the frame with nothing seen, so drop the waypoint for everyone instead of
+        // letting the dispatcher hand it out again. LootItemKilledPatch catches this at pickup time; this
+        // is the safety net for whatever reaches the pool without going through Kill.
+        if (location.Target is LootItem emptyItem && emptyItem.Item == null)
+        {
+            Log.Info($"{agent} LootContainerAction: {location} is an empty loose-item object ({emptyItem.name}), already picked up. Dropping the waypoint");
+            waypointSystem.RemoveWaypoint(location.Id);
+            objective.Status = ObjectiveStatus.Failed;
+            return;
+        }
+
         // Dormant bots loot for real since phase 2: BotLootState flips the handler into DormantMode
         // (pure data transfers, no animations/delays/equips), so ghost squads bank loot value and the
         // world state matches what an awake bot would have produced.

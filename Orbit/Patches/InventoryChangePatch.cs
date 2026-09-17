@@ -15,6 +15,9 @@ namespace Orbit.Patches;
 ///   2. Another mod (or vanilla AI) moves an item out of the world.
 ///   3. A bot loots via our pipeline — the hook still fires, but
 /// RemoveLooseLootByItemId is idempotent so the duplicate is cheap.
+/// Not covered: Fika's ObservedPlayer overrides OnItemAddedOrRemoved with an empty body, so an item taken by
+/// another player in a co-op raid never reaches this hook. <see cref="LootItemKilledPatch"/> catches those
+/// from the world-object side.
 /// </summary>
 public class InventoryChangePatch : ModulePatch
 {
