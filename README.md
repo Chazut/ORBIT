@@ -141,8 +141,8 @@ own zones, mark which ones can host kill hunts. Export your setup as a
 **zone pack** and publish it on the Forge as an ORBIT addon, or import
 someone else's.
 
-Map reworks that keep the vanilla location id (Interchange Rework, the
-Lighthouse 1.0 backport) are detected per raid and get their own zone
+Map reworks that keep the vanilla location id (Interchange Rework, Manimal's
+Interchange and Lighthouse 1.0 backports) are detected per raid and get their own zone
 set and render, listed as "Interchange (1.0 rework)" in the editor.
 
 ## Install

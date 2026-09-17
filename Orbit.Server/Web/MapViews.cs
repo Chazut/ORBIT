@@ -17,7 +17,8 @@ public static class MapViews
         ["Sandbox"] = new("https://assets.tarkov.dev/maps/svg/GroundZero-Ground_Level.svg", 180, 249, -124, -99, 364),
         ["Sandbox_high"] = new("https://assets.tarkov.dev/maps/svg/GroundZero-Ground_Level.svg", 180, 249, -124, -99, 364),
         ["Interchange"] = new("https://assets.tarkov.dev/maps/svg/Interchange-Ground_Level.svg", 180, 530, -439, -364, 452),
-        // Interchange Rework (LennoxP90): tarkov.dev's current Interchange.svg is the 1.0 layout, with the
+        // Interchange 1.0 layout (LennoxP90's Interchange Rework and Manimal's expansion backport both rebuild
+        // it): tarkov.dev's current Interchange.svg is that layout, with the
         // mall floors as sibling groups; the upper two are hidden so the ground level stays visible.
         ["Interchange@rework"] = new("https://assets.tarkov.dev/maps/svg/Interchange.svg", 180, 598, -442, -433, 426, ["First_Floor", "Second_Floor"]),
         ["laboratory"] = new(null, 270, -80, -477, -287, -193),
