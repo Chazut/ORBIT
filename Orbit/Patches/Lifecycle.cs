@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Reflection;
 using Comfort.Common;
 using EFT;
@@ -69,8 +70,30 @@ public class OrbitTickPatch : ModulePatch
         if (orbit == null)
             return;
 
-        orbit.Update();
+        try
+        {
+            orbit.Update();
+        }
+        catch (System.Exception e)
+        {
+            // One bad reference must never freeze every bot for the rest of the raid: drop whatever body
+            // vanished under us and keep ticking. Reported once per 10s with the top of the stack so the
+            // player's log names the ORBIT frame instead of a wall of raw NullReferenceExceptions.
+            _tickErrorsSinceReport++;
+            var purged = orbit.PurgeDestroyedAgents();
+            if (UnityEngine.Time.time - _lastTickErrorReportAt > 10f)
+            {
+                _lastTickErrorReportAt = UnityEngine.Time.time;
+                var stack = e.StackTrace ?? "";
+                var top = string.Join(" | ", stack.Split('\n').Take(4).Select(l => l.Trim()));
+                Log.Warning($"ORBIT tick threw {_tickErrorsSinceReport} time(s) in the last 10s (purged {purged} dead agent(s)): {e.GetType().Name}: {e.Message} @ {top}");
+                _tickErrorsSinceReport = 0;
+            }
+        }
     }
+
+    private static float _lastTickErrorReportAt = -999f;
+    private static int _tickErrorsSinceReport;
 }
 
 /// <summary>
@@ -98,7 +121,11 @@ public class OrbitDisposePatch : ModulePatch
             Plugin.LogSource.LogInfo("Disposing ORBIT static + long-lived state");
 
             var orbit = Singleton<OrbitManager>.Instance;
-            if (orbit != null) Singleton<OrbitManager>.Release(orbit);
+            if (orbit != null)
+            {
+                orbit.Dispose();
+                Singleton<OrbitManager>.Release(orbit);
+            }
 
             var roster = Singleton<BotRoster>.Instance;
             if (roster != null) Singleton<BotRoster>.Release(roster);

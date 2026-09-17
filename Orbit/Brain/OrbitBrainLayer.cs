@@ -246,6 +246,20 @@ public class OrbitBrainLayer : CustomLayer
     public override bool IsActive()
     {
         if (_excluded) return false;
+        // A sleeper never hands its inactive body to BSG. Healing and combat cannot happen on it, and
+        // when the meds gate below let PatrolAssault take a dormant bot, BSG started a first aid on a
+        // body whose animator was off: Medecine.Using stayed stuck and the bot could not walk a single
+        // step after it woke, only teleport (Customs raid: FantaSipper, 30 rescues in 4 minutes). The
+        // ghost patch-up handles bleeds while asleep; real healing resumes on wake.
+        if (_agent.IsDormant)
+        {
+            if (!_lastIsActive)
+            {
+                Log.Debug($"{_agent} IsActive transition: False → True (dormant)");
+                _lastIsActive = true;
+            }
+            return true;
+        }
         var timeSinceSainCombatEnded = _sainCombatActive ? 0f : Time.time - _sainCombatEndedAt;
         var inCombatWindow = _sainCombatActive || timeSinceSainCombatEnded < 15f;
         var medsWorking = BotOwner.Medecine.Using || BotOwner.Medecine.SurgicalKit.HaveWork || BotOwner.Medecine.FirstAid.Have2Do;

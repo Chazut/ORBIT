@@ -140,6 +140,8 @@ public class HardStuck
     // geometry escapes instead of landing nearby and re-wedging.
     public int TeleportCount;
     public Vector3 LastTeleportPos;
+    // Consecutive hard-stuck rescues with no destination reached in between (see MovementSystem.ReportRescueLoop).
+    public int RescueStreak;
 
     public override string ToString()
     {

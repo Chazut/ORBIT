@@ -56,6 +56,8 @@ public class OrbitManager
     public readonly SquadRegistry SquadRegistry;
 
     private readonly BotRoster _botRoster;
+    private readonly BotsController _botsController;
+    private readonly List<Agent> _destroyedScratch = new();
     private readonly List<Agent> _liveAgents;
     private readonly List<Squad> _liveSquads;
 
@@ -113,6 +115,14 @@ public class OrbitManager
 
         SquadRegistry = new SquadRegistry(SquadData, StrategyManager, WaypointSystem);
         _botRoster = botRoster;
+        _botsController = botsController;
+        // A despawn never reaches Player.OnPlayerDead; the spawner's event fires for deaths and despawns alike.
+        botsController.BotSpawner.OnBotRemoved += OnBotRemoved;
+    }
+
+    public void Dispose()
+    {
+        try { _botsController.BotSpawner.OnBotRemoved -= OnBotRemoved; } catch { }
     }
 
     public Agent AddAgent(BotOwner bot)
@@ -131,6 +141,54 @@ public class OrbitManager
         SquadRegistry.AddAgent(agent);
         _botRoster.AddAgent(agent);
         return agent;
+    }
+
+    /// <summary>
+    /// The game dropped this bot: death, or a despawn by another mod (ABPS distance despawn, bot cyclers).
+    /// Death already reaches <see cref="RemoveAgent"/> through Player.OnPlayerDead, a despawn does not: the
+    /// body is destroyed while the agent stays registered, its cached body transform throws on every read
+    /// and the whole tick dies with it, every ORBIT bot on the map frozen (Marksman765's raid, 2,847
+    /// NullReferenceExceptions from GotoObjectiveAction.UpdateScore in four minutes).
+    /// </summary>
+    private void OnBotRemoved(BotOwner bot)
+    {
+        var agent = _botRoster.GetAgent(bot);
+        if (agent == null) return;
+        Log.Info($"{agent} removed by the game (death or despawn), dropping the agent");
+        RemoveAgent(agent);
+    }
+
+    /// <summary>
+    /// Safety net for bodies that vanish without any event: a Player whose GameObject is gone or a BotOwner
+    /// already disposed. Cheap (a Unity liveness check per agent), runs every tick and again whenever the
+    /// tick throws. Returns how many agents were dropped.
+    /// </summary>
+    public int PurgeDestroyedAgents()
+    {
+        _destroyedScratch.Clear();
+        for (var i = 0; i < _liveAgents.Count; i++)
+        {
+            var agent = _liveAgents[i];
+            if (agent == null) continue;
+            bool gone;
+            try
+            {
+                gone = agent.Player == null || !agent.Player || agent.Bot == null || agent.Bot.BotState == EBotState.Disposed;
+            }
+            catch
+            {
+                gone = true;
+            }
+            if (gone) _destroyedScratch.Add(agent);
+        }
+        for (var i = 0; i < _destroyedScratch.Count; i++)
+        {
+            var agent = _destroyedScratch[i];
+            Log.Warning($"{agent} body is gone without a death event (despawned by another mod?), dropping the agent");
+            try { RemoveAgent(agent); }
+            catch (System.Exception e) { Log.Warning($"{agent} removal after despawn threw: {e.GetType().Name}: {e.Message}"); }
+        }
+        return _destroyedScratch.Count;
     }
 
     public void RemoveAgent(Agent agent)
@@ -152,6 +210,7 @@ public class OrbitManager
 
     public void Update()
     {
+        PurgeDestroyedAgents();
         Orbit.Helpers.PerfMonitor.Tick(_liveAgents.Count, DormancySystem.DormantCount);
         StrategyManager.Update();
         ActionManager.Update();

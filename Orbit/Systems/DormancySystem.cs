@@ -257,7 +257,7 @@ public class DormancySystem
     private int _windowSleeps, _windowWakes;
     private int _wakeByHuman, _wakeByAwakeBot, _wakeByExtract, _wakeByTargeted, _wakeByDamage, _wakeByScope;
     private int _farBlockedCombat, _farBlockedLoot, _farBlockedDoor, _farBlockedExtract, _farBlockedState;
-    private int _farBlockedBleeding, _farBlockedCooldown;
+    private int _farBlockedBleeding, _farBlockedCooldown, _farBlockedHealing;
     private int _windowPatchUps;
     private int _windowShotsDropped;
     private readonly Dictionary<BotOwner, float> _vanillaPatchUpAt = new();
@@ -442,8 +442,15 @@ public class DormancySystem
         _dormantAgents.Remove(agent);
         DormantProfileIds.Remove(agent.Player?.ProfileId);
         UnthrottleBrain(agent.Bot);
-        var go = agent.Bot?.gameObject;
-        if (go != null && !go.activeSelf) go.SetActive(true);
+        try
+        {
+            var go = agent.Bot?.gameObject;
+            if (go != null && !go.activeSelf) go.SetActive(true);
+        }
+        catch
+        {
+            // The body was already destroyed (despawn), nothing left to re-activate.
+        }
         Log.Info($"{agent} removed while dormant — body re-activated");
     }
 
@@ -458,13 +465,13 @@ public class DormancySystem
         Log.Info(
             $"LIMITER: dormant={_dormantAgents.Count}/{liveAgentCount} agents +{_vanillaDormant.Count} vanilla (standardAwake={_lastAwakeStandard}) | 30s: sleeps={_windowSleeps} wakes={_windowWakes} " +
             $"[human={_wakeByHuman} awakeBot={_wakeByAwakeBot} extract={_wakeByExtract} targeted={_wakeByTargeted} damage={_wakeByDamage} scope={_wakeByScope}] " +
-            $"farBlocked=[combat={_farBlockedCombat} loot={_farBlockedLoot} door={_farBlockedDoor} extract={_farBlockedExtract} state={_farBlockedState} bleeding={_farBlockedBleeding} cooldown={_farBlockedCooldown} proximity={_blockedProximity} floor={_blockedFloor}] " +
+            $"farBlocked=[combat={_farBlockedCombat} loot={_farBlockedLoot} door={_farBlockedDoor} extract={_farBlockedExtract} state={_farBlockedState} bleeding={_farBlockedBleeding} healing={_farBlockedHealing} cooldown={_farBlockedCooldown} proximity={_blockedProximity} floor={_blockedFloor}] " +
             $"ghostFights={_windowFights} fightShotsPlayed={_windowShotsPlayed} fightShotsDropped={_windowShotsDropped} visionBlocks={VisionBlocks} brainTicksSkipped={BrainTicksSkipped} patchUps={_windowPatchUps}");
         _summaryWindowStart = Time.time;
         _windowSleeps = _windowWakes = 0;
         _wakeByHuman = _wakeByAwakeBot = _wakeByExtract = _wakeByTargeted = _wakeByDamage = _wakeByScope = 0;
         _farBlockedCombat = _farBlockedLoot = _farBlockedDoor = _farBlockedExtract = _farBlockedState = 0;
-        _farBlockedBleeding = _farBlockedCooldown = 0;
+        _farBlockedBleeding = _farBlockedCooldown = _farBlockedHealing = 0;
         _blockedProximity = _blockedFloor = 0;
         _windowFights = 0;
         _windowShotsPlayed = 0;
@@ -568,6 +575,9 @@ public class DormancySystem
             if (Time.time < agent.Movement.DoorInteractHoldUntil) { _farBlockedDoor++; return false; } // mid door interaction
             if (bot.Memory != null && (bot.Memory.GoalEnemy != null || bot.Memory.IsUnderFire)) { _farBlockedCombat++; return false; }
             if (_targetedProfileIds.Contains(agent.Player.ProfileId)) { _farBlockedCombat++; return false; }
+            // A body mid-heal stays awake: deactivating it freezes the meds animation, Medecine.Using
+            // never clears and the bot cannot walk once it wakes.
+            if (bot.Medecine is { Using: true }) { _farBlockedHealing++; return false; }
             if (Time.time - agent.LastHpDropTime < HpStableSeconds)
             {
                 _farBlockedBleeding++;
@@ -826,6 +836,13 @@ public class DormancySystem
             // them from the current height so a ghost that walked downhill does not "land" from its
             // sleep altitude on the first live tick.
             player.MovementContext?.ResetFlying();
+            // A heal that was in flight when the body went inactive never finished its animation and
+            // leaves Medecine.Using stuck; putting the main weapon back in hands clears the state.
+            if (bot.Medecine is { Using: true })
+            {
+                Log.Info($"{agent} woke with a stale meds state, taking the main weapon back in hands");
+                try { bot.WeaponManager?.Selector?.TakeMainWeapon(); } catch { }
+            }
 
             // Ghost movement can leave the body marginally off-mesh (or squarely off it when the wake
             // lands mid-segment on a slope); snap back before the mover resumes. Path corners are

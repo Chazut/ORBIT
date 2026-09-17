@@ -425,6 +425,7 @@ public class MovementSystem
                 }
 
                 Log.Debug($"{agent} movement destination reached");
+                agent.Stuck.Hard.RescueStreak = 0;
                 // Don't reset the target — it hasn't changed, we just reached it.
                 ResetPath(agent);
                 return;
@@ -1645,6 +1646,7 @@ public class MovementSystem
                 ? stuck.TeleportCount + 1
                 : 1;
             stuck.LastTeleportPos = pos;
+            if (++stuck.RescueStreak % 3 == 0) ReportRescueLoop(agent, stuck.RescueStreak);
             var startRing = stuck.TeleportCount <= 1 ? 0 : stuck.TeleportCount == 2 ? 2 : 3; // rings {4,8,16,28,45}
 
             // Prefer an unsticking teleport (objective-connected point, else a squadmate); path-corner is last resort.
@@ -1656,6 +1658,31 @@ public class MovementSystem
             teleportPos.y += 0.25f;
             agent.Player.Teleport(teleportPos);
             Log.Debug($"{agent} teleporting to {teleportPos} (path-corner fallback)");
+        }
+
+        // Three rescues in a row without the bot reaching anything on its own is not geometry any more,
+        // it is the body refusing to move (Customs raid: FantaSipper, 30 teleports in a row after waking
+        // with a meds animation frozen in flight). Dump the movement state and undo the known cause.
+        private static void ReportRescueLoop(Agent agent, int streak)
+        {
+            var bot = agent.Bot;
+            var player = agent.Player;
+            string state = "?", hands = "?", meds = "?", ctx = "?";
+            try { state = player.CurrentManagedState?.GetType().Name ?? "null"; } catch { }
+            try { hands = player.HandsController?.GetType().Name ?? "null"; } catch { }
+            try { meds = bot?.Medecine == null ? "null" : $"using={bot.Medecine.Using} firstAid={bot.Medecine.FirstAid?.Have2Do} surgery={bot.Medecine.SurgicalKit?.HaveWork}"; } catch { }
+            try
+            {
+                var mc = player.MovementContext;
+                ctx = $"grounded={mc.IsGrounded} freefall={mc.FreefallTime:F1}s pose={mc.PoseLevel:F2} speed={mc.CharacterMovementSpeed:F2} botState={bot?.BotState}";
+            }
+            catch { }
+            Log.Warning($"{agent} {streak} stuck rescues in a row without walking: state={state} hands={hands} meds=[{meds}] {ctx}");
+            if (bot?.Medecine is { Using: true })
+            {
+                Log.Warning($"{agent} meds state is stuck, taking the main weapon back in hands");
+                try { bot.WeaponManager?.Selector?.TakeMainWeapon(); } catch { }
+            }
         }
     }
 }
