@@ -85,8 +85,15 @@ public class MovementSystem
             // (world keeps moving); everything else waits for the wake resync in DormancySystem.
             if (agent.IsDormant)
             {
-                // Pinned while a simulated ghost fight plays out — nobody walks their route mid-firefight.
+                // Pinned while a simulated ghost fight plays out: nobody walks their route mid-firefight.
                 if (agent.Squad != null && Time.time < agent.Squad.GhostFightUntil) continue;
+                // The island rescues run for sleepers too. A ghost that spawned on a disconnected chunk only
+                // ever gets PathPartial (Unity paths to the closest point of its island, never PathInvalid),
+                // so the invalid-path streak rescue never fires; a bot that fell asleep within seconds of
+                // spawning used to sit in that room for the whole raid (Streets, Gipphe). Both rescues move
+                // the body through Player.Teleport, which the wake resync already uses on inactive bodies.
+                TryIdleIslandRescue(agent);
+                TrySpawnIslandRescue(agent, liveAgents);
                 if (DormancySystem.GhostMovementEnabled)
                     GhostFollowPath(agent);
                 continue;
