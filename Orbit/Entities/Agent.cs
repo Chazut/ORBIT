@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using EFT;
+using EFT.InventoryLogic;
 using UnityEngine;
 
 namespace Orbit.Entities;
@@ -26,6 +27,20 @@ public class Agent(int id, BotOwner bot, float[] taskScores) : Entity(id, taskSc
     /// branch on this flag.
     /// </summary>
     public bool IsDormant;
+
+    /// <summary>Ghost gear swaps. A sleeper changes its equipment through inventory transactions only: the
+    /// hands controller cannot run on an inactive body, so the weapon in hands is never touched while asleep.
+    /// <see cref="GhostHandsResync"/> asks the wake resync to refresh the weapon selector and redraw the main
+    /// weapon. <see cref="GhostPendingPromotion"/> is a better weapon parked in the second primary slot,
+    /// waiting for the slot1/slot2 swap, which moves the weapon in hands and is done at the next AWAKE loot
+    /// session. <see cref="GhostBestWeapon"/> is what the sleeper fights with in simulated fights meanwhile.</summary>
+    public bool GhostHandsResync;
+
+    /// <summary>Time.time at which the limiter first found an inventory operation in flight on this body
+    /// while it wanted to put it to sleep, -1 when none. Bounds how long that gate may hold the body awake.</summary>
+    public float InventoryBusySince = -1f;
+    public Weapon GhostPendingPromotion;
+    public Weapon GhostBestWeapon;
 
     /// <summary>Total HP captured at sleep entry. The dormancy poll wakes the squad the moment current HP
     /// drops below this (mines and other position-based damage still land on inactive bodies, and a

@@ -852,6 +852,14 @@ public class DormancySystem
                 try { bot.WeaponManager?.Selector?.TakeMainWeapon(); } catch { }
             }
 
+            // Gear equipped while asleep never reached the hands (no animation on an inactive body): refresh
+            // the weapon list and redraw the main weapon now that the body is live again.
+            if (agent.GhostHandsResync)
+            {
+                agent.GhostHandsResync = false;
+                Orbit.Looting.WeaponSwap.WeaponSwapper.ResyncHandsAfterWake(bot, agent.ToString());
+            }
+
             // Ghost movement can leave the body marginally off-mesh (or squarely off it when the wake
             // lands mid-segment on a slope); snap back before the mover resumes. Path corners are
             // guaranteed on-mesh, so they are the fallback when the local sample fails.
