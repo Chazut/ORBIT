@@ -265,7 +265,7 @@ public class DormancySystem
     private int _windowSleeps, _windowWakes;
     private int _wakeByHuman, _wakeByAwakeBot, _wakeByExtract, _wakeByTargeted, _wakeByDamage, _wakeByScope;
     private int _farBlockedCombat, _farBlockedLoot, _farBlockedDoor, _farBlockedExtract, _farBlockedState;
-    private int _farBlockedBleeding, _farBlockedCooldown, _farBlockedHealing;
+    private int _farBlockedBleeding, _farBlockedCooldown, _farBlockedHealing, _farBlockedHands;
     private int _windowPatchUps;
     private int _windowShotsDropped;
     private readonly Dictionary<BotOwner, float> _vanillaPatchUpAt = new();
@@ -475,13 +475,13 @@ public class DormancySystem
         Log.Info(
             $"LIMITER: dormant={_dormantAgents.Count}/{liveAgentCount} agents +{_vanillaDormant.Count} vanilla (standardAwake={_lastAwakeStandard}) | 30s: sleeps={_windowSleeps} wakes={_windowWakes} " +
             $"[human={_wakeByHuman} awakeBot={_wakeByAwakeBot} extract={_wakeByExtract} targeted={_wakeByTargeted} damage={_wakeByDamage} scope={_wakeByScope}] " +
-            $"farBlocked=[combat={_farBlockedCombat} loot={_farBlockedLoot} door={_farBlockedDoor} extract={_farBlockedExtract} state={_farBlockedState} bleeding={_farBlockedBleeding} healing={_farBlockedHealing} cooldown={_farBlockedCooldown} proximity={_blockedProximity} floor={_blockedFloor}] " +
+            $"farBlocked=[combat={_farBlockedCombat} loot={_farBlockedLoot} door={_farBlockedDoor} extract={_farBlockedExtract} state={_farBlockedState} bleeding={_farBlockedBleeding} healing={_farBlockedHealing} hands={_farBlockedHands} cooldown={_farBlockedCooldown} proximity={_blockedProximity} floor={_blockedFloor}] " +
             $"ghostFights={_windowFights} fightShotsPlayed={_windowShotsPlayed} fightShotsDropped={_windowShotsDropped} visionBlocks={VisionBlocks} brainTicksSkipped={BrainTicksSkipped} patchUps={_windowPatchUps}");
         _summaryWindowStart = Time.time;
         _windowSleeps = _windowWakes = 0;
         _wakeByHuman = _wakeByAwakeBot = _wakeByExtract = _wakeByTargeted = _wakeByDamage = _wakeByScope = 0;
         _farBlockedCombat = _farBlockedLoot = _farBlockedDoor = _farBlockedExtract = _farBlockedState = 0;
-        _farBlockedBleeding = _farBlockedCooldown = _farBlockedHealing = 0;
+        _farBlockedBleeding = _farBlockedCooldown = _farBlockedHealing = _farBlockedHands = 0;
         _blockedProximity = _blockedFloor = 0;
         _windowFights = 0;
         _windowShotsPlayed = 0;
@@ -588,6 +588,7 @@ public class DormancySystem
             // A body mid-heal stays awake: deactivating it freezes the meds animation, Medecine.Using
             // never clears and the bot cannot walk once it wakes.
             if (bot.Medecine is { Using: true }) { _farBlockedHealing++; return false; }
+            if (InventoryOperationInFlight(agent)) { _farBlockedHands++; return false; }
             if (Time.time - agent.LastHpDropTime < HpStableSeconds)
             {
                 _farBlockedBleeding++;
@@ -771,6 +772,54 @@ public class DormancySystem
     }
 
     // ── ORBIT squad sleep / wake mechanics ──────────────────────────────
+
+    // An operation that is still registered after this long is stuck for good, asleep or not.
+    private const float InventoryBusyMaxHoldSeconds = 15f;
+
+    /// <summary>
+    /// True while the body has an inventory operation in flight (a reload, a magazine check, an item going in
+    /// or out of the hands). BSG keeps such an operation registered as active until its hands animation ends,
+    /// and refuses every later operation that touches the same item or the same cells ("Can not execute").
+    /// Deactivating the body freezes the animation, so the operation would stay active for the whole sleep:
+    /// Interchange raid, mikufilck fell asleep 9 frames after its fight and 15 of its ghost loot operations
+    /// were refused. Same idea as the mid-heal gate above. Bounded, so an operation that never completes on
+    /// an awake body cannot keep its squad awake for the rest of the raid.
+    /// </summary>
+    private static bool InventoryOperationInFlight(Agent agent)
+    {
+        try
+        {
+            var controller = agent.Player?.InventoryController;
+            if (controller == null) return false;
+            ItemEventArgs first = null;
+            var count = 0;
+            foreach (var activeEvent in controller.SelectEvents<ItemEventArgs>())
+            {
+                first ??= activeEvent;
+                count++;
+            }
+            if (count == 0)
+            {
+                agent.InventoryBusySince = -1f;
+                return false;
+            }
+            if (float.IsPositiveInfinity(agent.InventoryBusySince)) return false; // released as stuck, until the list empties
+            if (agent.InventoryBusySince < 0f)
+            {
+                agent.InventoryBusySince = Time.time;
+                Log.Debug($"{agent} stays awake: {count} inventory operation(s) in flight ({first.GetType().Name} on {first.Item?.LocalizedName() ?? "?"}, {first.Status})");
+                return true;
+            }
+            if (Time.time - agent.InventoryBusySince < InventoryBusyMaxHoldSeconds) return true;
+            Log.Info($"{agent} still has {count} inventory operation(s) in flight after {InventoryBusyMaxHoldSeconds:F0}s ({first.GetType().Name} on {first.Item?.LocalizedName() ?? "?"}, {first.Status}): stuck, no longer holding the body awake");
+            agent.InventoryBusySince = float.PositiveInfinity;
+            return false;
+        }
+        catch
+        {
+            return false;
+        }
+    }
 
     private void SleepSquad(Squad squad)
     {
