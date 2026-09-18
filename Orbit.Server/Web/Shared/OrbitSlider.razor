@@ -1,4 +1,4 @@
-@* Numeric setting: bounded slider + live value readout + optional tooltip info icon. *@
+@* Numeric setting: bounded slider + live value readout (click it to type a value) + optional tooltip info icon. *@
 @using System.Globalization
 @typeparam T where T : struct, System.Numerics.INumber<T>
 
@@ -12,7 +12,25 @@
             </MudTooltip>
         }
         <MudSpacer />
-        <MudText Typo="Typo.body2" Color="Color.Primary" Style="font-variant-numeric: tabular-nums">@Display</MudText>
+        @if (_editing)
+        {
+            <input @ref="_input" value="@_editText" inputmode="decimal" autocomplete="off" spellcheck="false"
+                   placeholder="@EditPlaceholder"
+                   @oninput="@(e => _editText = e.Value?.ToString() ?? "")"
+                   @onkeydown="OnEditKey" @onblur="CommitEdit"
+                   style="width:86px; text-align:right; font:inherit; font-size:.875rem; font-variant-numeric:tabular-nums; color:var(--mud-palette-primary); background:rgba(255,255,255,.06); border:1px solid var(--mud-palette-primary); border-radius:6px; padding:0 6px; outline:none" />
+            @if (EditUnit != null)
+            {
+                <MudText Typo="Typo.body2" Color="Color.Primary">@EditUnit</MudText>
+            }
+        }
+        else
+        {
+            <span title="@($"Click to type a value ({FormatValue(Min)} to {FormatValue(Max)})")" @onclick="BeginEdit"
+                  style="cursor:text; border-bottom:1px dashed rgba(255,180,84,.45)">
+                <MudText Typo="Typo.body2" Color="Color.Primary" Style="font-variant-numeric: tabular-nums">@Display</MudText>
+            </span>
+        }
     </div>
     <MudSlider T="T" Value="Value" ValueChanged="OnChanged" Min="Min" Max="Max" Step="Step"
                Immediate="true" Color="Color.Primary" Size="Size.Small" />
@@ -35,10 +53,72 @@
     {
         get
         {
-            var s = Fmt is null ? Value.ToString() ?? "" : Value.ToString(Fmt, CultureInfo.InvariantCulture);
+            var s = FormatValue(Value);
             return Unit is null ? s : $"{s} {Unit}";
         }
     }
 
+    private string FormatValue(T v) => Fmt is null ? v.ToString() ?? "" : v.ToString(Fmt, CultureInfo.InvariantCulture);
+
     private Task OnChanged(T v) { Value = v; return ValueChanged.InvokeAsync(v); }
+
+    // ── typed value ──
+    // Percent settings ("P0") are stored as fractions and typed as percents; everything else is typed raw.
+    // The typed value is clamped to the slider's bounds (they are the validated range of the setting) but
+    // not snapped to its step, so a precise value between two slider stops can be entered.
+
+    private bool _editing;
+    private bool _focusPending;
+    private string _editText = "";
+    private ElementReference _input;
+
+    private bool IsPercent => Fmt is { Length: > 0 } && (Fmt[0] == 'P' || Fmt[0] == 'p');
+    private string? EditUnit => IsPercent ? "%" : Unit;
+    private string EditPlaceholder => RawText(Value);
+
+    private string RawText(T v)
+    {
+        var d = double.CreateSaturating(v);
+        if (IsPercent) d *= 100d;
+        return Math.Round(d, 4).ToString("0.####", CultureInfo.InvariantCulture);
+    }
+
+    private void BeginEdit()
+    {
+        // Empty field with the current value as placeholder: typing replaces the value straight away, no
+        // need to select the old text first (that would take a script). Leaving it empty changes nothing.
+        _editText = "";
+        _editing = true;
+        _focusPending = true;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!_focusPending || !_editing) return;
+        _focusPending = false;
+        try { await _input.FocusAsync(); } catch { }
+    }
+
+    private Task OnEditKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") return CommitEdit();
+        if (e.Key == "Escape") _editing = false;
+        return Task.CompletedTask;
+    }
+
+    private Task CommitEdit()
+    {
+        if (!_editing) return Task.CompletedTask; // Enter already committed, this is the blur that follows
+        _editing = false;
+        var text = _editText.Trim().TrimEnd('%').Trim().Replace(',', '.');
+        if (text.Length == 0) return Task.CompletedTask;
+        if (!double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var d) || double.IsNaN(d))
+            return Task.CompletedTask;
+        if (IsPercent) d /= 100d;
+        // Integer settings round what was typed (CreateSaturating would truncate): 1/2 is only an integer
+        // when T itself is an integer type.
+        if (T.IsInteger(T.One / (T.One + T.One))) d = Math.Round(d);
+        var v = T.Clamp(T.CreateSaturating(d), Min, Max);
+        return v == Value ? Task.CompletedTask : OnChanged(v);
+    }
 }
