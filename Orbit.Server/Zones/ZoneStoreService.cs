@@ -193,6 +193,37 @@ public class ZoneStoreService(ISptLogger<ZoneStoreService> logger)
         return seed;
     }
 
+    // ── Sibling maps (same layout, separate zone file) ─────────────────
+
+    /// <summary>Maps that share a layout with another one and are tuned in a separate file: Ground Zero and
+    /// its 21+ twin, a vanilla map and its 1.0 rework. Both directions.</summary>
+    private static readonly Dictionary<string, string> _siblings = new()
+    {
+        ["Sandbox"] = "Sandbox_high",
+        ["Sandbox_high"] = "Sandbox",
+        ["Interchange"] = "Interchange@rework",
+        ["Interchange@rework"] = "Interchange",
+        ["Lighthouse"] = "Lighthouse@rework",
+        ["Lighthouse@rework"] = "Lighthouse",
+    };
+
+    public static string? SiblingOf(string mapId) => _siblings.TryGetValue(mapId, out var sibling) ? sibling : null;
+
+    /// <summary>Overwrites the target map's WORKING copy with a deep copy of the source's (unsaved: it rides
+    /// the unsaved-changes button and the undo history like any other edit). Built-in zone names the target
+    /// layout does not have are kept in the file and ignored by the game.</summary>
+    public void CopyWorking(string fromMapId, string toMapId)
+    {
+        var source = GetWorking(fromMapId);
+        GetWorking(toMapId); // seeds the target's saved-state snapshot so the copy shows as pending
+        var clone = JsonSerializer.Deserialize<MapZoneModel>(JsonSerializer.Serialize(source, _json), _json) ?? new MapZoneModel();
+        lock (_working)
+        {
+            _working[toMapId] = clone;
+        }
+        ZonesReplaced?.Invoke();
+    }
+
     // ── Edit history support (EditHistoryService) ──────────────────────
 
     /// <summary>Current and last-saved JSON of every working copy. The saved one is the baseline the history
@@ -304,6 +335,7 @@ public class ZoneStoreService(ISptLogger<ZoneStoreService> logger)
             ClampRange(cz.Radius, 10f, 2000f);
             ClampRange(cz.Force, -10f, 10f);
             cz.Decay = Math.Clamp(cz.Decay, 0.05f, 20f);
+            cz.Name = string.IsNullOrWhiteSpace(cz.Name) ? null : cz.Name.Trim()[..Math.Min(cz.Name.Trim().Length, 40)];
         }
         if (zones.Convergence != null)
         {

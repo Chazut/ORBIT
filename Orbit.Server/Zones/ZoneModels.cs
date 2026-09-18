@@ -29,6 +29,10 @@ public class BuiltinZoneModel
 
 public class CustomZoneModel
 {
+    // Editor-only label. Omitted from the JSON when unset, and ignored by the client (Newtonsoft skips
+    // members it does not know), so files stay readable by every ORBIT version.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Name { get; set; }
     public ZoneVec Position { get; set; } = new();
     public ZoneRange Radius { get; set; } = new() { Min = 100f, Max = 150f };
     public ZoneRange Force { get; set; } = new() { Min = 0.5f, Max = 1f };

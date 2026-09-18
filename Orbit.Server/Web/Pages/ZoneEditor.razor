@@ -9,6 +9,7 @@
 @inject ZoneStoreService ZoneStore
 @inject ConfigService Configs
 @inject ISnackbar Snackbar
+@inject IJSRuntime JS
 
 <PageTitle>ORBIT: Zone editor</PageTitle>
 
@@ -26,13 +27,23 @@
         <MudTooltip Text="Preview of the selected zone's pull. Arrows point where squads get nudged; length and brightness show strength. Uses the middle of the zone's min/max ranges." Arrow="true">
             <MudSwitch T="bool" @bind-Value="_showField" Color="Color.Primary" Size="Size.Small" Label="Pull field" />
         </MudTooltip>
+        <MudTooltip Text="Heatmap of how each zone's force fades from its center to its edge, which is what Decay shapes: the color is the share of the zone's force left at that distance. Shows the selected zone, or every zone when nothing is selected. Uses the middle of the min/max ranges." Arrow="true">
+            <MudSwitch T="bool" @bind-Value="_showHeat" Color="Color.Primary" Size="Size.Small" Label="Decay heatmap" />
+        </MudTooltip>
+        @if (ZoneStoreService.SiblingOf(_mapId) is { } siblingId)
+        {
+            <MudTooltip Text="@($"Overwrites the zones of {ZoneStoreService.MapLabels[siblingId]} with a copy of the ones on screen. Lands as unsaved changes there: review, then Save (or undo).")" Arrow="true">
+                <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.ContentCopy" OnClick="@(() => CopyToSibling(siblingId))">Copy to @ZoneStoreService.MapLabels[siblingId]</MudButton>
+            </MudTooltip>
+        }
         <MudTooltip Text="Restore this map's shipped default zones (writes them immediately)." Arrow="true">
             <MudButton Variant="Variant.Outlined" Color="Color.Warning" Size="Size.Small" StartIcon="@Icons.Material.Filled.RestartAlt" OnClick="ResetMap">Reset map</MudButton>
         </MudTooltip>
     </div>
     <MudText Typo="Typo.body2" Class="mb-3" Style="opacity:.6">
         Hotspots pull (teal) or push (red) squad routing. <b>Click</b> selects, <b>drag</b> moves a custom zone
-        (dragging empty ground pans), <b>wheel</b> zooms, <b>Ctrl+wheel</b> resizes the selection,
+        (dragging empty ground pans, and so does the <b>middle mouse button</b> anywhere, without touching the
+        selection), <b>wheel</b> zooms, <b>Ctrl+wheel</b> resizes the selection,
         <b>double-click</b> adds a zone. Dashed ring = max radius, solid = min (sampled per raid).
         Built-in zones (labelled) sit where BSG put them — tune them, they cannot move. Grey dots are
         BSG zones without a tuning entry yet: click one (map or list) to start tuning it. Edits ride the
@@ -47,7 +58,7 @@
        labels behind (visible highlight), and the NEXT drag starting inside that selection becomes a
        browser drag-of-selection that cancels our pointer events — the RC "second drag does nothing"
        report. Synthetic-event tests can't reproduce it, only real mouse gestures do. *@
-    <div style="position:relative; width:@(CanvasW)px; height:@F(_canvasH)px; background:#0A0E17; border:1px solid #222B3E; border-radius:10px; overflow:hidden; touch-action:none; user-select:none; -webkit-user-select:none; cursor:@CursorStyle"
+    <div id="orbit-zone-pad" style="position:relative; width:@(CanvasW)px; height:@F(_canvasH)px; background:#0A0E17; border:1px solid #222B3E; border-radius:10px; overflow:hidden; touch-action:none; user-select:none; -webkit-user-select:none; cursor:@CursorStyle"
          @onpointerdown="OnPointerDown" @onpointermove="OnPointerMove" @onpointerup="OnPointerUp"
          @onpointerleave="OnPointerUp" @ondblclick="OnDoubleClick"
          @ondragstart:preventDefault="true"
@@ -70,6 +81,10 @@
                     <line x1="@F(g * 100)" y1="0" x2="@F(g * 100)" y2="@F(_vh)" stroke="#222B3E" stroke-width="@F(0.8f / _zoom)" />
                     <line x1="0" y1="@F(_vh * g / 10f)" x2="1000" y2="@F(_vh * g / 10f)" stroke="#222B3E" stroke-width="@F(0.8f / _zoom)" />
                 }
+            }
+            @if (_showHeat)
+            {
+                @((MarkupString)HeatLayer())
             }
             @if (_showField && !_panning && !_draggingZone)
             {
@@ -113,12 +128,28 @@
                 <circle cx="@F(px)" cy="@F(py)" r="@F(MetersToView(zone.Radius.Min))" fill="@color" fill-opacity="0.14"
                         stroke="@(selected ? "#FFB454" : color)" stroke-opacity="@(selected ? "0.9" : "0.55")"
                         stroke-width="@F((selected ? 1.8f : 1.1f) / _zoom)" />
+                @if (!string.IsNullOrWhiteSpace(zone.Name))
+                {
+                    @((MarkupString)$"<text x=\"{F(px)}\" y=\"{F(py - MetersToView(zone.Radius.Min) - 4f / _zoom)}\" text-anchor=\"middle\" font-size=\"{F(10f / _zoom)}\" fill=\"{(selected ? "#FFB454" : "#9AA4B8")}\" opacity=\"0.9\">{System.Net.WebUtility.HtmlEncode(zone.Name)}</text>")
+                }
                 <circle cx="@F(px)" cy="@F(py)" r="@F(3f / _zoom)" fill="@(selected ? "#FFB454" : color)" />
             }
         </svg>
         @if (_view.Svg == null)
         {
             <MudText Typo="Typo.caption" Style="position:absolute; top:8px; left:12px; opacity:.5; pointer-events:none">No public map render for this location — zones stay fully editable on the grid.</MudText>
+        }
+        @if (_showHeat)
+        {
+            <div style="position:absolute; bottom:6px; left:10px; pointer-events:none; font-size:.68rem; color:#9AA4B8; display:flex; align-items:center; gap:6px">
+                <span>edge 0%</span>
+                <span style="display:inline-flex; flex-direction:column; gap:2px">
+                    <span title="attracting zone" style="width:120px; height:6px; border-radius:3px; background:linear-gradient(90deg, @HeatCss(false))"></span>
+                    <span title="repelling zone" style="width:120px; height:6px; border-radius:3px; background:linear-gradient(90deg, @HeatCss(true))"></span>
+                </span>
+                <span>100% center</span>
+                <span style="opacity:.6">top: pull, bottom: push</span>
+            </div>
         }
         <MudText Typo="Typo.caption" Style="position:absolute; bottom:6px; right:10px; opacity:.4; pointer-events:none">@($"zoom x{_zoom:0.#}")</MudText>
     </div>
@@ -155,7 +186,7 @@
                  @onclick="@(() => SelectCustom(rowIdx))"
                  style="display:flex; align-items:center; gap:8px; padding:4px 8px; border-radius:6px; cursor:pointer; background:@(rowSelected ? "rgba(255,180,84,.12)" : _hoverCustom == rowIdx ? "rgba(255,255,255,.05)" : "transparent")">
                 <span style="width:9px; height:9px; border-radius:50%; background:@rowColor; border:1px dashed #E6EAF2; flex-shrink:0"></span>
-                <span style="font-size:.83rem">@($"Custom {rowIdx + 1} ({zone.Position.X:F0}, {zone.Position.Y:F0})")</span>
+                <span style="font-size:.83rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap">@CustomLabel(rowIdx)</span>
                 @if (ForceCenteredOnZeroWarning(zone.Force) is { } rowWarning)
                 {
                     <span title="@rowWarning" style="margin-left:auto; color:#FFB454; font-size:.8rem; flex-shrink:0">&#9888;</span>
@@ -182,7 +213,11 @@
     @if (_selectedCustom >= 0 && _selectedCustom < _zones.CustomZones.Count)
     {
         var sel = _zones.CustomZones[_selectedCustom];
-        <SettingsCard Title="@($"Custom zone — ({sel.Position.X:F0}, {sel.Position.Y:F0})")">
+        <SettingsCard Title="@($"{(string.IsNullOrWhiteSpace(sel.Name) ? "Custom zone" : sel.Name)} — ({sel.Position.X:F0}, {sel.Position.Y:F0})")">
+            <MudTextField T="string" Value="@sel.Name" ValueChanged="@(v => sel.Name = string.IsNullOrEmpty(v) ? null : v)"
+                          Label="Name" Placeholder="@($"Custom {_selectedCustom + 1}")" MaxLength="40" Immediate="true"
+                          Variant="Variant.Outlined" Margin="Margin.Dense" Class="mb-3" Style="max-width:340px"
+                          HelperText="Only for you: shown on the map, in the list and in exported packs. The game ignores it." />
             <OrbitSlider T="float" @bind-Value="sel.Radius.Min" Label="Radius min" Unit="m" Min="10f" Max="2000f" Step="1f" Fmt="0"
                          Tooltip="Rolled once per raid between min and max with a gaussian: about 68% of raids land in the middle third of the range, 95% in the middle two thirds, the edges are rare. The circle on the map is NOT the size of the zone: the zone is its center point, the radius is how far out squads start getting pulled toward it, and outside the circle the zone does nothing. A wide range changes the reach a lot from raid to raid; set min close to max for a consistent reach." />
             <OrbitSlider T="float" @bind-Value="sel.Radius.Max" Label="Radius max" Unit="m" Min="10f" Max="2000f" Step="1f" Fmt="0"
@@ -200,6 +235,9 @@
             <OrbitSwitch @bind-Value="sel.KillMains" Label="Kill-main anchor"
                          Tooltip="ON (default): squads rolling a Kills main objective can pick this zone as their hunting ground (only zones with a positive force qualify). OFF: the zone only steers routing — a pure hotspot, never a kill arena." />
             <div class="mt-2"></div>
+            <MudTooltip Text="New custom zone with the same radius, force, decay and kill-main setting, placed next to this one and selected: drag it where you want it." Arrow="true">
+                <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.ContentCopy" Class="mr-2" OnClick="DuplicateSelected">Duplicate zone</MudButton>
+            </MudTooltip>
             <MudButton Variant="Variant.Outlined" Color="Color.Error" Size="Size.Small" StartIcon="@Icons.Material.Filled.Delete" OnClick="DeleteSelected">Delete zone</MudButton>
         </SettingsCard>
     }
@@ -224,6 +262,9 @@
             <OrbitSwitch @bind-Value="selBz.KillMains" Label="Kill-main anchor"
                          Tooltip="ON (default): squads rolling a Kills main objective can pick this zone as their hunting ground (only zones with a positive force qualify). OFF: the zone only steers routing — a pure hotspot, never a kill arena." />
             <div class="mt-2"></div>
+            <MudTooltip Text="New CUSTOM zone with the same radius, force, decay and kill-main setting, placed next to this one and selected. Built-in zones cannot move, the copy can." Arrow="true">
+                <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.ContentCopy" Class="mr-2" OnClick="DuplicateSelected">Duplicate as custom zone</MudButton>
+            </MudTooltip>
             <MudTooltip Text="Remove this zone's tuning entry — ORBIT will then ignore this BSG zone entirely. It goes back to the 'not tuned yet' list." Arrow="true">
                 <MudButton Variant="Variant.Outlined" Color="Color.Error" Size="Size.Small" StartIcon="@Icons.Material.Filled.Delete" OnClick="RemoveBuiltinTuning">Remove tuning</MudButton>
             </MudTooltip>
@@ -287,6 +328,8 @@
     private string? _hoverBuiltin;
     private bool _draggingZone, _panning;
     private bool _showField = true;
+    private bool _showHeat;
+    private bool _middlePan;
     private bool _builtinDragHintShown;
     private double _panStartOx, _panStartOy;
     private float _dragDx, _dragDz;
@@ -325,6 +368,83 @@
         _inlineSvg = render;
         await InvokeAsync(StateHasChanged);
     }
+
+    // The browser starts its autoscroll on a middle-button mousedown; only a script can cancel that one
+    // button without also swallowing the left click's default (focus changes, which commit a typed value).
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        try
+        {
+            await JS.InvokeVoidAsync("eval", "(function(){var el=document.getElementById('orbit-zone-pad');if(!el||el.__orbitMid)return;el.__orbitMid=true;el.addEventListener('mousedown',function(e){if(e.button===1)e.preventDefault();});})()");
+        }
+        catch
+        {
+            // Script blocked: middle-button panning still works, the browser's autoscroll icon shows up.
+        }
+    }
+
+    private string CustomLabel(int index)
+    {
+        var zone = _zones.CustomZones[index];
+        return string.IsNullOrWhiteSpace(zone.Name)
+            ? $"Custom {index + 1} ({zone.Position.X:F0}, {zone.Position.Y:F0})"
+            : zone.Name!;
+    }
+
+    private void CopyToSibling(string siblingId)
+    {
+        ZoneStore.CopyWorking(_mapId, siblingId);
+        Snackbar.Add($"Zones copied to {ZoneStoreService.MapLabels[siblingId]} as unsaved changes: review them there, then Save.", Severity.Success);
+    }
+
+    /// <summary>Copy of the selected zone as a new custom zone, offset so both stay visible, and selected.</summary>
+    private void DuplicateSelected()
+    {
+        CustomZoneModel copy;
+        float x, z;
+        if (_selectedCustom >= 0 && _selectedCustom < _zones.CustomZones.Count)
+        {
+            var source = _zones.CustomZones[_selectedCustom];
+            copy = new CustomZoneModel
+            {
+                Name = string.IsNullOrWhiteSpace(source.Name) ? null : Truncate(source.Name + " copy"),
+                Radius = new ZoneRange { Min = source.Radius.Min, Max = source.Radius.Max },
+                Force = new ZoneRange { Min = source.Force.Min, Max = source.Force.Max },
+                Decay = source.Decay,
+                KillMains = source.KillMains,
+            };
+            (x, z) = (source.Position.X, source.Position.Y);
+        }
+        else if (_selectedBuiltin != null && _zones.BuiltinZones.TryGetValue(_selectedBuiltin, out var builtin)
+                 && BuiltinZonePositions.TryGet(_mapId, _selectedBuiltin, out var pos))
+        {
+            copy = new CustomZoneModel
+            {
+                Name = Truncate(_selectedBuiltin + " copy"),
+                Radius = new ZoneRange { Min = builtin.Radius.Min, Max = builtin.Radius.Max },
+                Force = new ZoneRange { Min = builtin.Force.Min, Max = builtin.Force.Max },
+                Decay = builtin.Decay,
+                KillMains = builtin.KillMains,
+            };
+            (x, z) = (pos.X, pos.Z);
+        }
+        else
+        {
+            return;
+        }
+
+        // Offset by a fraction of the radius, flipped when that would leave the map.
+        var offset = Math.Clamp(copy.Radius.Min * 0.35f, 15f, 80f);
+        var (cx, cz) = ClampToWorld(MathF.Round(x + offset), MathF.Round(z - offset));
+        if (MathF.Abs(cx - x) < 1f && MathF.Abs(cz - z) < 1f)
+            (cx, cz) = ClampToWorld(MathF.Round(x - offset), MathF.Round(z + offset));
+        copy.Position = new ZoneVec { X = cx, Y = cz };
+        _zones.CustomZones.Add(copy);
+        SelectCustom(_zones.CustomZones.Count - 1);
+    }
+
+    private static string Truncate(string name) => name.Length <= 40 ? name : name[..40];
 
     private void LoadMap(string mapId)
     {
@@ -427,6 +547,14 @@
     {
         _lastOx = e.OffsetX;
         _lastOy = e.OffsetY;
+        if (e.Button == 1)
+        {
+            // Middle button: pan from anywhere, zones and selection untouched.
+            _panning = true;
+            _middlePan = true;
+            return;
+        }
+        if (e.Button != 0) return;
         var (wx, wz) = OffsetToWorld(e.OffsetX, e.OffsetY);
 
         var customHit = HitTestCustom(wx, wz);
@@ -476,7 +604,7 @@
         {
             // Dragging a built-in pans (they can't move) — RC feedback showed nobody discovers that
             // from the hint text alone, so the first real drag attempt on one says it out loud.
-            if (!_builtinDragHintShown && _selectedBuiltin != null
+            if (!_middlePan && !_builtinDragHintShown && _selectedBuiltin != null
                 && Math.Abs(e.OffsetX - _panStartOx) + Math.Abs(e.OffsetY - _panStartOy) > 25)
             {
                 _builtinDragHintShown = true;
@@ -495,6 +623,7 @@
     {
         _draggingZone = false;
         _panning = false;
+        _middlePan = false;
     }
 
     private void OnDoubleClick(MouseEventArgs e)
@@ -628,6 +757,89 @@
         var lo = (min + width / 3f).ToString("0.00", CultureInfo.InvariantCulture);
         var hi = (max - width / 3f).ToString("0.00", CultureInfo.InvariantCulture);
         return $"Force range centered around 0: the roll is gaussian, so about 68% of raids land between {lo} and {hi} and the zone barely pulls or pushes. Shift the range if you want it to act every raid, for example 0.2 / 0.8 instead of -0.3 / 0.3.";
+    }
+
+    // ── decay heatmap ──
+    // One zone's force only depends on the distance to its center: clamp01(1 - d/R) ^ (decay * falloffScale).
+    // A radial gradient whose stops are sampled from that curve IS the heatmap, exact and nearly free to
+    // draw (one circle per zone instead of a grid of cells). Color = share of the zone's own force left at
+    // that distance, so the shape of the fade reads the same on a weak zone and on a strong one.
+
+    private const int HeatStops = 18;
+
+    private static readonly (float T, int R, int G, int B)[] PullRamp =
+    [
+        (0f, 0x2C, 0x3E, 0x90), (0.25f, 0x2B, 0xB3, 0xC0), (0.5f, 0x7B, 0xD8, 0x8F), (0.75f, 0xFF, 0xD4, 0x54), (1f, 0xFF, 0x6B, 0x3D),
+    ];
+
+    private static readonly (float T, int R, int G, int B)[] PushRamp =
+    [
+        (0f, 0x2A, 0x1E, 0x5A), (0.35f, 0x6D, 0x3A, 0xA8), (0.7f, 0xC0, 0x47, 0x9B), (1f, 0xFF, 0x7A, 0xA2),
+    ];
+
+    private static string RampColor((float T, int R, int G, int B)[] ramp, float t)
+    {
+        t = Math.Clamp(t, 0f, 1f);
+        for (var i = 1; i < ramp.Length; i++)
+        {
+            if (t > ramp[i].T) continue;
+            var a = ramp[i - 1];
+            var b = ramp[i];
+            var k = (t - a.T) / MathF.Max(0.0001f, b.T - a.T);
+            return $"#{(int)MathF.Round(a.R + (b.R - a.R) * k):X2}{(int)MathF.Round(a.G + (b.G - a.G) * k):X2}{(int)MathF.Round(a.B + (b.B - a.B) * k):X2}";
+        }
+        var last = ramp[^1];
+        return $"#{last.R:X2}{last.G:X2}{last.B:X2}";
+    }
+
+    private static string HeatCss(bool push)
+    {
+        var ramp = push ? PushRamp : PullRamp;
+        return string.Join(", ", ramp.Select(stop => $"{RampColor(ramp, stop.T)} {F(stop.T * 100f)}%"));
+    }
+
+    private string HeatLayer()
+    {
+        var zs = new List<(float X, float Z, float R, float Fo, float D)>();
+        var anySelected = _selectedBuiltin != null || (_selectedCustom >= 0 && _selectedCustom < _zones.CustomZones.Count);
+        foreach (var kv in _zones.BuiltinZones)
+        {
+            if (anySelected && kv.Key != _selectedBuiltin) continue;
+            if (!BuiltinZonePositions.TryGet(_mapId, kv.Key, out var pos)) continue;
+            zs.Add((pos.X, pos.Z, (kv.Value.Radius.Min + kv.Value.Radius.Max) * 0.5f, (kv.Value.Force.Min + kv.Value.Force.Max) * 0.5f, kv.Value.Decay));
+        }
+        for (var i = 0; i < _zones.CustomZones.Count; i++)
+        {
+            if (anySelected && i != _selectedCustom) continue;
+            var cz = _zones.CustomZones[i];
+            zs.Add((cz.Position.X, cz.Position.Y, (cz.Radius.Min + cz.Radius.Max) * 0.5f, (cz.Force.Min + cz.Force.Max) * 0.5f, cz.Decay));
+        }
+        if (zs.Count == 0) return "";
+
+        var cfg = Configs.Config.Zones;
+        var peakOpacity = anySelected ? 0.62f : 0.42f; // several overlapping zones must not bury the map
+        var defs = new StringBuilder("<defs>");
+        var shapes = new StringBuilder();
+        for (var n = 0; n < zs.Count; n++)
+        {
+            var z = zs[n];
+            var radius = MetersToView(z.R * cfg.ZoneRadiusScale);
+            if (radius <= 0.01f) continue;
+            var exponent = MathF.Max(0.01f, z.D * cfg.ZoneFalloffScale);
+            var ramp = z.Fo * cfg.ZoneForceScale < 0f ? PushRamp : PullRamp;
+            var (px, py) = WorldToView(z.X, z.Z);
+            defs.Append($"<radialGradient id=\"orbit-heat-{n}\" gradientUnits=\"userSpaceOnUse\" cx=\"{F(px)}\" cy=\"{F(py)}\" r=\"{F(radius)}\">");
+            for (var i = 0; i <= HeatStops; i++)
+            {
+                var t = i / (float)HeatStops;
+                var share = MathF.Pow(1f - t, exponent);
+                var opacity = i == HeatStops ? 0f : peakOpacity * (0.18f + 0.82f * share);
+                defs.Append($"<stop offset=\"{F(t)}\" stop-color=\"{RampColor(ramp, share)}\" stop-opacity=\"{F(opacity)}\" />");
+            }
+            defs.Append("</radialGradient>");
+            shapes.Append($"<circle cx=\"{F(px)}\" cy=\"{F(py)}\" r=\"{F(radius)}\" fill=\"url(#orbit-heat-{n})\" />");
+        }
+        return defs.Append("</defs>").Append(shapes).ToString();
     }
 
     /// <summary>
