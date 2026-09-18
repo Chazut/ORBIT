@@ -35,7 +35,8 @@ public static class RigSwapper
         if (slot == null || !slot.CheckCompatibility(candidate)) return WouldSwapResult.No;
 
         var current = slot.ContainedItem;
-        if (current == null) return new WouldSwapResult(true, RigScorer.Score(candidate));
+        if (current == null)
+            return Refused(bot, candidate, slot) ? WouldSwapResult.No : new WouldSwapResult(true, RigScorer.Score(candidate));
 
         // Same-type guard: a simple rig may only displace a simple rig; an armored rig may only displace an
         // armored rig.
@@ -53,7 +54,19 @@ public static class RigSwapper
         var currentUsed = RigScorer.UsedCells(current);
         if (candidateCapacity < currentUsed) return new WouldSwapResult(false, candidateScore);
 
+        if (Refused(bot, candidate, slot)) return new WouldSwapResult(false, candidateScore);
         return new WouldSwapResult(true, candidateScore, current);
+    }
+
+    /// <summary>Dry run of the equip or of the exchange, before anything is planned or moved: BSG refuses
+    /// cross-slot conflicts the slot filter does not see (an armored rig against an armor vest, on the bot or
+    /// on the corpse that would receive the displaced item).</summary>
+    private static bool Refused(BotOwner bot, Item candidate, Slot slot)
+    {
+        var refusal = WeaponSwapper.EquipRefusal(bot, candidate, slot);
+        if (refusal == null) return false;
+        Log.Info($"RigSwap({bot.Profile?.Nickname ?? "(no-nick)"}): SKIP {candidate.LocalizedName()}, BSG refuses it in TacticalVest ({refusal}); nothing was moved");
+        return true;
     }
 
     public static async Task<Outcome> TryEquipOnlyAsync(BotOwner bot, Item candidate, CancellationToken ct)
@@ -63,6 +76,7 @@ public static class RigSwapper
         var slot = equipment?.GetSlot(EquipmentSlot.TacticalVest);
         if (slot == null || slot.ContainedItem != null) return Outcome.Skipped;
         if (!slot.CheckCompatibility(candidate)) return Outcome.Skipped;
+        if (Refused(bot, candidate, slot)) return Outcome.Skipped;
         var nick = bot.Profile?.Nickname ?? "(no-nick)";
         Log.Info($"RigSwap.Equip({nick}): {candidate.LocalizedName()} → TacticalVest (empty)");
         var ok = await WeaponSwapper.MoveIntoSlotAsync(bot, candidate, slot, nick, ct);
@@ -85,6 +99,7 @@ public static class RigSwapper
         var current = slot.ContainedItem;
         if (current == null)
         {
+            if (Refused(bot, candidate, slot)) return Outcome.Skipped;
             var candScore = RigScorer.Score(candidate, $"{nick}:CAND");
             Log.Info($"RigSwap({nick}): TacticalVest empty — equip {candidate.LocalizedName()} (score {candScore:F1})");
             var moved = await WeaponSwapper.MoveIntoSlotAsync(bot, candidate, slot, nick, ct);
@@ -117,6 +132,8 @@ public static class RigSwapper
         // Move items from current rig → candidate rig BEFORE the atomic swap so the bot keeps their carry.
         // After the Swap, the candidate (now in our TacticalVest) holds our items; the emptied current rig
         // goes to the candidate's source address (typically the corpse).
+        // Dry run first: the carry is about to move INTO the candidate, a refused exchange would strand it there.
+        if (Refused(bot, candidate, slot)) return Outcome.Skipped;
         if (!await TransferRigContentsAsync(bot, current, candidate, nick, ct))
         {
             Log.Info($"RigSwap({nick}): SKIP {candidate.LocalizedName()} — could not transfer all items from {current.LocalizedName()}");

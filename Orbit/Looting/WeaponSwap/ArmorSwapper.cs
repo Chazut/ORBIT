@@ -55,12 +55,25 @@ public static class ArmorSwapper
         if (candidateScore <= 0f) return WouldSwapResult.No; // no ArmorComponent — not gear we care about
 
         var current = slot.ContainedItem;
-        if (current == null) return new WouldSwapResult(true, candidateScore);
-
-        const float margin = LootConfig.SwapMargin;
-        var currentScore = ArmorScorer.Score(current);
-        var wouldSwap = candidateScore > currentScore * margin;
+        var wouldSwap = true;
+        if (current != null)
+        {
+            const float margin = LootConfig.SwapMargin;
+            wouldSwap = candidateScore > ArmorScorer.Score(current) * margin;
+        }
+        if (wouldSwap && Refused(bot, candidate, slot, slotKind)) return WouldSwapResult.No;
         return new WouldSwapResult(wouldSwap, candidateScore, wouldSwap ? current : null);
+    }
+
+    /// <summary>Dry run of the equip: a helmet against the headset worn under it, an armor vest against an
+    /// armored rig, or the displaced item against what the corpse wears, are cross-slot conflicts the slot
+    /// filter does not see and that would only be found out when the real operation fails to build.</summary>
+    private static bool Refused(BotOwner bot, Item candidate, Slot slot, EquipmentSlot slotKind)
+    {
+        var refusal = WeaponSwapper.EquipRefusal(bot, candidate, slot);
+        if (refusal == null) return false;
+        Log.Info($"ArmorSwap({bot.Profile?.Nickname ?? "(no-nick)"}): SKIP {candidate.LocalizedName()}, BSG refuses it in {slotKind} ({refusal}); nothing was moved");
+        return true;
     }
 
     /// <summary>
@@ -76,6 +89,7 @@ public static class ArmorSwapper
         var slot = equipment.GetSlot(slotKind);
         if (slot == null || slot.ContainedItem != null) return Outcome.Skipped;
         if (!slot.CheckCompatibility(candidate)) return Outcome.Skipped;
+        if (Refused(bot, candidate, slot, slotKind)) return Outcome.Skipped;
 
         var nick = bot.Profile?.Nickname ?? "(no-nick)";
         Log.Info($"ArmorSwap.Equip({nick}): {candidate.LocalizedName()} → {slotKind} (empty)");
@@ -111,6 +125,7 @@ public static class ArmorSwapper
         var current = slot.ContainedItem;
         if (current == null)
         {
+            if (Refused(bot, candidate, slot, slotKind)) return Outcome.Skipped;
             Log.Info($"ArmorSwap({nick}): {slotKind} empty — equip {candidate.LocalizedName()} (score {candidateScore:F1})");
             var moved = await WeaponSwapper.MoveIntoSlotAsync(bot, candidate, slot, nick, ct);
             return moved ? Outcome.Swapped : Outcome.Skipped;
@@ -124,6 +139,7 @@ public static class ArmorSwapper
             return Outcome.Skipped;
         }
 
+        if (Refused(bot, candidate, slot, slotKind)) return Outcome.Skipped;
         Log.Info($"ArmorSwap({nick}): {slotKind} SWAP {current.LocalizedName()}({currentScore:F1}) → {candidate.LocalizedName()}({candidateScore:F1}, margin {margin:F2}) via atomic Swap");
         var ok = await WeaponSwapper.SwapInPlaceAsync(bot, candidate, current, nick, ct);
         return ok ? Outcome.Swapped : Outcome.Skipped;

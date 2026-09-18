@@ -1398,6 +1398,8 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
         {
             var result = await inventoryController.TryRunNetworkTransaction(place, null);
             if (!result.Succeed) Log.Warning($"OrbitLootHandler.Pickup({Nick}): TX FAILED on {name} (Error={result.Error})");
+            if (!result.Succeed && result.Error == "Can not execute")
+                Log.Warning($"OrbitLootHandler.Pickup({Nick}): refusal detail: {WeaponSwapper.DescribeRefusal(_bot, place.Value)}");
             return result.Succeed;
         }
         catch (System.OperationCanceledException) { throw; }

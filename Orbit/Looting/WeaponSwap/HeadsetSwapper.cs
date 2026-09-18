@@ -37,12 +37,24 @@ public static class HeadsetSwapper
         if (candidateScore <= 0f) return WouldSwapResult.No;
 
         var current = slot.ContainedItem;
-        if (current == null) return new WouldSwapResult(true, candidateScore);
-
-        const float margin = LootConfig.SwapMargin;
-        var currentScore = HeadsetScorer.Score(current);
-        var wouldSwap = candidateScore > currentScore * margin;
+        var wouldSwap = true;
+        if (current != null)
+        {
+            const float margin = LootConfig.SwapMargin;
+            wouldSwap = candidateScore > HeadsetScorer.Score(current) * margin;
+        }
+        if (wouldSwap && Refused(bot, candidate, slot)) return WouldSwapResult.No;
         return new WouldSwapResult(wouldSwap, candidateScore, wouldSwap ? current : null);
+    }
+
+    /// <summary>Dry run of the equip: a helmet that blocks the Earpiece slot, or a headset and a hat that BSG
+    /// refuses to combine, would only be found out when the real operation fails to build.</summary>
+    private static bool Refused(BotOwner bot, Item candidate, Slot slot)
+    {
+        var refusal = WeaponSwapper.EquipRefusal(bot, candidate, slot);
+        if (refusal == null) return false;
+        Log.Info($"HeadsetSwap({bot.Profile?.Nickname ?? "(no-nick)"}): SKIP {candidate.LocalizedName()}, BSG refuses it in Earpiece ({refusal}); nothing was moved");
+        return true;
     }
 
     public static async Task<Outcome> TryEquipOnlyAsync(BotOwner bot, Item candidate, CancellationToken ct)
@@ -52,6 +64,7 @@ public static class HeadsetSwapper
         var slot = equipment?.GetSlot(EquipmentSlot.Earpiece);
         if (slot == null || slot.ContainedItem != null) return Outcome.Skipped;
         if (!slot.CheckCompatibility(candidate)) return Outcome.Skipped;
+        if (Refused(bot, candidate, slot)) return Outcome.Skipped;
         var nick = bot.Profile?.Nickname ?? "(no-nick)";
         Log.Info($"HeadsetSwap.Equip({nick}): {candidate.LocalizedName()} → Earpiece (empty)");
         var ok = await WeaponSwapper.MoveIntoSlotAsync(bot, candidate, slot, nick, ct);
@@ -77,6 +90,7 @@ public static class HeadsetSwapper
         var current = slot.ContainedItem;
         if (current == null)
         {
+            if (Refused(bot, candidate, slot)) return Outcome.Skipped;
             Log.Info($"HeadsetSwap({nick}): Earpiece empty — equip {candidate.LocalizedName()} (score {candidateScore:F1})");
             var moved = await WeaponSwapper.MoveIntoSlotAsync(bot, candidate, slot, nick, ct);
             return moved ? Outcome.Swapped : Outcome.Skipped;
@@ -90,6 +104,7 @@ public static class HeadsetSwapper
             return Outcome.Skipped;
         }
 
+        if (Refused(bot, candidate, slot)) return Outcome.Skipped;
         Log.Info($"HeadsetSwap({nick}): SWAP {current.LocalizedName()}({currentScore:F1}) → {candidate.LocalizedName()}({candidateScore:F1}, margin {margin:F2})");
         var ok = await WeaponSwapper.SwapInPlaceAsync(bot, candidate, current, nick, ct);
         return ok ? Outcome.Swapped : Outcome.Skipped;

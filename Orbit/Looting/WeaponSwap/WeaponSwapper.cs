@@ -493,6 +493,8 @@ public static class WeaponSwapper
             if (!result.Succeed)
             {
                 Log.Warning($"WeaponSwap.{label}({nick}): tx FAILED — {result.Error}");
+                if (result.Error == "Can not execute")
+                    Log.Warning($"WeaponSwap.{label}({nick}): refusal detail: {DescribeRefusal(bot, op.Value)}");
                 return false;
             }
             Log.Debug($"WeaponSwap.{label}({nick}): tx DONE (succeeded), settling {PostTransactionSettleMs}ms");
@@ -512,6 +514,38 @@ public static class WeaponSwapper
     /// cref="ItemManipulator.Swap"/>, the same op the vanilla UI dispatches when dragging an item
     /// onto an already-occupied slot. Neither slot is transiently empty during the exchange.
     /// </summary>
+    /// <summary>
+    /// Dry run of <see cref="SwapInPlaceAsync"/>: builds the same simulated operation and throws it away. The
+    /// rig and backpack swappers move the bot's carry INTO the candidate before swapping, so a swap BSG refuses
+    /// must be known before anything is moved. Customs raid, AlienShooter: a TV-110 armored rig could not go to
+    /// a corpse that wore an armor vest (BSG slot conflict), the build failed AFTER the magazines had been
+    /// moved into the corpse's rig, and the bot walked away without them.
+    /// </summary>
+    internal static bool CanSwapInPlace(BotOwner bot, Item itemA, Item itemB, out string error)
+    {
+        error = null;
+        try
+        {
+            var ic = bot.GetPlayer?.InventoryController;
+            var addrA = itemA?.CurrentAddress;
+            var addrB = itemB?.CurrentAddress;
+            if (ic == null || addrA == null || addrB == null)
+            {
+                error = "missing inventory controller or item address";
+                return false;
+            }
+            var op = ItemManipulator.Swap(itemA, addrB, itemB, addrA, ic, true);
+            if (op.Succeeded) return true;
+            error = op.Error?.ToString() ?? "refused";
+            return false;
+        }
+        catch (System.Exception e)
+        {
+            error = e.Message;
+            return false;
+        }
+    }
+
     internal static async Task<bool> SwapInPlaceAsync(BotOwner bot, Item itemA, Item itemB, string nick, CancellationToken ct)
     {
         var ic = bot.GetPlayer?.InventoryController;
@@ -532,6 +566,96 @@ public static class WeaponSwapper
             return false;
         }
         return await RunGuardedTransactionAsync(bot, op, $"Swap({itemA.LocalizedName()}@{descA} ↔ {itemB.LocalizedName()}@{descB})", nick, ct);
+    }
+
+    /// <summary>Dry run of <see cref="MoveIntoSlotAsync"/>: same simulated operation, thrown away.</summary>
+    internal static bool CanMoveIntoSlot(BotOwner bot, Item item, Slot slot, out string error)
+    {
+        error = null;
+        try
+        {
+            var ic = bot.GetPlayer?.InventoryController;
+            if (ic == null || item == null || slot == null)
+            {
+                error = "missing inventory controller, item or slot";
+                return false;
+            }
+            var op = ItemManipulator.Move(item, slot.CreateItemAddress(), ic, true);
+            if (op.Succeeded) return true;
+            error = op.Error?.ToString() ?? "refused";
+            return false;
+        }
+        catch (System.Exception e)
+        {
+            error = e.Message;
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Dry run of the equip a gear swapper is about to do: the move into an empty slot, or the positional swap
+    /// with what the slot holds. Null when BSG accepts it, its reason otherwise. Slot.CheckCompatibility only
+    /// looks at the slot filter; the refusals caught here are the cross-slot ones it cannot see: a helmet that
+    /// blocks the Earpiece slot, a headset and a hat that conflict with each other (on the bot, or on the
+    /// corpse that would receive the displaced item), an armor vest against an armored rig.
+    /// </summary>
+    internal static string EquipRefusal(BotOwner bot, Item candidate, Slot slot)
+    {
+        string error;
+        var current = slot?.ContainedItem;
+        var accepted = current == null
+            ? CanMoveIntoSlot(bot, candidate, slot, out error)
+            : CanSwapInPlace(bot, candidate, current, out error);
+        if (accepted) return null;
+        // BSG names every item with its 24-character id, which triples the length of the message.
+        return System.Text.RegularExpressions.Regex.Replace(error ?? "refused", @" \(id: [0-9a-f]{24}\)", string.Empty);
+    }
+
+    /// <summary>
+    /// What stands behind BSG's bare "Can not execute". ItemController.TryRunNetworkTransaction answers it when
+    /// the operation's CanExecute fails, which for a move is Item.CheckAction(To): the inventory is blocked, or
+    /// the item, its target container or the target cells are held by an operation still registered as ACTIVE
+    /// on one of the two owners (ItemController.CheckItemAction). An operation stays active until its hands
+    /// animation ends, which never happens on a body that fell asleep in the middle of it. Log-only.
+    /// </summary>
+    internal static string DescribeRefusal(BotOwner bot, object operation)
+    {
+        try
+        {
+            var ic = bot?.GetPlayer?.InventoryController;
+            if (ic == null) return "no inventory controller";
+            var sb = new System.Text.StringBuilder();
+            sb.Append(operation?.GetType().Name ?? "?");
+            IItemOwner sourceOwner = null;
+            if (operation is MoveResult move && move._item != null)
+            {
+                var to = move._to;
+                sb.Append($" {move._item.LocalizedName()} {DescribeAddress(move._item.CurrentAddress, bot)} -> {DescribeAddress(to, bot)} in {to?.Container?.ParentItem?.LocalizedName() ?? "?"} [{to}]");
+                var check = move._item.CheckAction(to);
+                sb.Append(check.Failed ? $", CheckAction: {check.Error?.GetType().Name} {check.Error}" : ", CheckAction passes now");
+                sourceOwner = move._item.Parent?.GetOwner();
+            }
+            sb.Append($", inventory blocked: {ic.IsInventoryBlocked()}");
+            sb.Append($", hands: {bot.GetPlayer.HandsController?.GetType().Name ?? "none"} holding {bot.GetPlayer.HandsController?.Item?.LocalizedName() ?? "nothing"}");
+            AppendActiveEvents(sb, "bot", ic, bot);
+            if (sourceOwner != null && !ReferenceEquals(sourceOwner, ic)) AppendActiveEvents(sb, "source", sourceOwner, bot);
+            return sb.ToString();
+        }
+        catch (System.Exception e)
+        {
+            return $"refusal diagnostic threw: {e.Message}";
+        }
+    }
+
+    private static void AppendActiveEvents(System.Text.StringBuilder sb, string label, IItemOwner owner, BotOwner bot)
+    {
+        var events = owner.SelectEvents((Item)null).ToList();
+        sb.Append($", active operations on {label}: {events.Count}");
+        for (var i = 0; i < events.Count && i < 6; i++)
+        {
+            var e = events[i];
+            sb.Append($" | {e.GetType().Name} {e.Item?.LocalizedName() ?? "?"} ({e.Status}) at {DescribeAddress(e.Location, bot)} [{e.Location}]");
+        }
     }
 
     internal static async Task<bool> MoveIntoSlotAsync(BotOwner bot, Item item, Slot slot, string nick, CancellationToken ct)
