@@ -245,6 +245,33 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                 }
             }
 
+            // Ghost hearing: the sleeping squad heard a firefight and rolled "go and look" (DormancySystem).
+            // Same interrupt shape as the opportunistic corpse, minus the resume: once there, the normal
+            // flow takes over (a ghost contact, bodies to loot, or simply the next objective).
+            if (squad.InvestigateNoisePosition.HasValue)
+            {
+                var noisePos = squad.InvestigateNoisePosition.Value;
+                squad.InvestigateNoisePosition = null;
+                if (!squad.ExtractRequested
+                    && squad.CombatCallerMemberIdx < 0
+                    && squad.PreInterruptObjectiveLocation == null
+                    && (squadObjective.Location == null || squadObjective.Location.Category != WaypointCategory.Corpse))
+                {
+                    var previous = squadObjective.Location;
+                    var investigate = waypointSystem.RequestForInvestigation(squad, noisePos);
+                    if (investigate != null)
+                    {
+                        squadObjective.LocationPrevious = previous;
+                        squadObjective.Location = investigate;
+                        squadObjective.Status = SquadObjectiveState.Active;
+                        ShufflePickCoverPoints(squadObjective, Math.Max(squad.TargetMembersCount, squad.Size));
+                        ResetDuration(squadObjective, _moveTimeout.SampleGaussian());
+                        Log.Info($"{squad} noise investigation: heading to {investigate} near the gunfire at {noisePos}, was on {previous}");
+                        continue; // re-enter on next tick; UpdateAgents will realign members
+                    }
+                    Log.Debug($"{squad} noise investigation: no usable waypoint around {noisePos}, staying on {previous}");
+                }
+            }
             if (squadObjective.Location == null)
             {
                 // Honour an explicit post-rescue (or other) cooldown set by a patch that nulled the location:

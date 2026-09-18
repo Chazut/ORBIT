@@ -123,6 +123,7 @@ public class OrbitManager
     public void Dispose()
     {
         try { _botsController.BotSpawner.OnBotRemoved -= OnBotRemoved; } catch { }
+        try { DormancySystem?.Dispose(); } catch { }
     }
 
     public Agent AddAgent(BotOwner bot)

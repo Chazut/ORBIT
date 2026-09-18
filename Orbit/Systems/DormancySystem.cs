@@ -301,6 +301,7 @@ public class DormancySystem
         _contactChanceMul = freq == "rare" ? 0.6f : freq == "frequent" ? 1.5f : 1f;
         _lethality = Mathf.Clamp(cfg.GhostFightLethality, 0.5f, 2f);
         _scopedWakeEnabled = cfg.ScopedWake;
+        _hearingEnabled = cfg.Enabled && cfg.GhostHearing;
         _scopedWakeMax = Mathf.Clamp(cfg.ScopedWakeMaxDistance, 100f, 1500f);
         // FullSleep (default): no population floor — far from every human, the whole map may sleep.
         _minAwakeBots = cfg.FullSleep ? 0 : Mathf.Max(0, cfg.MinAwakeBots);
@@ -436,6 +437,7 @@ public class DormancySystem
         if (_fightsMode != GhostFightsMode.Off)
             ResolveGhostSkirmishes(squads);
 
+        PollGhostHearing(squads);
         HealDormantWounded();
 
         EmitSummaryIfDue(liveAgents.Count);
@@ -1310,6 +1312,199 @@ public class DormancySystem
         return Mathf.Min(SkirmishReachCap, SkirmishBaseDetectRange * mag);
     }
 
+    // ── Ghost hearing ──────────────────────────────────────────────────────────────────────────────
+    // A sleeper has no ears: its body is inactive, SAIN is not running. Firefights therefore register here
+    // as NOISE events and sleeping squads roll whether to go and look, by personality. Two sources: the
+    // simulated ghost fights (their window and their weapons are known) and real gunfire, read from the
+    // game's own AI sound event, the one BSG's hearing sensor subscribes to, so the player's shots and any
+    // awake bot's shots count. A single stray shot is not a fight: a real cluster needs a few shots first.
+    private const float NoiseRangeLoud = 350f;
+    private const float NoiseRangeSuppressed = 120f;
+    private const float NoiseMinDistance = 40f;          // closer than this the skirmish / wake logic owns it
+    private const float NoiseClusterRadius = 60f;        // shots this close together are the same firefight
+    private const float NoiseLingerSeconds = 45f;        // a fight stays "audible" this long after its last shot
+    private const int NoiseMinRealShots = 4;
+    private const float NoiseReactionCooldownSeconds = 150f;
+    private const float NoisePollIntervalSeconds = 2f;
+
+    private sealed class NoiseEvent
+    {
+        public Vector3 Position;
+        public float Range;
+        public float LastShotAt;
+        public int Shots;
+        public bool Simulated;
+        public readonly HashSet<int> SourceSquadIds = new();
+        public readonly HashSet<int> RolledSquadIds = new();
+    }
+
+    private readonly List<NoiseEvent> _noises = new();
+    private readonly bool _hearingEnabled;
+    private bool _soundHooked;
+    private float _nextNoisePollAt;
+
+    private void HookGunfire()
+    {
+        if (!_hearingEnabled || _soundHooked) return;
+        try
+        {
+            var dispatcher = Singleton<GlobalEventDispatcher>.Instance;
+            if (dispatcher == null) return;
+            dispatcher.OnSoundPlayed += OnAiSoundPlayed;
+            _soundHooked = true;
+        }
+        catch (System.Exception e)
+        {
+            Log.Debug($"Ghost hearing: could not subscribe to the AI sound event ({e.Message}), real gunfire will not be heard");
+        }
+    }
+
+    public void Dispose()
+    {
+        if (!_soundHooked) return;
+        try { Singleton<GlobalEventDispatcher>.Instance.OnSoundPlayed -= OnAiSoundPlayed; } catch { }
+        _soundHooked = false;
+    }
+
+    // Fires for every AI-audible sound in the raid: keep it to a type test and a short list walk.
+    private void OnAiSoundPlayed(IPlayer player, Vector3 position, float power, AISoundType type)
+    {
+        if (type != AISoundType.gun && type != AISoundType.silencedGun) return;
+        try
+        {
+            var range = type == AISoundType.gun ? NoiseRangeLoud : NoiseRangeSuppressed;
+            var sourceSquadId = -1;
+            if (player is Player shooter && shooter.IsAI)
+            {
+                var agent = _botRoster.GetAgent(shooter.AIData?.BotOwner);
+                // A sleeper does not fire real rounds; a dormant shooter here is a simulated-fight artefact.
+                if (agent != null && agent.IsDormant) return;
+                if (agent?.Squad != null) sourceSquadId = agent.Squad.Id;
+            }
+            RegisterNoise(position, range, Time.time, simulated: false, sourceSquadId, -1);
+        }
+        catch
+        {
+            // Never let a listener break the game's sound dispatch.
+        }
+    }
+
+    private void RegisterNoise(Vector3 position, float range, float lastShotAt, bool simulated, int sourceA, int sourceB)
+    {
+        NoiseEvent noise = null;
+        for (var i = 0; i < _noises.Count; i++)
+        {
+            var n = _noises[i];
+            if (n.Simulated != simulated) continue;
+            if ((n.Position - position).sqrMagnitude > NoiseClusterRadius * NoiseClusterRadius) continue;
+            noise = n;
+            break;
+        }
+        if (noise == null)
+        {
+            noise = new NoiseEvent { Position = position, Simulated = simulated };
+            _noises.Add(noise);
+        }
+        noise.Range = Mathf.Max(noise.Range, range);
+        noise.LastShotAt = Mathf.Max(noise.LastShotAt, lastShotAt);
+        noise.Shots++;
+        if (sourceA >= 0) noise.SourceSquadIds.Add(sourceA);
+        if (sourceB >= 0) noise.SourceSquadIds.Add(sourceB);
+    }
+
+    /// <summary>A simulated fight is audible for its whole window, as loud as its loudest gun.</summary>
+    private void RegisterFightNoise(GhostUnit a, Vector3 posA, GhostUnit b, Vector3 posB, float duration)
+    {
+        if (!_hearingEnabled) return;
+        var loud = UnitHasLoudGun(a) || UnitHasLoudGun(b);
+        RegisterNoise((posA + posB) * 0.5f, loud ? NoiseRangeLoud : NoiseRangeSuppressed, Time.time + duration,
+            simulated: true, a.Squad?.Id ?? -1, b.Squad?.Id ?? -1);
+    }
+
+    private bool UnitHasLoudGun(GhostUnit unit)
+    {
+        for (var i = 0; i < unit.Agents.Count; i++)
+        {
+            var sound = WeaponSoundFromProfile(unit.Agents[i].Player?.ProfileId);
+            if (sound == null || !sound.IsSilenced) return true; // unknown gun: assume loud
+        }
+        for (var i = 0; i < unit.VanillaBots.Count; i++)
+        {
+            var sound = WeaponSoundFromProfile(unit.VanillaBots[i].GetPlayer?.ProfileId);
+            if (sound == null || !sound.IsSilenced) return true;
+        }
+        return false;
+    }
+
+    /// <summary>How likely a sleeping squad is to push a firefight it hears. PMCs follow their SAIN
+    /// archetype; PlayerScavs are opportunists; everything else (bot scavs, bosses, factions) stays on its
+    /// own business, as it does awake.</summary>
+    private static float NoiseCuriosity(Squad squad)
+    {
+        if (squad.Personality != null)
+        {
+            switch (squad.Archetype)
+            {
+                case PersonalityArchetype.VeryAggressive: return 0.85f;
+                case PersonalityArchetype.Aggressive: return 0.6f;
+                case PersonalityArchetype.Cautious: return 0.08f;
+                case PersonalityArchetype.Timmy: return 0.03f;
+                default: return 0.3f;
+            }
+        }
+        var lead = squad.Members.Count > 0 ? squad.Members[0].Bot : null;
+        return lead?.Profile != null && lead.Profile.WillBeAPlayerScav() ? 0.2f : 0f;
+    }
+
+    private void PollGhostHearing(List<Squad> squads)
+    {
+        if (!_hearingEnabled) return;
+        HookGunfire(); // the dispatcher may not exist yet when the system is constructed
+        var now = Time.time;
+        if (now < _nextNoisePollAt) return;
+        _nextNoisePollAt = now + NoisePollIntervalSeconds;
+
+        for (var i = _noises.Count - 1; i >= 0; i--)
+            if (now - _noises[i].LastShotAt > NoiseLingerSeconds) _noises.RemoveAt(i);
+        if (_noises.Count == 0) return;
+
+        for (var s = 0; s < squads.Count; s++)
+        {
+            var squad = squads[s];
+            if (squad == null || squad.Members.Count == 0 || !IsSquadDormant(squad)) continue;
+            if (squad.ExtractRequested || squad.InvestigateNoisePosition.HasValue) continue;
+            if (now < squad.GhostFightUntil || now - squad.LastNoiseReactionAt < NoiseReactionCooldownSeconds) continue;
+            var curiosity = NoiseCuriosity(squad);
+            if (curiosity <= 0f) continue;
+
+            var listener = squad.Members[0].Position;
+            for (var n = 0; n < _noises.Count; n++)
+            {
+                var noise = _noises[n];
+                if (!noise.Simulated && noise.Shots < NoiseMinRealShots) continue;
+                if (noise.SourceSquadIds.Contains(squad.Id) || noise.RolledSquadIds.Contains(squad.Id)) continue;
+                var dist = Vector3.Distance(listener, noise.Position);
+                if (dist < NoiseMinDistance || dist > noise.Range) continue;
+
+                noise.RolledSquadIds.Add(squad.Id); // one roll per squad per firefight, whatever the outcome
+                // A fight at the edge of earshot is less tempting than one next door.
+                var chance = curiosity * Mathf.Lerp(1f, 0.5f, dist / noise.Range);
+                if (Random.value > chance)
+                {
+                    Log.Debug($"GHOST HEARING: {squad} ({squad.Archetype}) heard {(noise.Simulated ? "a ghost fight" : "real gunfire")} {dist:F0}m away and ignored it (chance {chance:P0})");
+                    continue;
+                }
+                squad.InvestigateNoisePosition = noise.Position;
+                squad.LastNoiseReactionAt = now;
+                _windowNoiseReactions++;
+                Log.Info($"GHOST HEARING: {squad} ({(squad.Personality != null ? squad.Archetype.ToString() : "PlayerScav")}) heard {(noise.Simulated ? "a ghost fight" : $"real gunfire ({noise.Shots} shots)")} {dist:F0}m away (audible to {noise.Range:F0}m) and goes to look (chance {chance:P0})");
+                break;
+            }
+        }
+    }
+
+    private int _windowNoiseReactions;
+
     // Night model. A unit with no night vision (NVG or thermal goggles on the head, thermal / NV scope on
     // the gun in hand) loses most of its detection reach in the dark, optics included: magnification does
     // not help an eye that sees nothing. It also fights at a handicap against a unit that can see (first
@@ -1610,6 +1805,7 @@ public class DormancySystem
         if (_darkness > 0f)
             Log.Info($"GHOST SKIRMISH night: darkness {_darkness:F2}, {a.Label} nightVision={a.NightCapable} (x{NightFightMul(a, b):F2}), {b.Label} nightVision={b.NightCapable} (x{NightFightMul(b, a):F2})");
         QueueFightSounds(a, posA, b, posB, loserDeaths + winnerDeaths, duration, shotsPerSecond);
+        RegisterFightNoise(a, posA, b, posB, duration);
     }
 
     private bool UnitInFight(GhostUnit unit)

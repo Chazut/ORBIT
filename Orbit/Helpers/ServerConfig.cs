@@ -130,6 +130,7 @@ public static class ServerConfig
         [JsonProperty("ghost_fights_mode")] public string GhostFightsMode = "simulated";
         [JsonProperty("ghost_fight_sounds")] public bool GhostFightSounds = true;
         [JsonProperty("ghost_looting")] public bool GhostLooting = true;
+        [JsonProperty("ghost_hearing")] public bool GhostHearing = true;
         [JsonProperty("ghost_fight_frequency")] public string GhostFightFrequency = "normal";
         [JsonProperty("ghost_fight_lethality")] public float GhostFightLethality = 1f;
 

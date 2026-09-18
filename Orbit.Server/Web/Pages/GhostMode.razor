@@ -30,6 +30,8 @@
                      Tooltip="ON: sleeping ORBIT squads keep advancing along their planned routes at walking speed, so the raid keeps evolving off-screen. OFF: sleepers hold their position (AILimit-style freeze)." />
         <OrbitSwitch @bind-Value="Cfg.GhostMode.GhostLooting" Label="Ghost looting"
                      Tooltip="ON (default): sleeping ORBIT squads keep looting containers, corpses and loose items along their routes, so the raid economy keeps evolving off-screen. OFF: sleepers walk past everything and the loot waits for you." />
+        <OrbitSwitch @bind-Value="Cfg.GhostMode.GhostHearing" Label="Ghost hearing"
+                     Tooltip="ON (default): sleeping PMC and PlayerScav squads hear firefights, simulated ghost fights and real gunfire alike (about 350 m unsuppressed, 120 m suppressed), and may drop what they are doing to go and look. The odds follow their SAIN personality: a GigaChad almost always pushes the noise, an average PMC sometimes, a Rat or a Timmy almost never. OFF: sleepers are deaf, as before." />
         <MudSelect T="string" @bind-Value="Cfg.GhostMode.GhostFightsMode" Label="Ghost fights" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mt-3" Style="max-width: 380px"
                    HelperText="Hostile dormant units detect each other at a range scaled by their best optic (up to 400 m, terrain blocks line of sight). Scav-family units never fight each other.">
             <MudSelectItem T="string" Value="@("simulated")">Simulated: statistical resolution, zero cost (default)</MudSelectItem>
@@ -123,6 +125,7 @@
         Cfg.GhostMode.Enabled = d.Enabled;
         Cfg.GhostMode.GhostMovement = d.GhostMovement;
         Cfg.GhostMode.GhostLooting = d.GhostLooting;
+        Cfg.GhostMode.GhostHearing = d.GhostHearing;
         Cfg.GhostMode.GhostFightsMode = d.GhostFightsMode;
         Cfg.GhostMode.GhostFightFrequency = d.GhostFightFrequency;
         Cfg.GhostMode.GhostFightLethality = d.GhostFightLethality;

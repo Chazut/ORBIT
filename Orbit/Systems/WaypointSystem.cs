@@ -398,6 +398,32 @@ public class WaypointSystem
     // the squad is treated as stranded and locked to local cell only.
     private const int IslandedFailureThreshold = 3;
 
+    /// <summary>
+    /// Ghost hearing: a waypoint in the cell of a noise (or the closest neighbouring cell that yields one),
+    /// so a squad can be sent to look at a place rather than at a POI. Same bookkeeping as RequestNear: the
+    /// current assignment is returned first, the pick goes through AssignWaypoint (claims, blacklist,
+    /// reachability, faction filters).
+    /// </summary>
+    public Waypoint RequestForInvestigation(Entity entity, Vector3 worldPos)
+    {
+        var center = WorldToCell(worldPos);
+        if (!IsValidCell(center)) return null;
+        Return(entity);
+        for (var ring = 0; ring <= 1; ring++)
+        {
+            for (var dx = -ring; dx <= ring; dx++)
+            for (var dy = -ring; dy <= ring; dy++)
+            {
+                if (ring == 1 && dx == 0 && dy == 0) continue;
+                var coords = center + new Vector2Int(dx, dy);
+                if (!IsValidCell(coords) || !_cells[coords.x, coords.y].HasWaypoints) continue;
+                var pick = AssignWaypoint(entity, coords);
+                if (pick != null) return pick;
+            }
+        }
+        return null;
+    }
+
     public Waypoint RequestNear(Entity entity, Vector3 worldPos, Waypoint previous)
     {
         // Always try and return assignments first to avoid counting our own influence into the decision.

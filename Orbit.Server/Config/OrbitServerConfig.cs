@@ -68,6 +68,9 @@ public class GhostModeConfig
     // ON (default): sleeping ORBIT squads keep looting along their routes. OFF: sleepers walk past
     // everything and the loot waits for the players.
     public bool GhostLooting { get; set; } = true;
+    // ON (default): sleeping PMC / PlayerScav squads hear firefights (simulated ghost fights and real
+    // gunfire alike) and may go and investigate, with odds driven by their SAIN personality.
+    public bool GhostHearing { get; set; } = true;
     // "rare" | "normal" | "frequent": scales the ghost-fight contact odds and the per-pair cooldown.
     public string GhostFightFrequency { get; set; } = "normal";
     // 0.5 to 2.0: casualty multiplier for simulated fights (0.5 = often bloodless, 2 = bloodbaths).

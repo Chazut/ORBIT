@@ -98,6 +98,13 @@ public class Squad(int id, float[] taskScores, int targetMembersCount) : Entity(
     /// holds position for the window (you don't walk your route mid-firefight).</summary>
     public float GhostFightUntil = -999f;
 
+    /// <summary>Ghost hearing: where the sleeping squad decided to go and look after hearing a firefight.
+    /// Set by DormancySystem, consumed (and cleared) by GotoObjectiveStrategy on its next tick.</summary>
+    public Vector3? InvestigateNoisePosition;
+
+    /// <summary>Time.time of the last noise this squad reacted to, paces the next reaction.</summary>
+    public float LastNoiseReactionAt = -999f;
+
     /// <summary>
     /// Short human-readable string describing WHY this squad flipped
     /// <see cref="ExtractRequested"/>. Set at the same moment the flag
