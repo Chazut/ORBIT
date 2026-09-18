@@ -200,6 +200,10 @@ public class DormancySystem
 
     // Weapon effective-kill-range cache per player (skirmish casualties). Same 60s TTL rationale.
     private readonly Dictionary<Player, (float range, float at)> _killRangeCache = new();
+    // Night vision cache per bot (skirmish reach and fight odds at night). Same 60s TTL rationale.
+    private readonly Dictionary<BotOwner, (bool has, float at)> _nightVisionCache = new();
+    // Darkness of the current skirmish poll, 0 (day / lit interior) to 1 (full night).
+    private float _darkness;
 
     // Simulated-fight gunfire: shots queued at resolution time and played over the following seconds
     // through BetterAudio's own sources (the fighters' bodies stay inactive — we only read their
@@ -243,6 +247,7 @@ public class DormancySystem
         public bool IsSavage;
         public float Reach;
         public float KillRange; // best member weapon's effective kill distance (bEffDist, buckshot capped)
+        public bool NightCapable; // at least one member sees in the dark (NVG, thermal goggles, thermal / NV scope)
         public Squad Squad;          // ORBIT units
         public object VanillaKey;    // vanilla units
         public readonly List<Agent> Agents = new();        // ORBIT members (empty for vanilla units)
@@ -1114,6 +1119,7 @@ public class DormancySystem
     private void BuildGhostUnits(List<Squad> squads)
     {
         _ghostUnits.Clear();
+        _darkness = CurrentDarkness();
 
         for (var i = 0; i < squads.Count; i++)
         {
@@ -1132,7 +1138,9 @@ public class DormancySystem
                 unit.Agents.Add(squad.Members[m]);
                 unit.Reach = Mathf.Max(unit.Reach, UnitMemberReach(squad.Members[m].Bot));
                 unit.KillRange = Mathf.Max(unit.KillRange, WeaponKillRange(squad.Members[m].Player));
+                unit.NightCapable |= HasNightVision(squad.Members[m].Bot);
             }
+            ApplyNightReach(unit);
             _ghostUnits.Add(unit);
         }
 
@@ -1154,7 +1162,9 @@ public class DormancySystem
                 unit.VanillaBots.Add(group[m]);
                 unit.Reach = Mathf.Max(unit.Reach, UnitMemberReach(group[m]));
                 unit.KillRange = Mathf.Max(unit.KillRange, WeaponKillRange(group[m].GetPlayer));
+                unit.NightCapable |= HasNightVision(group[m]);
             }
+            ApplyNightReach(unit);
             _ghostUnits.Add(unit);
         }
     }
@@ -1206,6 +1216,90 @@ public class DormancySystem
         _opticCache[bot] = (mag, Time.time);
         return Mathf.Min(SkirmishReachCap, SkirmishBaseDetectRange * mag);
     }
+
+    // Night model. A unit with no night vision (NVG or thermal goggles on the head, thermal / NV scope on
+    // the gun in hand) loses most of its detection reach in the dark, optics included: magnification does
+    // not help an eye that sees nothing. It also fights at a handicap against a unit that can see (first
+    // shots, target acquisition); two blind sides or two equipped sides stay even, they simply meet
+    // closer. Darkness follows the raid clock: full from 22:30 to 04:30 with a one-hour ramp on each side.
+    // Factory night is always dark; Factory day, Labs and the Labyrinth are lit interiors, never night.
+    private const float NightBlindReach = 35f;
+    private const float NightBlindStrengthMul = 0.7f;
+    private const string SpecialScopeParentId = "55818aeb4bdc2ddc698b456a"; // thermal and NV scopes
+
+    private static float CurrentDarkness()
+    {
+        try
+        {
+            var world = Singleton<GameWorld>.Instance;
+            if (world == null) return 0f;
+            var map = (world.LocationId ?? "").ToLowerInvariant();
+            if (map == "factory4_night") return 1f;
+            if (map == "factory4_day" || map == "laboratory" || map == "labyrinth") return 0f;
+            var gameTime = world.GameDateTime;
+            if (gameTime == null) return 0f;
+            var hour = (float)gameTime.Calculate().TimeOfDay.TotalHours;
+            if (hour >= 22.5f || hour < 4.5f) return 1f;
+            if (hour >= 21.5f) return Mathf.InverseLerp(21.5f, 22.5f, hour);
+            if (hour < 5.5f) return 1f - Mathf.InverseLerp(4.5f, 5.5f, hour);
+            return 0f;
+        }
+        catch
+        {
+            return 0f; // no clock on this map: treat as day, nothing changes
+        }
+    }
+
+    private bool HasNightVision(BotOwner bot)
+    {
+        if (bot == null) return false;
+        if (_nightVisionCache.TryGetValue(bot, out var cached) && Time.time - cached.at < 60f)
+            return cached.has;
+        var has = false;
+        try
+        {
+            // NVG on the helmet: BSG's own flag, set when the headwear carries a NightVisionComponent.
+            has = bot.NightVision is { HaveNightVision: true };
+            var player = bot.GetPlayer;
+            if (!has && player != null)
+            {
+                // Thermal goggles are a separate component that BSG's flag ignores.
+                if (player.Inventory?.Equipment?.GetSlot(EquipmentSlot.Headwear)?.ContainedItem is CompoundItem headwear)
+                {
+                    foreach (var _ in headwear.GetItemComponentsInChildren<ThermalVisionComponent>())
+                    {
+                        has = true;
+                        break;
+                    }
+                }
+                // Thermal / NV scope on the weapon in hand (BSG's "special scopes").
+                if (!has && player.HandsController?.Item is Weapon weapon)
+                {
+                    foreach (var sight in weapon.GetItemComponentsInChildren<SightComponent>(false))
+                    {
+                        if (sight.Item?.Template?.ParentId?.ToString() != SpecialScopeParentId) continue;
+                        has = true;
+                        break;
+                    }
+                }
+            }
+        }
+        catch
+        {
+            // Disposed/edge-case inventory: no night vision.
+        }
+        _nightVisionCache[bot] = (has, Time.time);
+        return has;
+    }
+
+    private void ApplyNightReach(GhostUnit unit)
+    {
+        if (_darkness <= 0f || unit.NightCapable) return;
+        unit.Reach = Mathf.Lerp(unit.Reach, Mathf.Min(unit.Reach, NightBlindReach), _darkness);
+    }
+
+    private float NightFightMul(GhostUnit self, GhostUnit other)
+        => _darkness > 0f && !self.NightCapable && other.NightCapable ? Mathf.Lerp(1f, NightBlindStrengthMul, _darkness) : 1f;
 
     /// <summary>
     /// Effective kill distance of the weapon in a member's hands: the game's own per-weapon
@@ -1350,8 +1444,8 @@ public class DormancySystem
         // vs the duel distance — a buckshot squad at 300m fights at a fraction of its strength.
         var gunA = Mathf.Lerp(0.3f, 1f, Mathf.Clamp01(a.KillRange * 1.3f / Mathf.Max(distance, 10f)));
         var gunB = Mathf.Lerp(0.3f, 1f, Mathf.Clamp01(b.KillRange * 1.3f / Mathf.Max(distance, 10f)));
-        var rollA = UnitStrength(a) * rangeA * gunA * Random.Range(0.7f, 1.3f);
-        var rollB = UnitStrength(b) * rangeB * gunB * Random.Range(0.7f, 1.3f);
+        var rollA = UnitStrength(a) * rangeA * gunA * NightFightMul(a, b) * Random.Range(0.7f, 1.3f);
+        var rollB = UnitStrength(b) * rangeB * gunB * NightFightMul(b, a) * Random.Range(0.7f, 1.3f);
         var winner = rollA >= rollB ? a : b;
         var loser = rollA >= rollB ? b : a;
         var ratio = Mathf.Max(rollA, rollB) / Mathf.Max(0.1f, Mathf.Min(rollA, rollB));
@@ -1420,6 +1514,8 @@ public class DormancySystem
         _windowFights++;
         Log.Info($"GHOST SKIRMISH at {distance:F0}m: {a.Label} (str {rollA:F1}, reach {a.Reach:F0}m, gun {a.KillRange:F0}m) vs {b.Label} (str {rollB:F1}, reach {b.Reach:F0}m, gun {b.KillRange:F0}m), {winner.Label} wins over {duration:F0}s, {loserDeaths + winnerDeaths} killed");
 
+        if (_darkness > 0f)
+            Log.Info($"GHOST SKIRMISH night: darkness {_darkness:F2}, {a.Label} nightVision={a.NightCapable} (x{NightFightMul(a, b):F2}), {b.Label} nightVision={b.NightCapable} (x{NightFightMul(b, a):F2})");
         QueueFightSounds(a, posA, b, posB, loserDeaths + winnerDeaths, duration, shotsPerSecond);
     }
 
