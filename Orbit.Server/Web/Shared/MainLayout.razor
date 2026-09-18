@@ -2,6 +2,8 @@
 @implements IDisposable
 @inject ConfigService Configs
 @inject Orbit.Server.Zones.ZoneStoreService ZoneStore
+@inject EditHistoryService History
+@inject IJSRuntime JS
 @inject ISnackbar Snackbar
 
 <MudThemeProvider IsDarkMode="true" Theme="_orbitTheme" />
@@ -20,6 +22,12 @@
         <MudText Typo="Typo.h6" Style="letter-spacing: .35em; font-weight: 600;">ORBIT</MudText>
         <MudText Typo="Typo.body2" Class="ml-3 d-none d-sm-flex" Style="opacity:.5">server config</MudText>
         <MudSpacer />
+        <MudTooltip Text="@($"Undo the last change (Ctrl+Z){(History.UndoCount > 0 ? $", {History.UndoCount} step(s) available" : "")}. Covers every config page and the zone editor.")" Placement="Placement.Bottom">
+            <MudIconButton Icon="@Icons.Material.Filled.Undo" Color="Color.Inherit" Size="Size.Small" Disabled="@(!History.CanUndo)" OnClick="Undo" />
+        </MudTooltip>
+        <MudTooltip Text="@($"Redo (Ctrl+Y or Ctrl+Shift+Z){(History.RedoCount > 0 ? $", {History.RedoCount} step(s) available" : "")}")" Placement="Placement.Bottom">
+            <MudIconButton Icon="@Icons.Material.Filled.Redo" Color="Color.Inherit" Size="Size.Small" Class="mr-3" Disabled="@(!History.CanRedo)" OnClick="Redo" />
+        </MudTooltip>
         @if (_pendingChanges.Count > 0)
         {
             <div class="mr-3" style="position: relative">
@@ -127,26 +135,95 @@
     };
 
     // The pages mutate the config object directly through their bindings, so the layout cannot be
-    // notified of edits — a 1s poll diffing against the last-saved snapshot keeps the "unsaved
-    // changes" button honest at negligible cost (one small serialize per tick).
+    // notified of edits — a poll diffing against the last-saved snapshot keeps the "unsaved changes"
+    // button honest at negligible cost (a small serialize per tick). The same tick feeds the undo
+    // history, which is why it runs twice a second: an edit becomes undoable within a second.
     private List<(string Path, string From, string To)> _pendingChanges = new();
     private bool _changesOpen;
     private System.Threading.Timer? _pollTimer;
 
     protected override void OnInitialized()
     {
-        _pollTimer = new System.Threading.Timer(_ => InvokeAsync(PollChanges), null, 1000, 1000);
+        _pollTimer = new System.Threading.Timer(_ => InvokeAsync(PollChanges), null, 500, 500);
     }
 
-    public void Dispose() => _pollTimer?.Dispose();
+    public void Dispose()
+    {
+        _pollTimer?.Dispose();
+        _selfRef?.Dispose();
+    }
+
+    // ── undo / redo ──
+
+    private DotNetObjectReference<MainLayout>? _selfRef;
+
+    // Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z anywhere on an ORBIT page. Text fields keep the browser's own undo;
+    // sliders and switches are inputs too but have none, so they do not block the shortcut (a slider keeps
+    // the focus after a drag, which is exactly when Ctrl+Z gets pressed).
+    private const string ShortcutScript = @"
+        window.orbitRegisterKeys = function (ref) {
+            window.__orbitKeysRef = ref;
+            if (window.__orbitKeysBound) return;
+            window.__orbitKeysBound = true;
+            document.addEventListener('keydown', function (e) {
+                if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+                var k = (e.key || '').toLowerCase();
+                if (k !== 'z' && k !== 'y') return;
+                if (location.pathname.indexOf('/orbit') !== 0) return;
+                var t = e.target, tag = t && t.tagName ? t.tagName.toLowerCase() : '';
+                if (tag === 'textarea' || (t && t.isContentEditable)) return;
+                if (tag === 'input' && !/^(range|checkbox|radio|button|submit)$/i.test(t.type || '')) return;
+                var ref = window.__orbitKeysRef;
+                if (!ref) return;
+                e.preventDefault();
+                ref.invokeMethodAsync(k === 'y' || e.shiftKey ? 'RedoFromKey' : 'UndoFromKey').catch(function () { });
+            });
+        };";
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        try
+        {
+            _selfRef = DotNetObjectReference.Create(this);
+            await JS.InvokeVoidAsync("eval", ShortcutScript);
+            await JS.InvokeVoidAsync("orbitRegisterKeys", _selfRef);
+        }
+        catch
+        {
+            // No shortcuts (script blocked or circuit gone): the AppBar buttons still work.
+        }
+    }
+
+    [JSInvokable] public Task UndoFromKey() => InvokeAsync(Undo);
+    [JSInvokable] public Task RedoFromKey() => InvokeAsync(Redo);
+
+    private void Undo()
+    {
+        if (!History.Undo()) return;
+        PollChanges();
+        StateHasChanged();
+    }
+
+    private void Redo()
+    {
+        if (!History.Redo()) return;
+        PollChanges();
+        StateHasChanged();
+    }
 
     private void PollChanges()
     {
+        var historyMoved = History.Track();
         var changes = Configs.GetPendingChanges();
         // Zone-editor edits ride the same unsaved-changes button as config edits.
         foreach (var mapId in ZoneStore.GetPendingMaps())
             changes.Add(($"Zone editor.{Orbit.Server.Zones.ZoneStoreService.MapLabels[mapId]}", "saved", "edited"));
-        if (changes.Count == _pendingChanges.Count && changes.SequenceEqual(_pendingChanges)) return;
+        if (changes.Count == _pendingChanges.Count && changes.SequenceEqual(_pendingChanges))
+        {
+            if (historyMoved) StateHasChanged(); // the undo / redo buttons changed state
+            return;
+        }
         _pendingChanges = changes;
         if (_pendingChanges.Count == 0) _changesOpen = false;
         StateHasChanged();

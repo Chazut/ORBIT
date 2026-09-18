@@ -91,6 +91,17 @@ public class ConfigService(ISptLogger<ConfigService> logger)
         return true;
     }
 
+    /// <summary>Puts the in-memory config back to a previous state (undo / redo). No-op when it already is
+    /// in that state, so a zone-only undo does not re-bind every config page.</summary>
+    public void RestoreJson(string json)
+    {
+        if (json == ToJson()) return;
+        var restored = JsonSerializer.Deserialize<OrbitServerConfig>(json, _jsonOptions);
+        if (restored == null) return;
+        Config = restored;
+        ConfigReplaced?.Invoke();
+    }
+
     /// <summary>Reverts the in-memory config to the last loaded/saved state (the web UI's "Discard all").</summary>
     public void DiscardChanges()
     {

@@ -193,6 +193,44 @@ public class ZoneStoreService(ISptLogger<ZoneStoreService> logger)
         return seed;
     }
 
+    // ── Edit history support (EditHistoryService) ──────────────────────
+
+    /// <summary>Current and last-saved JSON of every working copy. The saved one is the baseline the history
+    /// adopts for a map it sees for the first time: a map can enter the working set already modified (pack
+    /// import), and that modification must stay undoable.</summary>
+    public Dictionary<string, (string Current, string Saved)> SnapshotWorking()
+    {
+        lock (_working)
+        {
+            var result = new Dictionary<string, (string, string)>();
+            foreach (var kv in _working)
+            {
+                var current = JsonSerializer.Serialize(kv.Value, _json);
+                result[kv.Key] = (current, _workingSavedJson.TryGetValue(kv.Key, out var saved) ? saved : current);
+            }
+            return result;
+        }
+    }
+
+    /// <summary>Puts working copies back to the given JSON (undo / redo). Only the maps that actually differ
+    /// are replaced, so the editor keeps its instances, and its selection, everywhere else.</summary>
+    public void RestoreWorking(IReadOnlyDictionary<string, string> jsonByMap)
+    {
+        var replaced = false;
+        lock (_working)
+        {
+            foreach (var kv in jsonByMap)
+            {
+                if (_working.TryGetValue(kv.Key, out var current) && JsonSerializer.Serialize(current, _json) == kv.Value) continue;
+                var restored = JsonSerializer.Deserialize<MapZoneModel>(kv.Value, _json);
+                if (restored == null) continue;
+                _working[kv.Key] = restored;
+                replaced = true;
+            }
+        }
+        if (replaced) ZonesReplaced?.Invoke();
+    }
+
     // ── Zone packs (export / import, "ORBIT addons" on the Forge) ──────
 
     /// <summary>Builds the shareable pack JSON from the CURRENT working copies of the given maps.</summary>

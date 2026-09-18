@@ -308,8 +308,10 @@
         InvokeAsync(() =>
         {
             _zones = ZoneStore.GetWorking(_mapId);
-            _selectedCustom = -1;
-            _selectedBuiltin = null;
+            // Undo / redo lands here too: keep the selection when it still exists, the card being edited
+            // must not vanish under the cursor every time a slider move is undone.
+            if (_selectedCustom >= _zones.CustomZones.Count) _selectedCustom = -1;
+            if (_selectedBuiltin != null && !_zones.BuiltinZones.ContainsKey(_selectedBuiltin)) _selectedBuiltin = null;
             StateHasChanged();
         });
     }
