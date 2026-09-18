@@ -1077,9 +1077,8 @@ public class DormancySystem
             {
                 var a = _ghostUnits[i];
                 var b = _ghostUnits[j];
-                // Savage-family units (scavs, bosses, cultists...) are allies of each other; every
-                // pairing involving a PMC-side unit is hostile (PMC vs PMC included, SPT free-for-all).
-                if (a.IsSavage && b.IsSavage) continue;
+                // Who fights whom is the game's own verdict, asked to both groups (see UnitsHostile).
+                if (!UnitsHostile(a, b)) continue;
 
                 // A unit mid-fight can't be pulled into a second one until its window closes.
                 if (UnitInFight(a) || UnitInFight(b)) continue;
@@ -1126,6 +1125,89 @@ public class DormancySystem
             }
         }
     }
+
+    // Pair verdicts from the hostility settings, cached for the raid: BSG's test rolls the "chanced enemy"
+    // odds on every call, so asking again at 2 Hz would turn every chanced pair hostile within seconds.
+    private readonly Dictionary<string, bool> _hostilityCache = new();
+    private readonly HashSet<string> _hostilityRolesLogged = new();
+
+    /// <summary>
+    /// Whether two ghost units would fight, by the game's own rules rather than a side shortcut. The old test
+    /// (two Savage-side units never fight, anything involving a PMC does) was wrong for every modded faction,
+    /// which all spawn on the Savage side: RUAF and Black Division are enemies of the scavs and of each other,
+    /// scavs attack UNTAR, cultists are hostile to most of them, while UNTAR and RUAF only WARN each other;
+    /// and PMC squads of the same faction are not always hostile either. BotsGroup.IsPlayerEnemy is what an
+    /// awake bot runs when it sees someone: the bot-type enemy / friend / warn lists of the location's
+    /// hostility settings (where MoreBotsAPI factions, SPT's PMC config, ABPS and RvR write theirs), then the
+    /// per-side behaviour. One hostile direction is enough, the other side defends itself. Grudges picked up
+    /// while awake (BotsGroup.Enemies) are read live on top of the cached verdict.
+    /// </summary>
+    private bool UnitsHostile(GhostUnit a, GhostUnit b)
+    {
+        var botA = LeadBot(a);
+        var botB = LeadBot(b);
+        if (botA == null || botB == null) return !(a.IsSavage && b.IsSavage);
+        try
+        {
+            var groupA = botA.BotsGroup;
+            var groupB = botB.BotsGroup;
+            if (groupA == null || groupB == null) return !(a.IsSavage && b.IsSavage);
+            if (ReferenceEquals(groupA, groupB)) return false;
+            // IPlayer handles come from the game world's bridge: upcasting Player to IPlayer here would drag
+            // the voice-chat assembly (Player implements IDissonancePlayer) into ORBIT's compile references.
+            var playerA = _gameWorld.GetAlivePlayerBridgeByProfileID(botA.ProfileId)?.iPlayer;
+            var playerB = _gameWorld.GetAlivePlayerBridgeByProfileID(botB.ProfileId)?.iPlayer;
+            if (playerA == null || playerB == null) return !(a.IsSavage && b.IsSavage);
+            if (groupA.IsEnemy(playerB) || groupB.IsEnemy(playerA))
+            {
+                // BSG registers known hostiles on a group's enemy list as soon as they meet or spawn, so most
+                // hostile pairs end here: log them too, or the matrix in the log only shows the friendly ones.
+                LogHostilityOnce(botA, botB, true, "already on each other's enemy list");
+                return true;
+            }
+
+            var key = string.CompareOrdinal(a.Key, b.Key) < 0 ? a.Key + "|" + b.Key : b.Key + "|" + a.Key;
+            if (_hostilityCache.TryGetValue(key, out var cached)) return cached;
+            var aHatesB = groupA.IsPlayerEnemy(playerB);
+            var bHatesA = groupB.IsPlayerEnemy(playerA);
+            var hostile = aHatesB || bHatesA;
+            _hostilityCache[key] = hostile;
+
+            LogHostilityOnce(botA, botB, hostile, $"settings: first attacks second {aHatesB}, second attacks first {bHatesA}");
+            return hostile;
+        }
+        catch
+        {
+            return !(a.IsSavage && b.IsSavage); // torn-down group: the old side rule
+        }
+    }
+
+    /// <summary>The weapon a bot brings to a simulated fight: what it holds, or for a sleeper the better
+    /// weapon it equipped while asleep and has not drawn yet (hands are resynchronised at wake). Sounds keep
+    /// following the weapon in hands, the only one with a live sound player.</summary>
+    private Item FightWeaponOf(BotOwner bot)
+    {
+        if (bot == null) return null;
+        var agent = _botRoster.GetAgent(bot);
+        if (agent != null && agent.IsDormant && agent.GhostBestWeapon != null) return agent.GhostBestWeapon;
+        return bot.GetPlayer?.HandsController?.Item;
+    }
+
+    /// <summary>One Info line per pair of bot types and verdict per raid: the hostility matrix as the game
+    /// sees it.</summary>
+    private void LogHostilityOnce(BotOwner botA, BotOwner botB, bool hostile, string why)
+    {
+        var roleA = botA.Profile?.Info?.Settings?.Role.ToString() ?? "?";
+        var roleB = botB.Profile?.Info?.Settings?.Role.ToString() ?? "?";
+        var roleKey = string.CompareOrdinal(roleA, roleB) < 0 ? roleA + "|" + roleB : roleB + "|" + roleA;
+        if (!_hostilityRolesLogged.Add(roleKey + (hostile ? "+" : "-"))) return;
+        Log.Info($"GHOST HOSTILITY: {roleA} vs {roleB}: {(hostile ? "hostile" : "not hostile")} ({why})");
+    }
+
+    private static BotOwner LeadBot(GhostUnit unit)
+        => unit.Agents.Count > 0 ? unit.Agents[0].Bot
+            : unit.VanillaBots.Count > 0 ? unit.VanillaBots[0]
+            : null;
 
     private void BuildGhostUnits(List<Squad> squads)
     {
@@ -1209,7 +1291,7 @@ public class DormancySystem
         var mag = 1f;
         try
         {
-            var weapon = bot.GetPlayer?.HandsController?.Item;
+            var weapon = FightWeaponOf(bot);
             if (weapon != null)
             {
                 foreach (var sight in weapon.GetItemComponentsInChildren<SightComponent>(false))
@@ -1284,7 +1366,7 @@ public class DormancySystem
                     }
                 }
                 // Thermal / NV scope on the weapon in hand (BSG's "special scopes").
-                if (!has && player.HandsController?.Item is Weapon weapon)
+                if (!has && FightWeaponOf(bot) is Weapon weapon)
                 {
                     foreach (var sight in weapon.GetItemComponentsInChildren<SightComponent>(false))
                     {
@@ -1327,7 +1409,7 @@ public class DormancySystem
         var range = DefaultKillRange;
         try
         {
-            if (p.HandsController?.Item is Weapon weapon)
+            if (FightWeaponOf(p.AIData?.BotOwner) is Weapon weapon)
             {
                 range = Mathf.Max(25f, weapon.Template.bEffDist);
                 var ammo = weapon.CurrentAmmoTemplate;
