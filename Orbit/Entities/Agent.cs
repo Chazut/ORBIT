@@ -93,6 +93,10 @@ public class Agent(int id, BotOwner bot, float[] taskScores) : Entity(id, taskSc
     /// </summary>
     public int ConsecutiveSamePoiFailures;
 
+    /// <summary>Distance to <see cref="LastFailedPoiId"/> when the last arrival failure was recorded. A later
+    /// failure that ends clearly closer is a leg along a chain of partial paths, not a dead end.</summary>
+    public float LastFailedPoiDistance = float.MaxValue;
+
     /// <summary>
     /// POI id this agent is currently failing arrival on because Physics.Raycast LoS is blocked (within the
     /// arrival radius but a wall sits between bot and target). -1 = not tracking. Together with <see

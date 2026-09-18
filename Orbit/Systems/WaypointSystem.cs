@@ -1303,7 +1303,11 @@ public class WaypointSystem
                     continue;
                 }
                 var gapSqr = (corners[corners.Length - 1] - loc.Position).sqrMagnitude;
-                Log.Debug($"{squad} exfil scan: {loc} eligible but path PARTIAL — ends {Mathf.Sqrt(gapSqr):F0}m short");
+                // Where and how far the partial path goes tells a real mesh cut (same end point from anywhere) from
+                // a search that ran out of budget on a long route (the end point follows the leader).
+                var partialLength = 0f;
+                for (var c = 1; c < corners.Length; c++) partialLength += Vector3.Distance(corners[c - 1], corners[c]);
+                Log.Debug($"{squad} exfil scan: {loc} eligible but path PARTIAL — ends {Mathf.Sqrt(gapSqr):F0}m short (from {leaderPos}, {Vector3.Distance(leaderPos, loc.Position):F0}m away, path covers {partialLength:F0}m in {corners.Length} corners and ends at {corners[corners.Length - 1]})");
                 if (gapSqr < bestPartialGapSqr)
                 {
                     bestPartialGapSqr = gapSqr;

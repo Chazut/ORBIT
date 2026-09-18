@@ -667,9 +667,13 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                 {
                     // Re-arm the move order rather than issuing it once: a SAIN-combat detour drops the
                     // destination and an arrival stall flips it to Failed, either of which strands the bot near
-                    // the exfil with no way back into the arrival->Extracting handler.
+                    // the exfil with no way back into the arrival->Extracting handler. None is not stalled: it is
+                    // the armed state itself, waiting for GotoObjectiveAction, which cannot run while SAIN holds
+                    // the bot. An emergency extract usually fires mid-fight, and counting None re-armed the same
+                    // order every tick for the whole fight (257 "lost its move order" lines in two raids).
                     var firstDispatch = agentObjective.Location != agent.SoloExtractTarget;
                     var stalled = !firstDispatch
+                                  && agentObjective.Status != ObjectiveStatus.None
                                   && agentObjective.Status != ObjectiveStatus.Moving
                                   && agentObjective.Status != ObjectiveStatus.Extracting;
                     if (firstDispatch || stalled)

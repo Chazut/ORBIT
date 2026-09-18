@@ -457,6 +457,9 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
         agent.LoSBlockedSinceTime = -1f;
     }
 
+    // An attempt that ends at least this much closer to the POI than the previous failed one is progress.
+    private const float ArrivalProgressMeters = 20f;
+
     // Per-agent blacklist on repeated arrival failures for the same POI. The squad-level
     // ConsecutiveFailedDispatches only fires when ALL members fail at once; a single member stuck on an
     // unreachable splinter while squadmates loot fine never triggers it. Two failure modes feed in: "stopped
@@ -465,15 +468,26 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
     {
         if (location == null || agent?.Squad == null) return;
         var locId = location.Id;
-        if (agent.LastFailedPoiId == locId)
-        {
-            agent.ConsecutiveSamePoiFailures++;
-        }
-        else
+        var distance = Vector3.Distance(agent.Position, location.Position);
+        if (agent.LastFailedPoiId != locId)
         {
             agent.LastFailedPoiId = locId;
             agent.ConsecutiveSamePoiFailures = 1;
         }
+        else if (distance < agent.LastFailedPoiDistance - ArrivalProgressMeters)
+        {
+            // The attempt ended clearly closer than the previous one: the bot is walking a chain of partial
+            // paths, each leg as far as the pathfinder could see, and it is getting there. Interchange raid,
+            // sgt_dogwater: 560m, 394m then 261m from NW_Exfil, blacklisted on the third leg while it needed
+            // two more, then the same on SE_Exfil (775m, 605m, 316m) and it never left the raid.
+            Log.Info($"{agent} stopped {distance:F0}m from {location}, {agent.LastFailedPoiDistance - distance:F0}m closer than the previous attempt: progress, arrival strikes reset");
+            agent.ConsecutiveSamePoiFailures = 1;
+        }
+        else
+        {
+            agent.ConsecutiveSamePoiFailures++;
+        }
+        agent.LastFailedPoiDistance = distance;
         if (agent.ConsecutiveSamePoiFailures >= 3)
         {
             // Exfil special case: the squad has already committed to extracting (ExtractRequested set,
