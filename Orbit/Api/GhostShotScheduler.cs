@@ -56,9 +56,10 @@ public struct GhostWeaponProfile
             profile.Mode = hasAuto || (modes == null && profile.Mode == Kind.Auto) ? Kind.Auto
                 : hasBurst ? Kind.Burst
                 : Kind.Semi;
-            // Capped at 850: above that (MP7, Vector, KEDR, SR-2M, P90) the per-shot one-shots pile up into
-            // a buzz once heard from a distance, and players report the fights as "way too fast".
-            profile.CyclicRpm = Mathf.Clamp(template.bFirerate > 0 ? template.bFirerate : 600f, 300f, 850f);
+            // The weapon's real cyclic rate, no cap. The old 850 limit was a workaround for fights that
+            // sounded "way too fast": the actual cause was the automatic Body bank being a 16-round loop
+            // stacked once per round (see GhostShotPlayback). The bounds only guard against bad template data.
+            profile.CyclicRpm = Mathf.Clamp(template.bFirerate > 0 ? template.bFirerate : 600f, 300f, 1500f);
         }
         profile.SemiRpm = Mathf.Clamp(template.SingleFireRate > 0 ? template.SingleFireRate : 240f, 60f, 600f);
         return profile;

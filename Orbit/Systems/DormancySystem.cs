@@ -213,6 +213,9 @@ public class DormancySystem
         public float At;
         public Vector3 Pos;
         public WeaponSoundPlayer Sound;
+        public int Rounds;            // rounds of this trigger pull (automatic weapons loop their Body clip)
+        public bool IsTail;           // end of an automatic pull: cut the loop, play the Tail bank
+        public BetterSource LoopSource;
     }
 
     private readonly List<PendingShot> _pendingShots = new();
@@ -1826,14 +1829,18 @@ public class DormancySystem
     {
         if (sound == null || budget <= 0) return;
         var times = Api.GhostShotScheduler.Schedule(weapon, budget, duration, startOffset, pauseScale);
-        for (var i = 0; i < times.Count; i++)
+        // One entry per TRIGGER PULL, not per round: an automatic weapon's Body clip is a 16-round loop
+        // that must be started once and cut, see GhostShotPlayback.
+        var pulls = Api.GhostShotPlayback.GroupTriggerPulls(times, weapon, sound.IsAutoWeapon);
+        for (var i = 0; i < pulls.Count; i++)
         {
             _pendingShots.Add(new PendingShot
             {
-                At = Time.time + times[i],
+                At = Time.time + pulls[i].At,
                 // A shooter shifts around its own spot between shots, it never teleports.
                 Pos = pos + new Vector3(Random.Range(-1.5f, 1.5f), 0f, Random.Range(-1.5f, 1.5f)),
                 Sound = sound,
+                Rounds = pulls[i].Rounds,
             });
         }
     }
@@ -1911,15 +1918,27 @@ public class DormancySystem
             _pendingShots.RemoveAt(i);
             try
             {
-                var bank = PickGhostBank(shot.Sound);
-                if (bank == null) continue;
                 var listenerDist = Mathf.Sqrt(MinSqrDistanceToHumans(shot.Pos));
-                // PlayAtPoint (not the Distant variant): the bank's own source group, mixer and 3D
-                // rolloff, i.e. the exact path a real remote gunshot takes in FireBullet. The Distant
-                // variant forces the ambience "SuperSourceDistant" group, which colours every weapon
-                // the same way. Null = the bank's rolloff says the listener is out of earshot.
-                if (audio.PlayAtPoint(shot.Pos, bank, listenerDist, 1f) != null) _windowShotsPlayed++;
-                else _windowShotsDropped++;
+                if (shot.IsTail)
+                {
+                    Api.GhostShotPlayback.PlayTail(audio, shot.Sound, shot.LoopSource, shot.Pos, listenerDist);
+                    continue;
+                }
+                var rounds = Mathf.Max(1, shot.Rounds);
+                var source = Api.GhostShotPlayback.Play(audio, shot.Sound, shot.Pos, listenerDist, rounds, out var tailDelay);
+                if (source == null)
+                {
+                    _windowShotsDropped += rounds;
+                    continue;
+                }
+                _windowShotsPlayed += rounds;
+                if (tailDelay > 0f)
+                {
+                    _pendingShots.Add(new PendingShot
+                    {
+                        At = Time.time + tailDelay, Pos = shot.Pos, Sound = shot.Sound, IsTail = true, LoopSource = source,
+                    });
+                }
             }
             catch
             {

@@ -38,6 +38,9 @@ public class OrbitFikaPlugin : BaseUnityPlugin
         public float At;
         public Vector3 Pos;
         public WeaponSoundPlayer Sound;
+        public int Rounds;
+        public bool IsTail;
+        public BetterSource LoopSource;
     }
 
     private static ManualLogSource _log;
@@ -176,13 +179,16 @@ public class OrbitFikaPlugin : BaseUnityPlugin
     {
         if (sound == null || budget <= 0) return;
         var times = Orbit.Api.GhostShotScheduler.Schedule(weapon, budget, duration, startOffset, pauseScale);
-        for (var i = 0; i < times.Count; i++)
+        // One entry per trigger pull: an automatic weapon's Body clip is a 16-round loop (GhostShotPlayback).
+        var pulls = Orbit.Api.GhostShotPlayback.GroupTriggerPulls(times, weapon, sound.IsAutoWeapon);
+        for (var i = 0; i < pulls.Count; i++)
         {
             _pending.Add(new PendingShot
             {
-                At = Time.time + times[i],
+                At = Time.time + pulls[i].At,
                 Pos = pos + new Vector3(Random.Range(-1.5f, 1.5f), 0f, Random.Range(-1.5f, 1.5f)),
                 Sound = sound,
+                Rounds = pulls[i].Rounds,
             });
         }
     }
@@ -235,16 +241,20 @@ public class OrbitFikaPlugin : BaseUnityPlugin
             _pending.RemoveAt(i);
             try
             {
-                // Distant gunshots come from the BODY bank (distance-blended clips, same as
-                // FireBullet); tails alone sound dull and identical for every weapon.
-                var bank = shot.Sound.IsSilenced
-                    ? (shot.Sound.BodySilenced != null ? shot.Sound.BodySilenced
-                        : shot.Sound.Body != null ? shot.Sound.Body : shot.Sound.TailSilenced)
-                    : (shot.Sound.Body != null ? shot.Sound.Body : shot.Sound.Tail);
-                if (bank == null) continue;
-                // PlayAtPoint, not the Distant variant: the bank's own source group and 3D rolloff,
-                // the same path a real remote gunshot takes (the Distant group colours every weapon alike).
-                audio.PlayAtPoint(shot.Pos, bank, Vector3.Distance(listenerPos, shot.Pos), 1f);
+                var listenerDist = Vector3.Distance(listenerPos, shot.Pos);
+                if (shot.IsTail)
+                {
+                    Orbit.Api.GhostShotPlayback.PlayTail(audio, shot.Sound, shot.LoopSource, shot.Pos, listenerDist);
+                    continue;
+                }
+                var source = Orbit.Api.GhostShotPlayback.Play(audio, shot.Sound, shot.Pos, listenerDist, Mathf.Max(1, shot.Rounds), out var tailDelay);
+                if (source != null && tailDelay > 0f)
+                {
+                    _pending.Add(new PendingShot
+                    {
+                        At = Time.time + tailDelay, Pos = shot.Pos, Sound = shot.Sound, IsTail = true, LoopSource = source,
+                    });
+                }
             }
             catch
             {
