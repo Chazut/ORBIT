@@ -138,7 +138,11 @@
                  style="display:flex; align-items:center; gap:8px; padding:4px 8px; border-radius:6px; cursor:pointer; background:@(rowSelected ? "rgba(255,180,84,.12)" : _hoverBuiltin == rowName ? "rgba(255,255,255,.05)" : "transparent")">
                 <span style="width:9px; height:9px; border-radius:50%; background:@rowColor; flex-shrink:0"></span>
                 <span style="font-size:.83rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap">@rowName</span>
-                <span style="margin-left:auto; font-size:.72rem; opacity:.5; flex-shrink:0">@(unplacedRow ? "?" : $"{bz.Radius.Min:F0}-{bz.Radius.Max:F0}m")</span>
+                @if (ForceCenteredOnZeroWarning(bz.Force) is { } rowWarning)
+                {
+                    <span title="@rowWarning" style="margin-left:auto; color:#FFB454; font-size:.8rem; flex-shrink:0">&#9888;</span>
+                }
+                <span style="margin-left:@(ForceCenteredOnZeroWarning(bz.Force) == null ? "auto" : "6px"); font-size:.72rem; opacity:.5; flex-shrink:0">@(unplacedRow ? "?" : $"{bz.Radius.Min:F0}-{bz.Radius.Max:F0}m")</span>
             </div>
         }
         @for (var i = 0; i < _zones.CustomZones.Count; i++)
@@ -152,7 +156,11 @@
                  style="display:flex; align-items:center; gap:8px; padding:4px 8px; border-radius:6px; cursor:pointer; background:@(rowSelected ? "rgba(255,180,84,.12)" : _hoverCustom == rowIdx ? "rgba(255,255,255,.05)" : "transparent")">
                 <span style="width:9px; height:9px; border-radius:50%; background:@rowColor; border:1px dashed #E6EAF2; flex-shrink:0"></span>
                 <span style="font-size:.83rem">@($"Custom {rowIdx + 1} ({zone.Position.X:F0}, {zone.Position.Y:F0})")</span>
-                <span style="margin-left:auto; font-size:.72rem; opacity:.5; flex-shrink:0">@($"{zone.Radius.Min:F0}-{zone.Radius.Max:F0}m")</span>
+                @if (ForceCenteredOnZeroWarning(zone.Force) is { } rowWarning)
+                {
+                    <span title="@rowWarning" style="margin-left:auto; color:#FFB454; font-size:.8rem; flex-shrink:0">&#9888;</span>
+                }
+                <span style="margin-left:@(ForceCenteredOnZeroWarning(zone.Force) == null ? "auto" : "6px"); font-size:.72rem; opacity:.5; flex-shrink:0">@($"{zone.Radius.Min:F0}-{zone.Radius.Max:F0}m")</span>
             </div>
         }
         @if (AvailableBuiltins().Any())
@@ -183,6 +191,10 @@
                          Tooltip="Rolled once per raid between min and max with a gaussian: about 68% of raids land in the middle third of the range, 95% in the middle two thirds, the edges are rare. Positive attracts squads, negative repels them. A range centered on zero (like -0.3 / 0.3) is a zone that does nothing most raids: shift it instead. -0.5 / 1.5 pulls at roughly +0.5 most raids, hard in about 2% of raids, and repels in about 7% (1 raid in 15)." />
             <OrbitSlider T="float" @bind-Value="sel.Force.Max" Label="Force max" Min="-10f" Max="10f" Step="0.05f" Fmt="0.00"
                          Tooltip="Rolled once per raid between min and max with a gaussian: about 68% of raids land in the middle third of the range, 95% in the middle two thirds, the edges are rare. Positive attracts squads, negative repels them. A range centered on zero (like -0.3 / 0.3) is a zone that does nothing most raids: shift it instead. -0.5 / 1.5 pulls at roughly +0.5 most raids, hard in about 2% of raids, and repels in about 7% (1 raid in 15)." />
+            @if (ForceCenteredOnZeroWarning(sel.Force) is { } selForceWarning)
+            {
+                <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-1 mb-2">@selForceWarning</MudAlert>
+            }
             <OrbitSlider T="float" @bind-Value="sel.Decay" Label="Decay" Min="0.1f" Max="8f" Step="0.1f" Fmt="0.0"
                          Tooltip="How the pull fades from center to edge. 1 = linear. Below 1 = stays strong almost all the way to the edge. Above 1 = squeezed into the center, the rest of the zone barely attracts." />
             <OrbitSwitch @bind-Value="sel.KillMains" Label="Kill-main anchor"
@@ -203,6 +215,10 @@
                          Tooltip="Rolled once per raid between min and max with a gaussian: about 68% of raids land in the middle third of the range, 95% in the middle two thirds, the edges are rare. Positive attracts squads, negative repels them. A range centered on zero (like -0.3 / 0.3) is a zone that does nothing most raids: shift it instead. -0.5 / 1.5 pulls at roughly +0.5 most raids, hard in about 2% of raids, and repels in about 7% (1 raid in 15)." />
             <OrbitSlider T="float" @bind-Value="selBz.Force.Max" Label="Force max" Min="-10f" Max="10f" Step="0.05f" Fmt="0.00"
                          Tooltip="Rolled once per raid between min and max with a gaussian: about 68% of raids land in the middle third of the range, 95% in the middle two thirds, the edges are rare. Positive attracts squads, negative repels them. A range centered on zero (like -0.3 / 0.3) is a zone that does nothing most raids: shift it instead. -0.5 / 1.5 pulls at roughly +0.5 most raids, hard in about 2% of raids, and repels in about 7% (1 raid in 15)." />
+            @if (ForceCenteredOnZeroWarning(selBz.Force) is { } selBzForceWarning)
+            {
+                <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-1 mb-2">@selBzForceWarning</MudAlert>
+            }
             <OrbitSlider T="float" @bind-Value="selBz.Decay" Label="Decay" Min="0.1f" Max="8f" Step="0.1f" Fmt="0.0"
                          Tooltip="How the pull fades from center to edge. 1 = linear. Below 1 = stays strong almost all the way to the edge. Above 1 = squeezed into the center, the rest of the zone barely attracts." />
             <OrbitSwitch @bind-Value="selBz.KillMains" Label="Kill-main anchor"
@@ -591,6 +607,26 @@
         Math.Clamp(z, MathF.Min(_view.Z1, _view.Z2), MathF.Max(_view.Z1, _view.Z2)));
 
     private static string F(float v) => v.ToString("0.##", CultureInfo.InvariantCulture);
+
+    /// <summary>
+    /// Non-null when the force range is centered around zero (midpoint within a tenth of the range's width).
+    /// The per-raid roll is a gaussian on the midpoint with sigma = a sixth of the range, so about 68% of raids
+    /// land in the middle third: with the midpoint on zero the zone barely pulls or pushes most raids, whatever
+    /// its radius. Shown as an icon in the zone list and in full on the selected zone's card.
+    /// </summary>
+    private static string? ForceCenteredOnZeroWarning(ZoneRange force)
+    {
+        var min = MathF.Min(force.Min, force.Max);
+        var max = MathF.Max(force.Min, force.Max);
+        var width = max - min;
+        var mid = (min + max) * 0.5f;
+        if (width < 0.001f)
+            return MathF.Abs(mid) < 0.005f ? "Force is 0: this zone does nothing." : null;
+        if (MathF.Abs(mid) > width * 0.1f) return null;
+        var lo = (min + width / 3f).ToString("0.00", CultureInfo.InvariantCulture);
+        var hi = (max - width / 3f).ToString("0.00", CultureInfo.InvariantCulture);
+        return $"Force range centered around 0: the roll is gaussian, so about 68% of raids land between {lo} and {hi} and the zone barely pulls or pushes. Shift the range if you want it to act every raid, for example 0.2 / 0.8 instead of -0.3 / 0.3.";
+    }
 
     /// <summary>
     /// Arrow overlay previewing the advection pull. Mirrors WaypointSystem's per-cell formula
