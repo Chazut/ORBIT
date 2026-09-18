@@ -101,6 +101,13 @@ public class Movement
     /// map door, see MovementSystem.GhostHandleDoors).</summary>
     public float NextGhostDoorCheck;
 
+    // Ghost gait stand-ins for what an inactive body cannot report (see MovementSystem.GhostCanSprint):
+    // seconds of sprint left, the exhausted latch, and a throttled roof check replacing the environment id.
+    public float GhostStamina = 14f;
+    public bool GhostExhausted;
+    public bool GhostIndoors;
+    public float NextGhostIndoorCheck;
+
     public bool HasPath
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]

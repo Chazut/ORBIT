@@ -256,8 +256,76 @@ public class MovementSystem
         }
     }
 
-    /// <summary>Walking speed used by the dormant ghost follower (m/s), roughly EFT walk pace.</summary>
-    private const float GhostWalkSpeed = 1.9f;
+    // Ghost gait, aligned on what awake bots actually do. Measured on RaidReview position data (4 raids,
+    // moving samples only): a full-speed walk clusters at 2.5-3.0 m/s (scav median 2.74), a sprint at
+    // 5.0-5.5 m/s (PMC p90-p97 5.3-5.4). The old flat 1.9 m/s made every ghost a third slower than a
+    // walking bot and erased the personalities: a GigaChad ghost travelled like a Timmy.
+    private const float GhostWalkSpeed = 2.8f;
+    private const float GhostSprintSpeed = 5.3f;
+    private const float GhostCrouchSpeedMul = 0.5f;
+    private const float GhostSprintBurstSeconds = 14f;   // stamina stand-in: a sleeper's Physical does not tick
+    private const float GhostSprintRecoverSeconds = 10f; // time to refill a fully drained burst
+    private const float GhostIndoorCheckInterval = 1f;
+    private const float GhostRoofCheckHeight = 12f;
+
+    /// <summary>Speed of the ghost follower this frame. The gait INTENT is the live one: the actions keep
+    /// setting movement.Sprint / Speed / Pose for a sleeper exactly as for an awake bot (scavs and Timmies
+    /// never sprint, PMCs sprint when far and walk the final approach, a GigaChad sprints all the way).</summary>
+    private float GhostSpeed(Agent agent)
+    {
+        var movement = agent.Movement;
+        var crouched = movement.Pose < 0.5f;
+        var sprinting = GhostUpdateSprint(agent, movement.Sprint && !crouched);
+        if (sprinting) return GhostSprintSpeed;
+        var speed = GhostWalkSpeed * Mathf.Clamp(movement.Speed, 0.1f, 1f);
+        return crouched ? speed * GhostCrouchSpeedMul : speed;
+    }
+
+    // Same gates as CanSprint for a live body, with stand-ins for what an inactive body cannot report: the
+    // environment id is frozen at sleep time (a throttled roof ray replaces it: no running indoors) and the
+    // stamina does not tick (a burst / recovery budget replaces it). Twisty paths are walked, as awake.
+    private bool GhostUpdateSprint(Agent agent, bool wantsSprint)
+    {
+        var movement = agent.Movement;
+        var allowed = wantsSprint && !movement.GhostExhausted;
+        if (allowed)
+        {
+            if (Time.time >= movement.NextGhostIndoorCheck)
+            {
+                movement.NextGhostIndoorCheck = Time.time + GhostIndoorCheckInterval;
+                movement.GhostIndoors = Physics.Raycast(agent.Position + Vector3.up * 1.6f, Vector3.up,
+                    GhostRoofCheckHeight, TeleportVisLayerMask.value);
+            }
+            if (movement.GhostIndoors) allowed = false;
+        }
+        if (allowed)
+        {
+            var jitterLimit = movement.Urgency switch
+            {
+                MovementUrgency.High => 45f,
+                MovementUrgency.Low => 20f,
+                _ => 30f
+            };
+            if (PathHelper.CalculatePathAngleJitter(movement.Path, movement.CurrentCorner, 10f) >= jitterLimit) allowed = false;
+        }
+
+        if (allowed)
+        {
+            movement.GhostStamina -= Time.deltaTime;
+            if (movement.GhostStamina <= 0f)
+            {
+                movement.GhostStamina = 0f;
+                movement.GhostExhausted = true; // walk until most of the burst is back
+            }
+            return true;
+        }
+
+        movement.GhostStamina = Mathf.Min(GhostSprintBurstSeconds,
+            movement.GhostStamina + Time.deltaTime * GhostSprintBurstSeconds / GhostSprintRecoverSeconds);
+        if (movement.GhostExhausted && movement.GhostStamina >= GhostSprintBurstSeconds * 0.6f)
+            movement.GhostExhausted = false;
+        return false;
+    }
 
     /// <summary>
     /// Path-following for a dormant bot: the disabled GameObject's transform is still drivable, so advance
@@ -275,7 +343,7 @@ public class MovementSystem
 
         var transform = agent.Player.Transform;
         var pos = transform.position;
-        var step = GhostWalkSpeed * Time.deltaTime;
+        var step = GhostSpeed(agent) * Time.deltaTime;
 
         var corner = movement.Path[movement.CurrentCorner];
         var toCorner = corner - pos;
@@ -344,7 +412,7 @@ public class MovementSystem
     // closed until someone interacts with it locally).
     private const float GhostDoorCheckInterval = 0.25f;
     private const float GhostDoorScanRadiusSqr = 3f * 3f;
-    private const float GhostDoorLookahead = 1.5f;
+    private const float GhostDoorLookahead = 2.5f;
     private const float GhostDoorBoundsPadding = 0.25f;
     private const float GhostUnlockTimeoutSeconds = 4f;
     private const float GhostOpenTimeoutSeconds = 3f;      // swing never started (leaf angle unchanged)
