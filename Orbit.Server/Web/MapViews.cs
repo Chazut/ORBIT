@@ -1,7 +1,7 @@
 namespace Orbit.Server.Web;
 
 /// <summary>One map render: svg + rotation + overlay bounds straight from the tarkov.dev interactive
-/// map configs (same data raid-review uses). Null svg = no public render, callers draw a grid.</summary>
+/// map configs (same data raid-review uses). Tile-only maps use the shared floor catalogue.</summary>
 /// <param name="HideLayers">Group ids to hide when the file stacks several floors (see <see cref="MapRenders"/>).</param>
 public sealed record MapView(string? Svg, float Rot, float X1, float Z1, float X2, float Z2, string[]? HideLayers = null);
 

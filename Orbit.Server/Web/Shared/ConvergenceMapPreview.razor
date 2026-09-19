@@ -1,4 +1,5 @@
 @using Orbit.Server.Zones
+@using Orbit.Zones
 @using System.Globalization
 @implements IDisposable
 @inject ZoneStoreService ZoneStore
@@ -45,16 +46,9 @@ else
          @onpointerdown="OnPointerDown" @onpointermove="OnPointerMove" @onpointerup="OnPointerUp"
          @onpointerleave="OnPointerUp" @ondragstart:preventDefault="true">
         <svg viewBox="0 0 1000 @F(_vh)" preserveAspectRatio="none" style="position:absolute; inset:0; width:100%; height:100%; pointer-events:none">
-            @if (_view.Svg != null)
+            @if (FloorCatalog.For(_mapId)?.Floors.FirstOrDefault() is { } floor)
             {
-                @if (_inlineSvg != null)
-                {
-                    @((MarkupString)MapRenders.Wrap(_inlineSvg, _vh))
-                }
-                else
-                {
-                    <image href="@_view.Svg" x="0" y="0" width="1000" height="@F(_vh)" preserveAspectRatio="none" opacity="0.85" />
-                }
+                <ZoneFloorBackground @key="_mapId" MapId="@_mapId" Floor="floor" View="_view" Height="_vh" />
             }
             @if (showRing)
             {
@@ -86,7 +80,6 @@ else
 
     private string _mapId = "bigmap";
     private MapView _view = MapViews.Views["bigmap"];
-    private MapRenders.InlineRender? _inlineSvg;
     private ConvergenceModel? _conv;
     private float _minX, _maxX, _minZ, _maxZ, _spanX, _spanZ, _vh, _canvasH;
     private float _ringX, _ringZ;
@@ -110,20 +103,10 @@ else
         });
     }
 
-    private async Task LoadInlineRenderAsync(string mapId, MapView view)
-    {
-        var render = await MapRenders.InlineSvgAsync(mapId, view);
-        if (render == null || _mapId != mapId) return;
-        _inlineSvg = render;
-        await InvokeAsync(StateHasChanged);
-    }
-
     private void LoadMap(string mapId)
     {
         _mapId = mapId;
         _view = MapViews.Views[mapId];
-        _inlineSvg = null;
-        if (_view.HideLayers is { Length: > 0 }) _ = LoadInlineRenderAsync(mapId, _view);
         var (rx1, rz1) = MapViews.Rot(_view.X1, _view.Z1, _view.Rot);
         var (rx2, rz2) = MapViews.Rot(_view.X2, _view.Z2, _view.Rot);
         _minX = MathF.Min(rx1, rx2);

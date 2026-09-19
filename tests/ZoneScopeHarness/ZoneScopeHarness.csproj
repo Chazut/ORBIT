@@ -12,6 +12,8 @@
     <Compile Include="../../Orbit.Server/Zones/ZonePresetSnapshots.cs" Link="ZonePresetSnapshots.cs" />
     <Compile Include="../../Orbit.Server/Zones/NativeFloorMigration.cs" Link="NativeFloorMigration.cs" />
     <Compile Include="../../Orbit.Server/Zones/NativeFloorDefaults.cs" Link="NativeFloorDefaults.cs" />
+    <Compile Include="../../Orbit.Server/Web/MapRenders.cs" Link="MapRenders.cs" />
+    <Compile Include="../../Orbit.Server/Web/MapViews.cs" Link="MapViews.cs" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.1" />
     <EmbeddedResource Include="../../Orbit.Server/Resources/Zones/*.json" LogicalName="Orbit.Server.Resources.Zones.%(Filename)%(Extension)" />
   </ItemGroup>

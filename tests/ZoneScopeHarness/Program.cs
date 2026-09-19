@@ -6,6 +6,9 @@ using Orbit.Config;
 using Orbit.Entities;
 using Orbit.Navigation;
 using Orbit.Server.Zones;
+using Orbit.Server.Web;
+using System.Text;
+using System.Xml.Linq;
 using Orbit.Systems;
 using Orbit.Zones;
 using SPTarkov.Common.Models.Logging;
@@ -36,6 +39,32 @@ Check(!Floor("factory4_day","future-floor",0,0,0),"Unknown floor fails closed");
 Check(FloorCatalog.For("laboratory").Find("technical").TilePath!=null,"Labs has tile render");
 Check(FloorCatalog.For("Interchange@rework").Find("2nd-floor").HideLayers.Length==2,"Rework groups isolate the floor");
 Check(FloorCatalog.For("Interchange").Find("2nd-floor").Svg!=FloorCatalog.For("Interchange@rework").Find("2nd-floor").Svg,"Vanilla and rework renders remain distinct");
+var svgFixture="""
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" xml:space="preserve" viewBox="0 0 1127 947" width="1127" height="947">
+  <defs><path id="outline" d="M0 0h10v10z" /></defs>
+  <g id="Ground_Level"><use xlink:href="#outline" /></g>
+  <g id="First_Floor" style="opacity:0.8"><use xlink:href="#outline" /></g>
+  <g id="Second_Floor"><use xlink:href="#outline" /></g>
+</svg>
+""";
+XElement SvgDocument(MapRenders.InlineRender render)=>XElement.Parse(Encoding.UTF8.GetString(Convert.FromBase64String(render.ImageUrl.Split(',')[1])));
+XElement SvgLayer(XElement svg,string id)=>svg.Descendants().Single(e=>(string)e.Attribute("id")==id);
+var groundSvg=SvgDocument(MapRenders.PrepareSvg(svgFixture,["First_Floor","Second_Floor"]));
+Check(groundSvg.GetNamespaceOfPrefix("xlink")=="http://www.w3.org/1999/xlink"
+    && groundSvg.Descendants().First(e=>e.Name.LocalName=="use").Attribute(XName.Get("href","http://www.w3.org/1999/xlink")).Value=="#outline",
+    "Filtered SVG stays a valid standalone document with xlink references");
+Check((string)groundSvg.Attribute("viewBox")=="0 0 1127 947" && (string)groundSvg.Attribute("width")=="1127"
+    && (string)groundSvg.Attribute(XNamespace.Xml+"space")=="preserve","Filtering retains root geometry and XML attributes");
+Check(SvgLayer(groundSvg,"Ground_Level").Attribute("style")==null
+    && ((string)SvgLayer(groundSvg,"First_Floor").Attribute("style")).Contains("display:none")
+    && ((string)SvgLayer(groundSvg,"Second_Floor").Attribute("style")).Contains("display:none"),"Ground render hides only the two upper floors");
+Check(((string)SvgLayer(groundSvg,"First_Floor").Attribute("style")).Contains("opacity:0.8"),"Filtering preserves existing floor styles");
+var upperSvg=SvgDocument(MapRenders.PrepareSvg(svgFixture,["Ground_Level","Second_Floor"]));
+Check((string)SvgLayer(upperSvg,"First_Floor").Attribute("style")=="opacity:0.8"
+    && ((string)SvgLayer(upperSvg,"Ground_Level").Attribute("style")).Contains("display:none"),"Each floor image filters the original independently");
+foreach(var mapId in new[]{"laboratory","Labyrinth"})
+    Check(FloorCatalog.For(mapId).Floors[0].Svg==null && FloorCatalog.For(mapId).Floors[0].TilePath!=null,
+        "Convergence background has a base tile layer for "+mapId);
 foreach(var entry in FloorCatalog.Maps)
 {
     Check(entry.Value.Floors.Select(f=>f.Id).Distinct().Count()==entry.Value.Floors.Length,"Unique floor IDs: "+entry.Key);
