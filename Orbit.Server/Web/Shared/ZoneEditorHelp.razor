@@ -1,0 +1,94 @@
+@if (Expanded)
+{
+    <section id="orbit-zone-help" class="orbit-zone-help" aria-label="Zone editor controls and legend">
+        <div>
+            <h3>Controls</h3>
+            <dl class="orbit-zone-help-rows">
+                @foreach (var control in Controls)
+                {
+                    <div class="orbit-zone-help-control">
+                        <MudIcon Icon="@control.Icon" Size="Size.Small" aria-hidden="true" />
+                        <dt>@control.Gesture</dt>
+                        <dd>@control.Action</dd>
+                    </div>
+                }
+            </dl>
+        </div>
+        <div>
+            <h3>Legend</h3>
+            <dl class="orbit-zone-help-rows">
+                <div class="orbit-zone-help-item">
+                    <span class="orbit-zone-help-swatch" style="color:#4FD1C5" aria-hidden="true"></span>
+                    <div><dt>Attraction</dt><dd>Pulls squads toward the zone.</dd></div>
+                </div>
+                <div class="orbit-zone-help-item">
+                    <span class="orbit-zone-help-swatch" style="color:#FF6B6B" aria-hidden="true"></span>
+                    <div><dt>Repulsion</dt><dd>Pushes squads away.</dd></div>
+                </div>
+                <div class="orbit-zone-help-item">
+                    <span class="orbit-zone-help-dot" aria-hidden="true"></span>
+                    <div><dt>Untuned built-in zone</dt><dd>Click a grey dot or its name to add it.</dd></div>
+                </div>
+                <div class="orbit-zone-help-item">
+                    <svg width="28" height="28" viewBox="0 0 28 28" aria-hidden="true">
+                        <circle cx="14" cy="14" r="12" fill="none" stroke="#9AA4B8" stroke-dasharray="3 3" />
+                        <circle cx="14" cy="14" r="6" fill="none" stroke="#9AA4B8" />
+                    </svg>
+                    <div><dt>Inner / outer ring</dt><dd>Min / max radius. Rolled each raid.</dd></div>
+                </div>
+                <div class="orbit-zone-help-item">
+                    <MudIcon Icon="@Icons.Material.Filled.FilterAlt" Size="Size.Small" aria-hidden="true" />
+                    <div><dt>Highlighted / dimmed</dt><dd>Exclusive floor or bot matches / shared zones.</dd></div>
+                </div>
+            </dl>
+        </div>
+        <div>
+            <h3>Editing</h3>
+            <dl class="orbit-zone-help-rows">
+                <div class="orbit-zone-help-item">
+                    <MudIcon Icon="@Icons.Material.Filled.Lock" Size="Size.Small" aria-hidden="true" />
+                    <div><dt>Built-in zones</dt><dd>Tune their settings. Positions are fixed; floors are automatic.</dd></div>
+                </div>
+                <div class="orbit-zone-help-item">
+                    <MudIcon Icon="@Icons.Material.Filled.AddCircleOutline" Size="Size.Small" aria-hidden="true" />
+                    <div><dt>New custom zones</dt><dd>Use the selected floor and preview bot type.</dd></div>
+                </div>
+                <div class="orbit-zone-help-item">
+                    <MudIcon Icon="@Icons.Material.Filled.Layers" Size="Size.Small" aria-hidden="true" />
+                    <div><dt>All floors</dt><dd>Shows every zone over the base plan. All-floor zones stay visible on each floor.</dd></div>
+                </div>
+                <div class="orbit-zone-help-item">
+                    <MudIcon Icon="@Icons.Material.Filled.Save" Size="Size.Small" aria-hidden="true" />
+                    <div><dt>Save for the next raid</dt><dd>Edits stay pending until you use the global Save button.</dd></div>
+                </div>
+            </dl>
+        </div>
+    </section>
+    <style>
+        .orbit-zone-help { display:grid; grid-template-columns:repeat(auto-fit,minmax(250px,1fr)); gap:24px; margin:0 0 20px; padding:20px; background:#0E1420; border:1px solid #222B3E; border-radius:10px; }
+        .orbit-zone-help h3 { margin:0 0 14px; color:#FFB454; font-size:.8rem; font-weight:600; letter-spacing:.05em; }
+        .orbit-zone-help-rows { margin:0; display:grid; gap:12px; }
+        .orbit-zone-help dt { color:#E6EAF2; font-size:.8rem; line-height:1.5; }
+        .orbit-zone-help dd { margin:0; color:#9AA4B8; font-size:.75rem; line-height:1.5; }
+        .orbit-zone-help-control { display:grid; grid-template-columns:20px 106px 1fr; gap:8px; align-items:center; }
+        .orbit-zone-help-item { display:grid; grid-template-columns:28px 1fr; gap:10px; align-items:start; }
+        .orbit-zone-help .mud-icon-root { color:#8A94A8; margin-top:2px; }
+        .orbit-zone-help-swatch { width:22px; height:22px; border:1.5px solid currentColor; border-radius:50%; background:color-mix(in srgb,currentColor 14%,transparent); margin:2px 3px; }
+        .orbit-zone-help-dot { width:8px; height:8px; background:#8A94A8; border-radius:50%; margin:8px 10px; }
+    </style>
+}
+
+@code {
+    [Parameter] public bool Expanded { get; set; }
+
+    private static readonly (string Icon, string Gesture, string Action)[] Controls =
+    [
+        (Icons.Material.Filled.Mouse, "Click", "Select a zone"),
+        (Icons.Material.Filled.AddCircleOutline, "Double-click", "Add a custom zone"),
+        (Icons.Material.Filled.OpenWith, "Drag a zone", "Move a custom zone"),
+        (Icons.Material.Filled.OpenWith, "Drag empty space", "Pan the map"),
+        (Icons.Material.Filled.Mouse, "Middle-drag", "Pan; keep selection"),
+        (Icons.Material.Filled.ZoomIn, "Wheel", "Zoom in / out"),
+        (Icons.Material.Filled.AspectRatio, "Ctrl + wheel", "Resize selected zone"),
+    ];
+}

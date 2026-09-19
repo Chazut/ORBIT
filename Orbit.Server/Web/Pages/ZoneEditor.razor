@@ -37,19 +37,18 @@
                 <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.ContentCopy" OnClick="@(() => CopyToSibling(siblingId))">Copy to @ZoneStoreService.MapLabels[siblingId]</MudButton>
             </MudTooltip>
         }
-        <MudTooltip Text="Restore this map's shipped default zones (writes them immediately)." Arrow="true">
+        <MudTooltip Text="Restore this map's shipped default zones as unsaved changes. Save to apply, or discard to undo." Arrow="true">
             <MudButton Variant="Variant.Outlined" Color="Color.Warning" Size="Size.Small" StartIcon="@Icons.Material.Filled.RestartAlt" OnClick="ResetMap">Reset map</MudButton>
         </MudTooltip>
+        <MudButton Variant="@(_showHelp ? Variant.Filled : Variant.Outlined)" Color="Color.Primary" Size="Size.Small"
+                   StartIcon="@Icons.Material.Filled.Keyboard" EndIcon="@(_showHelp ? Icons.Material.Filled.ExpandLess : Icons.Material.Filled.ExpandMore)"
+                   aria-expanded="@(_showHelp ? "true" : "false")" aria-controls="orbit-zone-help"
+                   OnClick="@(() => _showHelp = !_showHelp)">Controls &amp; legend</MudButton>
     </div>
     <MudText Typo="Typo.body2" Class="mb-3" Style="opacity:.6">
-        Hotspots pull (teal) or push (red) squad routing. <b>Click</b> selects, <b>drag</b> moves a custom zone
-        (dragging empty ground pans, and so does the <b>middle mouse button</b> anywhere, without touching the
-        selection), <b>wheel</b> zooms, <b>Ctrl+wheel</b> resizes the selection,
-        <b>double-click</b> adds a zone. Dashed ring = max radius, solid = min (sampled per raid).
-        Built-in zones (labelled) sit where BSG put them — tune them, they cannot move. Grey dots are
-        BSG zones without a tuning entry yet: click one (map or list) to start tuning it. Edits ride the
-        global Unsaved changes / Save button and apply from the next raid. Map render courtesy of tarkov.dev.
+        Shape squad movement with attraction and repulsion zones.
     </MudText>
+    <ZoneEditorHelp Expanded="_showHelp" />
 
     <div class="d-flex flex-wrap align-center mb-3" style="gap:8px" aria-label="Map floors">
         <MudText Typo="Typo.subtitle2" Class="mr-2">Floor</MudText>
@@ -71,12 +70,10 @@
         </MudSelect>
     </div>
     <MudText Typo="Typo.caption" Class="mb-2" Style="opacity:.65">
-        New custom zones use the selected floor and preview bot type. Built-in floors are automatic.
-        All floors shows every zone over the base plan. All-floor custom zones remain visible on each floor.
         Only ORBIT-controlled bots follow these zones.
         @if (HasPreviewFilter)
         {
-            <span>Zones exclusive to the selected floor or bot type are emphasized; shared zones are dimmed.</span>
+            <span>Exclusive matches are highlighted.</span>
         }
     </MudText>
 
@@ -202,6 +199,9 @@
             </div>
         }
         <MudText Typo="Typo.caption" Style="position:absolute; bottom:6px; right:10px; opacity:.4; pointer-events:none">@($"zoom x{_zoom:0.#}")</MudText>
+    </div>
+    <div style="padding:5px 2px; text-align:right; font-size:.7rem; color:#8A94A8">
+        Map by <a href="https://tarkov.dev" target="_blank" rel="noopener noreferrer" style="color:inherit; text-decoration:underline">tarkov.dev</a>
     </div>
     </div>
 
@@ -464,6 +464,7 @@
     private string? _hoverBuiltin;
     private bool _draggingZone, _panning;
     private bool _showField = true;
+    private bool _showHelp;
     private bool _showHeat;
     private bool _middlePan;
     private bool _builtinDragHintShown;
