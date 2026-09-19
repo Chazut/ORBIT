@@ -137,6 +137,32 @@ Every behaviour setting lives in a **web UI** on your SPT server
 raid and works headless. Full-config export/import included, to back
 up or share your tuning.
 
+**2.1: configuration presets.** The preset selector is available on every page.
+Each personal preset keeps global settings and all zone maps together. Switches save
+the edits you are leaving; **Save** applies edits to the current preset. The built-in
+**Default** is protected: changing a setting or zone automatically creates **Custom**.
+Use **Presets** to duplicate, rename, delete inactive presets or export a complete setup.
+Undo history starts fresh when switching presets. Most settings apply next raid;
+faction takeover and personality brain lists still require a game restart.
+
+Upgrading from 2.0 automatically keeps existing tuning as **Custom** if it differs
+from defaults, including changes made only in the zone editor. Unchanged installations
+start on **Default**. Original config and zone files are backed up under
+`user/mods/ORBIT/presets/legacy-2.0/`. Saved presets and the active selection live in
+`presets/library.json`; `config.json` and `zones/*.json` remain compatibility copies.
+
+Drop JSON files into **`user/mods/ORBIT/addon/`** to add presets automatically.
+Subfolders are supported. Existing global config exports, `orbit-zones/1` packs,
+single-map files named after their map ID, and complete `orbit-preset/1` exports are
+recognized. Scans run at startup, every five seconds in the UI, and before client
+config fetches (at most once per five seconds). Partial addons replace
+only the supplied settings and maps, keeping the rest of your current setup.
+Addon sources are protected too: edits create a personal copy. A valid update to the
+selected addon is applied automatically, including at server startup. Personal copies
+keep their own tuning. Missing or incomplete files keep the last valid active version.
+Keep the same relative filename when distributing an update to an existing addon.
+Malformed addons are listed with an error and leave other presets available.
+
 The **zone editor** renders each map and lets you draw the hotspots
 that steer squad routing: drag, resize, attract or repel, tune BSG's
 own zones, mark which ones can host kill hunts. Export your setup as a

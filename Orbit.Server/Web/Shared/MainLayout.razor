@@ -3,6 +3,7 @@
 @inject ConfigService Configs
 @inject Orbit.Server.Zones.ZoneStoreService ZoneStore
 @inject EditHistoryService History
+@inject Orbit.Server.Presets.PresetService Presets
 @inject IJSRuntime JS
 @inject ISnackbar Snackbar
 
@@ -12,7 +13,7 @@
 <MudDialogProvider />
 
 <MudLayout>
-    <MudAppBar Elevation="0" Dense="true" Style="border-bottom: 1px solid var(--mud-palette-lines-default); backdrop-filter: blur(6px);">
+    <MudAppBar Elevation="0" Dense="false" Style="border-bottom: 1px solid var(--mud-palette-lines-default); backdrop-filter: blur(6px);">
         <MudIconButton Icon="@Icons.Material.Filled.Menu" Color="Color.Inherit" Edge="Edge.Start" OnClick="@(() => _drawerOpen = !_drawerOpen)" />
         <svg width="22" height="22" viewBox="0 0 24 24" style="margin-right:10px; flex-shrink:0">
             <circle cx="12" cy="12" r="4.2" fill="#FFB454" />
@@ -20,7 +21,7 @@
             <circle cx="3.2" cy="16" r="1.6" fill="#4FD1C5" />
         </svg>
         <MudText Typo="Typo.h6" Style="letter-spacing: .35em; font-weight: 600;">ORBIT</MudText>
-        <MudText Typo="Typo.body2" Class="ml-3 d-none d-sm-flex" Style="opacity:.5">server config</MudText>
+        <PresetPicker />
         <MudSpacer />
         <MudTooltip Text="@($"Undo the last change (Ctrl+Z){(History.UndoCount > 0 ? $", {History.UndoCount} step(s) available" : "")}. Covers every config page and the zone editor.")" Placement="Placement.Bottom">
             <MudIconButton Icon="@Icons.Material.Filled.Undo" Color="Color.Inherit" Size="Size.Small" Disabled="@(!History.CanUndo)" OnClick="Undo" />
@@ -59,8 +60,8 @@
             </div>
             <MudOverlay Visible="_changesOpen" OnClick="@(() => _changesOpen = false)" ZIndex="1299" LockScroll="false" />
         }
-        <MudTooltip Text="Saves to config.json. The game reads it at raid start: save, then start a new raid." Placement="Placement.Bottom">
-            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save" OnClick="Save" Size="Size.Small">Save</MudButton>
+        <MudTooltip Text="Save settings and zones in the selected preset. Applies next raid; faction takeover and personality brain lists need a game restart." Placement="Placement.Bottom">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save" OnClick="Save" Size="Size.Small" Disabled="@(Presets.Error != null)">Save</MudButton>
         </MudTooltip>
         <MudLink Href="/" Color="Color.Inherit" Underline="Underline.None" Class="ml-4" Style="opacity:.6; font-size:.85rem">Server home</MudLink>
     </MudAppBar>
@@ -69,6 +70,7 @@
                Style="border-right: 1px solid var(--mud-palette-lines-default);">
         <MudNavMenu Bordered="true" Color="Color.Primary" Class="pt-2">
             <MudNavLink Href="/orbit" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.Home">Overview</MudNavLink>
+            <MudNavLink Href="/orbit/presets" Icon="@Icons.Material.Filled.FolderOpen">Presets</MudNavLink>
             <MudNavLink Href="/orbit/factions" Icon="@Icons.Material.Filled.Groups">Factions</MudNavLink>
             <MudNavLink Href="/orbit/general" Icon="@Icons.Material.Filled.Tune">General</MudNavLink>
             <MudNavLink Href="/orbit/looting" Icon="@Icons.Material.Filled.Backpack">Looting</MudNavLink>
@@ -84,6 +86,10 @@
     </MudDrawer>
 
     <MudMainContent Class="pa-6 pt-16">
+        @if (Presets.Error != null)
+        {
+            <MudAlert Severity="Severity.Error" Class="mb-4">@Presets.Error</MudAlert>
+        }
         @Body
     </MudMainContent>
 </MudLayout>
@@ -130,7 +136,7 @@
         LayoutProperties = new LayoutProperties
         {
             DefaultBorderRadius = "10px",
-            AppbarHeight = "48px",
+            AppbarHeight = "64px",
         },
     };
 
@@ -144,12 +150,15 @@
 
     protected override void OnInitialized()
     {
+        Presets.Initialize();
+        Presets.Changed += OnPresetChanged;
         _pollTimer = new System.Threading.Timer(_ => InvokeAsync(PollChanges), null, 500, 500);
     }
 
     public void Dispose()
     {
         _pollTimer?.Dispose();
+        Presets.Changed -= OnPresetChanged;
         _selfRef?.Dispose();
     }
 
@@ -214,6 +223,17 @@
 
     private void PollChanges()
     {
+        try
+        {
+            Presets.TrackEdits();
+            Presets.RefreshAddons();
+            _presetPollError = null;
+        }
+        catch (Exception ex)
+        {
+            if (_presetPollError != ex.Message) Snackbar.Add(ex.Message, Severity.Error);
+            _presetPollError = ex.Message;
+        }
         var historyMoved = History.Track();
         var changes = Configs.GetPendingChanges();
         // Zone-editor edits ride the same unsaved-changes button as config edits.
@@ -230,13 +250,19 @@
     }
 
     private static string FormatPath(string path) => path.Replace(".", " / ").Replace("_", " ");
+    private string? _presetPollError;
+    private void OnPresetChanged() => InvokeAsync(PollChanges);
 
     private void Save()
     {
-        Configs.Save();
-        ZoneStore.SaveAllPending();
-        PollChanges();
-        Snackbar.Add("ORBIT config saved. Takes effect next raid.", Severity.Success);
+        try
+        {
+            Presets.Save();
+            PollChanges();
+            Snackbar.Add($"{Presets.ActiveName} saved. Applies next raid; faction takeover and brain lists need a game restart.", Severity.Success);
+            if (Presets.MirrorWarning != null) Snackbar.Add(Presets.MirrorWarning, Severity.Warning);
+        }
+        catch (Exception ex) { Snackbar.Add($"Save failed: {ex.Message}", Severity.Error); }
     }
 
     private void DiscardAll()

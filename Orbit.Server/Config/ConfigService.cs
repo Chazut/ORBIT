@@ -6,10 +6,9 @@ using SPTarkov.DI.Annotations;
 namespace Orbit.Server.Config;
 
 /// <summary>
-/// Owns the server-side ORBIT config: loads user/mods/ORBIT/config.json (creating it with defaults
-/// on first run), exposes it to the web UI and the /orbit/config client endpoint, and persists
-/// edits. Unknown JSON fields are preserved-by-rewrite: the file is regenerated from the typed
-/// model on save, so schema evolution goes through ConfigVersion.
+/// Editable global settings and their saved baseline. PresetService selects detached copies and
+/// persists settings together with zones. Legacy config.json loading remains the fallback if the
+/// preset library cannot load. Unknown fields are ignored; absent settings use compiled defaults.
 /// </summary>
 [Injectable(InjectionType.Singleton)]
 public class ConfigService(ISptLogger<ConfigService> logger)
@@ -23,6 +22,8 @@ public class ConfigService(ISptLogger<ConfigService> logger)
 
     public OrbitServerConfig Config { get; private set; } = new();
 
+    public string ModDirectory { get; init; } = Path.GetDirectoryName(typeof(ConfigService).Assembly.Location)!;
+
     // Serialized snapshot of the config as last loaded/saved — the baseline the web UI diffs against
     // to surface unsaved changes. Normalized through the same serializer options as ToJson().
     private string? _savedJson;
@@ -31,8 +32,7 @@ public class ConfigService(ISptLogger<ConfigService> logger)
     {
         get
         {
-            var modDir = Path.GetDirectoryName(typeof(ConfigService).Assembly.Location)!;
-            return Path.Combine(modDir, "config.json");
+            return Path.Combine(ModDirectory, "config.json");
         }
     }
 
@@ -72,6 +72,51 @@ public class ConfigService(ISptLogger<ConfigService> logger)
 
     public string ToJson() => JsonSerializer.Serialize(Config, _jsonOptions);
 
+    public string SavedJson => _savedJson ?? ToJson();
+    public static string DefaultJson => JsonSerializer.Serialize(new OrbitServerConfig(), _jsonOptions);
+
+    // Old exports can omit settings introduced later. Merge them with the current defaults, while
+    // rejecting null sections and incompatible types before replacing a working configuration.
+    public static string NormalizeJson(string json)
+    {
+        var defaults = System.Text.Json.Nodes.JsonNode.Parse(DefaultJson)!;
+        var supplied = System.Text.Json.Nodes.JsonNode.Parse(json) as System.Text.Json.Nodes.JsonObject
+            ?? throw new InvalidDataException("The config must be a JSON object.");
+        if (supplied["config_version"] is { } version && version.GetValue<int>() > new OrbitServerConfig().ConfigVersion)
+            throw new InvalidDataException("This config requires a newer ORBIT version.");
+        Merge(defaults, supplied);
+        var parsed = JsonSerializer.Deserialize<OrbitServerConfig>(defaults.ToJsonString(), _jsonOptions)
+            ?? throw new InvalidDataException("Empty config.");
+        parsed.ConfigVersion = new OrbitServerConfig().ConfigVersion;
+        return JsonSerializer.Serialize(parsed, _jsonOptions);
+
+        static void Merge(System.Text.Json.Nodes.JsonNode target, System.Text.Json.Nodes.JsonObject source)
+        {
+            foreach (var (key, value) in source)
+            {
+                if (target is not System.Text.Json.Nodes.JsonObject obj || !obj.ContainsKey(key)) continue;
+                if (value == null) throw new InvalidDataException($"Config setting '{key}' cannot be null.");
+                if (obj[key] is System.Text.Json.Nodes.JsonObject nested)
+                {
+                    if (value is not System.Text.Json.Nodes.JsonObject child)
+                        throw new InvalidDataException($"Config section '{key}' must be an object.");
+                    Merge(nested, child);
+                }
+                else obj[key] = value.DeepClone();
+            }
+        }
+    }
+
+    public void SelectSnapshot(string json)
+    {
+        var normalized = NormalizeJson(json);
+        Config = JsonSerializer.Deserialize<OrbitServerConfig>(normalized, _jsonOptions)!;
+        _savedJson = normalized;
+        ConfigReplaced?.Invoke();
+    }
+
+    public void AcceptSnapshot(string json) => _savedJson = NormalizeJson(json);
+
     /// <summary>Raised when the config OBJECT is swapped out from under the pages (Discard all): their
     /// bindings point at the old instance, so they must re-render. Subscribed by OrbitConfigPage.</summary>
     public event Action? ConfigReplaced;
@@ -84,7 +129,7 @@ public class ConfigService(ISptLogger<ConfigService> logger)
     /// </summary>
     public bool ImportJson(string json)
     {
-        var parsed = JsonSerializer.Deserialize<OrbitServerConfig>(json, _jsonOptions);
+        var parsed = JsonSerializer.Deserialize<OrbitServerConfig>(NormalizeJson(json), _jsonOptions);
         if (parsed == null) return false;
         Config = parsed;
         ConfigReplaced?.Invoke();

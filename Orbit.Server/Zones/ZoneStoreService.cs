@@ -6,14 +6,15 @@ using SPTarkov.DI.Annotations;
 namespace Orbit.Server.Zones;
 
 /// <summary>
-/// Owns the server-side per-map advection zones (hotspots). Files live in user/mods/ORBIT/zones/,
-/// seeded on first access from embedded defaults (a copy of the client's compiled-in zone JSONs).
-/// The web UI zone editor edits these; the client fetches the whole set via /orbit/zones at boot and
-/// raid start and overrides its local Config/Maps/Zones files with them.
+/// Per-map editor working copies, native metadata and legacy zone-file migration. PresetService
+/// supplies saved snapshots after initialization; zones/*.json remain compatibility copies.
+/// Embedded defaults mirror the client's compiled-in zones. The client fetches the active preset's
+/// maps via /orbit/zones at boot and raid start.
 /// </summary>
 [Injectable(InjectionType.Singleton)]
 public partial class ZoneStoreService(ISptLogger<ZoneStoreService> logger)
 {
+    public string ModDirectory { get; init; } = Path.GetDirectoryName(typeof(ZoneStoreService).Assembly.Location)!;
     // ORBIT map ids (BSG location ids as the client sees them).
     public static readonly string[] MapIds =
     [
@@ -60,8 +61,7 @@ public partial class ZoneStoreService(ISptLogger<ZoneStoreService> logger)
     {
         get
         {
-            var modDir = Path.GetDirectoryName(typeof(ZoneStoreService).Assembly.Location)!;
-            return Path.Combine(modDir, "zones");
+            return Path.Combine(ModDirectory, "zones");
         }
     }
 
@@ -75,6 +75,7 @@ public partial class ZoneStoreService(ISptLogger<ZoneStoreService> logger)
 
     private MapZoneModel GetZonesLocked(string mapId)
     {
+        if (_presetSaved != null) return NormalizeSnapshot(mapId, _presetSaved[mapId]);
         try
         {
             var path = PathFor(mapId);
@@ -210,15 +211,15 @@ public partial class ZoneStoreService(ISptLogger<ZoneStoreService> logger)
         ZonesReplaced?.Invoke();
     }
 
-    /// <summary>Resets the map to shipped defaults, persists, refreshes the working copy.</summary>
+    /// <summary>Reset is an ordinary unsaved edit, including while editing a protected preset.</summary>
     public MapZoneModel ResetWorkingToDefault(string mapId)
     {
         MapZoneModel seed;
         lock (_working)
         {
-            seed = ResetToDefault(mapId);
+            GetWorking(mapId);
+            seed = ReadEmbeddedDefault(mapId);
             _working[mapId] = seed;
-            _workingSavedJson[mapId] = JsonSerializer.Serialize(seed, _json);
         }
         ZonesReplaced?.Invoke();
         return seed;

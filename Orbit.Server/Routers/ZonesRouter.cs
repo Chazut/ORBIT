@@ -1,4 +1,5 @@
 using Orbit.Server.Zones;
+using Orbit.Server.Presets;
 using SPTarkov.DI.Annotations;
 using SPTarkov.Server.Core.DI;
 using SPTarkov.Server.Core.Models.Eft.Common;
@@ -14,11 +15,11 @@ namespace Orbit.Server.Routers;
 /// Config/Maps/Zones files with whatever this returns.
 /// </summary>
 [Injectable]
-public sealed class ZonesRouter(JsonUtil jsonUtil, ZoneStoreService zoneStore) : StaticRouter(jsonUtil, [
+public sealed class ZonesRouter(JsonUtil jsonUtil, ZoneStoreService zoneStore, PresetService presets) : StaticRouter(jsonUtil, [
     new RouteAction<EmptyRequestData>(
         "/orbit/zones",
         (url, requestData, sessionId, output, cancellationToken) =>
-            new ValueTask<string>(zoneStore.ToJsonAll())
+            new ValueTask<string>(presets.ZonesForGame())
     ),
     new RouteAction<NativeFloorsRequest>(
         "/orbit/zones/native-floors",

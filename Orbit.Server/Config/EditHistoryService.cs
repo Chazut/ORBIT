@@ -43,6 +43,18 @@ public class EditHistoryService(ConfigService configs, ZoneStoreService zones)
     public int UndoCount { get { lock (_lock) return _undo.Count + (_moving ? 1 : 0); } }
     public int RedoCount { get { lock (_lock) return _moving ? 0 : _redo.Count; } }
 
+    /// <summary>Preset switches start a separate editing history. Undo must not restore another preset.</summary>
+    public void Reset()
+    {
+        lock (_lock)
+        {
+            _undo.Clear();
+            _redo.Clear();
+            _committed = _lastSeen = Capture(out _);
+            _moving = false;
+        }
+    }
+
     /// <summary>Polled by the layout. Returns true when the undo / redo availability may have changed.</summary>
     public bool Track()
     {

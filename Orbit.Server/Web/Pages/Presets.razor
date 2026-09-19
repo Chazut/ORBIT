@@ -1,0 +1,105 @@
+@page "/orbit/presets"
+@layout Orbit.Server.Web.Shared.MainLayout
+@implements IDisposable
+@using System.Text
+@inject Orbit.Server.Presets.PresetService Store
+@inject ISnackbar Snackbar
+@inject IDialogService Dialogs
+
+<PageTitle>Presets - ORBIT</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.Large">
+    <MudText Typo="Typo.h5" Class="mb-2">Presets</MudText>
+    <MudText Typo="Typo.body2" Class="mb-5" Style="opacity:.7">
+        Switch settings and all your maps together using the selector at the top of any page.
+        Switching saves your current edits. Save applies the selected preset from the next raid;
+        faction takeover and personality brain lists need a game restart.
+    </MudText>
+
+    <SettingsCard Title="@($"Editing: {Store.ActiveName}")"
+                  Subtitle="Default and addon sources are protected. Changing any setting or zone creates a personal Custom copy automatically.">
+        <div class="d-flex flex-wrap align-center" style="gap:12px">
+            <MudTextField T="string" @bind-Value="_name" Label="Preset name" Variant="Variant.Outlined" Margin="Margin.Dense"
+                          MaxLength="60" Immediate="true" Style="min-width:220px; flex:1" />
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="Duplicate" Disabled="@(Store.Error != null)"
+                       StartIcon="@Icons.Material.Filled.ContentCopy">Save as new preset</MudButton>
+            <MudButton Variant="Variant.Outlined" OnClick="Rename" Disabled="@(Store.ReadOnly || Store.Error != null)">Rename current</MudButton>
+            <MudButton Variant="Variant.Outlined" OnClick="Export" Disabled="@(Store.Error != null)"
+                       StartIcon="@Icons.Material.Filled.IosShare">Export preset</MudButton>
+        </div>
+        @if (_exportHref != null)
+        {
+            <MudButton Class="mt-3" Href="@_exportHref" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Download"
+                       UserAttributes="@(new Dictionary<string, object?> { ["download"] = "orbit-preset.json" })">Download preset</MudButton>
+        }
+    </SettingsCard>
+
+    <SettingsCard Title="Your presets" Subtitle="Each personal preset keeps its own settings and zones. A preset must be inactive before you can delete it.">
+        @foreach (var preset in Store.Choices)
+        {
+            <div class="d-flex flex-wrap align-center py-3" style="gap:12px; border-bottom:1px solid #222B3E">
+                <MudIcon Icon="@(preset.ReadOnly ? Icons.Material.Filled.Lock : Icons.Material.Filled.Tune)" Color="@(preset.Id == Store.ActiveId ? Color.Primary : Color.Default)" />
+                <div style="flex:1; min-width:180px">
+                    <MudText Typo="Typo.subtitle2">@preset.Name</MudText>
+                    <MudText Typo="Typo.caption" Style="opacity:.65">@preset.Contents@(preset.Source != null ? $" | addon/{preset.Source}" : "")</MudText>
+                </div>
+                @if (preset.Id == Store.ActiveId)
+                {
+                    <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Outlined">Selected</MudChip>
+                }
+                else
+                {
+                    <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="@(() => Select(preset.Id))" Disabled="@(Store.Error != null)">Use preset</MudButton>
+                }
+                @if (!preset.ReadOnly)
+                {
+                    <MudIconButton Icon="@Icons.Material.Filled.DeleteOutline" Size="Size.Small" Color="Color.Error"
+                                   title="Delete preset" Disabled="@(preset.Id == Store.ActiveId || Store.Error != null)"
+                                   OnClick="@(() => Delete(preset.Id, preset.Name))" />
+                }
+            </div>
+        }
+    </SettingsCard>
+
+    <SettingsCard Title="Addons" Subtitle="Drop JSON exports into user/mods/ORBIT/addon. They appear automatically, including files inside subfolders. No server restart needed while this editor is open.">
+        <MudText Typo="Typo.body2" Class="mb-3" Style="opacity:.75">
+            Accepts global settings, zone packs and complete presets. A partial addon replaces only the settings
+            and maps it contains, keeping everything else from the current preset. Its source file stays unchanged.
+            Updates to the selected addon apply automatically, including after a server restart.
+            Personal edits stay in Custom. A missing or incomplete file keeps the last valid version.
+        </MudText>
+        <MudButton Variant="Variant.Outlined" Size="Size.Small" OnClick="Refresh" StartIcon="@Icons.Material.Filled.Refresh">Refresh addons</MudButton>
+        @foreach (var error in Store.AddonErrors)
+        {
+            <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-2">@error</MudAlert>
+        }
+    </SettingsCard>
+</MudContainer>
+
+@code {
+    private string _name = "";
+    private string? _exportHref;
+    protected override void OnInitialized() => Store.Changed += OnChanged;
+    private void OnChanged() => InvokeAsync(() => { _exportHref = null; StateHasChanged(); });
+    public void Dispose() => Store.Changed -= OnChanged;
+    private void Run(Action action, string message)
+    {
+        try
+        {
+            action();
+            Snackbar.Add(message, Severity.Success);
+            if (Store.MirrorWarning != null) Snackbar.Add(Store.MirrorWarning, Severity.Warning);
+        }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+    }
+    private void Duplicate() => Run(() => { Store.Duplicate(_name); _name = ""; }, "New preset saved and selected.");
+    private void Rename() => Run(() => { Store.Rename(_name); _name = ""; }, "Preset renamed.");
+    private void Select(string id) => Run(() => Store.Switch(id), "Preset selected. Previous edits saved. Applies next raid.");
+    private void Export() => Run(() => _exportHref = "data:application/json;base64," + Convert.ToBase64String(Encoding.UTF8.GetBytes(Store.Export())), "Export ready.");
+    private void Refresh() => Run(() => Store.RefreshAddons(force: true), "Addon folder scanned.");
+    private async Task Delete(string id, string name)
+    {
+        if (await Dialogs.ShowMessageBoxAsync("Delete preset", $"Delete '{name}'? This removes its saved settings and zones.", yesText: "Delete", cancelText: "Cancel") == true)
+            Run(() => Store.Delete(id), "Preset deleted.");
+    }
+}

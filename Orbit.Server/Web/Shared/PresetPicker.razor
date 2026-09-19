@@ -1,0 +1,30 @@
+@implements IDisposable
+@inject Orbit.Server.Presets.PresetService Presets
+@inject ISnackbar Snackbar
+
+<div class="ml-4" style="width:220px; min-width:120px; max-width:25vw">
+    <MudSelect @key="Presets.ActiveName" T="string" Value="@Presets.ActiveId" ValueChanged="Switch" Dense="true" Margin="Margin.Dense"
+               Variant="Variant.Outlined" Label="Preset" Style="margin:0" Disabled="@(Presets.Error != null)">
+        @foreach (var preset in Presets.Choices)
+        {
+            <MudSelectItem T="string" Value="@preset.Id">@preset.Name@(preset.Source != null ? " (addon)" : "")</MudSelectItem>
+        }
+    </MudSelect>
+</div>
+
+@code {
+    protected override void OnInitialized() => Presets.Changed += OnChanged;
+    private void OnChanged() => InvokeAsync(StateHasChanged);
+    public void Dispose() => Presets.Changed -= OnChanged;
+
+    private void Switch(string id)
+    {
+        try
+        {
+            Presets.Switch(id);
+            Snackbar.Add($"{Presets.ActiveName} selected. Previous edits saved. Applies next raid; faction takeover and brain lists need a game restart.", Severity.Success);
+            if (Presets.MirrorWarning != null) Snackbar.Add(Presets.MirrorWarning, Severity.Warning);
+        }
+        catch (Exception ex) { Snackbar.Add($"Could not switch preset: {ex.Message}", Severity.Error); }
+    }
+}
