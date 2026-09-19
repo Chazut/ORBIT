@@ -38,7 +38,7 @@ namespace Orbit.Systems;
 /// Sleep POLICY is per bot TYPE, orthogonal to who drives the bot: every type except PMC and PlayerScav
 /// has a "default dormant" toggle (scavs, Goons, bosses+followers, cultists, raiders/rogues, bloodhounds,
 /// others — all ON by default). A toggled type sleeps from a tight ring and never takes a population-floor
-/// slot; ORBIT-driven members ghost-walk their routes while dormant, vanilla members freeze in place (per
+/// slot; ORBIT-driven members ghost-walk their routes while supported native members follow their own paths (per
 /// BSG BotsGroup, so a boss never sleeps apart from its followers). Toggle OFF = ORBIT bots of that type
 /// fall back to the standard PMC-like rules, vanilla bots of that type are left untouched. The floor only
 /// counts standard-policy bots and self-caps to half of them, so small-population maps still sleep. Bots
@@ -133,6 +133,7 @@ public class DormancySystem
 
     public static void ClearStatics()
     {
+        NativeGhostSystem.Clear();
         Api.OrbitTelemetry.ClearGhostFights();
         DormantProfileIds.Clear();
         _throttledBrainAgents.Clear();
@@ -144,6 +145,7 @@ public class DormancySystem
     private readonly MovementSystem _movementSystem;
     private readonly DoorSystem _doorSystem;
     private readonly BotRoster _botRoster;
+    private readonly NativeGhostSystem _nativeGhosts;
     private readonly GameWorld _gameWorld;
     private readonly TimePacing _pollPacing = new(PollIntervalSeconds);
 
@@ -174,6 +176,7 @@ public class DormancySystem
     // Vanilla (non-ORBIT) sleeper state, keyed per bot. Groups are evaluated per BSG BotsGroup so a boss
     // and its followers sleep and wake together.
     private readonly HashSet<BotOwner> _vanillaDormant = new();
+    private readonly List<BotOwner> _nativeMoveScratch = new();
     private readonly Dictionary<BotOwner, float> _vanillaHpBaseline = new();
     private readonly Dictionary<BotOwner, float> _vanillaLastHp = new();
     private readonly Dictionary<BotOwner, float> _vanillaHpDropAt = new();
@@ -281,6 +284,7 @@ public class DormancySystem
         _movementSystem = movementSystem;
         _doorSystem = doorSystem;
         _botRoster = botRoster;
+        _nativeGhosts = new NativeGhostSystem(doorSystem);
         _gameWorld = Singleton<GameWorld>.Instance;
 
         // Config is read once per raid: ServerConfig is re-fetched in OrbitInitPatch right before this
@@ -352,6 +356,9 @@ public class DormancySystem
         if (!_enabled) return;
         if (_pendingShots.Count > 0) PumpGhostFightShots();
         if (_activeFights.Count > 0) PumpGhostFights();
+        _nativeMoveScratch.Clear();
+        _nativeMoveScratch.AddRange(_vanillaDormant);
+        for (var i = 0; i < _nativeMoveScratch.Count; i++) _nativeGhosts.Move(_nativeMoveScratch[i]);
         if (!_pollPacing.Allowed()) return;
 
         // The whole poll is crash-proofed: raid-3 test showed a single throwing access (a despawning
@@ -1410,6 +1417,7 @@ public class DormancySystem
 
     public void Dispose()
     {
+        NativeGhostSystem.Clear();
         if (!_soundHooked) return;
         try { Singleton<GlobalEventDispatcher>.Instance.OnSoundPlayed -= OnAiSoundPlayed; } catch { }
         _soundHooked = false;
@@ -1845,6 +1853,8 @@ public class DormancySystem
         // Pin both squads for the window: no ghost walking and no second fight mid-firefight.
         _unitFightingUntil[winner.Key] = fight.EndsAt;
         _unitFightingUntil[loser.Key] = fight.EndsAt;
+        foreach (var bot in winner.VanillaBots) _nativeGhosts.Pin(bot, fight.EndsAt);
+        foreach (var bot in loser.VanillaBots) _nativeGhosts.Pin(bot, fight.EndsAt);
         if (winner.Squad != null) winner.Squad.GhostFightUntil = fight.EndsAt;
         if (loser.Squad != null) loser.Squad.GhostFightUntil = fight.EndsAt;
 
@@ -1858,7 +1868,12 @@ public class DormancySystem
     }
 
     private bool UnitInFight(GhostUnit unit)
-        => _unitFightingUntil.TryGetValue(unit.Key, out var until) && Time.time < until;
+    {
+        if (unit.Squad != null && Time.time < unit.Squad.GhostFightUntil) return true;
+        foreach (var bot in unit.VanillaBots)
+            if (_nativeGhosts.InFight(bot)) return true;
+        return _unitFightingUntil.TryGetValue(unit.Key, out var until) && Time.time < until;
+    }
 
     /// <summary>Advances the in-flight fight windows every frame: due casualties drop, a window whose
     /// participant woke escalates into a REAL fight, and when a window closes normally the survivors'
@@ -1921,6 +1936,8 @@ public class DormancySystem
     {
         _unitFightingUntil.Remove(fight.Winner.Key);
         _unitFightingUntil.Remove(fight.Loser.Key);
+        foreach (var bot in fight.Winner.VanillaBots) _nativeGhosts.Pin(bot, 0f);
+        foreach (var bot in fight.Loser.VanillaBots) _nativeGhosts.Pin(bot, 0f);
         if (fight.Winner.Squad != null) fight.Winner.Squad.GhostFightUntil = -999f;
         if (fight.Loser.Squad != null) fight.Loser.Squad.GhostFightUntil = -999f;
     }
@@ -2436,14 +2453,16 @@ public class DormancySystem
 
     private void KillGhostVanilla(BotOwner victim, Player killer)
     {
+        var native = _nativeGhosts.Remove(victim);
         _vanillaDormant.Remove(victim);
         UnthrottleBrain(victim);
         DormantProfileIds.Remove(victim.GetPlayer?.ProfileId);
         try
         {
             victim.gameObject.SetActive(true);
-            victim.PatrollingData.Unpause();
+            if (!native) victim.PatrollingData.Unpause();
             victim.PostActivate();
+            if (native) NativeGhostSystem.ResyncAfterWake(victim);
             Log.Info($"GHOST SKIRMISH: vanilla {victim.GetPlayer?.Profile?.Nickname} killed in action by {killer?.Profile?.Nickname ?? "?"}");
             KillWithAttribution(victim.GetPlayer, killer);
         }
@@ -2457,8 +2476,8 @@ public class DormancySystem
 
     /// <summary>
     /// The vanilla (non-ORBIT) side of the per-type policy: any alive bot ORBIT does not drive whose type
-    /// toggle is ON sleeps frozen in place — no ORBIT path, no ghost movement, which suits guard-type
-    /// vanilla AI fine. Groups sleep and wake per BSG BotsGroup so a boss never sleeps apart from its
+    /// toggle is ON can sleep. Native movement preserves supported decisions and routes without takeover;
+    /// disabling it restores stationary sleep. Groups sleep and wake per BSG BotsGroup so a boss never sleeps apart from its
     /// followers. Toggled-off types are left completely untouched.
     /// </summary>
     private void UpdateVanilla()
@@ -2485,6 +2504,7 @@ public class DormancySystem
                 {
                     if (_vanillaDormant.Remove(owner))
                     {
+                        _nativeGhosts.Remove(owner);
                         UnthrottleBrain(owner);
                         DormantProfileIds.Remove(player.ProfileId);
                         if (!owner.gameObject.activeSelf) owner.gameObject.SetActive(true);
@@ -2507,9 +2527,12 @@ public class DormancySystem
         foreach (var kv in _vanillaGroups)
         {
             var group = kv.Value;
-            if (_vanillaDormant.Contains(group[0]))
+            var dormant = 0;
+            for (var i = 0; i < group.Count; i++)
+                if (_vanillaDormant.Contains(group[i])) dormant++;
+            if (dormant > 0)
             {
-                var reason = VanillaWakeReason(kv.Key, group);
+                var reason = dormant == group.Count ? VanillaWakeReason(kv.Key, group) : "group membership changed";
                 if (reason != null) WakeVanillaGroup(kv.Key, group, reason);
             }
             else if (CanVanillaSleep(kv.Key, group))
@@ -2532,6 +2555,7 @@ public class DormancySystem
             if (bot.Memory != null && (bot.Memory.GoalEnemy != null || bot.Memory.IsUnderFire)) return false;
             if (_targetedProfileIds.Contains(player.ProfileId)) return false;
             if (MinSqrDistanceToHumans(player.Position) <= _scavSleepDistanceSqr) return false;
+            if (_cfg.NativeGhostMovement && GhostMovementEnabled && !_nativeGhosts.CanSleep(bot)) return false;
 
             // Same bleed gate as ORBIT squads.
             var hp = VanillaHp(bot);
@@ -2555,6 +2579,8 @@ public class DormancySystem
         {
             var bot = group[i];
             var player = bot.GetPlayer;
+            var nativeReason = _nativeGhosts.WakeReason(bot);
+            if (nativeReason != null) return nativeReason;
             if (_targetedProfileIds.Contains(player.ProfileId)) { _wakeByTargeted++; return $"{player.Profile?.Nickname} targeted"; }
             var hp = VanillaHp(bot);
             if (_vanillaHpBaseline.TryGetValue(bot, out var baseline) && hp < baseline - 1f)
@@ -2573,19 +2599,29 @@ public class DormancySystem
 
     private void SleepVanillaGroup(object key, List<BotOwner> group)
     {
+        var native = _cfg.NativeGhostMovement && GhostMovementEnabled;
         for (var i = 0; i < group.Count; i++)
         {
             var bot = group[i];
             try
             {
-                bot.DecisionQueue.Clear();
-                bot.Memory.GoalEnemy = null;
-                bot.PatrollingData.Pause();
+                if (native)
+                    _nativeGhosts.Add(bot);
+                else
+                {
+                    bot.DecisionQueue.Clear();
+                    bot.Memory.GoalEnemy = null;
+                    bot.PatrollingData.Pause();
+                }
                 bot.gameObject.SetActive(false);
             }
             catch (System.Exception e)
             {
                 Log.Error($"vanilla sleeper {bot.GetPlayer?.Profile?.Nickname} sleep recipe failed: {e}");
+                // Roll back the entire group, including this member if deactivation partly succeeded.
+                _vanillaDormant.Add(bot);
+                WakeVanillaGroup(key, group, "sleep failed");
+                return;
             }
             ThrottleBrain(bot);
             _vanillaDormant.Add(bot);
@@ -2594,7 +2630,7 @@ public class DormancySystem
         }
         _vanillaGroupSleptAt[key] = Time.time;
         _windowSleeps++;
-        Log.Info($"vanilla group ({group[0].GetPlayer?.Profile?.Nickname} +{group.Count - 1}) dormant in place ({_vanillaDormant.Count} vanilla dormant)");
+        Log.Info($"vanilla group ({group[0].GetPlayer?.Profile?.Nickname} +{group.Count - 1}) dormant {(native ? "with native movement" : "in place")} ({_vanillaDormant.Count} vanilla dormant)");
     }
 
     private void WakeVanillaGroup(object key, List<BotOwner> group, string reason)
@@ -2602,7 +2638,8 @@ public class DormancySystem
         for (var i = 0; i < group.Count; i++)
         {
             var bot = group[i];
-            _vanillaDormant.Remove(bot);
+            if (!_vanillaDormant.Remove(bot)) continue;
+            var native = _nativeGhosts.Remove(bot);
             UnthrottleBrain(bot);
             DormantProfileIds.Remove(bot.GetPlayer.ProfileId);
             _vanillaLastHp[bot] = VanillaHp(bot);
@@ -2610,8 +2647,9 @@ public class DormancySystem
             try
             {
                 bot.gameObject.SetActive(true);
-                bot.PatrollingData.Unpause();
+                if (!native) bot.PatrollingData.Unpause();
                 bot.PostActivate();
+                if (native) NativeGhostSystem.ResyncAfterWake(bot);
             }
             catch (System.Exception e)
             {
@@ -2628,5 +2666,19 @@ public class DormancySystem
         var hc = bot.GetPlayer?.HealthController;
         if (hc == null || !hc.IsAlive) return 0f;
         return hc.GetBodyPartHealth(EBodyPart.Common, true).Current;
+    }
+
+    public void OnVanillaRemoved(BotOwner bot)
+    {
+        var dormant = _vanillaDormant.Remove(bot);
+        _nativeGhosts.Remove(bot);
+        _vanillaHpBaseline.Remove(bot);
+        _vanillaLastHp.Remove(bot);
+        _vanillaHpDropAt.Remove(bot);
+        if (!dormant) return;
+        UnthrottleBrain(bot);
+        DormantProfileIds.Remove(bot.ProfileId);
+        try { if (bot.gameObject != null) bot.gameObject.SetActive(true); }
+        catch { }
     }
 }

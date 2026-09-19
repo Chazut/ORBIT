@@ -127,6 +127,7 @@ public static class ServerConfig
         // community feedback, and the limiter is the release's headline feature.
         [JsonProperty("enabled")] public bool Enabled = true;
         [JsonProperty("ghost_movement")] public bool GhostMovement = true;
+        [JsonProperty("native_ghost_movement")] public bool NativeGhostMovement = true;
         [JsonProperty("ghost_fights_mode")] public string GhostFightsMode = "simulated";
         [JsonProperty("ghost_fight_sounds")] public bool GhostFightSounds = true;
         [JsonProperty("ghost_looting")] public bool GhostLooting = true;
@@ -255,7 +256,7 @@ public static class ServerConfig
 
     private sealed class Root
     {
-        [JsonProperty("config_version")] public int ConfigVersion;
+        [JsonProperty("config_version")] public int ConfigVersion = 0;
         [JsonProperty("factions")] public FactionsSection Factions = new FactionsSection();
         [JsonProperty("general")] public GeneralSection General = new GeneralSection();
         [JsonProperty("loot")] public LootSection Loot = new LootSection();

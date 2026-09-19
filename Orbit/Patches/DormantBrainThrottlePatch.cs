@@ -31,8 +31,18 @@ public class DormantBrainThrottlePatch : ModulePatch
     [PatchPrefix]
     public static bool Prefix(AICoreAgent<BotLogicDecision> __0, ref bool __result)
     {
+        if (NativeGhostSystem.ScheduleBrain(__0, out var skip))
+        {
+            if (!skip) return true;
+            __result = false;
+            return false;
+        }
         if (!DormancySystem.ShouldSkipBrainTick(__0)) return true;
         __result = false; // same verdict BigBrain's prefix returns: the original Update never runs
         return false;
     }
+
+    [PatchFinalizer]
+    public static System.Exception Finalizer(AICoreAgent<BotLogicDecision> __0, System.Exception __exception)
+        => NativeGhostSystem.HandleBrainException(__0, __exception) ? null : __exception;
 }

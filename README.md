@@ -70,15 +70,17 @@ wake range stretches with your magnification). Everything is tunable,
 down to which bot types sleep by default and how bloody ghost fights
 get.
 
-*Coming in 2.1: ghost movement for the bots ORBIT doesn't drive
-(vanilla scavs, raiders and rogues, bosses and followers, UNTAR / RUAF
-and other faction mods) - today those sleep frozen in place. Until
-that ships, for faction-mod bots I recommend either enabling their
-"Take over" toggle (Factions page, they become ORBIT-driven and ghost
-properly) or disabling Ghost Mode for their bot type (the "Dormant"
-toggles on the Ghost Mode page), so you never run into frozen bots.
-Awake bots wake any ghost they come across, so those encounters play
-out as real fights instead of simulated ones.*
+**2.1: movement without takeover.** The Ghost Mode page's "Vanilla / faction
+movement" toggle preserves supported bots' original decisions while their
+bodies sleep: vanilla patrol and follower actions, plus MoreBotsAPI hunts,
+regrouping and searching. Their native paths determine where they move.
+Doors, special interactions and unsupported behaviours keep the group awake.
+Other faction behaviours need their own compatibility support; this is not
+universal support for every custom brain. Requires "Ghost movement"; disabling
+either toggle restores stationary sleep for bots without takeover.
+Simulated fights include ORBIT, vanilla and faction groups alike. Both sides
+hold position for the fight; an actual wake returns the encounter to real combat.
+Native movement still needs in-raid validation.
 
 *Fika: designed for co-op (an optional `Orbit.Fika` addon syncs the
 fight sounds to every client) but untested so far.*
@@ -199,11 +201,9 @@ first). Then come say hi on the [ORBIT thread](https://discord.com/channels/8756
 
 ## Roadmap highlights
 
-**Next (2.1)**: Ghost Mode moves the bots ORBIT doesn't drive (vanilla
-scavs, raiders, rogues, bosses and followers, UNTAR / RUAF and other
-faction mods), so nothing on the map sleeps frozen anymore. Also for
-the zone editor: zones filtered by faction or bot type, per-floor
-zones (Reserve bunkers, Techlight...), and names on custom zones.
+**Next (2.1)**: validate native Ghost movement in raids and extend compatibility
+beyond vanilla patrols and MoreBotsAPI hunts. Also for the zone editor: zones
+filtered by faction or bot type, per-floor zones and names on custom zones.
 Per-map Ghost Mode settings are on the maybe list.
 
 No ETA, no promises: camp & ambush decisions, post-combat self-heal,
@@ -218,11 +218,10 @@ toggle. Suggestions land on the Discord thread.
 
 - Ghost Mode and the zone editor are brand new in 2.0: expect tuning
   passes. Fika support for the limiter is designed in but untested.
-- Bots ORBIT doesn't drive (vanilla scavs, raiders/rogues, bosses and
-  followers, faction mods) sleep FROZEN in place under Ghost Mode
-  (ghost movement for them comes in 2.1). Workarounds for faction
-  bots: enable their "Take over" toggle, or turn OFF the Dormant
-  toggle for their bot type.
+- Native Ghost movement supports selected patrol and hunt behaviours.
+  Unsupported actions keep the group awake. With "Vanilla / faction movement"
+  disabled, bots without takeover still sleep in place. Native movement and
+  its interaction with modded brains need in-raid validation.
 - Most Reserve exfils need switches ORBIT can't operate yet.
 - Faction-mod takeover (RUAF / UNTAR / Black Division) can misbehave;
   leave those toggles OFF if it does. ISB takeover works.

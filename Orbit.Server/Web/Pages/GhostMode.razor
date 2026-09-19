@@ -25,15 +25,17 @@
 
     <SettingsCard Title="Limiter" OnReset="ResetLimiter">
         <OrbitSwitch @bind-Value="Cfg.GhostMode.Enabled" Label="Enable Ghost Mode"
-                     Tooltip="Sleeps far-away bots body-first while ORBIT keeps thinking for them. Covers both ORBIT-driven bots (they keep moving while asleep) and vanilla ones (frozen in place), per the type toggles below. PMCs and PlayerScavs use the standard distance rules; the BTR is never touched." />
+                     Tooltip="Sleeps far-away bots while their supported behaviour continues. Covers ORBIT squads and, with native movement enabled, vanilla patrols and supported faction hunts. The type toggles below control who may sleep; the BTR is never touched." />
         <OrbitSwitch @bind-Value="Cfg.GhostMode.GhostMovement" Label="Ghost movement"
-                     Tooltip="ON: sleeping ORBIT squads keep advancing along their planned routes at walking speed, so the raid keeps evolving off-screen. OFF: sleepers hold their position (AILimit-style freeze)." />
+                     Tooltip="ON: sleeping bots advance along their planned routes. Native bots also need Vanilla / faction movement below. OFF: sleepers hold position." />
+        <OrbitSwitch @bind-Value="Cfg.GhostMode.NativeGhostMovement" Label="Vanilla / faction movement"
+                     Tooltip="Keeps supported bots moving without faction takeover: vanilla patrols and followers, plus MoreBotsAPI hunt, regroup and search. Their original behaviour chooses where to go. Unsupported actions and door interactions keep the group awake. Requires Ghost movement. OFF: bots without takeover sleep in place." />
         <OrbitSwitch @bind-Value="Cfg.GhostMode.GhostLooting" Label="Ghost looting"
                      Tooltip="ON (default): sleeping ORBIT squads keep looting containers, corpses and loose items along their routes, so the raid economy keeps evolving off-screen. OFF: sleepers walk past everything and the loot waits for you." />
         <OrbitSwitch @bind-Value="Cfg.GhostMode.GhostHearing" Label="Ghost hearing"
                      Tooltip="ON (default): sleeping PMC and PlayerScav squads hear firefights, simulated ghost fights and real gunfire alike (about 350 m unsuppressed, 120 m suppressed), and may drop what they are doing to go and look. The odds follow their SAIN personality: a GigaChad almost always pushes the noise, an average PMC sometimes, a Rat or a Timmy almost never. OFF: sleepers are deaf, as before." />
         <MudSelect T="string" @bind-Value="Cfg.GhostMode.GhostFightsMode" Label="Ghost fights" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mt-3" Style="max-width: 380px"
-                   HelperText="Hostile dormant units detect each other at a range scaled by their best optic (up to 400 m, terrain blocks line of sight). Scav-family units never fight each other.">
+                   HelperText="Uses the game's hostility rules for ORBIT, vanilla and faction groups. In Simulated mode, both sides stay asleep; a side waking brings the encounter back to real combat.">
             <MudSelectItem T="string" Value="@("simulated")">Simulated: statistical resolution, zero cost (default)</MudSelectItem>
             <MudSelectItem T="string" Value="@("real")">Real fights: wake both units and let the AI fight it out</MudSelectItem>
             <MudSelectItem T="string" Value="@("off")">Off: ghosts ignore each other</MudSelectItem>
@@ -124,6 +126,7 @@
         var d = new GhostModeConfig();
         Cfg.GhostMode.Enabled = d.Enabled;
         Cfg.GhostMode.GhostMovement = d.GhostMovement;
+        Cfg.GhostMode.NativeGhostMovement = d.NativeGhostMovement;
         Cfg.GhostMode.GhostLooting = d.GhostLooting;
         Cfg.GhostMode.GhostHearing = d.GhostHearing;
         Cfg.GhostMode.GhostFightsMode = d.GhostFightsMode;

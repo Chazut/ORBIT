@@ -16,6 +16,7 @@ using Orbit.Core;
 using Orbit.Interop;
 using Orbit.Looting;
 using Orbit.Patches;
+using Orbit.Systems;
 using SPT.Reflection.Patching;
 using UnityEngine;
 
@@ -115,6 +116,7 @@ public class Plugin : BaseUnityPlugin
         // OFF — the dormant set stays empty and the prefix falls through.
         EnableSafe(new DormantVisionPatch());
         EnableSafe(new DormantBrainThrottlePatch());
+        EnableSafe(new NativeGhostDecisionPatch());
         EnableSafe(new DormantDamageProbePatch());
         EnableSafe(new DormantGroundCollisionPatch());
         EnableSafe(new DormantAvoidDangerBypassPatch());
@@ -254,6 +256,8 @@ public class Plugin : BaseUnityPlugin
         try
         {
             patch.Enable();
+            if (patch is NativeGhostDecisionPatch) NativeGhostSystem.DecisionGuardReady = true;
+            if (patch is DormantBrainThrottlePatch) NativeGhostSystem.BrainBridgeReady = true;
         }
         catch (Exception ex)
         {

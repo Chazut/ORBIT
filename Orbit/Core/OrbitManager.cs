@@ -138,6 +138,7 @@ public class OrbitManager
             return existing;
         }
 
+        DormancySystem.OnVanillaRemoved(bot);
         var agent = AgentData.AddEntity(bot, ActionManager.Tasks.Length);
         SquadRegistry.AddAgent(agent);
         _botRoster.AddAgent(agent);
@@ -153,6 +154,7 @@ public class OrbitManager
     /// </summary>
     private void OnBotRemoved(BotOwner bot)
     {
+        DormancySystem.OnVanillaRemoved(bot);
         var agent = _botRoster.GetAgent(bot);
         if (agent == null) return;
         Log.Info($"{agent} removed by the game (death or despawn), dropping the agent");

@@ -40,6 +40,7 @@ public class GhostModeConfig
     // the release's headline feature. Release notes call it out with where to turn it off.
     public bool Enabled { get; set; } = true;
     public bool GhostMovement { get; set; } = true;
+    public bool NativeGhostMovement { get; set; } = true;
     // "simulated" (statistical resolution, zero cost) | "real" (wake both units on contact and let
     // the AI fight it out) | "off" (ghosts ignore each other).
     public string GhostFightsMode { get; set; } = "simulated";
