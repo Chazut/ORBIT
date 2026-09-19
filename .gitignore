@@ -18,3 +18,5 @@ dist/
 notes/
 .claude/
 refs/
+perf/
+tests/
