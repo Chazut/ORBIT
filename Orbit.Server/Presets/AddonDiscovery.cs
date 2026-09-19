@@ -18,21 +18,63 @@ public static class AddonDiscovery
         {
             var options = new EnumerationOptions { RecurseSubdirectories = true, AttributesToSkip = FileAttributes.ReparsePoint, IgnoreInaccessible = true };
             var files = Directory.EnumerateFiles(directory, "*.json", options).Order(StringComparer.OrdinalIgnoreCase).Take(257).ToArray();
-            if (files.Length > 256) errors.Add("Only the first 256 addon JSON files are loaded.");
-            foreach (var file in files.Take(256))
+            if (files.Length > 256)
             {
-                var relative = Path.GetRelativePath(directory, file);
+                errors.Add("Too many addon JSON files (maximum 256). No addons loaded to avoid applying incomplete folders.");
+                return (addons, errors);
+            }
+            var sources = files.Select(file => Path.GetRelativePath(directory, file).Replace('\\', '/'));
+            foreach (var group in sources.GroupBy(source => source.Contains('/') ? source[..(source.IndexOf('/') + 1)] : source,
+                         StringComparer.OrdinalIgnoreCase))
+            {
                 try
                 {
-                    if (new FileInfo(file).Length > 5_000_000) throw new InvalidDataException("File exceeds 5 MB.");
-                    addons.Add(Parse(File.ReadAllText(file), relative, zones));
+                    // A folder is loaded as one unit. One invalid file must not apply half an update.
+                    var parts = group.Select(source =>
+                    {
+                        try
+                        {
+                            var file = Path.Combine(directory, source);
+                            if (new FileInfo(file).Length > 5_000_000) throw new InvalidDataException("File exceeds 5 MB.");
+                            return Parse(File.ReadAllText(file), source, zones);
+                        }
+                        catch (Exception ex) { throw new InvalidDataException($"{source}: {ex.Message}", ex); }
+                    }).ToArray();
+                    addons.Add(group.Key.EndsWith('/') ? Combine(group.Key, parts) : parts[0]);
                 }
-                catch (Exception ex) { errors.Add($"{relative}: {ex.Message}"); }
+                catch (Exception ex) { errors.Add($"{group.Key}: {ex.Message}"); }
             }
         }
         catch (Exception ex) { errors.Add($"Cannot scan addon folder: {ex.Message}"); }
         return (addons, errors);
     }
+
+    private static PresetAddon Combine(string source, PresetAddon[] parts)
+    {
+        JsonObject? config = null;
+        var maps = new Dictionary<string, MapZoneModel>();
+        // Files are sorted by relative path. Later files override supplied settings and whole maps.
+        foreach (var part in parts)
+        {
+            if (part.Config is { } patch)
+            {
+                config ??= new JsonObject();
+                Merge(config, JsonNode.Parse(patch.GetRawText())!.AsObject());
+            }
+            foreach (var (map, content) in part.Maps) maps[map] = content;
+        }
+        return new PresetAddon
+        {
+            Id = SourceId(source), Name = source.TrimEnd('/'), Source = source,
+            Config = config == null ? null : JsonSerializer.SerializeToElement(config), Maps = maps,
+            Revision = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
+                JsonSerializer.Serialize(parts.Select(p => new { p.Source, p.Revision }))))),
+            LegacyFileIds = parts.Select(p => p.Id).ToArray(),
+        };
+    }
+
+    private static string SourceId(string source) => "addon:" + Convert.ToHexString(SHA256.HashData(
+        Encoding.UTF8.GetBytes(source.Replace('\\', '/').ToLowerInvariant())))[..24];
 
     public static PresetAddon Parse(string json, string source, ZoneStoreService zones)
     {
@@ -78,7 +120,7 @@ public static class AddonDiscovery
         if (!config.HasValue && maps.Count == 0) throw new InvalidDataException("The addon contains no settings or maps.");
         return new PresetAddon
         {
-            Id = "addon:" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(source.Replace('\\', '/').ToLowerInvariant())))[..24],
+            Id = SourceId(source),
             Name = name.Trim()[..Math.Min(name.Trim().Length, 80)], Source = source, Config = config, Maps = maps,
             Revision = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(json))),
         };
@@ -108,12 +150,12 @@ public static class AddonDiscovery
         var merged = JsonNode.Parse(baseline)!.AsObject();
         Merge(merged, JsonNode.Parse(patch.GetRawText())!.AsObject());
         return ConfigService.NormalizeJson(merged.ToJsonString());
+    }
 
-        static void Merge(JsonObject target, JsonObject source)
-        {
-            foreach (var (key, value) in source)
-                if (target[key] is JsonObject child && value is JsonObject other) Merge(child, other);
-                else target[key] = value?.DeepClone();
-        }
+    private static void Merge(JsonObject target, JsonObject source)
+    {
+        foreach (var (key, value) in source)
+            if (target[key] is JsonObject child && value is JsonObject other) Merge(child, other);
+            else target[key] = value?.DeepClone();
     }
 }

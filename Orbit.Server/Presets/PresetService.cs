@@ -138,7 +138,8 @@ public sealed class PresetService(ConfigService configs, ZoneStoreService zones,
         _addons = addons;
         _addonErrors = errors;
         var active = _library.ActiveAddon;
-        var update = active == null ? null : addons.FirstOrDefault(a => a.Id == active.Id && a.Revision != active.AddonRevision);
+        var update = active == null ? null : addons.FirstOrDefault(a =>
+            (a.Id == active.Id && a.Revision != active.AddonRevision) || a.LegacyFileIds.Contains(active.Id));
         if (update != null)
         {
             try
@@ -151,6 +152,7 @@ public sealed class PresetService(ConfigService configs, ZoneStoreService zones,
                     var snapshot = ApplyAddon(_active, update);
                     next.ActiveAddon = new UserPreset
                         { Id = update.Id, Name = update.Name, AddonRevision = update.Revision, Snapshot = snapshot };
+                    next.ActiveId = update.Id;
                     Persist(next);
                     _library = next;
                     _active = snapshot;

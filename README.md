@@ -152,7 +152,10 @@ start on **Default**. Original config and zone files are backed up under
 `presets/library.json`; `config.json` and `zones/*.json` remain compatibility copies.
 
 Drop JSON files into **`user/mods/ORBIT/addon/`** to add presets automatically.
-Subfolders are supported. Existing global config exports, `orbit-zones/1` packs,
+Each direct subfolder becomes one preset named after the folder, combining its JSON
+files, including nested folders. For example, `addon/Live-like/` can hold a global
+config and a zone pack: selecting **Live-like** applies both. Files directly in
+`addon/` remain individual presets. Existing global config exports, `orbit-zones/1` packs,
 single-map files named after their map ID, and complete `orbit-preset/1` exports are
 recognized. Scans run at startup, every five seconds in the UI, and before client
 config fetches (at most once per five seconds). Partial addons replace
@@ -160,8 +163,12 @@ only the supplied settings and maps, keeping the rest of your current setup.
 Addon sources are protected too: edits create a personal copy. A valid update to the
 selected addon is applied automatically, including at server startup. Personal copies
 keep their own tuning. Missing or incomplete files keep the last valid active version.
-Keep the same relative filename when distributing an update to an existing addon.
-Malformed addons are listed with an error and leave other presets available.
+Keep the folder name when updating a folder addon; filenames inside may change.
+For individual files directly in `addon/`, keep the same filename. Files within a
+folder are applied in alphabetical path order; later files override the supplied
+settings and whole maps if they overlap. One invalid file rejects the entire folder
+update and keeps its last valid selection. Malformed addons are listed with an error
+and leave other presets available.
 
 The **zone editor** renders each map and lets you draw the hotspots
 that steer squad routing: drag, resize, attract or repel, tune BSG's

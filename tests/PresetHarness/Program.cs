@@ -194,6 +194,99 @@ try
     await Task.Delay(5100); // exercise the real scan interval without an editor polling
     Check(LootDistance(restartedUpdate.Presets.ConfigForGame()) == 215 && restartedUpdate.Presets.ActiveName == "Version 6", "Client fetch detects addon updates while the editor is closed");
 
+    var folders = Open("folders");
+    folders.Configs.Config.General.SquadRally = false;
+    folders.Configs.Config.Loot.DetectDistance = 123;
+    folders.Presets.Save();
+    var folderPersonalId = folders.Presets.ActiveId;
+    var bundleDir = Path.Combine(folders.Presets.AddonDirectory, "Live-like");
+    Directory.CreateDirectory(Path.Combine(bundleDir, "maps"));
+    var bundleConfig = Path.Combine(bundleDir, "config-1.0.json");
+    var bundleZones = Path.Combine(bundleDir, "zones-1.0.json");
+    File.WriteAllText(bundleConfig, """{"loot":{"detect_distance":165}}""");
+    File.WriteAllText(bundleZones, """{"Format":"orbit-zones/1","Name":"Ignored file label","Maps":{"RezervBase":{"CustomZones":[{"Name":"Bundle bunker","FloorId":"bunkers","BotTypes":["PMC"]}]}}}""");
+    File.WriteAllText(Path.Combine(bundleDir, "maps", "Woods.json"), """{"CustomZones":[{"Name":"Nested forest"}]}""");
+    File.WriteAllText(Path.Combine(folders.Presets.AddonDirectory, "standalone.json"), partialGlobal);
+    folders.Presets.RefreshAddons(force: true);
+    Check(folders.Presets.Choices.Count(p => p.Source != null) == 2 && folders.Presets.ActiveId == folderPersonalId,
+        "Folder files become one choice alongside root files without changing a personal selection");
+    var bundleChoice = folders.Presets.Choices.Single(p => p.Name == "Live-like");
+    Check(bundleChoice.Source == "Live-like/" && bundleChoice.Contents == "Settings + 2 map(s)", "Folder name and combined contents describe its single preset");
+    folders.Presets.Switch(bundleChoice.Id);
+    Check(LootDistance(folders.Presets.ConfigForGame()) == 165 && !folders.Configs.Config.General.SquadRally
+        && folders.Presets.ZonesForGame().Contains("Bundle bunker") && folders.Presets.ZonesForGame().Contains("Nested forest"),
+        "One selection combines settings, zone packs and nested single-map files while preserving missing settings");
+    Check(Open("folders").Presets.ActiveId == bundleChoice.Id, "Folder selection survives restart");
+    var patchFile = Path.Combine(bundleDir, "zz-override.json");
+    File.WriteAllText(patchFile, """{"loot":{"detect_distance":185},"general":{"squad_rally":true}}""");
+    folders.Presets.RefreshAddons(force: true);
+    Check(LootDistance(folders.Presets.ConfigForGame()) == 185 && folders.Configs.Config.General.SquadRally,
+        "Adding a config fragment updates the folder and later paths override overlapping settings");
+    File.WriteAllText(patchFile, "{");
+    File.WriteAllText(bundleConfig, """{"loot":{"detect_distance":210}}""");
+    folders.Presets.RefreshAddons(force: true);
+    Check(LootDistance(folders.Presets.ConfigForGame()) == 185 && folders.Presets.AddonErrors.Count == 1
+        && folders.Presets.Choices.Count(p => p.Id == bundleChoice.Id) == 1
+        && folders.Presets.Choices.Any(p => p.Source == "standalone.json"),
+        "A broken component prevents a partial folder update, retains one saved choice and leaves other addons usable");
+    File.Delete(patchFile);
+    File.Move(bundleConfig, Path.Combine(bundleDir, "config-2.0.json"));
+    File.Move(bundleZones, Path.Combine(bundleDir, "zones-2.0.json"));
+    folders.Presets.RefreshAddons(force: true);
+    Check(folders.Presets.ActiveId == bundleChoice.Id && LootDistance(folders.Presets.ConfigForGame()) == 210
+        && folders.Presets.ZonesForGame().Contains("Bundle bunker"), "Versioned filenames may change without losing the selected folder or automatic updates");
+    File.WriteAllText(patchFile, UpdatePayload("Latest map", 215));
+    folders.Presets.RefreshAddons(force: true);
+    Check(folders.Presets.ZonesForGame().Contains("Latest map") && !folders.Presets.ZonesForGame().Contains("Bundle bunker"),
+        "Overlapping maps follow documented path order and replace a complete map");
+    folders.Configs.Config.Loot.DetectDistance = 230;
+    File.WriteAllText(patchFile, UpdatePayload("Next bundle", 225));
+    folders.Presets.RefreshAddons(force: true);
+    Check(!folders.Presets.ReadOnly && folders.Configs.Config.Loot.DetectDistance == 230
+        && LootDistance(folders.Presets.ConfigForGame()) == 215, "Folder refresh protects pending personal edits in Custom");
+    folders.Presets.Save();
+    folders.Presets.Switch(bundleChoice.Id);
+    Check(LootDistance(folders.Presets.ConfigForGame()) == 225, "Updated folder remains selectable after automatic Custom copy");
+
+    foreach (var oldSource in new[] { "Live-like/config-2.0.json", "Live-like/zones-2.0.json" })
+    {
+        var upgradeName = "folder-upgrade-" + Path.GetFileNameWithoutExtension(oldSource);
+        var upgrade = Open(upgradeName);
+        Directory.CreateDirectory(Path.Combine(upgrade.Presets.AddonDirectory, "Live-like"));
+        foreach (var file in Directory.GetFiles(bundleDir, "*.json"))
+            File.Copy(file, Path.Combine(upgrade.Presets.AddonDirectory, "Live-like", Path.GetFileName(file)));
+        var oldFileAddon = AddonDiscovery.Parse(File.ReadAllText(Path.Combine(upgrade.Presets.AddonDirectory, oldSource)), oldSource, upgrade.Zones);
+        var oldSelection = new PresetLibrary
+        {
+            ActiveId = oldFileAddon.Id,
+            ActiveAddon = new UserPreset
+            {
+                Id = oldFileAddon.Id, Name = oldFileAddon.Name, AddonRevision = oldFileAddon.Revision,
+                Snapshot = new PresetSnapshot
+                {
+                    Config = JsonSerializer.Deserialize<JsonElement>(ConfigService.DefaultJson), Maps = upgrade.Zones.DefaultSnapshot(),
+                },
+            },
+        };
+        File.WriteAllText(Path.Combine(root, upgradeName, "presets", "library.json"), JsonSerializer.Serialize(oldSelection));
+        var upgraded = Open(upgradeName);
+        Check(upgraded.Presets.Error == null && upgraded.Presets.ActiveId == bundleChoice.Id && upgraded.Presets.ActiveName == "Live-like"
+            && upgraded.Presets.Choices.Count(p => p.Source != null) == 1,
+            "An old selected component migrates into one folder preset: " + oldSource);
+        Check(LootDistance(upgraded.Presets.ConfigForGame()) == 225 && upgraded.Presets.ZonesForGame().Contains("Next bundle")
+            && Open(upgradeName).Presets.ActiveId == bundleChoice.Id, "Migrated selection combines the folder and persists across restart: " + oldSource);
+    }
+    var singleFolder = Open("single-folder");
+    Directory.CreateDirectory(Path.Combine(singleFolder.Presets.AddonDirectory, "baseline"));
+    File.WriteAllText(Path.Combine(singleFolder.Presets.AddonDirectory, "baseline", "zones.json"), UpdatePayload("File title", 150));
+    singleFolder.Presets.RefreshAddons(force: true);
+    Check(singleFolder.Presets.Choices.Single(p => p.Source != null).Name == "baseline", "A one-file folder also uses the folder identity and name");
+    var manyDir = Path.Combine(root, "too-many-addons");
+    Directory.CreateDirectory(manyDir);
+    for (var i = 0; i < 257; i++) File.WriteAllText(Path.Combine(manyDir, $"{i:D3}.json"), partialGlobal);
+    var tooMany = AddonDiscovery.Scan(manyDir, clean.Zones);
+    Check(tooMany.Addons.Count == 0 && tooMany.Errors.Count == 1, "Scan limit rejects incomplete discovery instead of loading a partial folder");
+
     var scene = Open("scene");
     scene.Zones.GetWorking("RezervBase");
     scene.Zones.RecordNativeFloors("RezervBase", new() { ["ZoneSubStorage"] = "base|bunkers" });

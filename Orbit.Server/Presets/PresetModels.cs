@@ -34,6 +34,8 @@ public sealed class PresetAddon
     public string Name { get; init; } = "";
     public string Source { get; init; } = "";
     public string Revision { get; init; } = "";
+    // Upgrade a selected file from the original discovery scheme to its containing addon folder.
+    public string[] LegacyFileIds { get; init; } = [];
     public JsonElement? Config { get; init; }
     public Dictionary<string, MapZoneModel> Maps { get; init; } = new();
     public string Contents => Config.HasValue

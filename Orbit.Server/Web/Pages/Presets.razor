@@ -61,12 +61,13 @@
         }
     </SettingsCard>
 
-    <SettingsCard Title="Addons" Subtitle="Drop JSON exports into user/mods/ORBIT/addon. They appear automatically, including files inside subfolders. No server restart needed while this editor is open.">
+    <SettingsCard Title="Addons" Subtitle="Drop JSON exports into user/mods/ORBIT/addon. Each subfolder becomes one preset combining all its JSON files; files directly in addon remain separate presets.">
         <MudText Typo="Typo.body2" Class="mb-3" Style="opacity:.75">
             Accepts global settings, zone packs and complete presets. A partial addon replaces only the settings
             and maps it contains, keeping everything else from the current preset. Its source file stays unchanged.
             Updates to the selected addon apply automatically, including after a server restart.
             Personal edits stay in Custom. A missing or incomplete file keeps the last valid version.
+            Keep the folder name when updating a folder addon; filenames inside may change.
         </MudText>
         <MudButton Variant="Variant.Outlined" Size="Size.Small" OnClick="Refresh" StartIcon="@Icons.Material.Filled.Refresh">Refresh addons</MudButton>
         @foreach (var error in Store.AddonErrors)
