@@ -143,6 +143,27 @@ own zones, mark which ones can host kill hunts. Export your setup as a
 **zone pack** and publish it on the Forge as an ORBIT addon, or import
 someone else's.
 
+**2.1: bot types and floors.** Each zone can target several bot types or factions
+and a named floor. The editor shows the corresponding floor plan from tarkov.dev,
+using the same SPT map catalogue as RaidReview. Choose a floor and a bot preview
+before drawing, or edit a zone's **Bot types** and **Zone floor** afterwards.
+Copies, undo/redo and zone packs retain these choices. Existing custom zones still
+apply to all types and floors unless configured otherwise.
+
+Built-in zones use automatic native floors, shown in read-only form. The initial
+editor data comes from SPT spawn positions; loading a map refreshes it from the
+scene's spawn and patrol points, including zones that span several floors.
+Existing zone files migrate automatically when the server starts. Their original
+contents are kept in a `.pre-native-floors.bak` file beside each changed JSON.
+Migration preserves radii, forces, bot filters and custom zones. Older imported
+packs also adopt the built-ins' native floors.
+
+Zones influence bots controlled by ORBIT, awake or Ghost. Shared squad destinations
+use the leader's type. Floor hotspots select destinations on that floor and check
+the arrival height; bots use the existing navigation paths and stairs to reach them.
+Repellers remain preferences, not walls. Bots retaining their native behaviour
+without takeover keep their original routing.
+
 Map reworks that keep the vanilla location id (Interchange Rework, Manimal's
 Interchange and Lighthouse 1.0 backports) are detected per raid and get their own zone
 set and render, listed as "Interchange (1.0 rework)" in the editor.
@@ -201,9 +222,8 @@ first). Then come say hi on the [ORBIT thread](https://discord.com/channels/8756
 
 ## Roadmap highlights
 
-**Next (2.1)**: validate native Ghost movement in raids and extend compatibility
-beyond vanilla patrols and MoreBotsAPI hunts. Also for the zone editor: zones
-filtered by faction or bot type, per-floor zones and names on custom zones.
+**Next (2.1)**: validate native Ghost movement and zones by bot type and floor
+in raids, and extend compatibility beyond vanilla patrols and MoreBotsAPI hunts.
 Per-map Ghost Mode settings are on the maybe list.
 
 No ETA, no promises: camp & ambush decisions, post-combat self-heal,
@@ -223,6 +243,9 @@ toggle. Suggestions land on the Discord thread.
   disabled, bots without takeover still sleep in place. Native movement and
   its interaction with modded brains need in-raid validation.
 - Most Reserve exfils need switches ORBIT can't operate yet.
+- Floor zones need a reachable navigation point on the selected floor. They do not
+  create paths through blocked stairs, operate switches or create spawn areas.
+  Floor routing and map height metadata still need in-raid validation.
 - Faction-mod takeover (RUAF / UNTAR / Black Division) can misbehave;
   leave those toggles OFF if it does. ISB takeover works.
 - Labs security gates can trap bots (BSG pathing quirk, checkpoint

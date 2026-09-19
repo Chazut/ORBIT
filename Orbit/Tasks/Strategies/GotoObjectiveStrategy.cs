@@ -1121,7 +1121,8 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                 {
                     for (var i = 0; i < squad.Size; i++)
                     {
-                        if (waypointSystem.WorldToCell(squad.Members[i].Position) == main.CellCoords)
+                        if (waypointSystem.WorldToCell(squad.Members[i].Position) == main.CellCoords
+                            && waypointSystem.MatchesZoneFloor(main.ZoneFloorId, squad.Members[i].Position))
                         {
                             main.KillsRoamStartedAt = now;
                             Log.Info($"{squad} Kills main at {main.CellCoords} entered roam phase (member {i} in cell, {main.KillsRoamTargetDuration:F0}s)");
@@ -1129,12 +1130,28 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                         }
                     }
                 }
+                // Scoped mains count time spent on their actual floor. Legacy mains keep their timer.
+                var elapsed = now - main.KillsRoamStartedAt;
+                if (!string.IsNullOrEmpty(main.ZoneFloorId))
+                {
+                    var onFloor = false;
+                    for (var i = 0; i < squad.Size; i++)
+                        if (!squad.Members[i].Bot.IsDead && waypointSystem.MatchesZoneFloor(main.ZoneFloorId, squad.Members[i].Position))
+                            onFloor = true;
+                    if (main.KillsRoamStartedAt > 0f && onFloor)
+                    {
+                        if (main.KillsFloorLastTick > 0f) main.KillsFloorElapsed += now - main.KillsFloorLastTick;
+                        main.KillsFloorLastTick = now;
+                    }
+                    else main.KillsFloorLastTick = 0f;
+                    elapsed = main.KillsFloorElapsed;
+                }
                 // Phase 2: timer-based completion
                 if (main.KillsRoamStartedAt > 0f
-                    && now - main.KillsRoamStartedAt >= main.KillsRoamTargetDuration)
+                    && elapsed >= main.KillsRoamTargetDuration)
                 {
                     main.Completed = true;
-                    Log.Info($"{squad} Kills main at {main.CellCoords} completed after {now - main.KillsRoamStartedAt:F0}s roam");
+                    Log.Info($"{squad} Kills main at {main.CellCoords} completed after {elapsed:F0}s roam");
                 }
                 break;
 

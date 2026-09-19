@@ -10,6 +10,7 @@ using Orbit.Helpers;
 using Orbit.Looting;
 using Orbit.Navigation;
 using Orbit.Sain;
+using Orbit.Zones;
 using UnityEngine;
 using UnityEngine.AI;
 using Random = UnityEngine.Random;
@@ -35,7 +36,7 @@ public struct Cell()
 /// corpse), and the per-squad reachability + claim + cooldown state that <c>RequestNear</c> consults to
 /// assign objectives. Heavy file — most of the routing intelligence lives here.
 /// </summary>
-public class WaypointSystem
+public partial class WaypointSystem
 {
     private readonly Cell[,] _cells;
     private readonly float _cellSize;
@@ -321,6 +322,7 @@ public class WaypointSystem
     public void CalculateAdvectionZones()
     {
         _zones.Clear();
+        var nativeFloors = CollectNativeZoneFloors();
 
         for (var i = 0; i < _botsController.BotSpawner._allBotZones.Length; i++)
         {
@@ -338,7 +340,8 @@ public class WaypointSystem
                 WorldToCellCentered(new Vector2(botZone.CenterOfSpawnPoints.x, botZone.CenterOfSpawnPoints.z)),
                 builtinZone.Radius.SampleGaussian(),
                 builtinZone.Force.SampleGaussian(),
-                builtinZone.Decay
+                builtinZone.Decay, new ZoneScope { BotTypes = builtinZone.BotTypes, FloorId = nativeFloors[botZone.name] }, botZone.CenterOfSpawnPoints,
+                builtinZone.KillMains && builtinZone.Force.Max > 0f
             );
             _zones.Add(zone);
         }
@@ -364,7 +367,8 @@ public class WaypointSystem
                 WorldToCellCentered(customZone.Position),
                 customZone.Radius.SampleGaussian(),
                 customZone.Force.SampleGaussian(),
-                customZone.Decay
+                customZone.Decay, customZone, new Vector3(customZone.Position.x, 0f, customZone.Position.y),
+                customZone.KillMains && customZone.Force.Max > 0f
             );
             _zones.Add(zone);
         }
@@ -380,6 +384,7 @@ public class WaypointSystem
                 for (var i = 0; i < _zones.Count; i++)
                 {
                     var zone = _zones[i];
+                    if (zone.IsScoped) continue;
                     var zoneCoords = zone.Coords;
                     var worldDist = Vector2.Distance(zoneCoords, cellCoords) * _cellSize;
                     var force = Mathf.Clamp01(1f - worldDist / (zone.Radius * ServerConfig.Zones.ZoneRadiusScale));
@@ -392,6 +397,7 @@ public class WaypointSystem
 
         foreach (var coords in _assignments.Values)
             PropagateForce(coords, 1f);
+        LogZoneScopes();
     }
 
     // Threshold for the islanded-pin: after this many consecutive null returns from RequestNear/RequestFar,
@@ -498,7 +504,8 @@ public class WaypointSystem
             }
         }
 
-        var advectionVector = _advectionField[requestCoords.x, requestCoords.y];
+        var advectionVector = _advectionField[requestCoords.x, requestCoords.y]
+            + ScopedAttraction(entity as Squad, requestCoords);
         var convergenceVector = _convergenceField[requestCoords.x, requestCoords.y];
         var randomization = Random.insideUnitCircle;
         randomization *= 0.5f;
@@ -1017,6 +1024,7 @@ public class WaypointSystem
         // the main's zone if they've strayed too far). Self-exclusion below still uses memberPos.
         const float MinSyntheticHopMeters = 10f;
         var center = WorldToCell(searchCenter);
+        var zoneFloor = ZoneFloorForCell(squad, center);
         // Convert radius to cell window. 50m / 75m cell ≈ 1 cell window → search the 3×3 around member. 75m /
         // 50m cell ≈ 2 cell window for tighter cells.
         var cellWindow = Mathf.Max(1, Mathf.CeilToInt(radius / _cellSize));
@@ -1040,9 +1048,9 @@ public class WaypointSystem
         var yTolerance = ServerConfig.MainObjectives.SameFloorLootYTolerance;
         var preferSameFloor = yTolerance > 0f;
         Waypoint bestSameFloor = null;
-        var sameFloorCandidates = 0;
+        var sameFloorCandidates = 0f;
         Waypoint best = null;
-        var candidates = 0;
+        var candidates = 0f;
         for (var dx = -cellWindow; dx <= cellWindow; dx++)
         {
             for (var dy = -cellWindow; dy <= cellWindow; dy++)
@@ -1053,6 +1061,7 @@ public class WaypointSystem
                 for (var i = 0; i < locs.Count; i++)
                 {
                     var loc = locs[i];
+                    if (!MatchesDestinationFloor(zoneFloor, loc)) continue;
                     var ok = loc.Category switch
                     {
                         WaypointCategory.LooseLoot => allowLooseLoot,
@@ -1091,12 +1100,13 @@ public class WaypointSystem
                             && squad.RecentlyVisitedPoiCooldowns.TryGetValue(loc.Id, out var visitExpiry)
                             && Time.time < visitExpiry) continue;
                     }
-                    candidates++;
-                    if (Random.Range(0, candidates) == 0) best = loc;
+                    var weight = ScopedWaypointWeight(squad, loc);
+                    candidates += weight;
+                    if (Random.value * candidates < weight) best = loc;
                     if (preferSameFloor && Mathf.Abs(loc.Position.y - memberPos.y) <= yTolerance)
                     {
-                        sameFloorCandidates++;
-                        if (Random.Range(0, sameFloorCandidates) == 0) bestSameFloor = loc;
+                        sameFloorCandidates += weight;
+                        if (Random.value * sameFloorCandidates < weight) bestSameFloor = loc;
                     }
                 }
             }
@@ -1157,6 +1167,7 @@ public class WaypointSystem
         // whole squad needs to converge.
         if (!IsLootCategory(mainObjective.Category)) return null;
         var center = WorldToCell(mainObjective.Position);
+        var zoneFloor = ZoneFloorForCell(squad, center);
         var radSqr = radius * radius;
         // Two parallel best-picks so we prefer a different loot category from the squad's anchor when
         // possible — gives a 4-PMC squad with a ContainerLoot anchor the chance to spread across container +
@@ -1175,6 +1186,7 @@ public class WaypointSystem
                 for (var i = 0; i < locs.Count; i++)
                 {
                     var loc = locs[i];
+                    if (!MatchesDestinationFloor(zoneFloor, loc)) continue;
                     if (!IsLootCategory(loc.Category)) continue;
                     if (loc.Id == mainObjective.Id) continue;
                     if (excludeIds != null && excludeIds.Contains(loc.Id)) continue;
@@ -1468,6 +1480,7 @@ public class WaypointSystem
         var squad = agent?.Squad;
         var agentSkips = agent?.ValueSkippedPoiIds;
         var center = WorldToCell(botPos);
+        var zoneFloor = ZoneFloorForCell(squad, center);
         var radSqr = radius * radius;
         // Same-floor preference: track nearest same-floor and nearest overall in parallel, return same-floor
         // when present. Without this, Resort sweeps yo-yo across floors because a basement candidate at low
@@ -1488,7 +1501,8 @@ public class WaypointSystem
                 for (var i = 0; i < locs.Count; i++)
                 {
                     var loc = locs[i];
-                    // All loot categories chain through sweep — excluding containers broke the chain and
+                    if (!MatchesDestinationFloor(zoneFloor, loc)) continue;
+                    // All loot categories chain through sweep, excluding containers broke the chain and
                     // zigzagged the bot to a cell-wide random pick after each container loot.
                     if (!IsLootCategory(loc.Category)) continue;
                     // A pooled LootItem (picked up, Item restored to null) is not a sweep target.
@@ -1841,6 +1855,7 @@ public class WaypointSystem
         // (worst with roaming scavs — no main, no home pull, constant RequestFar) until the field blew up.
         var pick = PickFromCell(cell, entity, coords);
         if (pick == null) return null;
+        if (entity is Squad scopedSquad) LogScopedPick(scopedSquad, coords, pick);
 
         cell.Congestion += 1;
         PropagateForce(coords, 1f);
@@ -1993,6 +2008,7 @@ public class WaypointSystem
             // get picked via the reservoir-sample path which respects the cooldown.
             if (m.Type == MainObjectiveType.Kills)
             {
+                if (!MatchesZoneFloor(m.ZoneFloorId, loc.Position)) continue;
                 if (locCell == m.CellCoords
                     && (loc.Category == WaypointCategory.ContainerLoot
                         || loc.Category == WaypointCategory.LooseLoot
@@ -2022,11 +2038,19 @@ public class WaypointSystem
     private float? ResolveSquadFloor(Squad squad, Vector2Int coords, List<Waypoint> waypoints, float tolerance)
     {
         if (tolerance <= 0f) return null;
-        if (squad.CellFloorAssignments.TryGetValue(coords, out var existing)) return existing;
+        var zoneFloor = ZoneFloorForCell(squad, coords);
+        if (squad.CellFloorAssignments.TryGetValue(coords, out var existing))
+        {
+            if (string.IsNullOrEmpty(zoneFloor)) return existing;
+            foreach (var point in waypoints)
+                if (MatchesZoneFloor(zoneFloor, point.Position) && Mathf.Abs(point.Position.y - existing) <= tolerance) return existing;
+            squad.CellFloorAssignments.Remove(coords);
+        }
         var floors = _floorScratch;
         floors.Clear();
         for (var i = 0; i < waypoints.Count; i++)
         {
+            if (!MatchesZoneFloor(zoneFloor, waypoints[i].Position)) continue;
             var y = waypoints[i].Position.y;
             var matched = false;
             for (var f = 0; f < floors.Count; f++)
@@ -2052,12 +2076,14 @@ public class WaypointSystem
         float tolerance, HashSet<float> exhaustedFloors, out float newFloorY)
     {
         newFloorY = 0f;
+        var zoneFloor = ZoneFloorForCell(squad, coords);
         var candidatesPerFloor = _floorScratch;
         candidatesPerFloor.Clear();
         var nowForVisitCheck = Time.time;
         for (var i = 0; i < waypoints.Count; i++)
         {
             var loc = waypoints[i];
+            if (!MatchesDestinationFloor(zoneFloor, loc)) continue;
             var alreadyExhausted = false;
             foreach (var ex in exhaustedFloors)
                 if (Mathf.Abs(loc.Position.y - ex) <= tolerance) { alreadyExhausted = true; break; }
@@ -2150,6 +2176,7 @@ public class WaypointSystem
                                      && !CellHasRuntimeLootPoi(cell);
             var corpseGate = CorpseRequiresSightOrSquadKillForSquad(squad);
             var waypoints = cell.Waypoints;
+            var zoneFloor = ZoneFloorForCell(squad, coords);
 
             // Multi-floor cell handling. If this cell has POIs spread across multiple Y clusters and the squad
             // hasn't already committed to a floor, pick one at random — keeps cleaning order varied between
@@ -2164,6 +2191,7 @@ public class WaypointSystem
             for (var i = 0; i < waypoints.Count; i++)
             {
                 var loc = waypoints[i];
+                if (!MatchesDestinationFloor(zoneFloor, loc)) continue;
                 if (loc.Category != WaypointCategory.Corpse) continue;
                 if (!IsRuntimeWaypoint(loc)) continue;
                 if (!WasCorpseKilledBySquad(loc.Id, squad.Id)) continue;
@@ -2182,6 +2210,7 @@ public class WaypointSystem
             for (var i = 0; i < waypoints.Count; i++)
             {
                 var loc = waypoints[i];
+                if (!MatchesDestinationFloor(zoneFloor, loc)) continue;
                 if (!IsWaypointMainAnchorOfSquad(squad, loc)) continue;
                 // Apply the standard hard filters before priority-picking.
                 if (loc.Category == WaypointCategory.Quest && !SquadOwnsQuest(squad, loc)) continue;
@@ -2207,7 +2236,7 @@ public class WaypointSystem
             }
 
             Waypoint pick = null;
-            var candidates = 0;
+            var candidates = 0f;
             var skippedBlacklist = 0;
             var skippedExfil = 0;
             var skippedUnreachable = 0;
@@ -2220,6 +2249,7 @@ public class WaypointSystem
             for (var i = 0; i < waypoints.Count; i++)
             {
                 var loc = waypoints[i];
+                if (!MatchesDestinationFloor(zoneFloor, loc)) continue;
                 if (loc.Category == WaypointCategory.Exfil
                     && (!squad.ExtractRequested || loc != squad.NearestExfilCached))
                 {
@@ -2291,8 +2321,9 @@ public class WaypointSystem
                 }
                 if (floorFilterActive && loc.Category != WaypointCategory.Quest
                     && Mathf.Abs(loc.Position.y - floorY.Value) > floorTolerance) continue;
-                candidates++;
-                if (Random.Range(0, candidates) == 0)
+                var weight = ScopedWaypointWeight(squad, loc);
+                candidates += weight;
+                if (Random.value * candidates < weight)
                     pick = loc;
             }
             if (pick != null)
@@ -2328,11 +2359,12 @@ public class WaypointSystem
 
             // Fallback: re-pick relaxing ONLY the detour-distance cap. Every other filter stays in effect to
             // avoid sending bots to genuinely unreachable / immersion-breaking targets.
-            var fallbackCandidates = 0;
+            var fallbackCandidates = 0f;
             Waypoint fallbackPick = null;
             for (var i = 0; i < waypoints.Count; i++)
             {
                 var loc = waypoints[i];
+                if (!MatchesDestinationFloor(zoneFloor, loc)) continue;
                 if (loc.Category == WaypointCategory.Exfil && !squad.ExtractRequested) continue;
                 if (loc.Category == WaypointCategory.Quest
                     && !SquadOwnsQuest(squad, loc)) continue;
@@ -2345,8 +2377,9 @@ public class WaypointSystem
                     && !HasLineOfSightToCorpse(squad, loc)) continue;
                 if (IsSquadKnownUnreachable(squad, loc.Id)) continue;
                 if (!SquadCanUseWaypoint(squad, squadIsPmc, loc)) continue;
-                fallbackCandidates++;
-                if (Random.Range(0, fallbackCandidates) == 0)
+                var weight = ScopedWaypointWeight(squad, loc);
+                fallbackCandidates += weight;
+                if (Random.value * fallbackCandidates < weight)
                     fallbackPick = loc;
             }
             if (fallbackPick != null) return fallbackPick;
@@ -3026,12 +3059,17 @@ public class WaypointSystem
         return false;
     }
 
-    public readonly struct Zone(Vector2 coords, float radius, float force, float decay)
+    public readonly struct Zone(Vector2 coords, float radius, float force, float decay,
+        ZoneScope scope = null, Vector3 worldPosition = default, bool killMains = false)
     {
         public readonly Vector2 Coords = coords;
         public readonly float Radius = radius;
         public readonly float Force = force;
         public readonly float Decay = decay;
+        public readonly ZoneScope Scope = scope;
+        public readonly Vector3 WorldPosition = worldPosition;
+        public readonly bool KillMains = killMains;
+        public bool IsScoped => Scope != null && (Scope.BotTypes != null || !string.IsNullOrEmpty(Scope.FloorId));
 
         public override string ToString()
             => $"Zone(position: {Coords}, radius: {Radius}, force: {Force}, decay: {Decay})";

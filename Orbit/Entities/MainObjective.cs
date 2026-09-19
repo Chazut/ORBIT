@@ -38,6 +38,10 @@ public class MainObjective
     /// cell; for Quest, the trigger's nav-point.</summary>
     public Vector3 Position;
     public bool Completed;
+    // Null preserves the original all-floor main semantics for existing zone files.
+    public string ZoneFloorId;
+    public float KillsFloorElapsed;
+    public float KillsFloorLastTick;
 
     // ── Kills-type only ──────────────────────────────────────────────
     /// <summary><see cref="Time.time"/> at which the first squad member

@@ -1,0 +1,63 @@
+@using Orbit.Zones
+
+<div class="d-flex flex-wrap mb-3" style="gap:16px">
+    <MudSelect T="string" Label="Bot types" MultiSelection="true" SelectedValues="SelectedTypes"
+               SelectedValuesChanged="SetTypes" ToStringFunc="@(type => type == "*" ? "All bot types" : type)"
+               Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:250px"
+               HelperText="Only ORBIT-controlled bots. Shared squad destinations use the leader's type. Empty selection disables this zone.">
+        <MudSelectItem T="string" Value="@("*")">All bot types</MudSelectItem>
+        @foreach (var type in ZoneBotTypes.Keys)
+        {
+            <MudSelectItem T="string" Value="@type">@type</MudSelectItem>
+        }
+    </MudSelect>
+    @if (Native)
+    {
+        <div style="min-width:220px; padding:8px 12px" aria-label="Native floors">
+            <MudText Typo="Typo.subtitle2">Native floors (automatic)</MudText>
+            <MudText>@(string.IsNullOrEmpty(Scope.FloorId) ? "Unknown until map data is available" : FloorSelection.Label(MapId, Scope.FloorId))</MudText>
+            <MudText Typo="Typo.caption">@(LiveNative ? "From the loaded map's spawn and patrol points." : "From SPT spawn data; refreshed from the game when this map loads.")</MudText>
+        </div>
+    }
+    else
+    {
+    <MudSelect T="string" Label="Zone floor" Value="@(Scope.FloorId ?? "")" ValueChanged="SetFloor"
+               Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:220px"
+               HelperText="Destinations use this floor's height and building limits. Stairs remain usable.">
+        <MudSelectItem T="string" Value="@string.Empty">All floors</MudSelectItem>
+        @foreach (var floor in Floors)
+        {
+            <MudSelectItem T="string" Value="@floor.Id">@floor.Name</MudSelectItem>
+        }
+        @if (!string.IsNullOrEmpty(Scope.FloorId) && !Floors.Any(f => f.Id == Scope.FloorId))
+        {
+            <MudSelectItem T="string" Value="@Scope.FloorId">@FloorSelection.Label(MapId, Scope.FloorId)</MudSelectItem>
+        }
+    </MudSelect>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public ZoneScope Scope { get; set; } = default!;
+    [Parameter, EditorRequired] public string MapId { get; set; } = "bigmap";
+    [Parameter] public EventCallback Changed { get; set; }
+    [Parameter] public bool Native { get; set; }
+    [Parameter] public bool LiveNative { get; set; }
+    private IReadOnlyCollection<string> SelectedTypes => Scope.BotTypes ?? new[] { "*" };
+    private MapFloor[] Floors => FloorCatalog.For(MapId)?.Floors ?? [];
+
+    private async Task SetTypes(IEnumerable<string> values)
+    {
+        var selected = values.ToArray();
+        // Selecting a concrete type from "All" starts a custom selection; choosing All resets it.
+        if (selected.Contains("*") && Scope.BotTypes != null) Scope.BotTypes = null;
+        else Scope.BotTypes = selected.Where(v => v != "*").ToArray();
+        await Changed.InvokeAsync();
+    }
+
+    private async Task SetFloor(string value)
+    {
+        Scope.FloorId = string.IsNullOrEmpty(value) ? null : value;
+        await Changed.InvokeAsync();
+    }
+}

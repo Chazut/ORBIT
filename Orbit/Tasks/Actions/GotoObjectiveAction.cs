@@ -259,6 +259,8 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                     {
                         ClearLoSBlockedTracking(agent);
                     }
+                    if (inRadius && !waypointSystem.HasReachedZoneFloor(agent.Squad, objective.Location, agent.Position))
+                        inRadius = false;
                     if (inRadius)
                     {
                         // If this is a lootable POI and we can grab the claim, chain straight into Looting

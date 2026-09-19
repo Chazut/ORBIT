@@ -92,6 +92,10 @@
       </Reference>
     </ItemGroup>
 
+    <ItemGroup>
+      <Compile Include="..\Shared\*.cs" Link="Zones\%(Filename)%(Extension)" />
+    </ItemGroup>
+
     <Target Name="PostBuild" AfterTargets="PostBuildEvent">
       <MakeDir Directories="$(DeployRoot)\BepInEx\plugins\$(TargetName)" />
       <Exec Command="copy /Y &quot;$(TargetPath)&quot; &quot;$(DeployRoot)\BepInEx\plugins\$(TargetName)\$(TargetFileName)&quot;&#xA;copy /Y &quot;$(TargetDir)$(TargetName).pdb&quot; &quot;$(DeployRoot)\BepInEx\plugins\$(TargetName)\$(TargetName).pdb&quot;" />

@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using Newtonsoft.Json;
 using UnityEngine;
+using Orbit.Zones;
 
 namespace Orbit.Config;
 
@@ -92,8 +93,10 @@ public class WaypointConfig
 
     /// <summary>Zone keyed on a BSG-defined trigger name (e.g. ZoneDormitory).
     /// Position comes from the BSG trigger; we just tune radius/force/decay.</summary>
-    public class BuiltinZone(Range radius, Range? force = null, float decay = 1f, bool killMains = true)
+    public class BuiltinZone(Range radius, Range? force = null, float decay = 1f, bool killMains = true) : ZoneScope
     {
+        // Use property defaults for omitted optional JSON members, including pre-editor zone files.
+        public BuiltinZone() : this(new Range(1f, 1f)) { }
         [JsonRequired] public Range Radius { get; set; } = radius;
         [JsonRequired] public Range Force { get; set; } = force ?? new Range(1f, 1f);
         [JsonRequired] public float Decay { get; set; } = decay;
@@ -104,8 +107,9 @@ public class WaypointConfig
 
     /// <summary>Mod-defined zone with hand-picked world position. Used to
     /// add attractors/repellers where BSG didn't put a trigger.</summary>
-    public class CustomZone(Vector2 position, Range radius, Range? force = null, float decay = 1f, bool killMains = true)
+    public class CustomZone(Vector2 position, Range radius, Range? force = null, float decay = 1f, bool killMains = true) : ZoneScope
     {
+        public CustomZone() : this(Vector2.zero, new Range(100f, 150f)) { }
         [JsonRequired] public Vector2 Position { get; set; } = position;
         [JsonRequired] public Range Radius { get; set; } = radius;
         [JsonRequired] public Range Force { get; set; } = force ?? new Range(1f, 1f);

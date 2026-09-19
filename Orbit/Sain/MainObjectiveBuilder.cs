@@ -71,7 +71,7 @@ public static class MainObjectiveBuilder
 
         // Lazy pools — only compute the ones we need.
         List<Vector2Int> topLootCells = null;
-        List<Vector3> killZoneAnchors = null;
+        List<WaypointSystem.ZoneAnchor> killZoneAnchors = null;
         List<Waypoint> questPool = null;
 
         // Resolve mix weights — PMC with SAIN personality uses archetype-specific weights, PlayerScav and
@@ -105,7 +105,7 @@ public static class MainObjectiveBuilder
         // duplicate is redundant (the squad would do the same thing twice) and inflates the count toward the
         // timeout fallback. Each roll retries up to MaxRolls times against this set; if every retry collides
         // we accept the duplicate as a last resort rather than dropping the main entirely.
-        var usedCells = new HashSet<Vector2Int>();
+        var usedCells = new HashSet<string>();
         const int MaxRetriesOnDuplicate = 6;
 
         for (var i = 0; i < count; i++)
@@ -127,7 +127,7 @@ public static class MainObjectiveBuilder
                         candidate = RollQuest(questPool, waypointSystem, squad);
                         break;
                     case MainObjectiveType.Kills:
-                        killZoneAnchors ??= waypointSystem.GetPositiveForceZoneAnchors();
+                        killZoneAnchors ??= waypointSystem.GetPositiveForceZoneAnchors(squad);
                         candidate = RollKills(killZoneAnchors, waypointSystem, squad);
                         break;
                 }
@@ -142,7 +142,7 @@ public static class MainObjectiveBuilder
                 }
                 if (candidate == null) break; // pool empty, give up on this slot
 
-                if (!usedCells.Contains(candidate.CellCoords))
+                if (!usedCells.Contains(candidate.CellCoords + "|" + candidate.ZoneFloorId))
                     main = candidate;
                 // else: collision with an existing cell within THIS squad — retry the same type. Cross-squad
                 // collisions are intentional (multiple squads can target the same Quest / Kills / LootValue
@@ -152,7 +152,7 @@ public static class MainObjectiveBuilder
             if (main != null)
             {
                 squad.MainObjectives.Add(main);
-                usedCells.Add(main.CellCoords);
+                usedCells.Add(main.CellCoords + "|" + main.ZoneFloorId);
             }
         }
 
@@ -176,10 +176,11 @@ public static class MainObjectiveBuilder
         Log.Info($"{squad} role={role} mains[{squad.MainObjectives.Count}]: {summary}");
     }
 
-    private static MainObjective RollKills(List<Vector3> anchors, WaypointSystem waypointSystem, Squad squad)
+    private static MainObjective RollKills(List<WaypointSystem.ZoneAnchor> anchors, WaypointSystem waypointSystem, Squad squad)
     {
         if (anchors.Count == 0) return null;
-        var pos = anchors[Random.Range(0, anchors.Count)];
+        var anchor = anchors[Random.Range(0, anchors.Count)];
+        var pos = anchor.Position;
         // Per-archetype roam-duration range if the squad has a SAIN personality; falls back to the global F12
         // range for PlayerScavs and personality-OFF PMCs.
         var roamRange = squad.Personality != null
@@ -188,6 +189,7 @@ public static class MainObjectiveBuilder
         return new MainObjective
         {
             Type = MainObjectiveType.Kills,
+            ZoneFloorId = anchor.FloorId,
             Position = pos,
             CellCoords = waypointSystem.WorldToCell(pos),
             KillsRoamTargetDuration = Random.Range(roamRange.x, roamRange.y),

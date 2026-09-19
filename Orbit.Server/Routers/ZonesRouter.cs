@@ -3,6 +3,8 @@ using SPTarkov.DI.Annotations;
 using SPTarkov.Server.Core.DI;
 using SPTarkov.Server.Core.Models.Eft.Common;
 using SPTarkov.Server.Core.Utils;
+using SPTarkov.Server.Core.Models.Utils;
+using System.Text.Json.Serialization;
 
 namespace Orbit.Server.Routers;
 
@@ -17,7 +19,21 @@ public sealed class ZonesRouter(JsonUtil jsonUtil, ZoneStoreService zoneStore) :
         "/orbit/zones",
         (url, requestData, sessionId, output, cancellationToken) =>
             new ValueTask<string>(zoneStore.ToJsonAll())
+    ),
+    new RouteAction<NativeFloorsRequest>(
+        "/orbit/zones/native-floors",
+        (url, requestData, sessionId, output, cancellationToken) =>
+        {
+            zoneStore.RecordNativeFloors(requestData.MapId, requestData.Floors);
+            return new ValueTask<string>("{}");
+        }
     )
 ])
 {
+}
+
+public sealed class NativeFloorsRequest : IRequestData
+{
+    [JsonPropertyName("MapId")] public string MapId { get; set; } = "";
+    [JsonPropertyName("Floors")] public Dictionary<string, string?> Floors { get; set; } = new();
 }

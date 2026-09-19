@@ -12,7 +12,7 @@ namespace Orbit.Server.Zones;
 /// raid start and overrides its local Config/Maps/Zones files with them.
 /// </summary>
 [Injectable(InjectionType.Singleton)]
-public class ZoneStoreService(ISptLogger<ZoneStoreService> logger)
+public partial class ZoneStoreService(ISptLogger<ZoneStoreService> logger)
 {
     // ORBIT map ids (BSG location ids as the client sees them).
     public static readonly string[] MapIds =
@@ -70,17 +70,38 @@ public class ZoneStoreService(ISptLogger<ZoneStoreService> logger)
     /// <summary>Zones for one map: the saved file, seeded from the embedded default on first access.</summary>
     public MapZoneModel GetZones(string mapId)
     {
+        lock (_working) return GetZonesLocked(mapId);
+    }
+
+    private MapZoneModel GetZonesLocked(string mapId)
+    {
         try
         {
             var path = PathFor(mapId);
             if (!File.Exists(path))
             {
                 var seed = ReadEmbeddedDefault(mapId);
+                NormalizeNativeFloors(mapId, seed);
                 Directory.CreateDirectory(ZonesDir);
                 File.WriteAllText(path, JsonSerializer.Serialize(seed, _json));
                 return seed;
             }
-            return JsonSerializer.Deserialize<MapZoneModel>(File.ReadAllText(path), _json) ?? new MapZoneModel();
+            var loaded = JsonSerializer.Deserialize<MapZoneModel>(File.ReadAllText(path), _json) ?? new MapZoneModel();
+            if (NormalizeNativeFloors(mapId, loaded))
+            {
+                try
+                {
+                    BackupBeforeNativeMigration(path);
+                    Save(mapId, loaded);
+                    logger.Info($"[ORBIT] ZONE MIGRATION: map={mapId} native floors updated; original retained in .pre-native-floors.bak");
+                }
+                catch (Exception ex)
+                {
+                    // A read-only install must not replace valid personal tuning with shipped defaults.
+                    logger.Error($"[ORBIT] ZONE MIGRATION: map={mapId} save failed: {ex.Message}; migrated settings kept in memory");
+                }
+            }
+            return loaded;
         }
         catch (Exception ex)
         {
@@ -91,9 +112,15 @@ public class ZoneStoreService(ISptLogger<ZoneStoreService> logger)
 
     public void Save(string mapId, MapZoneModel zones)
     {
-        Directory.CreateDirectory(ZonesDir);
-        File.WriteAllText(PathFor(mapId), JsonSerializer.Serialize(zones, _json));
-        logger.Info($"[ORBIT] Zones saved for {mapId}");
+        lock (_working)
+        {
+            NormalizeNativeFloors(mapId, zones);
+            Directory.CreateDirectory(ZonesDir);
+            var path = PathFor(mapId);
+            File.WriteAllText(path + ".tmp", JsonSerializer.Serialize(zones, _json));
+            File.Move(path + ".tmp", path, overwrite: true);
+            logger.Info($"[ORBIT] Zones saved for {mapId}");
+        }
     }
 
     /// <summary>Rewrites the map's file from the embedded default and returns the fresh model.</summary>
@@ -128,7 +155,11 @@ public class ZoneStoreService(ISptLogger<ZoneStoreService> logger)
     {
         lock (_working)
         {
-            if (_working.TryGetValue(mapId, out var working)) return working;
+            if (_working.TryGetValue(mapId, out var working))
+            {
+                NormalizeNativeFloors(mapId, working);
+                return working;
+            }
             var loaded = GetZones(mapId);
             _working[mapId] = loaded;
             _workingSavedJson[mapId] = JsonSerializer.Serialize(loaded, _json);
@@ -217,6 +248,7 @@ public class ZoneStoreService(ISptLogger<ZoneStoreService> logger)
         var source = GetWorking(fromMapId);
         GetWorking(toMapId); // seeds the target's saved-state snapshot so the copy shows as pending
         var clone = JsonSerializer.Deserialize<MapZoneModel>(JsonSerializer.Serialize(source, _json), _json) ?? new MapZoneModel();
+        NormalizeNativeFloors(toMapId, clone);
         lock (_working)
         {
             _working[toMapId] = clone;
@@ -255,6 +287,7 @@ public class ZoneStoreService(ISptLogger<ZoneStoreService> logger)
                 if (_working.TryGetValue(kv.Key, out var current) && JsonSerializer.Serialize(current, _json) == kv.Value) continue;
                 var restored = JsonSerializer.Deserialize<MapZoneModel>(kv.Value, _json);
                 if (restored == null) continue;
+                NormalizeNativeFloors(kv.Key, restored);
                 _working[kv.Key] = restored;
                 replaced = true;
             }
@@ -304,6 +337,7 @@ public class ZoneStoreService(ISptLogger<ZoneStoreService> logger)
                 continue;
             }
             Sanitize(kv.Value);
+            NormalizeNativeFloors(kv.Key, kv.Value);
             GetWorking(kv.Key); // seed the saved-state snapshot so the diff shows as pending
             lock (_working)
             {
@@ -354,7 +388,11 @@ public class ZoneStoreService(ISptLogger<ZoneStoreService> logger)
             {
                 using var reader = new StreamReader(stream);
                 var parsed = JsonSerializer.Deserialize<MapZoneModel>(reader.ReadToEnd(), _json);
-                if (parsed != null) return parsed;
+                if (parsed != null)
+                {
+                    NormalizeNativeFloors(mapId, parsed);
+                    return parsed;
+                }
             }
         }
         catch (Exception ex)

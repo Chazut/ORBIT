@@ -27,7 +27,8 @@ public static class MapRenders
     public static Task<InlineRender?> InlineSvgAsync(string mapId, MapView view)
     {
         if (view.Svg == null || view.HideLayers is not { Length: > 0 }) return Task.FromResult<InlineRender?>(null);
-        return _cache.GetOrAdd(mapId, _ => FetchAsync(view));
+        var key = mapId + "|" + view.Svg + "|" + string.Join(",", view.HideLayers);
+        return _cache.GetOrAdd(key, _ => FetchAsync(view));
     }
 
     /// <summary>Nested svg covering the same 1000 x vh box the &lt;image&gt; path uses.</summary>

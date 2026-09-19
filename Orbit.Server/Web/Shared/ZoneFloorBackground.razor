@@ -1,0 +1,89 @@
+@using Orbit.Zones
+@using System.Globalization
+@using System.Text
+
+<g opacity="@F(Opacity)" style="pointer-events:none">
+    @if (Floor.Svg != null && (Floor.HideLayers is not { Length: > 0 } || _render != null))
+    {
+        var box = ImageBox(Floor.ImageBounds);
+        <image href="@ImageUrl" x="@F(box.X)" y="@F(box.Y)" width="@F(box.W)" height="@F(box.H)" preserveAspectRatio="none" />
+    }
+    else if (Floor.TilePath != null)
+    {
+        @foreach (var tile in Tiles())
+        {
+            <image href="@tile.Url" x="@F(tile.X)" y="@F(tile.Y)" width="@F(tile.Size)" height="@F(tile.Size)" preserveAspectRatio="none" />
+        }
+    }
+</g>
+
+@code {
+    [Parameter, EditorRequired] public string MapId { get; set; } = "bigmap";
+    [Parameter, EditorRequired] public MapFloor Floor { get; set; } = default!;
+    [Parameter, EditorRequired] public MapView View { get; set; } = default!;
+    [Parameter] public float Height { get; set; }
+    [Parameter] public float Opacity { get; set; } = .85f;
+    private MapRenders.InlineRender? _render;
+    private string? _key;
+    private string? _imageUrl;
+    private string? ImageUrl => _imageUrl ?? Floor.Svg;
+    private static string F(float n) => n.ToString("0.###", CultureInfo.InvariantCulture);
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var key = MapId + "|" + Floor.Id;
+        if (_key == key) return;
+        _key = key;
+        _render = null;
+        _imageUrl = null;
+        if (Floor.HideLayers is not { Length: > 0 }) return;
+        var view = View with { Svg = Floor.Svg, HideLayers = Floor.HideLayers };
+        var render = await MapRenders.InlineSvgAsync(MapId, view);
+        if (_key != key || render == null) return;
+        _render = render;
+        // Each floor is an isolated SVG image: CSS hiding base groups must not hide sibling images.
+        var svg = $"<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"{render.ViewBox}\">{render.Content}</svg>";
+        _imageUrl = "data:image/svg+xml;base64," + Convert.ToBase64String(Encoding.UTF8.GetBytes(svg));
+    }
+
+    private (float MinX, float MaxZ, float Scale) Frame()
+    {
+        var a = MapViews.Rot(View.X1, View.Z1, View.Rot);
+        var b = MapViews.Rot(View.X2, View.Z2, View.Rot);
+        return (MathF.Min(a.x, b.x), MathF.Max(a.z, b.z), 1000f / MathF.Abs(b.x - a.x));
+    }
+
+    private (float X, float Y, float W, float H) ImageBox(float[] bounds)
+    {
+        var a = MapViews.Rot(bounds[0], bounds[1], View.Rot);
+        var b = MapViews.Rot(bounds[2], bounds[3], View.Rot);
+        var frame = Frame();
+        return ((MathF.Min(a.x, b.x) - frame.MinX) * frame.Scale,
+            (frame.MaxZ - MathF.Max(a.z, b.z)) * frame.Scale,
+            MathF.Abs(b.x - a.x) * frame.Scale, MathF.Abs(b.z - a.z) * frame.Scale);
+    }
+
+    private IEnumerable<(string Url, float X, float Y, float Size)> Tiles()
+    {
+        var map = FloorCatalog.For(MapId);
+        if (map == null || Floor.TilePath == null) yield break;
+        var frame = Frame();
+        var scale = MathF.Pow(2, map.TileZoom);
+        var t = map.Transform;
+        var pixels = map.TileSize;
+        var minPx = (t[0] * frame.MinX + t[1]) * scale;
+        var maxPx = (t[0] * (frame.MinX + 1000f / frame.Scale) + t[1]) * scale;
+        var minPy = (-t[2] * frame.MaxZ + t[3]) * scale;
+        var maxPy = (-t[2] * (frame.MaxZ - Height / frame.Scale) + t[3]) * scale;
+        for (var x = (int)MathF.Floor(minPx / pixels); x <= (int)MathF.Floor(maxPx / pixels); x++)
+        for (var y = (int)MathF.Floor(minPy / pixels); y <= (int)MathF.Floor(maxPy / pixels); y++)
+        {
+            var rx = (x * pixels / scale - t[1]) / t[0];
+            var rz = (t[3] - y * pixels / scale) / t[2];
+            var url = Floor.TilePath.Replace("{z}", map.TileZoom.ToString(CultureInfo.InvariantCulture))
+                .Replace("{x}", x.ToString(CultureInfo.InvariantCulture)).Replace("{y}", y.ToString(CultureInfo.InvariantCulture));
+            yield return (url, (rx - frame.MinX) * frame.Scale, (frame.MaxZ - rz) * frame.Scale,
+                pixels / scale / t[0] * frame.Scale);
+        }
+    }
+}

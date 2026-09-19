@@ -29,6 +29,10 @@
     <Reference Include="MudBlazor"><HintPath>$(SPT_DIR)\MudBlazor.dll</HintPath><Private>false</Private></Reference>
   </ItemGroup>
 
+  <ItemGroup>
+    <Compile Include="..\Shared\*.cs" Link="Zones\%(Filename)%(Extension)" />
+  </ItemGroup>
+
   <Target Name="EnsureSptDir" BeforeTargets="Build">
     <Error Condition="!Exists('$(SPT_DIR)\SPTarkov.Server.Core.dll')" Text="SPT_DIR does not point at a valid SPT 4.1 server (SPTarkov.Server.Core.dll not found)." />
   </Target>
