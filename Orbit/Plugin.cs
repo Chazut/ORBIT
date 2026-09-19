@@ -117,6 +117,8 @@ public class Plugin : BaseUnityPlugin
         EnableSafe(new DormantVisionPatch());
         EnableSafe(new DormantBrainThrottlePatch());
         EnableSafe(new NativeGhostDecisionPatch());
+        EnableSafe(new NativeGhostSainCleanupPatch());
+        EnableSafe(new NativeGhostSainStopPatch());
         EnableSafe(new DormantDamageProbePatch());
         EnableSafe(new DormantGroundCollisionPatch());
         EnableSafe(new DormantAvoidDangerBypassPatch());
@@ -258,6 +260,8 @@ public class Plugin : BaseUnityPlugin
             patch.Enable();
             if (patch is NativeGhostDecisionPatch) NativeGhostSystem.DecisionGuardReady = true;
             if (patch is DormantBrainThrottlePatch) NativeGhostSystem.BrainBridgeReady = true;
+            if (patch is NativeGhostSainCleanupPatch) NativeGhostSystem.SainCleanupScopeReady = true;
+            if (patch is NativeGhostSainStopPatch) NativeGhostSystem.SainStopGuardReady = true;
         }
         catch (Exception ex)
         {

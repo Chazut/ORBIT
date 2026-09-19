@@ -31,6 +31,8 @@ public sealed class NativeGhostSystem
         public float Stamina = 14f;
         public bool Exhausted;
         public float Travelled;
+        public int SainStopsProtected;
+        public bool ReportedSainProtection;
         public float ReportAt;
         public float NextDoorCheck;
         public Vector3 DoorDirection;
@@ -47,6 +49,9 @@ public sealed class NativeGhostSystem
     private static bool _huntResolved;
     public static bool DecisionGuardReady { get; set; }
     public static bool BrainBridgeReady { get; set; }
+    public static bool SainCleanupScopeReady { get; set; }
+    public static bool SainStopGuardReady { get; set; }
+    public static bool HasSleepers => Sleepers.Count > 0;
 
     private readonly DoorSystem _doors;
     private readonly HashSet<string> _reportedUnsupported = new();
@@ -95,6 +100,7 @@ public sealed class NativeGhostSystem
     public bool CanSleep(BotOwner bot)
     {
         if (!DecisionGuardReady || !BrainBridgeReady || bot?.Brain?.Agent == null || bot.Mover == null) return false;
+        if (!SainCleanupScopeReady || !SainStopGuardReady) return false;
         try
         {
             var decision = bot.Brain.LastDecision;
@@ -158,6 +164,33 @@ public sealed class NativeGhostSystem
 
     public string WakeReason(BotOwner bot)
         => Sleepers.TryGetValue(bot, out var state) ? state.WakeReason : null;
+
+    public static bool OwnsInactiveMovement(BotOwner bot)
+        => bot != null && Sleepers.TryGetValue(bot, out var state) && state.WakeReason == null
+            && !bot.IsDead && !bot.gameObject.activeSelf && bot.Brain?.Agent == state.Brain;
+
+    public static bool PreservePathDuringSainCleanup(BotOwner bot, BotMover mover)
+    {
+        if (!OwnsInactiveMovement(bot) || !ReferenceEquals(bot.Mover, mover)) return false;
+        var state = Sleepers[bot];
+        if (mover.ActualPathController.HavePath)
+        {
+            state.SainStopsProtected++;
+            if (!state.ReportedSainProtection)
+            {
+                state.ReportedSainProtection = true;
+                Log.Info($"NATIVE GHOST: {bot.Profile.Nickname} preserved native route during SAIN inactive cleanup ({state.Decision})");
+            }
+        }
+        return true;
+    }
+
+    public static void FailSainCleanupBridge(Exception exception)
+    {
+        SainCleanupScopeReady = false;
+        foreach (var state in Sleepers.Values)
+            RequestWake(state, $"SAIN cleanup bridge failed: {exception.GetType().Name}: {exception.Message}");
+    }
 
     public void Pin(BotOwner bot, float until)
     {
@@ -241,7 +274,10 @@ public sealed class NativeGhostSystem
             {
                 if (state.Travelled > 0.1f)
                     Log.Info($"NATIVE GHOST: {bot.Profile.Nickname} moved {state.Travelled:F1}m on native route ({state.Decision})");
+                var route = bot.Mover.ActualPathController;
+                Log.Info($"NATIVE GHOST: {bot.Profile.Nickname} route status: moved={state.Travelled:F1}m/30s path={route.HavePath} paused={bot.Mover.Pause} fight={Time.time < state.PinnedUntil} sainStopsProtected={state.SainStopsProtected}");
                 state.Travelled = 0f;
+                state.SainStopsProtected = 0;
                 state.ReportAt = Time.time + 30f;
             }
             if (state.WakeReason != null || Time.time < state.PinnedUntil) return;
