@@ -12,10 +12,9 @@ namespace Orbit.Navigation;
 /// </summary>
 public static class DangerZoneCarver
 {
-    // Pad by 8m world-space: the minefield DAMAGE zone is distorted beyond the BoxCollider
-    // (Minefield._zoneDistortion*), so a bot skirting the carved hole with the old 1m padding
-    // still got bitten by the waviness (observed on dormant ghosts: -12 then -143 on Birdeye).
-    private const float Padding = 8f;
+    // Keep the added world-space box size small so border zones do not cut nearby routes.
+    // The actual danger-zone checks and damage wakeups remain active.
+    private const float Padding = 1f;
 
     // A zone whose padded hole would swallow an exfil keeps the pre-2.0 padding. Vehicle extracts sit on
     // the map edge right against a minefield (Shoreline's Road to North V-Ex has one beside and behind it):
@@ -63,7 +62,7 @@ public static class DangerZoneCarver
 
         var padding = Padding;
         var crowded = FindExfilInside(collider, Padding, exfils);
-        if (crowded != null)
+        if (crowded != null && padding > PaddingNearExfil)
         {
             padding = PaddingNearExfil;
             Log.Info($"Danger zone {gameObject.name} at {gameObject.transform.position} would carve the navmesh under exfil '{crowded}': keeping the {PaddingNearExfil:F0}m padding there instead of {Padding:F0}m so the exfil stays reachable");
