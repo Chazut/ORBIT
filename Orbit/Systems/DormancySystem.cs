@@ -522,7 +522,9 @@ public class DormancySystem
 
                 // Build the "who is being targeted" set from every awake bot's current goal enemy, ORBIT or not.
                 var goalPerson = player.AIData.BotOwner?.Memory?.GoalEnemy?.Person;
-                if (goalPerson != null) _targetedProfileIds.Add(goalPerson.ProfileId);
+                if (goalPerson != null && !(_cfg.NativeGhostMovement && GhostMovementEnabled
+                    && NativeGhostSystem.CanRetainEnemy(player.AIData.BotOwner)))
+                    _targetedProfileIds.Add(goalPerson.ProfileId);
             }
             catch
             {
@@ -2502,6 +2504,8 @@ public class DormancySystem
                 // A dead body that is still dormant must be re-activated NOW (hidden corpse otherwise).
                 if (player.HealthController is not { IsAlive: true } || owner.IsDead)
                 {
+                    NativePatrolDiagnostics.Forget(owner);
+                    NativeGhostDiagnostics.Forget(owner);
                     if (_vanillaDormant.Remove(owner))
                     {
                         _nativeGhosts.Remove(owner);
@@ -2513,6 +2517,7 @@ public class DormancySystem
                     continue;
                 }
 
+                NativePatrolDiagnostics.Observe(owner, _vanillaDormant.Contains(owner), _nativeGhosts.InFight(owner));
                 var key = (object)owner.BotsGroup ?? owner;
                 if (!_vanillaGroups.TryGetValue(key, out var list))
                     _vanillaGroups[key] = list = new List<BotOwner>(4);
@@ -2545,17 +2550,21 @@ public class DormancySystem
     private bool CanVanillaSleep(object key, List<BotOwner> group)
     {
         if (_vanillaGroupWokeAt.TryGetValue(key, out var wokeAt) && Time.time - wokeAt < WakeCooldownSeconds)
-            return false;
+            return NativeGhostDiagnostics.Refuse(group[0], "wake-cooldown", groupSize: group.Count);
 
         for (var i = 0; i < group.Count; i++)
         {
             var bot = group[i];
             var player = bot.GetPlayer;
-            if (bot.BotState != EBotState.Active || !bot.gameObject.activeSelf) return false;
-            if (bot.Memory != null && (bot.Memory.GoalEnemy != null || bot.Memory.IsUnderFire)) return false;
-            if (_targetedProfileIds.Contains(player.ProfileId)) return false;
-            if (MinSqrDistanceToHumans(player.Position) <= _scavSleepDistanceSqr) return false;
-            if (_cfg.NativeGhostMovement && GhostMovementEnabled && !_nativeGhosts.CanSleep(bot)) return false;
+            var humanDistance = Mathf.Sqrt(MinSqrDistanceToHumans(player.Position));
+            bool Refuse(string reason) => NativeGhostDiagnostics.Refuse(bot, reason, humanDistance, group.Count);
+            if (bot.BotState != EBotState.Active || !bot.gameObject.activeSelf) return Refuse("bot-state");
+            if (bot.Memory?.IsUnderFire == true) return Refuse("under-fire");
+            if (bot.Memory?.GoalEnemy != null && !(_cfg.NativeGhostMovement && GhostMovementEnabled
+                && NativeGhostSystem.CanRetainEnemy(bot))) return Refuse("goal-enemy");
+            if (_targetedProfileIds.Contains(player.ProfileId)) return Refuse("targeted");
+            if (humanDistance * humanDistance <= _scavSleepDistanceSqr) return Refuse("human-distance");
+            if (_cfg.NativeGhostMovement && GhostMovementEnabled && !_nativeGhosts.CanSleep(bot, humanDistance, group.Count)) return false;
 
             // Same bleed gate as ORBIT squads.
             var hp = VanillaHp(bot);
@@ -2564,7 +2573,7 @@ public class DormancySystem
             if (_vanillaHpDropAt.TryGetValue(bot, out var dropAt) && Time.time - dropAt < HpStableSeconds)
             {
                 TryGhostPatchUpVanilla(bot);
-                return false;
+                return Refuse("health-unstable");
             }
         }
         return true;
@@ -2670,6 +2679,7 @@ public class DormancySystem
 
     public void OnVanillaRemoved(BotOwner bot)
     {
+        NativePatrolDiagnostics.Forget(bot);
         var dormant = _vanillaDormant.Remove(bot);
         _nativeGhosts.Remove(bot);
         _vanillaHpBaseline.Remove(bot);

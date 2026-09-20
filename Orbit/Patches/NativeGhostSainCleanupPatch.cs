@@ -77,5 +77,9 @@ public class NativeGhostSainStopPatch : ModulePatch
 
     [PatchPrefix]
     public static bool Prefix(BotMover __instance)
-        => !NativeGhostSainCleanupPatch.PreservePath(__instance);
+    {
+        if (NativeGhostSainCleanupPatch.PreservePath(__instance)) return false;
+        NativeGhostSystem.CancelMoveOrder(__instance);
+        return true;
+    }
 }

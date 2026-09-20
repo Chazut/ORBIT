@@ -119,6 +119,13 @@ public class Plugin : BaseUnityPlugin
         EnableSafe(new NativeGhostDecisionPatch());
         EnableSafe(new NativeGhostSainCleanupPatch());
         EnableSafe(new NativeGhostSainStopPatch());
+        EnableSafe(new NativeGhostMoveOrderPatch());
+        EnableSafe(new NativeGhostPointOrderPatch());
+        EnableSafe(new NativeGhostWayOrderPatch());
+        EnableSafe(new NativeGhostReachDistancePatch());
+        EnableSafe(new NativePatrolArrivalDiagnosticPatch());
+        EnableSafe(new NativeGlukharChoiceDiagnosticPatch());
+        NativeGhostBodyPatches.Enable();
         EnableSafe(new DormantDamageProbePatch());
         EnableSafe(new DormantGroundCollisionPatch());
         EnableSafe(new DormantAvoidDangerBypassPatch());
@@ -241,6 +248,7 @@ public class Plugin : BaseUnityPlugin
             LogSource.LogDebug($"{label}: plugin '{pluginGuid}' not present — toggle inert");
             return;
         }
+        if (pluginGuid == UntarPluginGuid) OrbitBrainLayer.LegacyUntarHunts = true;
         if (takeoverOn)
         {
             LogSource.LogInfo($"{label}: detected and takeover ON — ORBIT will run its bots");
@@ -262,6 +270,10 @@ public class Plugin : BaseUnityPlugin
             if (patch is DormantBrainThrottlePatch) NativeGhostSystem.BrainBridgeReady = true;
             if (patch is NativeGhostSainCleanupPatch) NativeGhostSystem.SainCleanupScopeReady = true;
             if (patch is NativeGhostSainStopPatch) NativeGhostSystem.SainStopGuardReady = true;
+            if (patch is NativeGhostMoveOrderPatch) NativeGhostSystem.MoveOrderReady = true;
+            if (patch is NativeGhostPointOrderPatch) NativeGhostSystem.PointOrderReady = true;
+            if (patch is NativeGhostWayOrderPatch) NativeGhostSystem.WayOrderReady = true;
+            if (patch is NativeGhostReachDistancePatch) NativeGhostSystem.ReachOrderReady = true;
         }
         catch (Exception ex)
         {

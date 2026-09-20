@@ -7,6 +7,7 @@ using EFT.Interactive;
 using EFT.InventoryLogic;
 using HarmonyLib;
 using Orbit.Navigation;
+using Orbit.Patches;
 using UnityEngine;
 using UnityEngine.AI;
 
@@ -38,10 +39,14 @@ public sealed class NativeGhostSystem
         public Vector3 DoorDirection;
         public string Decision;
         public string WakeReason;
+        public NativeGhostNavigation Navigation;
+        public NativeGhostAdapters Adapter;
+        public NativeGhostRegroup Regroup;
     }
 
     private static readonly Dictionary<BotOwner, Sleeper> Sleepers = new();
     private static readonly Dictionary<AICoreAgent<BotLogicDecision>, Sleeper> Brains = new();
+    private static readonly Dictionary<BotMover, Sleeper> Movers = new();
     private static readonly Dictionary<int, string> CustomActions = new();
     private static Type _huntType;
     private static FieldInfo _huntActive;
@@ -51,6 +56,10 @@ public sealed class NativeGhostSystem
     public static bool BrainBridgeReady { get; set; }
     public static bool SainCleanupScopeReady { get; set; }
     public static bool SainStopGuardReady { get; set; }
+    public static bool MoveOrderReady { get; set; }
+    public static bool PointOrderReady { get; set; }
+    public static bool WayOrderReady { get; set; }
+    public static bool ReachOrderReady { get; set; }
     public static bool HasSleepers => Sleepers.Count > 0;
 
     private readonly DoorSystem _doors;
@@ -64,7 +73,12 @@ public sealed class NativeGhostSystem
             RestoreStandBy(state);
         Sleepers.Clear();
         Brains.Clear();
+        Movers.Clear();
+        NativeGhostNavigation.ResetBudget();
+        NativeGhostOrders.Clear();
         CustomActions.Clear();
+        NativePatrolDiagnostics.Clear();
+        NativeGhostDiagnostics.Clear();
     }
 
     private static string CustomAction(BotLogicDecision decision)
@@ -76,6 +90,11 @@ public sealed class NativeGhostSystem
             CustomActions[pair.Value] = pair.Key.FullName;
         return CustomActions.TryGetValue(id, out name) ? name : "unsupported";
     }
+
+    internal static string ActionName(BotLogicDecision decision) => CustomAction(decision) ?? decision.ToString();
+
+    internal static bool CanRetainEnemy(BotOwner bot)
+        => NativeGhostPartisan.CanRetainEnemy(bot) || NativeGhostIsb.CanRetainEnemy(bot);
 
     private static bool IsCustomRole(BotOwner bot) => (int)bot.Profile.Info.Settings.Role >= 200;
 
@@ -97,39 +116,66 @@ public sealed class NativeGhostSystem
         return (Action)Delegate.CreateDelegate(typeof(Action), component, _huntUpdate);
     }
 
-    public bool CanSleep(BotOwner bot)
+    public bool CanSleep(BotOwner bot, float humanDistance = -1f, int groupSize = 1)
     {
-        if (!DecisionGuardReady || !BrainBridgeReady || bot?.Brain?.Agent == null || bot.Mover == null) return false;
-        if (!SainCleanupScopeReady || !SainStopGuardReady) return false;
+        bool Refuse(string reason) => NativeGhostDiagnostics.Refuse(bot, reason, humanDistance, groupSize);
+        if (!DecisionGuardReady || !BrainBridgeReady || bot?.Brain?.Agent == null || bot.Mover == null)
+            return Refuse("brain-bridge");
+        if (!SainCleanupScopeReady || !SainStopGuardReady) return Refuse("sain-bridge");
+        if (!MoveOrderReady || !PointOrderReady || !WayOrderReady) return Refuse("movement-bridge");
+        if (!NativeGhostBodyPatches.Ready) return Refuse("body-operation-bridge");
         try
         {
             var decision = bot.Brain.LastDecision;
-            if (!decision.HasValue || NeedsBody(bot)) return false;
+            if (!decision.HasValue) return Refuse("no-decision");
+            var bodyReason = BodyReason(bot);
+            if (bodyReason != null) return Refuse(bodyReason);
+            if (CombatRequiresBody(bot)) return Refuse("native-combat");
             var name = CustomAction(decision.Value) ?? decision.Value.ToString();
             var hunt = HuntUpdater(bot) != null;
-            if (!NativeGhostPolicy.Supports(decision.Value.ToString(), CustomAction(decision.Value), IsCustomRole(bot), hunt))
+            var adapter = NativeGhostAdapters.Resolve(bot);
+            if (!NativeGhostPolicy.Supports(decision.Value.ToString(), CustomAction(decision.Value), IsCustomRole(bot), hunt,
+                adapter?.Checkpoint, adapter?.Warband == true, NativeGhostPartisan.Supports(bot, decision.Value.ToString()),
+                NativeGhostCover.Supports(bot, decision.Value.ToString()), adapter?.Isb == true))
             {
                 if (_reportedUnsupported.Add(bot.ProfileId + "|" + name))
                     Log.Info($"NATIVE GHOST: {bot.Profile.Nickname} kept awake: unsupported {name} (role={bot.Profile.Info.Settings.Role}, hunt={hunt})");
-                return false;
+                return Refuse("unsupported-action");
             }
-            return NavMesh.SamplePosition(bot.Position, out _, 0.75f, NavMesh.AllAreas);
+            return NavMesh.SamplePosition(bot.Position, out _, 0.75f, NavMesh.AllAreas)
+                || Refuse("off-navmesh");
         }
-        catch { return false; }
+        catch (Exception e) { return Refuse("sleep-check-" + e.GetType().Name); }
     }
 
-    private static bool NeedsBody(BotOwner bot)
+    private static bool NeedsBody(BotOwner bot) => BodyReason(bot) != null;
+
+    private static bool CombatRequiresBody(BotOwner bot)
+        => bot.Memory?.IsUnderFire == true
+            || (bot.Memory?.GoalEnemy != null && !CanRetainEnemy(bot));
+
+    private static string BodyReason(BotOwner bot)
     {
-        if (bot.Medecine is { Using: true } || bot.DoorOpener is { Interacting: true }
-            || bot.PatrollingData?.CurPatrolPoint?.TargetPoint?.ActionData != null) return true;
+        var partisan = NativeGhostPartisan.BodyReason(bot);
+        if (partisan != null) return partisan;
+        var isb = NativeGhostIsb.BodyReason(bot);
+        if (isb != null) return isb;
+        if (bot.WeaponManager?.Reload?.Reloading == true) return "reload";
+        if (bot.WeaponManager?.Selector is { IsWeaponReady: false }) return "weapon-switch";
+        if (bot.WeaponManager?.Grenades?.ThrowindNow == true) return "grenade";
+        if (bot.Medecine is { Using: true }) return "medicine";
+        if (bot.DoorOpener is { Interacting: true }) return "door";
+        if (bot.PatrollingData?.PointControl != null && bot.PatrollingData.CurPatrolPoint?.TargetPoint?.ActionData != null)
+            return "patrol-interaction";
         var inventory = bot.GetPlayer?.InventoryController;
         if (inventory != null)
-            foreach (var operation in inventory.SelectEvents<ItemEventArgs>()) return true;
-        return false;
+            foreach (var operation in inventory.SelectEvents<ItemEventArgs>()) return "inventory-operation";
+        return null;
     }
 
     public void Add(BotOwner bot)
     {
+        NativePatrolDiagnostics.BeforeSleep(bot);
         var state = new Sleeper
         {
             Bot = bot,
@@ -139,11 +185,22 @@ public sealed class NativeGhostSystem
             CouldStandBy = bot.StandBy.CanDoStandBy,
             NextDecision = Time.time + (bot.Id & 7) * DecisionInterval / 8f,
             ReportAt = Time.time + 30f,
-            Decision = bot.Brain.LastDecision?.ToString(),
+            Decision = bot.Brain.LastDecision.HasValue
+                ? CustomAction(bot.Brain.LastDecision.Value) ?? bot.Brain.LastDecision.Value.ToString() : null,
+            Navigation = new NativeGhostNavigation(bot, _doors),
+            Adapter = NativeGhostAdapters.Resolve(bot),
+            Regroup = NativeGhostRegroup.Resolve(bot),
         };
         Sleepers.Add(bot, state);
         Brains.Add(state.Brain, state);
+        Movers.Add(bot.Mover, state);
+        NativeGhostOrders.AdoptOnSleep(bot.Mover, state.Navigation);
         bot.StandBy.CanDoStandBy = false;
+        state.Adapter?.ReissueOrder();
+        if (state.Adapter != null)
+            Log.Info($"NATIVE GHOST: {bot.Profile.Nickname} adapter={state.Adapter.Name} ready; original goals and waits retained");
+        if (NativeGhostPartisan.IsPartisan(bot))
+            Log.Info($"NATIVE GHOST: {bot.Profile.Nickname} adapter=Partizan tracking ready; original goals and waits retained");
         Log.Info($"NATIVE GHOST: {bot.Profile.Nickname} sleeping with original behaviour ({state.Decision}, hunt={state.UpdateHunt != null})");
     }
 
@@ -152,6 +209,10 @@ public sealed class NativeGhostSystem
         if (ReferenceEquals(bot, null) || !Sleepers.TryGetValue(bot, out var state)) return false;
         Sleepers.Remove(bot);
         Brains.Remove(state.Brain);
+        Movers.Remove(bot.Mover);
+        NativeGhostOrders.Forget(bot.Mover);
+        try { state.Adapter?.ReissueOrder(); }
+        catch (Exception e) { Log.Warning($"NATIVE GHOST: native order refresh on wake failed: {e.Message}"); }
         RestoreStandBy(state);
         return true;
     }
@@ -166,8 +227,72 @@ public sealed class NativeGhostSystem
         => Sleepers.TryGetValue(bot, out var state) ? state.WakeReason : null;
 
     public static bool OwnsInactiveMovement(BotOwner bot)
-        => bot != null && Sleepers.TryGetValue(bot, out var state) && state.WakeReason == null
-            && !bot.IsDead && !bot.gameObject.activeSelf && bot.Brain?.Agent == state.Brain;
+        => RetainsNativeState(bot) && Sleepers[bot].WakeReason == null;
+
+    internal static bool RetainsNativeState(BotOwner bot)
+        => bot != null && Sleepers.TryGetValue(bot, out var state) && !bot.IsDead
+            && bot.GetPlayer?.HealthController?.IsAlive == true && !bot.gameObject.activeSelf && bot.Brain?.Agent == state.Brain;
+
+    internal static bool DeferBodyOperation(BotOwner bot, string operation)
+    {
+        if (!RetainsNativeState(bot)) return false;
+        RequestWake(Sleepers[bot], "body operation deferred: " + operation);
+        return true;
+    }
+
+    public static bool MovementPinned(BotOwner bot)
+        => Sleepers.TryGetValue(bot, out var state) && Time.time < state.PinnedUntil;
+
+    public static bool TryMoveOrder(BotMover mover, Vector3 destination, float reach, out NavMeshPathStatus status)
+    {
+        status = NavMeshPathStatus.PathInvalid;
+        if (!Movers.TryGetValue(mover, out var state) || !RetainsNativeState(state.Bot)) return false;
+        // A door/reload request can defer midway through a native action. Suppress its remaining
+        // movement calls until wake instead of falling through to the inactive physical mover.
+        if (state.WakeReason != null) return true;
+        try { status = state.Navigation.Request(destination, reach); }
+        catch (Exception e) { RequestWake(state, $"navigation failed: {e.GetType().Name}: {e.Message}"); }
+        return true;
+    }
+
+    public static void CancelMoveOrder(BotMover mover)
+    {
+        NativeGhostOrders.Forget(mover);
+        if (Movers.TryGetValue(mover, out var state)) state.Navigation.Cancel();
+    }
+
+    public static void RecordMoveOrder(BotMover mover, Vector3 destination, NavMeshPathStatus status, string source)
+    {
+        if (!Movers.ContainsKey(mover)) NativeGhostOrders.Record(mover, destination, status, source);
+    }
+
+    public static bool AllowWayOrder(BotMover mover, Vector3[] way)
+    {
+        if (!Movers.TryGetValue(mover, out var state) || !RetainsNativeState(state.Bot)) return true;
+        if (state.WakeReason != null) return false;
+        if (NativeGhostOrders.ValidWay(way)) return true;
+        CancelMoveOrder(mover);
+        mover.ActualPathController.Stop();
+        return false;
+    }
+
+    public static void RetainWayOrder(BotMover mover, Vector3[] way, float reach)
+    {
+        if (!NativeGhostOrders.ValidWay(way)) { CancelMoveOrder(mover); return; }
+        var target = way[way.Length - 1];
+        if (Movers.TryGetValue(mover, out var state))
+        {
+            if (OwnsInactiveMovement(state.Bot) && mover.ActualPathController.HavePath)
+                state.Navigation.Retain(target, reach, NavMeshPathStatus.PathComplete, "go-to-way");
+        }
+        else NativeGhostOrders.Record(mover, target, NavMeshPathStatus.PathComplete, "go-to-way");
+    }
+
+    public static void SetReachDistance(BotMover mover, float reach)
+    {
+        if (Movers.TryGetValue(mover, out var state) && OwnsInactiveMovement(state.Bot))
+            state.Navigation.SetReachDistance(reach);
+    }
 
     public static bool PreservePathDuringSainCleanup(BotOwner bot, BotMover mover)
     {
@@ -220,9 +345,26 @@ public sealed class NativeGhostSystem
                 RequestWake(state, "native interaction requires its body");
                 return true;
             }
+            NativeGhostCover.UpdateVoxel(state.Bot);
+            NativeGhostPartisan.UpdateTracking(state.Bot);
+            if (NeedsBody(state.Bot) || CombatRequiresBody(state.Bot))
+            {
+                RequestWake(state, "native tracking requires its body or combat");
+                return true;
+            }
             // Unity does not call this component while the body is inactive. Its own timers, target
             // selection and knowledge remain authoritative; the bridge never reads a hunt target directly.
             state.UpdateHunt?.Invoke();
+            if (state.Adapter != null)
+            {
+                if (!state.Adapter.Valid())
+                {
+                    RequestWake(state, "native adapter state changed");
+                    return true;
+                }
+                if (!state.Navigation.HasOrder && !state.Bot.Mover.ActualPathController.HavePath)
+                    state.Adapter.ReissueOrder();
+            }
             SyncMover(state.Bot);
             skip = false;
         }
@@ -236,7 +378,10 @@ public sealed class NativeGhostSystem
         if (strategy is not BaseBrain brain || brain._owner == null || !Sleepers.TryGetValue(brain._owner, out var state)) return;
         if (!result.HasValue) return;
         var decision = result.Value.Action;
-        if (!NativeGhostPolicy.Supports(decision.ToString(), CustomAction(decision), state.CustomRole, state.UpdateHunt != null)
+        if (state.WakeReason != null || !NativeGhostPolicy.Supports(decision.ToString(), CustomAction(decision), state.CustomRole, state.UpdateHunt != null,
+                state.Adapter?.Checkpoint, state.Adapter?.Warband == true, NativeGhostPartisan.Supports(state.Bot, decision.ToString()),
+                NativeGhostCover.Supports(state.Bot, decision.ToString()), state.Adapter?.Isb == true)
+            || CombatRequiresBody(state.Bot)
             || NeedsBody(state.Bot))
         {
             RequestWake(state, $"action requires its body: {CustomAction(decision) ?? decision.ToString()}");
@@ -246,6 +391,8 @@ public sealed class NativeGhostSystem
         var name = CustomAction(decision) ?? decision.ToString();
         if (name != state.Decision)
         {
+            CancelMoveOrder(state.Bot.Mover);
+            state.Bot.Mover.ActualPathController.Stop();
             state.Decision = name;
             Log.Debug($"NATIVE GHOST: {state.Bot.Profile.Nickname} original decision {name}");
         }
@@ -275,12 +422,13 @@ public sealed class NativeGhostSystem
                 if (state.Travelled > 0.1f)
                     Log.Info($"NATIVE GHOST: {bot.Profile.Nickname} moved {state.Travelled:F1}m on native route ({state.Decision})");
                 var route = bot.Mover.ActualPathController;
-                Log.Info($"NATIVE GHOST: {bot.Profile.Nickname} route status: moved={state.Travelled:F1}m/30s path={route.HavePath} paused={bot.Mover.Pause} fight={Time.time < state.PinnedUntil} sainStopsProtected={state.SainStopsProtected}");
+                Log.Info($"NATIVE GHOST: {bot.Profile.Nickname} route status: moved={state.Travelled:F1}m/30s path={route.HavePath} paused={bot.Mover.Pause} fight={Time.time < state.PinnedUntil} sainStopsProtected={state.SainStopsProtected} {state.Navigation.Summary}");
                 state.Travelled = 0f;
                 state.SainStopsProtected = 0;
                 state.ReportAt = Time.time + 30f;
             }
-            if (state.WakeReason != null || Time.time < state.PinnedUntil) return;
+            if (state.WakeReason != null || Time.time < state.PinnedUntil)
+            { state.Navigation.Suspend(); state.Adapter?.SuspendProgress(); return; }
             if (bot == null || bot.IsDead || bot.Brain?.Agent != state.Brain || bot.gameObject.activeSelf)
             {
                 RequestWake(state, "native lifecycle changed");
@@ -288,8 +436,18 @@ public sealed class NativeGhostSystem
             }
             var mover = bot.Mover;
             SyncMover(bot);
-            if (mover.Pause && mover.RemainPause > 0f) return;
+            if (mover.Pause && mover.RemainPause > 0f)
+            { state.Navigation.Suspend(); state.Adapter?.SuspendProgress(); return; }
             if (mover.Pause) mover.MovementResume();
+            state.Navigation.Update();
+            if (state.Adapter?.RefreshStalledCheckpoint(bot, state.Decision, state.Navigation.Target, state.Navigation.RecoveringLocally) == true
+                || state.Regroup?.Refresh(bot, state.Decision, state.Navigation) == true)
+            {
+                state.Navigation.Cancel();
+                mover.ActualPathController.Stop();
+                mover.IsMoving = false;
+                return;
+            }
             var path = mover.ActualPathController;
             if (!path.HavePath || !path.CheckShouldMove()) { mover.IsMoving = false; return; }
 
@@ -315,10 +473,14 @@ public sealed class NativeGhostSystem
                 var distance = Vector3.Distance(from, corner);
                 if (BlockedByDoor(state, from, corner)) { RequestWake(state, "door on native route"); return; }
                 var next = Vector3.MoveTowards(from, corner, budget);
-                if (DangerZones.IsInside(next) || !NavMesh.SamplePosition(next, out var hit, 0.75f, NavMesh.AllAreas)
-                    || NavMesh.Raycast(from, hit.position, out _, NavMesh.AllAreas))
+                var danger = DangerZones.IsInside(next);
+                var sampled = NavMesh.SamplePosition(next, out var hit, 0.75f, NavMesh.AllAreas);
+                var blocked = danger ? "danger-zone" : !sampled ? "off-navmesh"
+                    : NavMesh.Raycast(from, hit.position, out _, NavMesh.AllAreas) ? "navmesh-edge"
+                    : (hit.position - from).sqrMagnitude < 0.000001f && distance > 0.1f ? "no-navmesh-progress" : null;
+                if (blocked != null)
                 {
-                    RequestWake(state, "native route needs physical navigation");
+                    if (!state.Navigation.Blocked(blocked, next)) RequestWake(state, "native route needs physical navigation");
                     return;
                 }
                 bot.GetPlayer.Transform.position = hit.position;
@@ -336,9 +498,9 @@ public sealed class NativeGhostSystem
                 budget -= distance;
                 if (path.CurPath.CurIndex + 1 >= path.CurPath.Length)
                 {
-                    // IncCornerIndex completes a BSG path even when its last corner falls short of
-                    // the requested destination. Let the awake mover handle that partial route.
-                    RequestWake(state, "end of native path requires a replan");
+                    // Reaching the last corner need not mean reaching the requested destination.
+                    // Keep that order alive so the next update replans without waking the body.
+                    path.Stop();
                     break;
                 }
                 path.IncCornerIndex();
@@ -368,7 +530,7 @@ public sealed class NativeGhostSystem
         return false;
     }
 
-    private static void SyncMover(BotOwner bot)
+    internal static void SyncMover(BotOwner bot)
     {
         var mover = bot.Mover;
         var position = bot.Position;
@@ -388,6 +550,7 @@ public sealed class NativeGhostSystem
                 player.Teleport(hit.position);
             SyncMover(bot);
             if (bot.Mover.HasPathAndNoComplete) bot.Mover.RecalcWay();
+            NativePatrolDiagnostics.AfterWake(bot);
         }
         catch (Exception e)
         {

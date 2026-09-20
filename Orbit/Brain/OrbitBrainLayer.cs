@@ -61,6 +61,7 @@ public class OrbitBrainLayer : CustomLayer
     private static bool _vanillaCultists;
     private static bool _vanillaRaiders;
     private static bool _vanillaBloodhounds;
+    internal static bool LegacyUntarHunts { get; set; }
 
     public static void AddExcludedRoleSubstring(string sub)
     {
@@ -109,18 +110,14 @@ public class OrbitBrainLayer : CustomLayer
                 return true;
         }
 
-        // MoreBotsAPI "hunt" squads (UNTAR Go Home's raider hunts, RUAF's) are plain pmcBot spawns tagged
-        // only by their spawn id (MoreBotsAPI HuntManager.OnBotCreated matches "hunt" in Id_spawn). They
-        // belong to the mod that ordered the hunt, not to BSG's raider population, so they follow the
-        // faction toggles (matched on the spawn id) and never the vanilla-raider one: with that toggle ON
-        // they used to freeze as vanilla sleepers while the rest of their faction ghost-walked.
+        // Faction hunts use their owner's toggle, including UNTAR's legacy generic "hunt" marker.
+        // Unknown owners keep their native behaviour instead of bypassing every exclusion.
         if (role.Value == EFT.WildSpawnType.pmcBot && HuntSpawnId(botOwner) is { } huntId)
         {
-            foreach (var sub in _excludedRoleSubstrings)
-            {
-                if (huntId.IndexOf(sub, StringComparison.OrdinalIgnoreCase) >= 0) return true;
-            }
-            return false;
+            var excluded = HuntFactionPolicy.IsExcluded(huntId, LegacyUntarHunts, _excludedRoleSubstrings);
+            var owner = HuntFactionPolicy.Owner(huntId, LegacyUntarHunts) ?? "unknown";
+            Log.Info($"FACTION HUNT: {botOwner.Profile.Nickname} role={role.Value} spawn={huntId} owner={owner} control={(excluded ? "native" : "ORBIT")}");
+            return excluded;
         }
 
         if (_excludedRoleSubstrings.Count > 0)

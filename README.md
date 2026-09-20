@@ -72,15 +72,54 @@ get.
 
 **2.1: movement without takeover.** The Ghost Mode page's "Vanilla / faction
 movement" toggle preserves supported bots' original decisions while their
-bodies sleep: vanilla patrol and follower actions, plus MoreBotsAPI hunts,
-regrouping and searching. Their native paths determine where they move.
+bodies sleep: vanilla patrol and follower actions, MoreBotsAPI hunts, regrouping
+and searching, UNTAR/RUAF checkpoints, and RoguesVRaiders travel, patrol, lockdown
+and hunt objectives. Their original destinations determine where they move.
+Checkpoint waiting periods, cover changes and RoguesVRaiders squad objectives
+remain controlled by their original mods. Optional integrations require their
+native manager or squad state to be available. Supported patrol layers can also
+walk or run to native covers, including Goons, Shturman, cultists and several
+boss guards. Cover destinations and arrival handling stay with the native brain.
+ISB checkpoints (including Black Division event checkpoints), tactical movement
+and Hunt/Camera Hunt preserve their original manager and squad membership during
+sleep. The optional lifecycle bridge checks the installed mod's method contracts;
+an incompatible tactical component keeps its bot awake.
+Truncated paths are retried while the bots remain asleep. A stranded bot can
+receive a hidden relocation of up to 8 m to a point connected to its destination,
+subject to visibility, collision, floor and proximity checks. If no suitable
+point exists, it keeps retrying in Ghost. Repeated rescues stay within the
+original blocked area, avoid previously tried landings and check the start of
+the new route. Small relocation loops do not count as progress.
+After 45 seconds without leaving a
+small area on a checkpoint travel order, ORBIT asks the faction's own selector
+for another reachable cover at the same checkpoint. A failed selection keeps
+the current goal. Stalled MoreBotsAPI followers can similarly request another
+regroup point from their original hunt manager. The leader continues waiting
+until the original action acknowledges the follower's arrival.
+Native stops, checkpoint waits and simulated fights suspend
+this recovery.
 Doors, special interactions and unsupported behaviours keep the group awake.
 Other faction behaviours need their own compatibility support; this is not
 universal support for every custom brain. Requires "Ghost movement"; disabling
 either toggle restores stationary sleep for bots without takeover.
+Partizan can follow his native tactical mine approaches while asleep. His
+tracking timer remains active; placing traps, prewarming mines and weapon
+interactions require his body to wake. A distant remembered quarry can remain
+in memory during mine preparation, with visible, nearby or recently seen
+enemies still preventing sleep. Other specialized native actions can still
+require waking. Refusal snapshots identify the blocking state and brain layer.
+Reloads, weapon switches, grenade throws, medical use and door operations requested from native
+decision selection are deferred until the body wakes. ISB mission movement can
+retain a similarly distant, old enemy memory only while ISB's own mission guard
+also approves it. Combat layers and unknown specialized actions still wake.
+
 Simulated fights include ORBIT, vanilla and faction groups alike. Both sides
 hold position for the fight; an actual wake returns the encounter to real combat.
 Native movement still needs in-raid validation.
+
+UNTAR's legacy raider hunts follow the UNTAR takeover toggle even though their
+spawn role is `pmcBot`. Hunts whose owner cannot be identified retain their native
+behaviour. The startup configuration and `FACTION HUNT` logs show the applied policy.
 
 *Fika: designed for co-op (an optional `Orbit.Fika` addon syncs the
 fight sounds to every client) but untested so far.*
