@@ -15,3 +15,5 @@ using Orbit;
 [assembly: Guid("d8a5e7c1-3f9b-4a2d-9e6f-c4b8a1d2e7f5")]
 
 [assembly: AssemblyVersion(Plugin.OrbitVersion + ".*")]
+[assembly: AssemblyFileVersion(Plugin.OrbitVersion)]
+[assembly: AssemblyInformationalVersion(Plugin.OrbitVersion)]

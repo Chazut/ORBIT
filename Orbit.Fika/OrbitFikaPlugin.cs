@@ -28,7 +28,7 @@ public class OrbitFikaPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "com.chazut.orbit.fika";
     public const string PluginName = "ORBIT Fika Bridge";
-    public const string PluginVersion = "1.0.0";
+    public const string PluginVersion = "1.1.0";
 
     // Mirrors the limiter's own earshot gate, judged here against the LOCAL listener.
     private const float EarshotMeters = 1500f;
