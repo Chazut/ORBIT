@@ -62,7 +62,7 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
     // and re-picks. Long enough that walking from across the map doesn't trip it.
     private const float StuckEnRouteThresholdSeconds = 30f;
     private const float StuckEnRouteMoveDistSqr = 2f * 2f;
-    private readonly System.Collections.Generic.Dictionary<int, (int locId, Vector3 lastPos, float lastMoveTime)> _stuckEnRouteTracker = new();
+    private readonly System.Collections.Generic.Dictionary<int, (Objective objective, int locId, Vector3 lastPos, float lastMoveTime)> _stuckEnRouteTracker = new();
 
     public override void UpdateScore(int ordinal)
     {
@@ -86,28 +86,21 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                                                           or ObjectiveStatus.Looting
                                                           or ObjectiveStatus.Extracting)
             {
+                _stuckEnRouteTracker.Remove(agent.Id);
                 agent.TaskScores[ordinal] = 0;
                 continue;
             }
 
-            // Baseline 0.5f, boosted to 0.65f as the bot gets nearer. Once within the objective radius,
-            // utility falls off sharply.
+            // Scoring still runs while SAIN owns the bot. Clear here as well as on deactivation:
+            // an internal action may have displaced Goto before the later handover to SAIN.
+            if (!agent.IsActive) _stuckEnRouteTracker.Remove(agent.Id);
+
+            // Keep navigation active until its arrival update validates the objective. A score that
+            // decays to zero at the target can prevent that update or let cover steal the arrival.
             var distSqr = (location.Position - agent.Position).sqrMagnitude;
 
             var utilityBoostFactor = Mathf.InverseLerp(UtilityBoostMaxDistSqr, location.RadiusSqr, distSqr);
-            // Exfil keeps full score inside the arrival radius. The proximity decay exists so the
-            // arrival handover (Loot / Guard) can outbid Goto, but an exfil has no handover: either
-            // the bot gets inside the trigger (status flips to Extracting → score 0 above) or it must
-            // keep pushing in while the outside-trigger force-extract timer runs — and that timer
-            // ticks in Update(), ActiveEntities only. With decay, entering the generous 15 m radius
-            // collapsed the score under GuardAction's in-radius 0.65, Goto deactivated, and the timer
-            // froze forever: a bot would arm the timer at an exfil it couldn't enter, then guard-sweep
-            // beside it until raid end.
-            var utilityDecay = location.Category == WaypointCategory.Exfil
-                ? 1f
-                : Mathf.InverseLerp(0f, location.RadiusSqr, distSqr);
-
-            agent.TaskScores[ordinal] = utilityDecay * (UtilityBase + utilityBoostFactor * UtilityBoost);
+            agent.TaskScores[ordinal] = UtilityBase + utilityBoostFactor * UtilityBoost;
         }
     }
 
@@ -150,13 +143,14 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                         _stuckEnRouteTracker.Remove(agent.Id);
                     }
                     else if (!_stuckEnRouteTracker.TryGetValue(agent.Id, out var t)
+                             || !ReferenceEquals(t.objective, objective)
                              || t.locId != objective.Location.Id)
                     {
-                        _stuckEnRouteTracker[agent.Id] = (objective.Location.Id, agent.Position, Time.time);
+                        _stuckEnRouteTracker[agent.Id] = (objective, objective.Location.Id, agent.Position, Time.time);
                     }
                     else if ((agent.Position - t.lastPos).sqrMagnitude > StuckEnRouteMoveDistSqr)
                     {
-                        _stuckEnRouteTracker[agent.Id] = (t.locId, agent.Position, Time.time);
+                        _stuckEnRouteTracker[agent.Id] = (objective, t.locId, agent.Position, Time.time);
                     }
                     else if (Time.time - t.lastMoveTime > StuckEnRouteThresholdSeconds)
                     {
@@ -385,9 +379,12 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
 
     protected override void Deactivate(Agent entity)
     {
-        // Clear the stuck-en-route timer on losing the agent; otherwise a bot held stationary by SAIN
-        // re-enters Goto with a stale timer and wrongly blacklists its POI.
-        _stuckEnRouteTracker.Remove(entity.Id);
+        // Preserve the same target's watchdog across internal action changes. A handover to SAIN
+        // still clears it, so legitimate combat/cover time never counts as an ORBIT navigation stall.
+        if (!entity.IsActive || !dataset.Entities.Values.Contains(entity)
+            || entity.Objective.Status is ObjectiveStatus.Finished or ObjectiveStatus.Failed
+                                                       or ObjectiveStatus.Looting or ObjectiveStatus.Extracting)
+            _stuckEnRouteTracker.Remove(entity.Id);
 
         if (entity.Objective.Status is ObjectiveStatus.Finished or ObjectiveStatus.Failed
                                     or ObjectiveStatus.Looting or ObjectiveStatus.Extracting)

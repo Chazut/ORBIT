@@ -39,12 +39,16 @@ public class GuardAction(AgentData dataset, MovementSystem movementSystem, float
             var agent = agents[i];
             var location = agent.Objective.Location;
 
-            // No objective or no cover-point → no Guard. Exfil objectives never Guard either: there
+            // Guard starts only after Goto has validated arrival, including floor and line of sight.
+            // Otherwise entering the radius can switch to cover before the arrival update runs,
+            // then back to Goto when that cover lies outside the radius (Synthetic_1123).
+            // No objective or no cover-point means no Guard. Exfil objectives never Guard either: there
             // is no post-arrival idle at an exfil (inside trigger → ExtractAction owns it, outside
             // trigger → Goto must stay active to run the force-extract timer). With Guard allowed to
             // bid, its in-radius 0.65 + active-task hysteresis could lock a bot into guarding beside
             // its own extract until raid end.
             if (location == null || agent.Guard.CoverPoint == null
+                || agent.Objective.Status != ObjectiveStatus.Finished
                 || location.Category == WaypointCategory.Exfil)
             {
                 agent.TaskScores[ordinal] = 0;
