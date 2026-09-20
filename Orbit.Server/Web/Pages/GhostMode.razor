@@ -71,7 +71,7 @@
     </SettingsCard>
 
     <SettingsCard Title="Default-dormant bot types" OnReset="ResetTypes"
-                  Subtitle="These types sleep by default and wake when a player or an awake bot gets close. ORBIT-driven bots keep moving while asleep; vanilla ones freeze in place.">
+                  Subtitle="These types sleep by default and wake when a player or an awake bot gets close. Enable Ghost movement and Vanilla / faction movement to keep supported native behaviours moving while asleep.">
         <OrbitSwitch @bind-Value="Cfg.GhostMode.DormantScavs" Label="Scavs" />
         <OrbitSwitch @bind-Value="Cfg.GhostMode.DormantGoons" Label="Goons" />
         <OrbitSwitch @bind-Value="Cfg.GhostMode.DormantBosses" Label="Bosses and followers" />

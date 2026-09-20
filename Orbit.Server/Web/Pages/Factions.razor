@@ -10,7 +10,7 @@
                 Description="This config applies wherever the bots run (including headless). Save with the button in the top bar, then start a new raid. Client-side settings (log levels, performance) stay in the in-game F12 menu." />
 
     <SettingsCard Title="Faction-mod takeover" OnReset="ResetTakeover"
-                  Subtitle="ON: ORBIT routes these bots like PMCs. OFF: their own mod behaviour wins. Only matters when the faction mod is installed.">
+                  Subtitle="ON: ORBIT routes these bots like PMCs. OFF: their own mod behaviour wins. Only matters when the faction mod is installed. Save and restart the game after changing takeover.">
         <OrbitSwitch @bind-Value="Cfg.Factions.TakeOverUntar" Label="Take over UNTAR bots"
                      Tooltip="UNTAR bots keep their gear and spawns but navigate the map with ORBIT instead of their own checkpoint layers. Includes the raider hunt squads UNTAR orders through MoreBotsAPI (they are not vanilla raiders)." />
         <OrbitSwitch @bind-Value="Cfg.Factions.TakeOverRuaf" Label="Take over RUAF bots"
@@ -24,7 +24,7 @@
     </SettingsCard>
 
     <SettingsCard Title="Vanilla behaviour" OnReset="ResetVanilla"
-                  Subtitle="ON: ORBIT leaves these bots on BSG's vanilla brain entirely.">
+                  Subtitle="ON: ORBIT leaves these bots on BSG's vanilla brain entirely. Save and restart the game after changing these switches.">
         <OrbitSwitch Value="Cfg.Factions.VanillaScavs" ValueChanged="@((bool v) => SetVanilla(v, x => Cfg.Factions.VanillaScavs = x))" Label="Vanilla scavs"
                      Tooltip="Bot scavs run on BSG's vanilla brain. PlayerScavs are unaffected." />
         <OrbitSwitch Value="Cfg.Factions.VanillaGoons" ValueChanged="@((bool v) => SetVanilla(v, x => Cfg.Factions.VanillaGoons = x))" Label="Vanilla goons"
@@ -52,9 +52,8 @@
     // Every FactionsConfig field lives on this page, so a fresh instance is the page's defaults.
     private void ResetPage() => Cfg.Factions = new FactionsConfig();
 
-    // Turning a vanilla toggle ON asks for confirmation first: bots ORBIT does not drive have no
-    // route to replay while dormant, so with Ghost Mode they FREEZE in place as ghosts instead
-    // of moving (ghost patrol for them is on the roadmap). Cancel leaves the toggle untouched.
+    // Explain the native movement option when retaining vanilla behaviour.
+    // Cancel leaves the toggle untouched.
     private async Task SetVanilla(bool on, Action<bool> apply)
     {
         // Applied optimistically, reverted on cancel: the bound value must actually CHANGE both
@@ -63,7 +62,7 @@
         if (!on) return;
         var ok = await DialogService.ShowMessageBoxAsync(
             "Disable ORBIT on these bots?",
-            "With Ghost Mode, bots ORBIT does not drive can still go dormant, but they will FREEZE in place instead of moving around as ghosts (ORBIT has no route to replay for them). They wake up and behave normally as soon as anyone \"active\" gets close.",
+            "These bots will keep their vanilla behaviour. Enable Ghost movement and Vanilla / faction movement on the Ghost Mode page to keep supported behaviours moving while asleep. Without native movement, they sleep in place. Save your settings and restart the game to apply this change.",
             yesText: "Disable ORBIT here", cancelText: "Cancel");
         if (ok != true) apply(false);
     }
