@@ -60,6 +60,7 @@ public sealed class NativeGhostSystem
     public static bool PointOrderReady { get; set; }
     public static bool WayOrderReady { get; set; }
     public static bool ReachOrderReady { get; set; }
+    public static bool GoalOrderReady { get; set; }
     public static bool HasSleepers => Sleepers.Count > 0;
 
     private readonly DoorSystem _doors;
@@ -70,7 +71,10 @@ public sealed class NativeGhostSystem
     public static void Clear()
     {
         foreach (var state in Sleepers.Values)
+        {
             RestoreStandBy(state);
+            state.Navigation.RestorePathReach();
+        }
         Sleepers.Clear();
         Brains.Clear();
         Movers.Clear();
@@ -122,7 +126,7 @@ public sealed class NativeGhostSystem
         if (!DecisionGuardReady || !BrainBridgeReady || bot?.Brain?.Agent == null || bot.Mover == null)
             return Refuse("brain-bridge");
         if (!SainCleanupScopeReady || !SainStopGuardReady) return Refuse("sain-bridge");
-        if (!MoveOrderReady || !PointOrderReady || !WayOrderReady) return Refuse("movement-bridge");
+        if (!MoveOrderReady || !PointOrderReady || !WayOrderReady || !GoalOrderReady) return Refuse("movement-bridge");
         if (!NativeGhostBodyPatches.Ready) return Refuse("body-operation-bridge");
         try
         {
@@ -208,6 +212,7 @@ public sealed class NativeGhostSystem
     {
         if (ReferenceEquals(bot, null) || !Sleepers.TryGetValue(bot, out var state)) return false;
         Sleepers.Remove(bot);
+        state.Navigation.RestorePathReach();
         Brains.Remove(state.Brain);
         Movers.Remove(bot.Mover);
         NativeGhostOrders.Forget(bot.Mover);
@@ -279,13 +284,14 @@ public sealed class NativeGhostSystem
     public static void RetainWayOrder(BotMover mover, Vector3[] way, float reach)
     {
         if (!NativeGhostOrders.ValidWay(way)) { CancelMoveOrder(mover); return; }
-        var target = way[way.Length - 1];
+        var target = NativeGhostOrders.WayGoal(mover, way[way.Length - 1], out var original);
+        var source = original ? "go-to-way-goal" : "go-to-way";
         if (Movers.TryGetValue(mover, out var state))
         {
             if (OwnsInactiveMovement(state.Bot) && mover.ActualPathController.HavePath)
-                state.Navigation.Retain(target, reach, NavMeshPathStatus.PathComplete, "go-to-way");
+                state.Navigation.Retain(target, reach, NavMeshPathStatus.PathComplete, source);
         }
-        else NativeGhostOrders.Record(mover, target, NavMeshPathStatus.PathComplete, "go-to-way");
+        else NativeGhostOrders.Record(mover, target, NavMeshPathStatus.PathComplete, source);
     }
 
     public static void SetReachDistance(BotMover mover, float reach)

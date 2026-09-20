@@ -1,3 +1,4 @@
+using System;
 using System.Runtime.CompilerServices;
 using EFT;
 using UnityEngine;
@@ -9,6 +10,35 @@ namespace Orbit.Systems;
 // corner is not its goal. Weak keys also release despawned movers that never enter Ghost.
 internal static class NativeGhostOrders
 {
+    internal sealed class GoalScope
+    {
+        internal BotMover Mover;
+        internal Vector3 Target;
+        internal GoalScope Parent;
+    }
+
+    [ThreadStatic] private static GoalScope _goal;
+
+    internal static GoalScope BeginGoal(BotMover mover, Vector3 target)
+        => _goal = new GoalScope { Mover = mover, Target = target, Parent = _goal };
+
+    internal static void EndGoal(GoalScope scope)
+    {
+        if (scope != null) _goal = scope.Parent;
+    }
+
+    internal static Vector3 WayGoal(BotMover mover, Vector3 endpoint, out bool original)
+    {
+        for (var scope = _goal; scope != null; scope = scope.Parent)
+            if (ReferenceEquals(scope.Mover, mover))
+            {
+                original = true;
+                return scope.Target;
+            }
+        original = false;
+        return endpoint;
+    }
+
     private sealed class Order
     {
         internal object Path;

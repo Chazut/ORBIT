@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using EFT;
 using Orbit.Navigation;
 using UnityEngine;
@@ -21,6 +22,11 @@ internal sealed class NativeGhostNavigation(BotOwner bot, DoorSystem doors)
     private Vector3 _progressPosition;
     private Vector3? _recoveryOrigin;
     private readonly List<Vector3> _triedLandings = new();
+    private readonly List<Vector3> _reachedFrontiers = new();
+    private readonly Dictionary<string, int> _rejections = new();
+    private Vector3? _partialEnd;
+    private object _adjustedPath;
+    private float _originalPathReach;
     private int _failures, _probe;
     private NavMeshPathStatus _status = NavMeshPathStatus.PathInvalid;
     private string _source;
@@ -33,7 +39,10 @@ internal sealed class NativeGhostNavigation(BotOwner bot, DoorSystem doors)
     internal void SetReachDistance(float reach)
     {
         if (!float.IsNaN(reach) && !float.IsInfinity(reach) && reach >= 0f)
+        {
             _reach = Mathf.Max(0.1f, reach);
+            _originalPathReach = reach;
+        }
     }
 
     internal string Summary => _target.HasValue
@@ -52,12 +61,16 @@ internal sealed class NativeGhostNavigation(BotOwner bot, DoorSystem doors)
 
     internal void Cancel()
     {
+        RestorePathReach();
         _target = null;
         _source = null;
         _failures = _probe = 0;
         _retryAt = _rescueAt = 0f;
         _recoveryOrigin = null;
         _triedLandings.Clear();
+        _reachedFrontiers.Clear();
+        _rejections.Clear();
+        _partialEnd = null;
     }
 
     internal void Suspend()
@@ -117,6 +130,7 @@ internal sealed class NativeGhostNavigation(BotOwner bot, DoorSystem doors)
         _reach = reach;
         _status = status;
         _source = source;
+        AdjustPathReach();
         if (Time.time < _retainedReportAt) return;
         _retainedReportAt = Time.time + 30f;
         Log.Info($"NATIVE GHOST: {bot.Profile.Nickname} retained native order: {Summary}");
@@ -127,7 +141,8 @@ internal sealed class NativeGhostNavigation(BotOwner bot, DoorSystem doors)
         if (!_target.HasValue) return;
         if (NativeGhostSystem.MovementPinned(bot) || bot.Mover.Pause && bot.Mover.RemainPause > 0f)
         { Suspend(); return; }
-        if (Vector3.Distance(bot.Position, _target.Value) <= _reach)
+        AdjustPathReach();
+        if (Vector3.Distance(bot.Position, _target.Value) < _reach)
         {
             bot.Mover.ActualPathController.Stop();
             bot.Mover.IsMoving = false;
@@ -147,6 +162,15 @@ internal sealed class NativeGhostNavigation(BotOwner bot, DoorSystem doors)
             _triedLandings.Clear();
         }
         if (bot.Mover.ActualPathController.HavePath || Time.time < _retryAt) return;
+        if (_partialEnd.HasValue && Vector3.Distance(bot.Position, _partialEnd.Value) <= _reach + 0.2f)
+        {
+            if (!_reachedFrontiers.Any(p => Vector3.Distance(p, _partialEnd.Value) < 1f))
+            {
+                if (_reachedFrontiers.Count == 16) _reachedFrontiers.RemoveAt(0);
+                _reachedFrontiers.Add(_partialEnd.Value);
+            }
+            _partialEnd = null;
+        }
         if (_failures >= 3 && Time.time - _progressAt >= StuckSeconds && Time.time >= _rescueAt)
         {
             TryRelocate(_target.Value);
@@ -159,9 +183,9 @@ internal sealed class NativeGhostNavigation(BotOwner bot, DoorSystem doors)
         _status = calculated ? _path.status : NavMeshPathStatus.PathInvalid;
         var corners = _path.corners;
         if (calculated && _status != NavMeshPathStatus.PathInvalid && corners.Length > 1
-            && Vector3.Distance(bot.Position, corners[corners.Length - 1]) > _reach)
+            && Vector3.Distance(bot.Position, corners[corners.Length - 1]) > PathReach(corners[corners.Length - 1]))
         {
-            bot.Mover.ActualPathController.GoToByWay(corners, _reach);
+            SetPath(corners, _status);
             if (Time.time >= _repathReportAt)
             {
                 _repathReportAt = Time.time + 30f;
@@ -184,36 +208,95 @@ internal sealed class NativeGhostNavigation(BotOwner bot, DoorSystem doors)
             var index = _probe++;
             var angle = (index % 8) * Mathf.PI / 4f;
             var candidate = _recoveryOrigin.Value + new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle)) * RescueRings[index / 8];
-            if (!NavMesh.SamplePosition(candidate, out var hit, 0.4f, NavMesh.AllAreas)) continue;
+            if (!NavMesh.SamplePosition(candidate, out var hit, 0.4f, NavMesh.AllAreas)) { Reject("no-sample"); continue; }
             candidate = hit.position;
             if (Vector3.Distance(origin, candidate) > MaxRelocation
                 || Vector3.Distance(_recoveryOrigin.Value, candidate) > MaxRelocation
-                || (candidate - origin).sqrMagnitude < 0.25f || TriedLanding(candidate)
-                || Mathf.Abs(candidate.y - origin.y) > 0.75f || DangerZones.IsInside(candidate)) continue;
-            if (!NativeGhostRelocation.IsSafe(bot, origin, candidate, doors)) continue;
+                || (candidate - origin).sqrMagnitude < 0.25f || TriedLanding(candidate)) { Reject("bounds-or-repeat"); continue; }
+            if (Mathf.Abs(candidate.y - origin.y) > 0.75f || DangerZones.IsInside(candidate)) { Reject("height-or-danger"); continue; }
+            if (!NativeGhostRelocation.IsSafe(bot, origin, candidate, doors)) { Reject("unsafe"); continue; }
             if (!NavMesh.CalculatePath(candidate, target, NavMesh.AllAreas, _path)
-                || _path.status != NavMeshPathStatus.PathComplete) continue;
+                || _path.status == NavMeshPathStatus.PathInvalid) { Reject("invalid-path"); continue; }
             var corners = _path.corners;
-            if (corners.Length < 2 || Vector3.Distance(corners[corners.Length - 1], target) > _reach
-                || !CanStartRoute(candidate, corners)) continue;
+            if (corners.Length < 2 || corners.Any(p => !Finite(p))) { Reject("invalid-corners"); continue; }
+            var end = corners[corners.Length - 1];
+            if (_path.status == NavMeshPathStatus.PathComplete)
+            {
+                if (Vector3.Distance(end, target) > _reach) { Reject("end-outside-goal"); continue; }
+            }
+            else
+            {
+                // The walk must leave the rescue area, not just relocate toward another nearby edge.
+                if (Vector3.Distance(end, candidate) < ProgressDistance
+                    || Vector3.Distance(end, _recoveryOrigin.Value) <= MaxRelocation + ProgressDistance
+                    || Vector3.Distance(end, target) > Vector3.Distance(_recoveryOrigin.Value, target) - ProgressDistance)
+                { Reject("partial-no-progress"); continue; }
+                if (_reachedFrontiers.Any(p => Vector3.Distance(p, end) < 1f))
+                { Reject("partial-repeated-frontier"); continue; }
+            }
+            if (!CanStartRoute(candidate, corners)) { Reject("blocked-start"); continue; }
             _triedLandings.Add(candidate);
             bot.GetPlayer.Transform.position = candidate;
             NativeGhostSystem.SyncMover(bot);
-            bot.Mover.ActualPathController.GoToByWay(corners, _reach);
-            _status = NavMeshPathStatus.PathComplete;
+            SetPath(corners, _path.status);
             _rescueAt = Time.time + 30f;
             // Preserve failures, search cursor and elapsed stuck time until real walking leaves
             // this area. Record the landing only as the start of the next walking measurement.
             _progressPosition = candidate;
-            Log.Info($"NATIVE GHOST: {bot.Profile.Nickname} relocated in Ghost: {Vector3.Distance(origin, candidate):F1}m from={origin} to={candidate} nativeTarget={target}");
+            Log.Info($"NATIVE GHOST: {bot.Profile.Nickname} relocated in Ghost: {Vector3.Distance(origin, candidate):F1}m from={origin} to={candidate} nativeTarget={target} nav={_status} end={end}");
+            _rejections.Clear();
             return;
         }
         if (_probe >= RescueRings.Length * 8)
         {
             _probe = 0;
             _rescueAt = Time.time + 30f;
-            Report($"route unresolved in Ghost: no safe connected point within {MaxRelocation:F0}m, target={target}");
+            // Completing a scan is already limited by _rescueAt. Do not lose its rejection
+            // summary because a routine pending-route report happened during the same scan.
+            Log.Info($"NATIVE GHOST: {bot.Profile.Nickname} route unresolved in Ghost: no safe connected point within {MaxRelocation:F0}m, target={target} rejected=[{string.Join(",", _rejections.Select(p => $"{p.Key}:{p.Value}"))}]");
+            _rejections.Clear();
         }
+    }
+
+    private void Reject(string reason)
+        => _rejections[reason] = _rejections.TryGetValue(reason, out var count) ? count + 1 : 1;
+
+    // Arrival belongs to the requested goal. A projected last corner must not consume the route
+    // while the original action is still outside its radius. A small margin also respects '<'.
+    private float PathReach(Vector3 end)
+    {
+        if (!_target.HasValue) return _reach;
+        var offset = Vector3.Distance(end, _target.Value);
+        if (offset >= _reach && _status != NavMeshPathStatus.PathComplete) return _reach;
+        return Mathf.Max(0f, _reach - offset - 0.01f);
+    }
+
+    private void SetPath(Vector3[] corners, NavMeshPathStatus status)
+    {
+        RestorePathReach();
+        _status = status;
+        _partialEnd = status == NavMeshPathStatus.PathPartial ? corners[corners.Length - 1] : null;
+        bot.Mover.ActualPathController.GoToByWay(corners, _reach);
+        AdjustPathReach();
+    }
+
+    private void AdjustPathReach()
+    {
+        var path = bot.Mover.ActualPathController.CurPath;
+        if (path?.TargetPoint == null || !_target.HasValue) return;
+        if (!ReferenceEquals(path, _adjustedPath))
+        {
+            _adjustedPath = path;
+            _originalPathReach = path.ReachDist;
+        }
+        path.SetReachDist(PathReach(path.TargetPoint.Position));
+    }
+
+    internal void RestorePathReach()
+    {
+        var path = bot.Mover.ActualPathController.CurPath;
+        if (path != null && ReferenceEquals(path, _adjustedPath)) path.SetReachDist(_originalPathReach);
+        _adjustedPath = null;
     }
 
     private bool TriedLanding(Vector3 candidate)

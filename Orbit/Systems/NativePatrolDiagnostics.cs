@@ -19,6 +19,8 @@ public static class NativePatrolDiagnostics
         public float NextArrivalReport, NextChoiceReport;
         public int ArrivalChecks, Arrivals, Choices, SameChoices, WayChanges;
         public object LastChoiceWay;
+        public float NextFollowerArrivalReport;
+        public int FollowerChecks, FollowerArrivals;
     }
 
     private const float StationarySeconds = 30f;
@@ -121,6 +123,26 @@ public static class NativePatrolDiagnostics
                 + $" choices={observation.Choices} sameChoices={observation.SameChoices} wayChanges={observation.WayChanges}"
                 + $" current={current?.Id}:{current?.name} chosen={next?.Id}:{next?.name} way={patrol.Way?.name} patrol={patrol.Status}");
             observation.Choices = observation.SameChoices = observation.WayChanges = 0;
+        }
+        catch (Exception e) { DiagnosticError(bot, observation, e); }
+    }
+
+    internal static void FollowerArrivalChecked(BotOwner bot, Vector3? target, bool extraTarget, float distance, bool arrived)
+    {
+        if (bot == null || bot.BotFollower?.BossToFollow == null
+            || !Observations.TryGetValue(bot, out var observation)) return;
+        observation.FollowerChecks++;
+        if (arrived) observation.FollowerArrivals++;
+        if (Time.time < observation.NextFollowerArrivalReport) return;
+        observation.NextFollowerArrivalReport = Time.time + ReportInterval;
+        try
+        {
+            var leader = bot.BotFollower.BossToFollow;
+            Log.Info($"NATIVE FOLLOWER ARRIVAL: {bot.Profile.Nickname} [{bot.ProfileId}] ghost={!bot.gameObject.activeSelf} arrived={arrived}"
+                + $" checks={observation.FollowerChecks} arrivals={observation.FollowerArrivals} target={target} extraTarget={extraTarget} distance={distance:F3}m"
+                + $" reach={(extraTarget ? 1f : bot.Settings.FileSettings.Move.REACH_DIST):F3}m leader={leader.Player()?.Profile?.Nickname}"
+                + $" leaderDistance={Vector3.Distance(bot.Position, leader.Position):F1}m path={bot.Mover.ActualPathController.HavePath}");
+            observation.FollowerChecks = observation.FollowerArrivals = 0;
         }
         catch (Exception e) { DiagnosticError(bot, observation, e); }
     }

@@ -122,8 +122,10 @@ public class Plugin : BaseUnityPlugin
         EnableSafe(new NativeGhostMoveOrderPatch());
         EnableSafe(new NativeGhostPointOrderPatch());
         EnableSafe(new NativeGhostWayOrderPatch());
+        EnableSafe(new NativeGhostZigzagGoalPatch());
         EnableSafe(new NativeGhostReachDistancePatch());
         EnableSafe(new NativePatrolArrivalDiagnosticPatch());
+        EnableSafe(new NativeFollowerArrivalDiagnosticPatch());
         EnableSafe(new NativeGlukharChoiceDiagnosticPatch());
         NativeGhostBodyPatches.Enable();
         EnableSafe(new DormantDamageProbePatch());
@@ -273,6 +275,7 @@ public class Plugin : BaseUnityPlugin
             if (patch is NativeGhostMoveOrderPatch) NativeGhostSystem.MoveOrderReady = true;
             if (patch is NativeGhostPointOrderPatch) NativeGhostSystem.PointOrderReady = true;
             if (patch is NativeGhostWayOrderPatch) NativeGhostSystem.WayOrderReady = true;
+            if (patch is NativeGhostZigzagGoalPatch) NativeGhostSystem.GoalOrderReady = true;
             if (patch is NativeGhostReachDistancePatch) NativeGhostSystem.ReachOrderReady = true;
         }
         catch (Exception ex)

@@ -1,3 +1,4 @@
+using System;
 using System.Reflection;
 using EFT;
 using HarmonyLib;
@@ -62,6 +63,26 @@ public class NativeGhostWayOrderPatch : ModulePatch
     [PatchPostfix]
     public static void Postfix(BotMover __instance, Vector3[] __0, float __1)
         => NativeGhostSystem.RetainWayOrder(__instance, __0, __1);
+}
+
+// The original goal is lost when native zigzag navigation hands the mover only its corners.
+// Keep it scoped to this call, including nested calls and failures; never replace the native route.
+public class NativeGhostZigzagGoalPatch : ModulePatch
+{
+    protected override MethodBase GetTargetMethod()
+        => AccessTools.Method(typeof(BotRun), nameof(BotRun.CalcPathToMoveZigZagAndGo),
+            new[] { typeof(Vector3), typeof(BotOwner), typeof(EZigZAgType) });
+
+    [PatchPrefix]
+    private static void Prefix(Vector3 __0, BotOwner __1, out NativeGhostOrders.GoalScope __state)
+        => __state = NativeGhostOrders.BeginGoal(__1?.Mover, __0);
+
+    [PatchFinalizer]
+    private static Exception Finalizer(Exception __exception, NativeGhostOrders.GoalScope __state)
+    {
+        NativeGhostOrders.EndGoal(__state);
+        return __exception;
+    }
 }
 
 // Tactical movement tightens its arrival radius after issuing GoToPoint.
