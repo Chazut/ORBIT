@@ -73,6 +73,13 @@ public class GhostModeConfig
     // ON (default): sleeping PMC / PlayerScav squads hear firefights (simulated ghost fights and real
     // gunfire alike) and may go and investigate, with odds driven by their SAIN personality.
     public bool GhostHearing { get; set; } = true;
+    // Base investigation odds in percent; distance still reduces the final roll.
+    public int GhostHearingVeryAggressivePct { get; set; } = 85;
+    public int GhostHearingAggressivePct { get; set; } = 60;
+    public int GhostHearingAveragePct { get; set; } = 30;
+    public int GhostHearingCautiousPct { get; set; } = 8;
+    public int GhostHearingTimmyPct { get; set; } = 3;
+    public int GhostHearingPlayerScavPct { get; set; } = 20;
     // "rare" | "normal" | "frequent": scales the ghost-fight contact odds and the per-pair cooldown.
     public string GhostFightFrequency { get; set; } = "normal";
     // 0.5 to 2.0: casualty multiplier for simulated fights (0.5 = often bloodless, 2 = bloodbaths).

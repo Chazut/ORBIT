@@ -307,6 +307,14 @@ public partial class DormancySystem
         _lethality = Mathf.Clamp(cfg.GhostFightLethality, 0.5f, 2f);
         _scopedWakeEnabled = cfg.ScopedWake;
         _hearingEnabled = cfg.Enabled && cfg.GhostHearing;
+        _hearingVeryAggressive = Mathf.Clamp(cfg.GhostHearingVeryAggressivePct, 0, 100) / 100f;
+        _hearingAggressive = Mathf.Clamp(cfg.GhostHearingAggressivePct, 0, 100) / 100f;
+        _hearingAverage = Mathf.Clamp(cfg.GhostHearingAveragePct, 0, 100) / 100f;
+        _hearingCautious = Mathf.Clamp(cfg.GhostHearingCautiousPct, 0, 100) / 100f;
+        _hearingTimmy = Mathf.Clamp(cfg.GhostHearingTimmyPct, 0, 100) / 100f;
+        _hearingPlayerScav = Mathf.Clamp(cfg.GhostHearingPlayerScavPct, 0, 100) / 100f;
+        if (_hearingEnabled)
+            Log.Always($"Ghost hearing chances: veryAggressive={_hearingVeryAggressive:P0} aggressive={_hearingAggressive:P0} average={_hearingAverage:P0} cautious={_hearingCautious:P0} timmy={_hearingTimmy:P0} playerScav={_hearingPlayerScav:P0}");
         _scopedWakeMax = Mathf.Clamp(cfg.ScopedWakeMaxDistance, 100f, 1500f);
         // FullSleep (default): no population floor — far from every human, the whole map may sleep.
         _minAwakeBots = cfg.FullSleep ? 0 : Mathf.Max(0, cfg.MinAwakeBots);
@@ -1409,6 +1417,8 @@ public partial class DormancySystem
     private readonly List<NoiseEvent> _noises = new();
     private int _nextNoiseId;
     private readonly bool _hearingEnabled;
+    private readonly float _hearingVeryAggressive, _hearingAggressive, _hearingAverage;
+    private readonly float _hearingCautious, _hearingTimmy, _hearingPlayerScav;
     private bool _soundHooked;
     private float _nextNoisePollAt;
 
@@ -1509,21 +1519,21 @@ public partial class DormancySystem
     /// <summary>How likely a sleeping squad is to push a firefight it hears. PMCs follow their SAIN
     /// archetype; PlayerScavs are opportunists; everything else (bot scavs, bosses, factions) stays on its
     /// own business, as it does awake.</summary>
-    private static float NoiseCuriosity(Squad squad)
+    private float NoiseCuriosity(Squad squad)
     {
         if (squad.Personality != null)
         {
             switch (squad.Archetype)
             {
-                case PersonalityArchetype.VeryAggressive: return 0.85f;
-                case PersonalityArchetype.Aggressive: return 0.6f;
-                case PersonalityArchetype.Cautious: return 0.08f;
-                case PersonalityArchetype.Timmy: return 0.03f;
-                default: return 0.3f;
+                case PersonalityArchetype.VeryAggressive: return _hearingVeryAggressive;
+                case PersonalityArchetype.Aggressive: return _hearingAggressive;
+                case PersonalityArchetype.Cautious: return _hearingCautious;
+                case PersonalityArchetype.Timmy: return _hearingTimmy;
+                default: return _hearingAverage;
             }
         }
         var lead = squad.Members.Count > 0 ? squad.Members[0].Bot : null;
-        return lead?.Profile != null && lead.Profile.WillBeAPlayerScav() ? 0.2f : 0f;
+        return lead?.Profile != null && lead.Profile.WillBeAPlayerScav() ? _hearingPlayerScav : 0f;
     }
 
     internal Api.OrbitGhostHearingState GetGhostHearingState(Agent agent)

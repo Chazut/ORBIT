@@ -32,8 +32,6 @@
                      Tooltip="Keeps supported bots moving without faction takeover: vanilla patrols and followers, plus MoreBotsAPI hunt, regroup and search. Their original behaviour chooses where to go. Ordinary unlocked doors work in Ghost; unsupported actions and special door interactions require waking. Requires Ghost movement. OFF: bots without takeover sleep in place." />
         <OrbitSwitch @bind-Value="Cfg.GhostMode.GhostLooting" Label="Ghost looting"
                      Tooltip="ON (default): sleeping ORBIT squads keep looting containers, corpses and loose items along their routes, so the raid economy keeps evolving off-screen. OFF: sleepers walk past everything and the loot waits for you." />
-        <OrbitSwitch @bind-Value="Cfg.GhostMode.GhostHearing" Label="Ghost hearing"
-                     Tooltip="ON (default): sleeping PMC and PlayerScav squads hear firefights, simulated ghost fights and real gunfire alike (about 350 m unsuppressed, 120 m suppressed), and may drop what they are doing to go and look. The odds follow their SAIN personality: a GigaChad almost always pushes the noise, an average PMC sometimes, a Rat or a Timmy almost never. OFF: sleepers are deaf, as before." />
         <MudSelect T="string" @bind-Value="Cfg.GhostMode.GhostAwakeBehavior" Label="Ghost meets awake bot" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mt-3" Style="max-width: 480px"
                    HelperText="Applies to ORBIT, vanilla and faction groups. Combat, player distance, scoped view and other sleep protections always apply. If the awake group cannot safely sleep, the Ghost wakes as before.">
             <MudSelectItem T="string" Value="@("sleep_awake")">Put the awake group into Ghost (default)</MudSelectItem>
@@ -72,6 +70,39 @@
             <OrbitSlider T="int" @bind-Value="Cfg.GhostMode.MinAwakeBots" Label="Minimum awake bots"
                          Min="0" Max="30" Step="1"
                          Tooltip="Population floor: keeps at least this many bots awake, meaning PMCs, PlayerScavs, and any type whose default-dormant toggle below is OFF. Default-dormant types never take a floor slot. On small maps the floor self-caps so everything can still sleep." />
+        }
+    </SettingsCard>
+
+    <SettingsCard Title="Ghost hearing" OnReset="ResetHearing"
+                  Subtitle="Investigation chances for ORBIT-controlled PMC and PlayerScav squads. Native and faction bots keep their original hearing behaviour.">
+        <OrbitSwitch @bind-Value="Cfg.GhostMode.GhostHearing" Label="Investigate gunfire while in Ghost"
+                     Tooltip="Hear real gunfire and simulated fights (about 350 m unsuppressed, 120 m suppressed). Eligible squads may leave their current route to investigate. Saves apply from the next raid." />
+        @if (Cfg.GhostMode.GhostHearing)
+        {
+            <MudText Typo="Typo.body2" Class="mt-2 mb-3" Style="opacity:.65">
+                Base chance per squad personality. Distance reduces the chance, down to half at the hearing limit.
+                0% disables investigations for that personality; 100% is still affected by distance.
+            </MudText>
+            <MudGrid Spacing="3">
+                <MudItem xs="12" sm="6">
+                    <OrbitSlider T="int" @bind-Value="Cfg.GhostMode.GhostHearingVeryAggressivePct" Label="Very aggressive" Unit="%" Min="0" Max="100" Step="1" />
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <OrbitSlider T="int" @bind-Value="Cfg.GhostMode.GhostHearingAggressivePct" Label="Aggressive" Unit="%" Min="0" Max="100" Step="1" />
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <OrbitSlider T="int" @bind-Value="Cfg.GhostMode.GhostHearingAveragePct" Label="Average" Unit="%" Min="0" Max="100" Step="1" />
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <OrbitSlider T="int" @bind-Value="Cfg.GhostMode.GhostHearingCautiousPct" Label="Cautious" Unit="%" Min="0" Max="100" Step="1" />
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <OrbitSlider T="int" @bind-Value="Cfg.GhostMode.GhostHearingTimmyPct" Label="Timmy" Unit="%" Min="0" Max="100" Step="1" />
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <OrbitSlider T="int" @bind-Value="Cfg.GhostMode.GhostHearingPlayerScavPct" Label="PlayerScav" Unit="%" Min="0" Max="100" Step="1" />
+                </MudItem>
+            </MudGrid>
         }
     </SettingsCard>
 
@@ -123,7 +154,19 @@
 </MudContainer>
 
 @code {
-    private void ResetPage() { ResetLimiter(); ResetTypes(); ResetDistances(); }
+    private void ResetPage() { ResetLimiter(); ResetHearing(); ResetTypes(); ResetDistances(); }
+
+    private void ResetHearing()
+    {
+        var d = new GhostModeConfig();
+        Cfg.GhostMode.GhostHearing = d.GhostHearing;
+        Cfg.GhostMode.GhostHearingVeryAggressivePct = d.GhostHearingVeryAggressivePct;
+        Cfg.GhostMode.GhostHearingAggressivePct = d.GhostHearingAggressivePct;
+        Cfg.GhostMode.GhostHearingAveragePct = d.GhostHearingAveragePct;
+        Cfg.GhostMode.GhostHearingCautiousPct = d.GhostHearingCautiousPct;
+        Cfg.GhostMode.GhostHearingTimmyPct = d.GhostHearingTimmyPct;
+        Cfg.GhostMode.GhostHearingPlayerScavPct = d.GhostHearingPlayerScavPct;
+    }
 
     private void ResetLimiter()
     {
@@ -132,7 +175,6 @@
         Cfg.GhostMode.GhostMovement = d.GhostMovement;
         Cfg.GhostMode.NativeGhostMovement = d.NativeGhostMovement;
         Cfg.GhostMode.GhostLooting = d.GhostLooting;
-        Cfg.GhostMode.GhostHearing = d.GhostHearing;
         Cfg.GhostMode.GhostAwakeBehavior = d.GhostAwakeBehavior;
         Cfg.GhostMode.GhostFightsMode = d.GhostFightsMode;
         Cfg.GhostMode.GhostFightFrequency = d.GhostFightFrequency;

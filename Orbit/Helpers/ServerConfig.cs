@@ -133,6 +133,12 @@ public static class ServerConfig
         [JsonProperty("ghost_fight_sounds")] public bool GhostFightSounds = true;
         [JsonProperty("ghost_looting")] public bool GhostLooting = true;
         [JsonProperty("ghost_hearing")] public bool GhostHearing = true;
+        [JsonProperty("ghost_hearing_very_aggressive_pct")] public int GhostHearingVeryAggressivePct = 85;
+        [JsonProperty("ghost_hearing_aggressive_pct")] public int GhostHearingAggressivePct = 60;
+        [JsonProperty("ghost_hearing_average_pct")] public int GhostHearingAveragePct = 30;
+        [JsonProperty("ghost_hearing_cautious_pct")] public int GhostHearingCautiousPct = 8;
+        [JsonProperty("ghost_hearing_timmy_pct")] public int GhostHearingTimmyPct = 3;
+        [JsonProperty("ghost_hearing_player_scav_pct")] public int GhostHearingPlayerScavPct = 20;
         [JsonProperty("ghost_fight_frequency")] public string GhostFightFrequency = "normal";
         [JsonProperty("ghost_fight_lethality")] public float GhostFightLethality = 1f;
 

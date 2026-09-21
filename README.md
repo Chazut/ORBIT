@@ -70,6 +70,13 @@ wake range stretches with your magnification). Everything is tunable,
 down to which bot types sleep by default and how bloody ghost fights
 get.
 
+**2.1: configurable hearing.** The Ghost Mode page lets you set a base investigation
+chance from 0 to 100% for each PMC personality archetype and for PlayerScavs.
+Defaults preserve the existing behaviour. Distance still reduces the final chance,
+down to half at the hearing limit; 0% disables that archetype's investigations.
+Settings belong to the selected preset and apply from the next raid. Native and
+faction bots keep their original hearing behaviour.
+
 **2.1: Ghost meets awake bot.** By default, eligible awake groups go into Ghost
 before proximity wakes are evaluated, including ORBIT, vanilla and faction groups.
 Combat, player distance, scoped view, cooldowns and the population floor still apply.
