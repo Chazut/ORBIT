@@ -92,6 +92,13 @@ remain controlled by their original mods. Optional integrations require their
 native manager or squad state to be available. Supported patrol layers can also
 walk or run to native covers, including Goons, Shturman, cultists and several
 boss guards. Cover destinations and arrival handling stay with the native brain.
+Sniper scavs follow the Scavs sleep toggle too. Their peaceful cover travel and
+settled prone overwatch can continue in Ghost, keeping their native positions and
+decisions. Combat, player proximity and scoped-wake protections still apply.
+In Ghost versus Ghost encounters, sniper scavs detect targets from at least
+200 m horizontally, extended by optics up to 400 m before night penalties.
+Height does not reduce their detection radius. Terrain and buildings still block
+sight, and combat resolution uses the real distance between the bots.
 ISB checkpoints (including Black Division event checkpoints), tactical movement
 and Hunt/Camera Hunt preserve their original manager and squad membership during
 sleep. The optional lifecycle bridge checks the installed mod's method contracts;

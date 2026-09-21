@@ -143,7 +143,8 @@ public sealed class NativeGhostSystem
             if (!NativeGhostPolicy.Supports(decision.Value.ToString(), CustomAction(decision.Value), IsCustomRole(bot), hunt,
                 adapter?.Checkpoint, adapter?.Warband == true, NativeGhostPartisan.Supports(bot, decision.Value.ToString()),
                 NativeGhostCover.Supports(bot, decision.Value.ToString()), adapter?.Isb == true,
-                NativeGhostZryachiy.Supports(bot, decision.Value.ToString())))
+                NativeGhostZryachiy.Supports(bot, decision.Value.ToString())
+                    || NativeGhostMarksman.SupportsLay(bot, decision.Value)))
             {
                 if (_reportedUnsupported.Add(bot.ProfileId + "|" + name))
                     Log.Info($"NATIVE GHOST: {bot.Profile.Nickname} kept awake: unsupported {name} (role={bot.Profile.Info.Settings.Role}, hunt={hunt})");
@@ -214,6 +215,8 @@ public sealed class NativeGhostSystem
             Log.Info($"NATIVE GHOST: {bot.Profile.Nickname} adapter=Partizan tracking ready; original goals and waits retained");
         if (NativeGhostZryachiy.Supports(bot, state.Decision))
             Log.Info($"NATIVE GHOST: {bot.Profile.Nickname} adapter=Zryachiy peaceful lay ready; native cover and posture retained");
+        if (bot.Profile.Info.Settings.Role == WildSpawnType.marksman)
+            Log.Info($"NATIVE GHOST: {bot.Profile.Nickname} adapter=Sniper scav ready; native position and decisions retained ({state.Decision})");
         Log.Info($"NATIVE GHOST: {bot.Profile.Nickname} sleeping with original behaviour ({state.Decision}, hunt={state.UpdateHunt != null})");
     }
 
@@ -436,7 +439,8 @@ public sealed class NativeGhostSystem
         if (state.WakeReason != null || !NativeGhostPolicy.Supports(decision.ToString(), CustomAction(decision), state.CustomRole, state.UpdateHunt != null,
                 state.Adapter?.Checkpoint, state.Adapter?.Warband == true, NativeGhostPartisan.Supports(state.Bot, decision.ToString()),
                 NativeGhostCover.Supports(state.Bot, decision.ToString()), state.Adapter?.Isb == true,
-                NativeGhostZryachiy.Supports(state.Bot, decision.ToString()))
+                NativeGhostZryachiy.Supports(state.Bot, decision.ToString())
+                    || NativeGhostMarksman.SupportsLay(state.Bot, decision))
             || CombatRequiresBody(state.Bot)
             || NeedsBody(state.Bot))
         {

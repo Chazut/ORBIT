@@ -252,6 +252,7 @@ public partial class DormancySystem
         public string Label;
         public bool IsSavage;
         public float Reach;
+        public float SniperReach; // horizontal detection only; ordinary combat reach stays unchanged
         public float KillRange; // best member weapon's effective kill distance (bEffDist, buckshot capped)
         public bool NightCapable; // at least one member sees in the dark (NVG, thermal goggles, thermal / NV scope)
         public Squad Squad;          // ORBIT units
@@ -341,11 +342,9 @@ public partial class DormancySystem
         if (!role.HasValue) return false;
         var r = role.Value;
         if (r.IsPMC()) return false;
+        if (r == WildSpawnType.marksman) return _cfg.DormantScavs;
         if (r.IsScav())
             return bot.Profile != null && !bot.Profile.WillBeAPlayerScav() && _cfg.DormantScavs;
-        // Sniper scavs never sleep: they are cheap stationary overwatch, and their entire role is
-        // long-range threat — a sleeping one is just absent.
-        if (r == WildSpawnType.marksman) return false;
         if (r.IsGoon()) return _cfg.DormantGoons;
         if (r.IsCultist()) return _cfg.DormantCultists;
         if (r.IsRaider()) return _cfg.DormantRaiders;
@@ -1166,9 +1165,7 @@ public partial class DormancySystem
                 // A unit mid-fight can't be pulled into a second one until its window closes.
                 if (UnitInFight(a) || UnitInFight(b)) continue;
 
-                var distSqr = MinUnitDistanceSqr(a, b, out var posA, out var posB);
-                var reach = Mathf.Max(a.Reach, b.Reach);
-                if (distSqr > reach * reach) continue;
+                if (!TryFindGhostContact(a, b, out var posA, out var posB, out var distSqr, out var reach, out var sniperDetection)) continue;
                 var dist = Mathf.Sqrt(distSqr);
 
                 // Terrain/structure LoS between the closest members, THREE rays that must ALL be
@@ -1201,10 +1198,13 @@ public partial class DormancySystem
                 }
                 _skirmishPairSeenAt[pairKey] = Time.time;
 
+                var fightDistance = sniperDetection ? Vector3.Distance(posA, posB) : dist;
+                if (sniperDetection)
+                    Log.Info($"GHOST SNIPER CONTACT: {a.Label} vs {b.Label} horizontal={dist:F0}m actual={fightDistance:F0}m reach={reach:F0}m");
                 if (_fightsMode == GhostFightsMode.Real)
-                    WakeBothForRealFight(a, b, dist);
+                    WakeBothForRealFight(a, b, fightDistance);
                 else
-                    ResolveFight(a, b, dist, posA, posB);
+                    ResolveFight(a, b, fightDistance, posA, posB);
             }
         }
     }
@@ -1312,7 +1312,9 @@ public partial class DormancySystem
             for (var m = 0; m < squad.Members.Count; m++)
             {
                 unit.Agents.Add(squad.Members[m]);
-                unit.Reach = Mathf.Max(unit.Reach, UnitMemberReach(squad.Members[m].Bot));
+                var memberReach = UnitMemberReach(squad.Members[m].Bot);
+                unit.Reach = Mathf.Max(unit.Reach, memberReach);
+                unit.SniperReach = Mathf.Max(unit.SniperReach, SniperDetectionReach(squad.Members[m].Bot, memberReach));
                 unit.KillRange = Mathf.Max(unit.KillRange, WeaponKillRange(squad.Members[m].Player));
                 unit.NightCapable |= HasNightVision(squad.Members[m].Bot);
             }
@@ -1336,31 +1338,15 @@ public partial class DormancySystem
             for (var m = 0; m < group.Count; m++)
             {
                 unit.VanillaBots.Add(group[m]);
-                unit.Reach = Mathf.Max(unit.Reach, UnitMemberReach(group[m]));
+                var memberReach = UnitMemberReach(group[m]);
+                unit.Reach = Mathf.Max(unit.Reach, memberReach);
+                unit.SniperReach = Mathf.Max(unit.SniperReach, SniperDetectionReach(group[m], memberReach));
                 unit.KillRange = Mathf.Max(unit.KillRange, WeaponKillRange(group[m].GetPlayer));
                 unit.NightCapable |= HasNightVision(group[m]);
             }
             ApplyNightReach(unit);
             _ghostUnits.Add(unit);
         }
-    }
-
-    private static float MinUnitDistanceSqr(GhostUnit a, GhostUnit b, out Vector3 closestA, out Vector3 closestB)
-    {
-        var min = float.MaxValue;
-        closestA = default;
-        closestB = default;
-        for (var i = 0; i < a.Count; i++)
-        {
-            var pa = i < a.Agents.Count ? a.Agents[i].Position : a.VanillaBots[i - a.Agents.Count].GetPlayer.Position;
-            for (var j = 0; j < b.Count; j++)
-            {
-                var pb = j < b.Agents.Count ? b.Agents[j].Position : b.VanillaBots[j - b.Agents.Count].GetPlayer.Position;
-                var d = (pa - pb).sqrMagnitude;
-                if (d < min) { min = d; closestA = pa; closestB = pb; }
-            }
-        }
-        return min;
     }
 
     /// <summary>Engagement reach of one member: base range scaled by the best optic on the weapon in
@@ -1719,6 +1705,7 @@ public partial class DormancySystem
     {
         if (_darkness <= 0f || unit.NightCapable) return;
         unit.Reach = Mathf.Lerp(unit.Reach, Mathf.Min(unit.Reach, NightBlindReach), _darkness);
+        unit.SniperReach = Mathf.Lerp(unit.SniperReach, Mathf.Min(unit.SniperReach, NightBlindReach), _darkness);
     }
 
     private float NightFightMul(GhostUnit self, GhostUnit other)

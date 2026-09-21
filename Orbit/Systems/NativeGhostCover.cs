@@ -16,6 +16,7 @@ internal static class NativeGhostCover
             "BoarClosePatrolLayer" or "BoarPatrolLayer" or "BossBoarPatrolLayer" or
             "HoldNearBossLayer" or "KolontayHoldNearBossLayer" or
             "PatrolAssaultLayer" or "FullMapPatrolLayer" or "FollowerPatrolLayer"
+            || NativeGhostMarksman.IsPeacefulLayer(bot)
             || NativeGhostPartisan.IsPartisan(bot) && NativeGhostPartisan.IsMineLayer(NativeGhostPartisan.Layer(bot));
     }
 

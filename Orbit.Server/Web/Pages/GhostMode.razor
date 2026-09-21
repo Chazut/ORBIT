@@ -77,7 +77,7 @@
 
     <SettingsCard Title="Default-dormant bot types" OnReset="ResetTypes"
                   Subtitle="These types sleep by default and wake when a player gets close. Encounters with awake bots follow the setting above. Enable both movement options to keep supported native behaviours moving while asleep.">
-        <OrbitSwitch @bind-Value="Cfg.GhostMode.DormantScavs" Label="Scavs" />
+        <OrbitSwitch @bind-Value="Cfg.GhostMode.DormantScavs" Label="Scavs (including snipers)" />
         <OrbitSwitch @bind-Value="Cfg.GhostMode.DormantGoons" Label="Goons" />
         <OrbitSwitch @bind-Value="Cfg.GhostMode.DormantBosses" Label="Bosses and followers" />
         <OrbitSwitch @bind-Value="Cfg.GhostMode.DormantCultists" Label="Cultists" />
@@ -116,7 +116,6 @@
             <MudListItem Icon="@Icons.Material.Filled.Check" IconColor="Color.Secondary">Body animations and hands operations in progress: finish that step, then continue supported loot and doors in Ghost</MudListItem>
             <MudListItem Icon="@Icons.Material.Filled.Check" IconColor="Color.Secondary">Corpses: loot always stays visible</MudListItem>
             <MudListItem Icon="@Icons.Material.Filled.Check" IconColor="Color.Secondary">Wounded bots (recent HP drop): they stay awake until healed</MudListItem>
-            <MudListItem Icon="@Icons.Material.Filled.Check" IconColor="Color.Secondary">Sniper scavs (their whole role is long-range overwatch)</MudListItem>
             <MudListItem Icon="@Icons.Material.Filled.Check" IconColor="Color.Secondary">The BTR</MudListItem>
         </MudList>
     </SettingsCard>
