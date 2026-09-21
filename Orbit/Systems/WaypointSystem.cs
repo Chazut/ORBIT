@@ -1578,11 +1578,23 @@ public partial class WaypointSystem
     }
 
     /// <summary>
-    /// Attempts to reserve a waypoint for an agent. Returns true if the claim was granted, false if another
-    /// agent already holds it. Same agent re-claiming is idempotent.
+    /// True when a loose-loot reference outlived its registry entry or its physical item.
+    /// </summary>
+    public bool IsUnavailableLooseLoot(Waypoint location)
+        => location != null && location.Category == WaypointCategory.LooseLoot
+           && (!_waypointCells.ContainsKey(location.Id) || location.Target == null
+               || (location.Target is LootItem item && item.Item == null));
+
+    /// <summary>
+    /// Reserve an existing waypoint for an agent. Reclaiming one's own reservation is idempotent.
     /// </summary>
     public bool TryClaim(int waypointId, int agentId)
     {
+        if (!_waypointCells.ContainsKey(waypointId))
+        {
+            Log.Debug($"LOOT RECOVERY: denied claim on removed waypoint {waypointId} for agent {agentId}");
+            return false;
+        }
         if (_claims.TryGetValue(waypointId, out var holder))
         {
             var ok = holder == agentId;

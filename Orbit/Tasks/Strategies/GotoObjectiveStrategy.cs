@@ -272,6 +272,11 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                     Log.Debug($"{squad} noise investigation: no usable waypoint around {noisePos}, staying on {previous}");
                 }
             }
+            // Do not re-arm Failed on a consumed loose item. Pending pickup sessions get their action
+            // tick first, so their successful result and extraction checks are preserved.
+            if (LooseLootRecovery.PrepareSquad(squad, waypointSystem))
+                continue;
+
             if (squadObjective.Location == null)
             {
                 // Honour an explicit post-rescue (or other) cooldown set by a patch that nulled the location:

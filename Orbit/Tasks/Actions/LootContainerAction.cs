@@ -83,22 +83,9 @@ public class LootContainerAction(AgentData dataset, WaypointSystem waypointSyste
 
         // Defensive: the dispatcher shouldn't put us in this task without a lootable Waypoint, but if
         // something invalidated it, fail clean.
-        if (location == null || location.Target == null)
+        if (location == null)
         {
             Log.Debug($"{agent} LootContainerAction: location/target null, failing");
-            objective.Status = ObjectiveStatus.Failed;
-            return;
-        }
-
-        // A loose item whose GameObject is alive but empty: someone picked it up, BSG returned the LootItem
-        // to the asset pool and the pool restored the component's original state (Item = null). A session
-        // on it ends within the frame with nothing seen, so drop the waypoint for everyone instead of
-        // letting the dispatcher hand it out again. LootItemKilledPatch catches this at pickup time; this
-        // is the safety net for whatever reaches the pool without going through Kill.
-        if (location.Target is LootItem emptyItem && emptyItem.Item == null)
-        {
-            Log.Info($"{agent} LootContainerAction: {location} is an empty loose-item object ({emptyItem.name}), already picked up. Dropping the waypoint");
-            waypointSystem.RemoveWaypoint(location.Id);
             objective.Status = ObjectiveStatus.Failed;
             return;
         }
@@ -108,6 +95,18 @@ public class LootContainerAction(AgentData dataset, WaypointSystem waypointSyste
         // world state matches what an awake bot would have produced.
         if (!_states.TryGetValue(agent.Id, out var state))
         {
+            // A running session must observe its result first: our own successful pickup removes the
+            // world item before this action gets its next tick. Only reject stale targets for NEW sessions.
+            if (waypointSystem.IsUnavailableLooseLoot(location))
+            {
+                LooseLootRecovery.Abandon(agent, waypointSystem);
+                return;
+            }
+            if (location.Target == null)
+            {
+                objective.Status = ObjectiveStatus.Failed;
+                return;
+            }
             Log.Debug($"{agent} LootContainerAction: starting loot on {location} (target={location.Target?.GetType().Name ?? "null"})");
             state = new BotLootState(agent, location);
             _states[agent.Id] = state;
@@ -822,9 +821,24 @@ internal class BotLootState
         if (IsDone) return;
         if (!_started) return;
 
+        // Pickup can destroy or pool the target. Reconcile a completed transfer before inspecting that
+        // target, the watchdog or combat flags, so a successful pickup is not turned into a failure.
+        var lootedNow = _brain.Stats != null ? _brain.Stats.TotalGained : 0f;
+        var targetMissing = _location.Target == null
+                            || (_location.Target is LootItem item && item.Item == null);
+        if (!_brain.LootTaskRunning)
+        {
+            ItemsTaken = lootedNow > _lootedAtStart;
+            Success = ItemsTaken || (!_brain.LastSessionCancelled && !targetMissing);
+            Log.Debug($"{_agent} BotLootState.Tick: brain.LootTaskRunning=false -> done, lootedDelta={(lootedNow - _lootedAtStart):N0}₽, ItemsTaken={ItemsTaken}, cancelled={_brain.LastSessionCancelled}, success={Success}");
+            IsDone = true;
+            CleanupBrainTarget();
+            return;
+        }
+
         // Target destroyed mid-loot — e.g. another player picked up the loose item, a corpse despawned, a
         // container was disabled by a scripted event. Bail cleanly so we don't kneel forever at a ghost.
-        if (_location.Target == null)
+        if (targetMissing && lootedNow <= _lootedAtStart)
         {
             Log.Info($"{_agent} BotLootState: target destroyed mid-loot — cancelling");
             Cancel();
@@ -855,20 +869,6 @@ internal class BotLootState
             return;
         }
 
-        // loot handler clears LootTaskRunning when the async loot finishes (success OR timeout/cancellation).
-        // Compare Stats.TotalGained before and after to determine whether anything was actually taken.
-        if (!_brain.LootTaskRunning)
-        {
-            var lootedNow = _brain.Stats != null ? _brain.Stats.TotalGained : 0f;
-            ItemsTaken = lootedNow > _lootedAtStart;
-            // A cancelled session with nothing taken is a FAILURE (hang watchdog, external stop): the
-            // success path would value-skip instead of squad-blacklisting, and the same broken POI got
-            // re-picked forever. A cancel that still grabbed items counts as success.
-            Success = ItemsTaken || !_brain.LastSessionCancelled;
-            Log.Debug($"{_agent} BotLootState.Tick: brain.LootTaskRunning=false → done, lootedDelta={(lootedNow - _lootedAtStart):N0}₽, ItemsTaken={ItemsTaken}, cancelled={_brain.LastSessionCancelled}, success={Success}");
-            IsDone = true;
-            CleanupBrainTarget();
-        }
     }
 
     public void Cancel()
