@@ -732,6 +732,7 @@ internal class BotLootState
             handler.Init(agent.Bot);
         }
         _brain = handler;
+        agent.LootHandler = handler;
     }
 
     public void Begin()

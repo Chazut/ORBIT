@@ -29,11 +29,16 @@
         <OrbitSwitch @bind-Value="Cfg.GhostMode.GhostMovement" Label="Ghost movement"
                      Tooltip="ON: sleeping bots advance along their planned routes. Native bots also need Vanilla / faction movement below. OFF: sleepers hold position." />
         <OrbitSwitch @bind-Value="Cfg.GhostMode.NativeGhostMovement" Label="Vanilla / faction movement"
-                     Tooltip="Keeps supported bots moving without faction takeover: vanilla patrols and followers, plus MoreBotsAPI hunt, regroup and search. Their original behaviour chooses where to go. Unsupported actions and door interactions keep the group awake. Requires Ghost movement. OFF: bots without takeover sleep in place." />
+                     Tooltip="Keeps supported bots moving without faction takeover: vanilla patrols and followers, plus MoreBotsAPI hunt, regroup and search. Their original behaviour chooses where to go. Ordinary unlocked doors work in Ghost; unsupported actions and special door interactions require waking. Requires Ghost movement. OFF: bots without takeover sleep in place." />
         <OrbitSwitch @bind-Value="Cfg.GhostMode.GhostLooting" Label="Ghost looting"
                      Tooltip="ON (default): sleeping ORBIT squads keep looting containers, corpses and loose items along their routes, so the raid economy keeps evolving off-screen. OFF: sleepers walk past everything and the loot waits for you." />
         <OrbitSwitch @bind-Value="Cfg.GhostMode.GhostHearing" Label="Ghost hearing"
                      Tooltip="ON (default): sleeping PMC and PlayerScav squads hear firefights, simulated ghost fights and real gunfire alike (about 350 m unsuppressed, 120 m suppressed), and may drop what they are doing to go and look. The odds follow their SAIN personality: a GigaChad almost always pushes the noise, an average PMC sometimes, a Rat or a Timmy almost never. OFF: sleepers are deaf, as before." />
+        <MudSelect T="string" @bind-Value="Cfg.GhostMode.GhostAwakeBehavior" Label="Ghost meets awake bot" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mt-3" Style="max-width: 480px"
+                   HelperText="Applies to ORBIT, vanilla and faction groups. Combat, player distance, scoped view and other sleep protections always apply. If the awake group cannot safely sleep, the Ghost wakes as before.">
+            <MudSelectItem T="string" Value="@("sleep_awake")">Put the awake group into Ghost (default)</MudSelectItem>
+            <MudSelectItem T="string" Value="@("wake_ghost")">Wake the Ghost group</MudSelectItem>
+        </MudSelect>
         <MudSelect T="string" @bind-Value="Cfg.GhostMode.GhostFightsMode" Label="Ghost fights" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mt-3" Style="max-width: 380px"
                    HelperText="Uses the game's hostility rules for ORBIT, vanilla and faction groups. In Simulated mode, both sides stay asleep; a side waking brings the encounter back to real combat.">
             <MudSelectItem T="string" Value="@("simulated")">Simulated: statistical resolution, zero cost (default)</MudSelectItem>
@@ -71,7 +76,7 @@
     </SettingsCard>
 
     <SettingsCard Title="Default-dormant bot types" OnReset="ResetTypes"
-                  Subtitle="These types sleep by default and wake when a player or an awake bot gets close. Enable Ghost movement and Vanilla / faction movement to keep supported native behaviours moving while asleep.">
+                  Subtitle="These types sleep by default and wake when a player gets close. Encounters with awake bots follow the setting above. Enable both movement options to keep supported native behaviours moving while asleep.">
         <OrbitSwitch @bind-Value="Cfg.GhostMode.DormantScavs" Label="Scavs" />
         <OrbitSwitch @bind-Value="Cfg.GhostMode.DormantGoons" Label="Goons" />
         <OrbitSwitch @bind-Value="Cfg.GhostMode.DormantBosses" Label="Bosses and followers" />
@@ -89,9 +94,9 @@
         <OrbitSlider T="float" @bind-Value="Cfg.GhostMode.WakeDistance" Label="Wake within" Unit="m"
                      Min="50f" Max="450f" Step="10f" Fmt="0"
                      Tooltip="A sleeping squad closer than this to any human player wakes up." />
-        <OrbitSlider T="float" @bind-Value="Cfg.GhostMode.HostileWakeDistance" Label="Awake-bot wake within" Unit="m"
+        <OrbitSlider T="float" @bind-Value="Cfg.GhostMode.HostileWakeDistance" Label="Ghost / awake encounter distance" Unit="m"
                      Min="0f" Max="150f" Step="5f" Fmt="0"
-                     Tooltip="An awake bot closer than this to a sleeper blocks its sleep or wakes it, so an active scav crossing a dormant PMC squad still turns into a fight." />
+                     Tooltip="Within this distance, the Ghost meets awake bot setting applies. If an awake group cannot sleep safely, the Ghost wakes using the existing grace period." />
         <div class="mt-1"></div>
         <OrbitSwitch @bind-Value="Cfg.GhostMode.ScopedWake" Label="Scoped wake"
                      Tooltip="ON (default): aiming through a magnified optic wakes bots ahead of you, in a cone wider than the scope view so they never pop in at the reticle. OFF: only the normal wake ring applies." />
@@ -108,7 +113,7 @@
         <MudList T="string" Dense="true" ReadOnly="true">
             <MudListItem Icon="@Icons.Material.Filled.Check" IconColor="Color.Secondary">Squads in combat or targeted by anyone</MudListItem>
             <MudListItem Icon="@Icons.Material.Filled.Check" IconColor="Color.Secondary">Squads or members heading to an extract</MudListItem>
-            <MudListItem Icon="@Icons.Material.Filled.Check" IconColor="Color.Secondary">Bots mid-loot or mid-door-interaction (they finish first)</MudListItem>
+            <MudListItem Icon="@Icons.Material.Filled.Check" IconColor="Color.Secondary">Body animations and hands operations in progress: finish that step, then continue supported loot and doors in Ghost</MudListItem>
             <MudListItem Icon="@Icons.Material.Filled.Check" IconColor="Color.Secondary">Corpses: loot always stays visible</MudListItem>
             <MudListItem Icon="@Icons.Material.Filled.Check" IconColor="Color.Secondary">Wounded bots (recent HP drop): they stay awake until healed</MudListItem>
             <MudListItem Icon="@Icons.Material.Filled.Check" IconColor="Color.Secondary">Sniper scavs (their whole role is long-range overwatch)</MudListItem>
@@ -129,6 +134,7 @@
         Cfg.GhostMode.NativeGhostMovement = d.NativeGhostMovement;
         Cfg.GhostMode.GhostLooting = d.GhostLooting;
         Cfg.GhostMode.GhostHearing = d.GhostHearing;
+        Cfg.GhostMode.GhostAwakeBehavior = d.GhostAwakeBehavior;
         Cfg.GhostMode.GhostFightsMode = d.GhostFightsMode;
         Cfg.GhostMode.GhostFightFrequency = d.GhostFightFrequency;
         Cfg.GhostMode.GhostFightLethality = d.GhostFightLethality;

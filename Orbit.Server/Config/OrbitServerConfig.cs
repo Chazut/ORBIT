@@ -44,6 +44,7 @@ public class GhostModeConfig
     // "simulated" (statistical resolution, zero cost) | "real" (wake both units on contact and let
     // the AI fight it out) | "off" (ghosts ignore each other).
     public string GhostFightsMode { get; set; } = "simulated";
+    public string GhostAwakeBehavior { get; set; } = "sleep_awake";
     // Audible distant gunfire when a simulated fight resolves (the fighters' real weapon sounds).
     public bool GhostFightSounds { get; set; } = true;
 

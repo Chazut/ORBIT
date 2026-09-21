@@ -70,6 +70,18 @@ wake range stretches with your magnification). Everything is tunable,
 down to which bot types sleep by default and how bloody ghost fights
 get.
 
+**2.1: Ghost meets awake bot.** By default, eligible awake groups go into Ghost
+before proximity wakes are evaluated, including ORBIT, vanilla and faction groups.
+Combat, player distance, scoped view, cooldowns and the population floor still apply.
+If a nearby group must stay awake, the existing proximity wake rules apply.
+Select "Wake the Ghost group" for the previous behaviour. Simulated combat is unchanged.
+
+ORBIT loot sessions can continue in Ghost after their current body-dependent step
+finishes, preserving the target and inventory transactions. Door finalisation also
+continues outside the body. Nearby doors use a spatial index and a two-second cache,
+refreshed early when the bot leaves its covered area. Door state changes remain visible
+without rescanning. These transitions still need raid validation.
+
 **2.1: movement without takeover.** The Ghost Mode page's "Vanilla / faction
 movement" toggle preserves supported bots' original decisions while their
 bodies sleep: vanilla patrol and follower actions, MoreBotsAPI hunts, regrouping

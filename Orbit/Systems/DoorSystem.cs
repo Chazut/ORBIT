@@ -19,6 +19,10 @@ namespace Orbit.Systems;
 public class DoorSystem
 {
     public readonly Door[] Doors;
+    private readonly DoorSpatialIndex _spatial = new();
+
+    internal void Nearby(Vector3 position, float radius, List<Door> result)
+        => _spatial.Query(position, radius, result);
 
     private readonly List<(Collider bot, Collider pom)> _bots = new();
     // Doors Locked at raid start. Used purely to log when one of them physically opens: a locked door is
@@ -34,6 +38,7 @@ public class DoorSystem
 
         for (var i = 0; i < Doors.Length; i++)
         {
+            _spatial.Update(Doors[i]);
             Doors[i].OnDoorStateChanged += HandleDoorStateChanged;
             if (Doors[i].DoorState == EDoorState.Locked) _startedLocked.Add(Doors[i].GetInstanceID());
         }
@@ -71,6 +76,7 @@ public class DoorSystem
     private void HandleDoorStateChanged(WorldInteractiveObject obj, EDoorState prevState, EDoorState nextState)
     {
         if (obj is not Door door || door.Collider == null) return;
+        _spatial.Update(door);
         if (IsPassable(prevState) == IsPassable(nextState)) return; // collision verdict unchanged
         var passable = IsPassable(nextState);
 

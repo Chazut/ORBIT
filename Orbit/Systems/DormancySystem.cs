@@ -45,7 +45,7 @@ namespace Orbit.Systems;
 /// whose HP dropped recently never sleep (bleeds tick on inactive bodies and a sleeper cannot heal).
 /// Corpses can never go dormant, and OnAgentRemoved re-activates a dormant body just in case.
 /// </summary>
-public class DormancySystem
+public partial class DormancySystem
 {
     private const float PollIntervalSeconds = 0.5f;
     // Extract-bound squads keep ghosting toward the exfil and only wake this close to it: the
@@ -323,6 +323,9 @@ public class DormancySystem
         _summaryWindowStart = Time.time;
 
         if (_enabled)
+            Log.Always($"Ghost encounters: mode={(string.Equals(cfg.GhostAwakeBehavior, "wake_ghost", System.StringComparison.OrdinalIgnoreCase) ? "wake_ghost" : "sleep_awake")} doorCache=2s");
+
+        if (_enabled)
             Log.Always($"Ghost Mode ON — sleep>{sleepDist:F0}m (default-dormant>{scavSleepDist:F0}m) wake<{cfg.WakeDistance:F0}m hostileWake<{cfg.HostileWakeDistance:F0}m minAwake={_minAwakeBots} ghost={(cfg.GhostMovement ? "on" : "off")} ghostLoot={B(cfg.GhostLooting)} fights={_fightsMode.ToString().ToLowerInvariant()}/{freq} lethality={_lethality:F1}x scopedWake={(_scopedWakeEnabled ? $"{_scopedWakeMax:F0}m" : "off")} dormantTypes=[scav={B(cfg.DormantScavs)} goon={B(cfg.DormantGoons)} boss={B(cfg.DormantBosses)} cultist={B(cfg.DormantCultists)} raider={B(cfg.DormantRaiders)} bloodhound={B(cfg.DormantBloodhounds)} other={B(cfg.DormantOthers)}]");
     }
 
@@ -383,6 +386,22 @@ public class DormancySystem
         ScanWorld();
         UpdateScopeState();
 
+        if (!string.Equals(_cfg.GhostAwakeBehavior, "wake_ghost", System.StringComparison.OrdinalIgnoreCase))
+            UpdateSleepPreferred(liveAgents, squads);
+        else
+            UpdateWakePreferred(liveAgents, squads);
+
+        if (_fightsMode != GhostFightsMode.Off)
+            ResolveGhostSkirmishes(squads);
+
+        PollGhostHearing(squads);
+        HealDormantWounded();
+
+        EmitSummaryIfDue(liveAgents.Count);
+    }
+
+    private void UpdateWakePreferred(List<Agent> liveAgents, List<Squad> squads)
+    {
         // ── Pass 1: decide wakes, collect sleep candidates ──────────────
         _sleepCandidates.Clear();
         _wakeQueue.Clear();
@@ -441,13 +460,6 @@ public class DormancySystem
 
         UpdateVanilla();
 
-        if (_fightsMode != GhostFightsMode.Off)
-            ResolveGhostSkirmishes(squads);
-
-        PollGhostHearing(squads);
-        HealDormantWounded();
-
-        EmitSummaryIfDue(liveAgents.Count);
     }
 
     /// <summary>Re-activates a dormant body when its agent leaves the roster (death or removal), so a
@@ -590,10 +602,19 @@ public class DormancySystem
             if (bot == null || bot.IsDead || bot.BotState != EBotState.Active) { _farBlockedState++; return false; }
             if (!bot.gameObject.activeSelf) { _farBlockedState++; return false; } // someone else owns the GameObject — never fight over it
             if (agent.SoloExtractRequested && (agent.SoloExtractIsEmergency || NearOwnExfil(agent))) { _farBlockedExtract++; return false; }
-            if (agent.Objective.Status == ObjectiveStatus.Looting) { _farBlockedLoot++; return false; } // let the loot animation finish
-            if (Time.time < agent.Movement.DoorInteractHoldUntil) { _farBlockedDoor++; return false; } // mid door interaction
+            var loot = agent.LootHandler;
+            if (loot != null && loot.LootTaskRunning && !_cfg.GhostLooting)
+            { _farBlockedLoot++; return false; }
             if (bot.Memory != null && (bot.Memory.GoalEnemy != null || bot.Memory.IsUnderFire)) { _farBlockedCombat++; return false; }
             if (_targetedProfileIds.Contains(agent.Player.ProfileId)) { _farBlockedCombat++; return false; }
+            var bodyReady = loot != null ? loot.CanEnterGhost : !GhostBodyTransition.Busy(agent.Player);
+            if (!bodyReady)
+            {
+                if (loot?.LootTaskRunning == true) _farBlockedLoot++;
+                else if (Time.time < agent.Movement.DoorInteractHoldUntil) _farBlockedDoor++;
+                else _farBlockedHands++;
+                return false;
+            }
             // A body mid-heal stays awake: deactivating it freezes the meds animation, Medecine.Using
             // never clears and the bot cannot walk once it wakes.
             if (bot.Medecine is { Using: true }) { _farBlockedHealing++; return false; }
@@ -669,7 +690,7 @@ public class DormancySystem
 
     /// <summary>Why a dormant squad must wake, or null to keep sleeping. The string goes straight to the
     /// wake log line so a single raid read tells premature wakes from legit ones.</summary>
-    private string WakeReason(Squad squad)
+    private string WakeReason(Squad squad, bool proximity = true)
     {
         // Extract-bound squads ghost their way to the exfil and only wake shortly before its
         // radius, so the real AI handles just the trigger interaction (not the whole walk).
@@ -704,7 +725,7 @@ public class DormancySystem
             var humanSqr = MinSqrDistanceToHumans(agent.Position);
             if (humanSqr <= _wakeDistanceSqr) { _wakeByHuman++; return $"human at {Mathf.Sqrt(humanSqr):F0}m"; }
             if (InScopedView(agent.Position, out var scopeDist)) { _wakeByScope++; return $"in scoped view at {scopeDist:F0}m"; }
-            if (awakeBotTriggerArmed && AnyAwakeBotNear(agent.Position, squad)) { _wakeByAwakeBot++; return $"awake bot near {agent}"; }
+            if (proximity && awakeBotTriggerArmed && AnyAwakeBotNear(agent.Position, squad)) { _wakeByAwakeBot++; return $"awake bot near {agent}"; }
         }
         return null;
     }
@@ -852,6 +873,8 @@ public class DormancySystem
         try
         {
             // Questing Bots' proven recipe, in this order.
+            agent.LootHandler?.EnterGhost(agent);
+            _movementSystem.PrepareGhostDoorHandoff(agent);
             bot.DecisionQueue.Clear();
             bot.Memory.GoalEnemy = null;
             bot.PatrollingData.Pause();
@@ -2535,8 +2558,9 @@ public class DormancySystem
     /// disabling it restores stationary sleep. Groups sleep and wake per BSG BotsGroup so a boss never sleeps apart from its
     /// followers. Toggled-off types are left completely untouched.
     /// </summary>
-    private void UpdateVanilla()
+    private void CollectVanillaGroups()
     {
+        foreach (var group in _vanillaGroups.Values) { group.Clear(); _vanillaGroupPool.Push(group); }
         _vanillaGroups.Clear();
 
         var players = _gameWorld.AllAlivePlayersList;
@@ -2573,7 +2597,7 @@ public class DormancySystem
                 NativePatrolDiagnostics.Observe(owner, _vanillaDormant.Contains(owner), _nativeGhosts.InFight(owner));
                 var key = (object)owner.BotsGroup ?? owner;
                 if (!_vanillaGroups.TryGetValue(key, out var list))
-                    _vanillaGroups[key] = list = new List<BotOwner>(4);
+                    _vanillaGroups[key] = list = _vanillaGroupPool.Count > 0 ? _vanillaGroupPool.Pop() : new List<BotOwner>(4);
                 list.Add(owner);
             }
             catch
@@ -2582,6 +2606,13 @@ public class DormancySystem
             }
         }
 
+    }
+
+    private readonly Stack<List<BotOwner>> _vanillaGroupPool = new();
+
+    private void UpdateVanilla()
+    {
+        CollectVanillaGroups();
         foreach (var kv in _vanillaGroups)
         {
             var group = kv.Value;
@@ -2632,7 +2663,7 @@ public class DormancySystem
         return true;
     }
 
-    private string VanillaWakeReason(object key, List<BotOwner> group)
+    private string VanillaWakeReason(object key, List<BotOwner> group, bool proximity = true)
     {
         var awakeBotTriggerArmed = !_vanillaGroupSleptAt.TryGetValue(key, out var sleptAt)
                                    || Time.time - sleptAt >= SleepGraceSeconds;
@@ -2654,7 +2685,7 @@ public class DormancySystem
             var humanSqr = MinSqrDistanceToHumans(player.Position);
             if (humanSqr <= _wakeDistanceSqr) { _wakeByHuman++; return $"human at {Mathf.Sqrt(humanSqr):F0}m"; }
             if (InScopedView(player.Position, out var scopeDist)) { _wakeByScope++; return $"in scoped view at {scopeDist:F0}m"; }
-            if (awakeBotTriggerArmed && AnyAwakeBotNear(player.Position, null)) { _wakeByAwakeBot++; return $"awake bot near {player.Profile?.Nickname}"; }
+            if (proximity && awakeBotTriggerArmed && AnyAwakeBotNear(player.Position, null)) { _wakeByAwakeBot++; return $"awake bot near {player.Profile?.Nickname}"; }
         }
         return null;
     }

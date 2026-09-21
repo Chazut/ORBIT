@@ -27,6 +27,7 @@ public class Agent(int id, BotOwner bot, float[] taskScores) : Entity(id, taskSc
     /// branch on this flag.
     /// </summary>
     public bool IsDormant;
+    internal Orbit.Looting.OrbitLootHandler LootHandler;
 
     /// <summary>Ghost gear swaps. A sleeper changes its equipment through inventory transactions only: the
     /// hands controller cannot run on an inactive body, so the weapon in hands is never touched while asleep.

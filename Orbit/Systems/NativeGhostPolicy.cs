@@ -3,7 +3,8 @@ namespace Orbit.Systems;
 internal static class NativeGhostPolicy
 {
     public static bool Supports(string decision, string customLogic, bool customRole, bool huntAdapter,
-        string checkpoint = null, bool warband = false, bool partisanTravel = false, bool coverTravel = false, bool isb = false)
+        string checkpoint = null, bool warband = false, bool partisanTravel = false, bool coverTravel = false, bool isb = false,
+        bool peacefulLay = false)
     {
         if (customLogic != null)
         {
@@ -30,6 +31,7 @@ internal static class NativeGhostPolicy
         }
 
         if (customRole && !huntAdapter && checkpoint == null && !isb) return false;
+        if (peacefulLay && decision == "lay") return true;
         if (coverTravel && decision is "goToCoverPoint" or "runToCover") return true;
         if (partisanTravel && decision is "goToPointTactical" or "goToCoverPointTactical") return true;
         return decision is "simplePatrol" or "followerPatrol" or "alternativePatrol" or "holdPosition";

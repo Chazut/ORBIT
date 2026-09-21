@@ -5,6 +5,7 @@ using System.Linq.Expressions;
 using System.Reflection;
 using System.Reflection.Emit;
 using EFT;
+using EFT.Interactive;
 using HarmonyLib;
 using Orbit.Systems;
 
@@ -27,7 +28,13 @@ internal static class NativeGhostBodyPatches
             Bind(harmony, typeof(BotWeaponSelector), "TryChangeToSlot");
             Bind(harmony, typeof(BotGrenadeController), "DoThrow");
             Bind(harmony, typeof(BotUnderbarrelLauncherController), "TryEnableReloadDisable", "TryEnable", "TryDisable", "TryReload");
-            Bind(harmony, typeof(BotDoorOpener), "TryPassCurrentDoor", "Interact", "RunEnteringDoorSequence");
+            Bind(harmony, typeof(BotDoorOpener), "TryPassCurrentDoor", "RunEnteringDoorSequence",
+                "WaitForDoorOpen", "ManualUpdate", "InteractionWithDoor");
+            harmony.Patch(AccessTools.Method(typeof(BotDoorOpener), "Interact", new[] { typeof(Door), typeof(EInteractionType) }),
+                prefix: new HarmonyMethod(typeof(NativeGhostBodyPatches), nameof(DoorInteractPrefix)));
+            harmony.Patch(AccessTools.Method(typeof(BotDoorOpener), "UpdateDoorInteractionStatus", Type.EmptyTypes),
+                prefix: new HarmonyMethod(typeof(NativeGhostBodyPatches), nameof(DoorStatusPrefix)));
+            Bind(harmony, typeof(BotLay), "TryLay");
             Bind(harmony, typeof(BotFirstAid), "TryApplyToCurrentPart", "ApplyToSelf");
             Bind(harmony, typeof(BotSurgicalKit), "ApplyToCurrentPart");
             Bind(harmony, typeof(BotStimulators), "StartApplyToTarget", "TryApply");
@@ -38,7 +45,7 @@ internal static class NativeGhostBodyPatches
             Bind(harmony, typeof(PatrolTakeItemsNode), "UpdateNodeByBrain");
             Bind(harmony, typeof(PatrolDropItemsNode), "UpdateNodeByBrain");
             Ready = true;
-            Log.Info($"NATIVE GHOST: body guards ready ({Owners.Count} entry points)");
+            Log.Info($"NATIVE GHOST: body guards ready ({Owners.Count + 2} entry points)");
         }
         catch (Exception e)
         {
@@ -76,6 +83,10 @@ internal static class NativeGhostBodyPatches
     private static bool VoidPrefix(object __instance, MethodBase __originalMethod)
     {
         if (!NativeGhostSystem.HasSleepers) return true;
+        if (__instance is BotDoorOpener opener)
+            return !NativeGhostSystem.HandleDoorOperation(opener,
+                __originalMethod.Name == "ManualUpdate" ? null : opener._currentDoorLink?.Door,
+                __originalMethod.Name != "ManualUpdate" && opener._currentDoorLink == null, out _);
         var bot = Owners[__originalMethod](__instance);
         if (__instance is PatrollingData) return !NativeGhostPatrol.DeferArrival(bot);
         if (__instance is PatrollingAlternative) return !NativeGhostPatrol.DeferUpdate(bot);
@@ -98,6 +109,17 @@ internal static class NativeGhostBodyPatches
         }
         if (replaced != 1) throw new InvalidOperationException("Native patrol update shape changed");
         return result;
+    }
+
+    private static bool DoorInteractPrefix(BotDoorOpener __instance, Door __0, EInteractionType __1)
+        => !NativeGhostSystem.HasSleepers
+            || !NativeGhostSystem.HandleDoorOperation(__instance, __0, __1 != EInteractionType.Open, out _);
+
+    private static bool DoorStatusPrefix(BotDoorOpener __instance, ref DoorInteractionStatus __result)
+    {
+        if (!NativeGhostSystem.HasSleepers || !NativeGhostSystem.HandleDoorOperation(__instance, null, false, out var waiting)) return true;
+        __result = waiting ? DoorInteractionStatus.OpeningDoor : DoorInteractionStatus.CanRun;
+        return false;
     }
 
     private static bool BoolPrefix(object __instance, MethodBase __originalMethod, ref bool __result)

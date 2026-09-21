@@ -96,9 +96,9 @@ public class Movement
     /// interaction is in flight and the open animation is cancelled if the bot keeps
     /// pushing forward through the doorway.</summary>
     public float DoorInteractHoldUntil = -1f;
+    internal readonly Orbit.Systems.NearbyDoorCache GhostDoors = new();
 
-    /// <summary>Next Time.time the ghost follower scans the doors on its heading (throttled scan of every
-    /// map door, see MovementSystem.GhostHandleDoors).</summary>
+    /// <summary>Next local route check. Door candidates are cached for two seconds separately.</summary>
     public float NextGhostDoorCheck;
 
     // Ghost gait stand-ins for what an inactive body cannot report (see MovementSystem.GhostCanSprint):

@@ -129,6 +129,7 @@ public static class ServerConfig
         [JsonProperty("ghost_movement")] public bool GhostMovement = true;
         [JsonProperty("native_ghost_movement")] public bool NativeGhostMovement = true;
         [JsonProperty("ghost_fights_mode")] public string GhostFightsMode = "simulated";
+        [JsonProperty("ghost_awake_behavior")] public string GhostAwakeBehavior = "sleep_awake";
         [JsonProperty("ghost_fight_sounds")] public bool GhostFightSounds = true;
         [JsonProperty("ghost_looting")] public bool GhostLooting = true;
         [JsonProperty("ghost_hearing")] public bool GhostHearing = true;

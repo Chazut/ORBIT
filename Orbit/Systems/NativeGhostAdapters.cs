@@ -122,6 +122,12 @@ internal sealed class NativeGhostAdapters
         if (isb != null && NativeGhostIsb.Valid(bot, isb))
             return new NativeGhostAdapters(null, false, () => NativeGhostIsb.Valid(bot, isb),
                 () => NativeGhostIsb.ReissueOrder(bot, isb), isb: true);
+        return ResolveWarband(bot);
+    }
+
+    internal static NativeGhostAdapters ResolveWarband(BotOwner bot)
+    {
+        ResolveBindings();
         if (_rvrMember == null || _rvrBoard == null || _rvrOrders == null || bot.BotsGroup == null || !_rvrMember(bot)) return null;
         var group = bot.BotsGroup;
         var board = _rvrBoard(group);

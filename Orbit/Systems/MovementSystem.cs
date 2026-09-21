@@ -338,6 +338,7 @@ public class MovementSystem
     private void GhostFollowPath(Agent agent)
     {
         var movement = agent.Movement;
+        if (Time.time < movement.DoorInteractHoldUntil) return;
         if (!movement.HasPath || movement.Status != MovementStatus.Moving)
             return;
 
@@ -403,13 +404,8 @@ public class MovementSystem
         ResetPath(agent, MovementStatus.Failed);
     }
 
-    // Ghost door handling. A sleeping body has no BSG mover, no voxel door links and no hands, so the live
-    // HandleDoors path cannot run for it. Instead the ghost follower scans the map doors on its heading a few
-    // times per second and drives the DOOR object directly: Unlock() (latch coroutine on the door, no key
-    // animation) for a Locked door the squad was routed behind, Open() (the door's own swing coroutine +
-    // sound) for a Shut one. The door GameObject is always active, so its coroutines run even though the
-    // bot's do not. Fika: host-side only, like every other door state write here (a client sees the door
-    // closed until someone interacts with it locally).
+    // Sleeping bodies cannot drive doors. Search nearby candidates through a two-second spatial cache,
+    // then check only that short list along the route. Door-owned unlock/open coroutines keep running.
     private const float GhostDoorCheckInterval = 0.25f;
     private const float GhostDoorScanRadiusSqr = 3f * 3f;
     private const float GhostDoorLookahead = 2.5f;
@@ -440,9 +436,9 @@ public class MovementSystem
         if (Time.time < movement.NextGhostDoorCheck) return;
         movement.NextGhostDoorCheck = Time.time + GhostDoorCheckInterval;
 
-        var doors = _doorSystem.Doors;
+        var doors = movement.GhostDoors.Get(_doorSystem, pos);
         var ray = new Ray(pos, dir);
-        for (var i = 0; i < doors.Length; i++)
+        for (var i = 0; i < doors.Count; i++)
         {
             var door = doors[i];
             if (door == null) continue;
@@ -809,6 +805,19 @@ public class MovementSystem
     }
 
     private readonly List<long> _doorWatchRemoveBuffer = new();
+
+    internal void PrepareGhostDoorHandoff(Agent agent)
+    {
+        foreach (var watch in _pendingDoorOpens.Values)
+        {
+            if (watch.Agent != agent || watch.Door == null) continue;
+            // The body animation is already complete (sleep gate). DoorWatch runs outside the body
+            // and still owns finalisation and Fika replication. Retain its remaining hold while asleep.
+            agent.Movement.DoorInteractHoldUntil = Mathf.Max(agent.Movement.DoorInteractHoldUntil,
+                watch.RequestedAtTime + DoorWatchTimeoutSeconds);
+            Log.Info($"{agent} door handoff to Ghost: id={watch.Door.Id} existing interaction retained");
+        }
+    }
 
     private void TickDoorOpenWatches()
     {

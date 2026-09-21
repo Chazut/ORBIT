@@ -16,7 +16,7 @@ using UnityEngine;
 
 namespace Orbit.Looting;
 
-public class OrbitLootHandler : MonoBehaviour, ILootHandler
+public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
 {
     // Fallback per-slot threshold for bots without an archetype-resolved value (PlayerScavs, or PMCs while
     // SAIN attach is pending).
@@ -195,7 +195,11 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
             // awake session: the bot is pinned and calm. Hooking it on phase 4 missed every session that ends
             // early with nothing to take, which is most of them (Shoreline raid: a parked Benelli went through
             // an awake container session without ever being promoted).
-            if (!DormantMode) await WeaponSwapper.PromotePendingAsync(_bot, ct);
+            if (!DormantMode)
+            {
+                using var body = _bodyGate.Enter(true);
+                await WeaponSwapper.PromotePendingAsync(_bot, ct);
+            }
             switch (kind)
             {
                 case LootKind.Container:
@@ -327,6 +331,7 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
 
         if (container.DoorState != EDoorState.Open)
         {
+            using var body = _bodyGate.Enter(!DormantMode);
             if (!DormantMode)
             {
                 Log.Debug($"OrbitLootHandler.Container({Nick}, {container.name}): Interact(Open), waiting {ContainerOpenAnimMs}ms anim");
@@ -351,7 +356,13 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
         try
         {
             Log.Debug($"OrbitLootHandler.Container({Nick}, {container.name}): calling LootOpener.Interact(Close), door={container.DoorState}");
-            _bot.LootOpener.Interact(container, EInteractionType.Close);
+            if (!DormantMode) _bot.LootOpener.Interact(container, EInteractionType.Close);
+            else if (container.DoorState == EDoorState.Open)
+            {
+                if (FikaDetection.FikaLoaded)
+                    _bot.GetPlayer.ExecuteInteraction(container, new InteractionResult(EInteractionType.Close));
+                else container.Close();
+            }
         }
         catch (System.Exception e)
         {
@@ -1129,6 +1140,7 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
         // bot's bag instead of being left behind.
         if (entry.Item is Weapon candidateWeapon)
         {
+            using var body = _bodyGate.Enter(!DormantMode);
             WeaponSwapper.Outcome outcome;
             if (_allowWeaponSwapPath)
             {
@@ -1284,6 +1296,7 @@ public class OrbitLootHandler : MonoBehaviour, ILootHandler
             return taken;
         }
 
+        using var body = _bodyGate.Enter(true);
         var pickupReady = new TaskCompletionSource<bool>();
         try
         {
