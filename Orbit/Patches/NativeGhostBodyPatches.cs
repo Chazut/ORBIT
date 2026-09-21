@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Linq.Expressions;
 using System.Reflection;
+using System.Reflection.Emit;
 using EFT;
 using HarmonyLib;
 using Orbit.Systems;
@@ -30,6 +31,12 @@ internal static class NativeGhostBodyPatches
             Bind(harmony, typeof(BotFirstAid), "TryApplyToCurrentPart", "ApplyToSelf");
             Bind(harmony, typeof(BotSurgicalKit), "ApplyToCurrentPart");
             Bind(harmony, typeof(BotStimulators), "StartApplyToTarget", "TryApply");
+            Bind(harmony, typeof(PatrollingData), "ComeToPoint");
+            Bind(harmony, typeof(PatrollingAlternative), "UpdateNodeByBrain");
+            harmony.Patch(AccessTools.Method(typeof(PatrollingAlternative), "UpdateNodeByBrain"),
+                transpiler: new HarmonyMethod(typeof(NativeGhostBodyPatches), nameof(GuardPatrolUpdate)));
+            Bind(harmony, typeof(PatrolTakeItemsNode), "UpdateNodeByBrain");
+            Bind(harmony, typeof(PatrolDropItemsNode), "UpdateNodeByBrain");
             Ready = true;
             Log.Info($"NATIVE GHOST: body guards ready ({Owners.Count} entry points)");
         }
@@ -67,8 +74,31 @@ internal static class NativeGhostBodyPatches
     }
 
     private static bool VoidPrefix(object __instance, MethodBase __originalMethod)
-        => !NativeGhostSystem.HasSleepers || !NativeGhostSystem.DeferBodyOperation(Owners[__originalMethod](__instance),
+    {
+        if (!NativeGhostSystem.HasSleepers) return true;
+        var bot = Owners[__originalMethod](__instance);
+        if (__instance is PatrollingData) return !NativeGhostPatrol.DeferArrival(bot);
+        if (__instance is PatrollingAlternative) return !NativeGhostPatrol.DeferUpdate(bot);
+        return !NativeGhostSystem.DeferBodyOperation(bot,
             __originalMethod.DeclaringType.Name + "." + __originalMethod.Name);
+    }
+
+    private static IEnumerable<CodeInstruction> GuardPatrolUpdate(IEnumerable<CodeInstruction> instructions)
+    {
+        var update = AccessTools.Method(typeof(AReserveWayAction), "ManualUpdate", new[] { typeof(BotOwner) });
+        var guarded = AccessTools.Method(typeof(NativeGhostPatrol), nameof(NativeGhostPatrol.ManualUpdate));
+        var result = instructions.ToList();
+        var replaced = 0;
+        foreach (var instruction in result)
+        {
+            if (!instruction.Calls(update)) continue;
+            instruction.opcode = OpCodes.Call;
+            instruction.operand = guarded;
+            replaced++;
+        }
+        if (replaced != 1) throw new InvalidOperationException("Native patrol update shape changed");
+        return result;
+    }
 
     private static bool BoolPrefix(object __instance, MethodBase __originalMethod, ref bool __result)
     {

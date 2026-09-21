@@ -183,7 +183,7 @@ public static class NativePatrolDiagnostics
                 + $" sinceStay={stayFor} bossNextIn={nextPointIn} reserveNextIn={reserveNextIn} changeWayIn={changeWayIn}"
                 + $" path={route?.HavePath} corner={path?.CurIndex}/{path?.Length} moverTarget={mover?.TargetPoint} moving={mover?.IsMoving}"
                 + $" paused={mover?.Pause} pauseLeft={mover?.RemainPause:F1}s speed={mover?.DestMoveSpeed:F2} standbyAllowed={bot.StandBy?.CanDoStandBy} enemy={bot.Memory?.GoalEnemy != null} fight={fight}"
-                + HuntSnapshot(bot));
+                + " " + NativeGhostPatrol.Snapshot(bot) + HuntSnapshot(bot));
         }
         catch (Exception e)
         {

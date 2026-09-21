@@ -25,7 +25,8 @@ internal static class NativeGhostDiagnostics
             Log.Info($"NATIVE GHOST REFUSED: {bot.Profile?.Nickname} [{bot.ProfileId}] reason={reason} role={bot.Profile?.Info?.Settings?.Role}"
                 + $" layer={NativeGhostPartisan.Layer(bot) ?? "none"} decision={bot.Brain?.LastDecision} state={bot.BotState} bodyActive={bot.gameObject.activeSelf}"
                 + $" human={humanDistance:F1}m group={groupSize} enemy={enemy != null} enemyId={enemy?.Person?.ProfileId ?? "none"} enemyDistance={distance:F1}m visible={enemy?.IsVisible} canShoot={enemy?.CanShoot}"
-                + $" seenAgo={seen:F1}s underFire={bot.Memory?.IsUnderFire} path={bot.Mover?.ActualPathController?.HavePath} position={bot.Position}");
+                + $" seenAgo={seen:F1}s underFire={bot.Memory?.IsUnderFire} path={bot.Mover?.ActualPathController?.HavePath} position={bot.Position}"
+                + " " + NativeGhostPatrol.Snapshot(bot));
         }
         catch (Exception e)
         {

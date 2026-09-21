@@ -169,8 +169,8 @@ public sealed class NativeGhostSystem
         if (bot.WeaponManager?.Grenades?.ThrowindNow == true) return "grenade";
         if (bot.Medecine is { Using: true }) return "medicine";
         if (bot.DoorOpener is { Interacting: true }) return "door";
-        if (bot.PatrollingData?.PointControl != null && bot.PatrollingData.CurPatrolPoint?.TargetPoint?.ActionData != null)
-            return "patrol-interaction";
+        var patrol = NativeGhostPatrol.BodyReason(bot);
+        if (patrol != null) return patrol;
         var inventory = bot.GetPlayer?.InventoryController;
         if (inventory != null)
             foreach (var operation in inventory.SelectEvents<ItemEventArgs>()) return "inventory-operation";
