@@ -1387,6 +1387,7 @@ public class DormancySystem
 
     private sealed class NoiseEvent
     {
+        public int Id;
         public Vector3 Position;
         public float Range;
         public float LastShotAt;
@@ -1397,6 +1398,7 @@ public class DormancySystem
     }
 
     private readonly List<NoiseEvent> _noises = new();
+    private int _nextNoiseId;
     private readonly bool _hearingEnabled;
     private bool _soundHooked;
     private float _nextNoisePollAt;
@@ -1461,7 +1463,7 @@ public class DormancySystem
         }
         if (noise == null)
         {
-            noise = new NoiseEvent { Position = position, Simulated = simulated };
+            noise = new NoiseEvent { Id = ++_nextNoiseId, Position = position, Simulated = simulated };
             _noises.Add(noise);
         }
         noise.Range = Mathf.Max(noise.Range, range);
@@ -1515,6 +1517,29 @@ public class DormancySystem
         return lead?.Profile != null && lead.Profile.WillBeAPlayerScav() ? 0.2f : 0f;
     }
 
+    internal Api.OrbitGhostHearingState GetGhostHearingState(Agent agent)
+    {
+        var squad = agent?.Squad;
+        // PollGhostHearing measures from member zero, once for the entire squad.
+        if (!_hearingEnabled || agent == null || !agent.IsDormant || squad == null
+            || squad.Members.Count == 0 || squad.Members[0] != agent || NoiseCuriosity(squad) <= 0f)
+            return new Api.OrbitGhostHearingState();
+
+        var now = Time.time;
+        var state = squad.ExtractRequested ? "Extracting"
+            : squad.InvestigateNoisePosition.HasValue ? "Investigating"
+            : now < squad.GhostFightUntil ? "Fighting"
+            : now - squad.LastNoiseReactionAt < NoiseReactionCooldownSeconds ? "Cooldown"
+            : "Listening";
+        return new Api.OrbitGhostHearingState
+        {
+            Range = NoiseRangeLoud,
+            SuppressedRange = NoiseRangeSuppressed,
+            MinimumDistance = NoiseMinDistance,
+            State = state,
+        };
+    }
+
     private void PollGhostHearing(List<Squad> squads)
     {
         if (!_hearingEnabled) return;
@@ -1548,7 +1573,9 @@ public class DormancySystem
                 noise.RolledSquadIds.Add(squad.Id); // one roll per squad per firefight, whatever the outcome
                 // A fight at the edge of earshot is less tempting than one next door.
                 var chance = curiosity * Mathf.Lerp(1f, 0.5f, dist / noise.Range);
-                if (Random.value > chance)
+                var investigate = Random.value <= chance;
+                RecordGhostHearing(squad, noise, listener, dist, chance, investigate);
+                if (!investigate)
                 {
                     Log.Debug($"GHOST HEARING: {squad} ({squad.Archetype}) heard {(noise.Simulated ? "a ghost fight" : "real gunfire")} {dist:F0}m away and ignored it (chance {chance:P0})");
                     continue;
@@ -1560,6 +1587,32 @@ public class DormancySystem
                 break;
             }
         }
+    }
+
+    private static void RecordGhostHearing(Squad squad, NoiseEvent noise, Vector3 listener,
+        float distance, float chance, bool investigate)
+    {
+        var members = new string[squad.Members.Count];
+        for (var i = 0; i < members.Length; i++)
+            members[i] = squad.Members[i].Player?.ProfileId;
+        Api.OrbitTelemetry.PushGhostHearing(new Api.OrbitGhostHearing
+        {
+            RecordedAt = Time.realtimeSinceStartup,
+            NoiseId = noise.Id,
+            SquadId = squad.Id,
+            ProfileId = members[0],
+            MemberProfileIds = members,
+            SourceX = noise.Position.x, SourceY = noise.Position.y, SourceZ = noise.Position.z,
+            ListenerX = listener.x, ListenerY = listener.y, ListenerZ = listener.z,
+            Range = noise.Range,
+            MinimumDistance = NoiseMinDistance,
+            Distance = distance,
+            Chance = chance,
+            Simulated = noise.Simulated,
+            Shots = noise.Shots,
+            Investigate = investigate,
+            Personality = squad.Personality != null ? squad.Archetype.ToString() : "PlayerScav",
+        });
     }
 
     private int _windowNoiseReactions;

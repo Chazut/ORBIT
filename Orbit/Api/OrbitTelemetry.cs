@@ -32,6 +32,19 @@ public static class OrbitTelemetry
     public static bool IsBotDormant(string profileId)
         => Orbit.Systems.DormancySystem.IsDormantProfile(profileId);
 
+    /// <summary>Current hearing coverage at the squad listener, independent of sound events.</summary>
+    public static OrbitGhostHearingState GetGhostHearingState(string profileId)
+    {
+        var manager = Singleton<OrbitManager>.Instance;
+        if (manager?.DormancySystem == null || manager.AgentData == null || string.IsNullOrEmpty(profileId))
+            return null;
+        var agents = manager.AgentData.Entities.Values;
+        for (var i = 0; i < agents.Count; i++)
+            if (agents[i]?.Player?.ProfileId == profileId)
+                return manager.DormancySystem.GetGhostHearingState(agents[i]);
+        return new OrbitGhostHearingState();
+    }
+
     // ── Simulated ghost fights (Ghost Mode) ─────────────────────────────
 
     private static readonly List<OrbitGhostFight> PendingGhostFights = new();
@@ -49,6 +62,31 @@ public static class OrbitTelemetry
     internal static void ClearGhostFights()
     {
         lock (PendingGhostFights) PendingGhostFights.Clear();
+        lock (PendingGhostHearing) PendingGhostHearing.Clear();
+    }
+
+    private static readonly List<OrbitGhostHearing> PendingGhostHearing = new();
+
+    /// <summary>Records the outcome of an actual hearing roll, without rolling again for telemetry.</summary>
+    internal static void PushGhostHearing(OrbitGhostHearing hearing)
+    {
+        lock (PendingGhostHearing)
+        {
+            // Bounded even when RaidReview is absent or stops polling.
+            if (PendingGhostHearing.Count < 512) PendingGhostHearing.Add(hearing);
+        }
+    }
+
+    /// <summary>Drains hearing decisions since the last poll. Null means no new decisions.</summary>
+    public static List<OrbitGhostHearing> DrainGhostHearing()
+    {
+        lock (PendingGhostHearing)
+        {
+            if (PendingGhostHearing.Count == 0) return null;
+            var drained = new List<OrbitGhostHearing>(PendingGhostHearing);
+            PendingGhostHearing.Clear();
+            return drained;
+        }
     }
 
     /// <summary>
@@ -318,4 +356,37 @@ public class OrbitGhostFight
     public float BZ;
     public float Duration;
     public int Casualties;
+}
+
+/// <summary>An eligible dormant ORBIT squad heard a noise and chose whether to investigate it.
+/// Positions and membership are captured at the decision, not at the consumer's next poll.</summary>
+public class OrbitGhostHearing
+{
+    public float RecordedAt;
+    public int NoiseId;
+    public int SquadId;
+    public string ProfileId;
+    public string[] MemberProfileIds;
+    public float SourceX;
+    public float SourceY;
+    public float SourceZ;
+    public float ListenerX;
+    public float ListenerY;
+    public float ListenerZ;
+    public float Range;
+    public float MinimumDistance;
+    public float Distance;
+    public float Chance;
+    public bool Simulated;
+    public int Shots;
+    public bool Investigate;
+    public string Personality;
+}
+
+public class OrbitGhostHearingState
+{
+    public float Range;
+    public float SuppressedRange;
+    public float MinimumDistance;
+    public string State;
 }
