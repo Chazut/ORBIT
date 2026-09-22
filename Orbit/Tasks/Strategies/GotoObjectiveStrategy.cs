@@ -666,6 +666,12 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
             UpdateEmergencyExtract(agent);
             if (agent.SoloExtractRequested)
             {
+                if (agent.IsActive && agent.SoloExtractTarget?.Target is EFT.Interactive.ExfiltrationPoint soloExfil
+                    && ExfilArrival.IsSharedTimer(soloExfil) && ExfilArrival.IsUnavailable(soloExfil))
+                {
+                    Log.Info($"{agent} solo V-Ex {soloExfil.name} unavailable, selecting another exfil");
+                    ExfilArrival.Abandon(agent, agent.SoloExtractTarget);
+                }
                 if (agent.SoloExtractTarget == null)
                     agent.SoloExtractTarget = waypointSystem.FindNearestEligibleExfil(squad);
                 if (agent.SoloExtractTarget != null)

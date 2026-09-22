@@ -173,6 +173,11 @@ anchor, the others splinter to nearby loot and cover. They extract for
 real reasons - enough roubles, goals completed, or the raid clock - and
 they coordinate on shared exfils like the car.
 
+At a car, squads wait up to 90 seconds for their teammates before starting
+the 60-second countdown. A bot leaving solo skips the squad wait. After a
+combat interruption, a bot must return to the extraction area to leave;
+if the car has departed or its trigger cannot be reached, it seeks another exit.
+
 ### 🎒 Looting that feels human
 
 A custom loot engine built on BSG's own pickup APIs. Per-personality

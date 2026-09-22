@@ -282,6 +282,12 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                         else if (objective.Location.Category == WaypointCategory.Exfil
                                  && objective.Location.Target is ExfiltrationPoint exfil)
                         {
+                            if (ExfilArrival.IsSharedTimer(exfil) && ExfilArrival.IsUnavailable(exfil))
+                            {
+                                Log.Info($"{agent} V-Ex {exfil.name} unavailable on arrival, selecting another exfil");
+                                ExfilArrival.Abandon(agent, objective.Location);
+                                break;
+                            }
                             // The 15 m exfil radius is generous on purpose (BSG nav-snap drift, large
                             // trigger volumes), but it lets bots "extract" while standing at the surface
                             // above an underground exfil whose registered transform.position is at the
@@ -291,7 +297,7 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                             // arrival radius still bounded re-dispatch via TrackArrivalFailure when the
                             // BSG nav can't get them in (3-fail blacklist still applies, the squad picks
                             // a different exfil).
-                            if (!IsAgentInsideExfilTrigger(agent, exfil))
+                            if (!ExfilArrival.IsInside(agent, objective.Location))
                             {
                                 // Bot is within the loose arrival radius but outside the actual trigger
                                 // volume. The TrackArrivalFailure path is fragile here — if the agent
@@ -310,6 +316,12 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                                 }
                                 else if (Time.time - objective.ExfilOutsideTriggerSince >= ExfilOutsideTriggerForceExtractSeconds)
                                 {
+                                    if (ExfilArrival.IsSharedTimer(exfil))
+                                    {
+                                        Log.Info($"{agent} V-Ex {exfil.name} trigger unreachable, selecting another exfil");
+                                        ExfilArrival.Abandon(agent, objective.Location);
+                                        break;
+                                    }
                                     ActivateExfilForBot(exfil, agent);
                                     objective.Status = ObjectiveStatus.Extracting;
                                     objective.ExfilOutsideTriggerSince = -1f;
@@ -502,7 +514,8 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                 // Force the despawn only when the bot made it near the exit (blocked trigger, nav quirk on
                 // the last meters). Far away — a genuinely dead-ended partial path — blacklist this exfil
                 // instead so the next scan picks another; despawning mid-map is never acceptable.
-                if ((agent.Position - location.Position).sqrMagnitude <= ExfilForceDespawnProximitySqr)
+                if (!ExfilArrival.IsSharedTimer(exfil)
+                    && (agent.Position - location.Position).sqrMagnitude <= ExfilForceDespawnProximitySqr)
                 {
                     ActivateExfilForBot(exfil, agent);
                     agent.Objective.Status = ObjectiveStatus.Extracting;
@@ -516,6 +529,8 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
             }
 
             agent.Squad.CompletedPoiIds.Add(locId);
+            if (location.Target is ExfiltrationPoint failedExfil && ExfilArrival.IsSharedTimer(failedExfil))
+                ExfilArrival.Abandon(agent, location);
             // Adding to CompletedPoiIds only filters FUTURE picks; the current dispatch still has
             // agent.Objective.Location pinned at the bad POI (set by AssignNewObjective, by a follower
             // splinter pick, or by the loot routine's scavenge sweep which pins squad.Objective.Location at
@@ -538,23 +553,6 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
             agent.ConsecutiveSamePoiFailures = 0;
             agent.LastFailedPoiId = -1;
         }
-    }
-
-    /// <summary>
-    /// True when the agent is physically inside the exfil's trigger collider bounds (or no collider is
-    /// available, in which case we fall back to the existing radius check upstream). Catches the case
-    /// where the registered transform.position is at the surface but the actual trigger volume is below
-    /// ground (or vice versa): the bot would otherwise extract from outside the real zone.
-    /// </summary>
-    private static bool IsAgentInsideExfilTrigger(Agent agent, ExfiltrationPoint exfil)
-    {
-        var collider = exfil?.GetComponent<Collider>();
-        if (collider == null) return true; // can't verify → defer to the existing radius check
-        var pos = agent.Position;
-        // Bounds.Contains is AABB which is loose for rotated colliders, but exfil triggers are usually
-        // axis-aligned BoxColliders so this is exact enough. Closer-point would be more precise but
-        // costs more and isn't worth it for ~5-15 m volumes.
-        return collider.bounds.Contains(pos);
     }
 
     // Mirrors BSG's ActivateExfil flow: forces a still-gated exfil into a usable state right when the bot
