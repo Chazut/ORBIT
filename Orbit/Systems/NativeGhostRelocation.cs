@@ -40,8 +40,11 @@ internal static class NativeGhostRelocation
             var distance = Mathf.Min((player.Position - from).sqrMagnitude, (player.Position - to).sqrMagnitude);
             if (player.IsAI)
             {
-                // Avoid landing among bots, or relocating within an awake encounter.
-                if ((player.Position - to).sqrMagnitude < 9f || distance < 900f && player.gameObject.activeSelf) { reason = "nearby-bot"; return false; }
+                // An awake encounter always blocks recovery. Overlapping sleeping allies may
+                // separate a little, otherwise each one vetoes every fine edge landing of the other.
+                if (distance < 900f && player.gameObject.activeSelf
+                    || (player.Position - to).sqrMagnitude < 9f && !SeparatesSleepingAlly(bot, player, from, to))
+                { reason = "nearby-bot"; return false; }
                 continue;
             }
             if (distance < 10000f) { reason = "nearby-human"; return false; }
@@ -50,6 +53,31 @@ internal static class NativeGhostRelocation
             if (Visible(head.position, from, mask) || Visible(head.position, to, mask)) { reason = "visible-human"; return false; }
         }
         return true;
+    }
+
+    private static bool SeparatesSleepingAlly(BotOwner bot, Player other, Vector3 from, Vector3 to)
+    {
+        if ((to - from).sqrMagnitude > 1.5f * 1.5f) return false;
+        var offset = from - other.Position;
+        var landing = to - other.Position;
+        // Horizontal clearance must improve without passing through the other body. Moving up
+        // or down alone cannot make an overlapping landing safe.
+        if (Mathf.Abs(offset.y) > 0.75f) return false;
+        offset.y = landing.y = 0f;
+        var clearance = offset.magnitude + 0.15f;
+        if (offset.sqrMagnitude > 0.5f * 0.5f
+            || landing.sqrMagnitude < clearance * clearance
+            || Vector3.Dot(offset, landing - offset) < 0f) return false;
+        var mate = other.AIData?.BotOwner;
+        var group = bot.BotsGroup;
+        if (mate == null || group == null || !ReferenceEquals(group, mate.BotsGroup)
+            || !NativeGhostSystem.OwnsInactiveMovement(bot) || !NativeGhostSystem.OwnsInactiveMovement(mate)
+            || NativeGhostSystem.MovementPinned(bot) || NativeGhostSystem.MovementPinned(mate)) return false;
+        // Use the game's IPlayer bridges, as the hostility checks do, without adding voice-chat dependencies.
+        var world = Singleton<GameWorld>.Instance;
+        var otherPlayer = world.GetAlivePlayerBridgeByProfileID(other.ProfileId)?.iPlayer;
+        var ownPlayer = world.GetAlivePlayerBridgeByProfileID(bot.GetPlayer.ProfileId)?.iPlayer;
+        return otherPlayer != null && ownPlayer != null && !group.IsEnemy(otherPlayer) && !group.IsEnemy(ownPlayer);
     }
 
     private static bool Visible(Vector3 head, Vector3 foot, int mask)

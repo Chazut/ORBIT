@@ -119,6 +119,9 @@ the new route. Small relocation loops do not count as progress.
 At a repeatedly blocked navmesh edge, recovery also checks small landings along
 the failed segment, with the same collision and visibility protections. Identical
 segment failures progressively space path retries from 2 to 30 seconds.
+Already overlapping native Ghost allies can separate with a short correction of
+up to 1.5 m that increases horizontal clearance. Group identity, combat, player
+visibility, walls, doors and navigation checks still apply, and their native orders remain intact.
 After 45 seconds without leaving a
 small area on a checkpoint travel order, ORBIT asks the faction's own selector
 for another reachable cover at the same checkpoint. A failed selection keeps
