@@ -116,12 +116,17 @@ subject to visibility, collision, floor and proximity checks. If no suitable
 point exists, it keeps retrying in Ghost. Repeated rescues stay within the
 original blocked area, avoid previously tried landings and check the start of
 the new route. Small relocation loops do not count as progress.
+At a repeatedly blocked navmesh edge, recovery also checks small landings along
+the failed segment, with the same collision and visibility protections. Identical
+segment failures progressively space path retries from 2 to 30 seconds.
 After 45 seconds without leaving a
 small area on a checkpoint travel order, ORBIT asks the faction's own selector
 for another reachable cover at the same checkpoint. A failed selection keeps
 the current goal. Stalled MoreBotsAPI followers can similarly request another
 regroup point from their original hunt manager. The leader continues waiting
 until the original action acknowledges the follower's arrival.
+Rejected alternatives report whether the point was unchanged, the path was
+incomplete or its first steps were blocked.
 Native stops, checkpoint waits and simulated fights suspend
 this recovery.
 Doors, special interactions and unsupported behaviours keep the group awake.

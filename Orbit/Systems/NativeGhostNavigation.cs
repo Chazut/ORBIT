@@ -15,7 +15,11 @@ internal sealed class NativeGhostNavigation(BotOwner bot, DoorSystem doors)
     private const float StuckSeconds = 12f;
     private const float MaxRelocation = 8f;
     private const float ProgressDistance = 3f;
+    private const int EdgeProbeCount = 15;
+    private const int MaxLandings = 32 + EdgeProbeCount;
     private static readonly float[] RescueRings = { 1f, 2f, 4f, MaxRelocation };
+    private static readonly float[] EdgeForward = { 0.2f, 0.5f, 1f };
+    private static readonly float[] EdgeSideways = { 0f, -0.15f, 0.15f, -0.35f, 0.35f };
     private static int _budgetFrame = -1, _queries;
     private readonly NavMeshPath _path = new();
     private Vector3? _target;
@@ -34,6 +38,10 @@ internal sealed class NativeGhostNavigation(BotOwner bot, DoorSystem doors)
     private float _retainedReportAt;
     private Vector3? _blockedFrom, _blockedCorner;
     private int _repeatedSegment;
+    private int _edgeProbe = EdgeProbeCount;
+    private Vector3 _edgeOrigin, _edgeDirection;
+    private float RetryDelay => _repeatedSegment >= 10 ? 30f : _repeatedSegment >= 6 ? 10f
+        : _repeatedSegment >= 3 ? 5f : RetryInterval;
     internal bool HasOrder => _target.HasValue;
     internal Vector3? Target => _target;
     internal float StalledFor => HasOrder ? Time.time - _progressAt : 0f;
@@ -76,6 +84,8 @@ internal sealed class NativeGhostNavigation(BotOwner bot, DoorSystem doors)
         _partialEnd = null;
         _blockedFrom = _blockedCorner = null;
         _repeatedSegment = 0;
+        _edgeProbe = EdgeProbeCount;
+        _edgeDirection = default;
     }
 
     internal void Suspend()
@@ -95,19 +105,32 @@ internal sealed class NativeGhostNavigation(BotOwner bot, DoorSystem doors)
                 && Vector3.Distance(corner.Value, _blockedCorner.Value) < 0.25f ? _repeatedSegment + 1 : 1;
             _blockedFrom = from;
             _blockedCorner = corner;
+            if (_repeatedSegment == 1)
+            {
+                _edgeProbe = EdgeProbeCount;
+                _edgeDirection = default;
+                var direction = corner.Value - from;
+                direction.y = 0f;
+                if (reason == "navmesh-edge" && Finite(direction) && direction.sqrMagnitude > 0.0001f)
+                {
+                    _edgeOrigin = from;
+                    _edgeDirection = direction.normalized;
+                    _edgeProbe = 0;
+                }
+            }
         }
         if (reason != null && Time.time >= _blockedReportAt)
         {
             _blockedReportAt = Time.time + 30f;
             Log.Info($"NATIVE GHOST: {bot.Profile.Nickname} route blocked: reason={reason} from={bot.Position} attempted={attempted} {Summary}");
             if (corner.HasValue)
-                Log.Info($"NATIVE GHOST: {bot.Profile.Nickname} blocked segment: index={bot.Mover.ActualPathController.CurPath?.CurIndex} from={Precise(from)} corner={Precise(corner)} desired={Precise(attempted)} projected={Precise(projected)} edge={Precise(edge)} repeat={_repeatedSegment}");
+                Log.Info($"NATIVE GHOST: {bot.Profile.Nickname} blocked segment: index={bot.Mover.ActualPathController.CurPath?.CurIndex} from={Precise(from)} corner={Precise(corner)} desired={Precise(attempted)} projected={Precise(projected)} edge={Precise(edge)} repeat={_repeatedSegment} retryIn={RetryDelay:F1}s");
         }
         if (!_target.HasValue) return false;
         bot.Mover.ActualPathController.Stop();
         bot.Mover.IsMoving = false;
         _failures++;
-        _retryAt = Time.time + RetryInterval;
+        _retryAt = Time.time + RetryDelay;
         return true;
     }
 
@@ -177,6 +200,10 @@ internal sealed class NativeGhostNavigation(BotOwner bot, DoorSystem doors)
             _failures = _probe = 0;
             _recoveryOrigin = null;
             _triedLandings.Clear();
+            _edgeProbe = EdgeProbeCount;
+            _edgeDirection = default;
+            _repeatedSegment = 0;
+            _blockedFrom = _blockedCorner = null;
         }
         if (bot.Mover.ActualPathController.HavePath || Time.time < _retryAt) return;
         if (_partialEnd.HasValue && Vector3.Distance(bot.Position, _partialEnd.Value) <= _reach + 0.2f)
@@ -194,7 +221,7 @@ internal sealed class NativeGhostNavigation(BotOwner bot, DoorSystem doors)
             if (bot.Mover.ActualPathController.HavePath) return;
         }
         if (!TakeQuery()) return;
-        _retryAt = Time.time + RetryInterval;
+        _retryAt = Time.time + RetryDelay;
         var target = _target.Value;
         var calculated = NavMesh.CalculatePath(bot.Position, target, NavMesh.AllAreas, _path);
         _status = calculated ? _path.status : NavMeshPathStatus.PathInvalid;
@@ -219,17 +246,33 @@ internal sealed class NativeGhostNavigation(BotOwner bot, DoorSystem doors)
         // A small, bounded correction across a broken navmesh seam. Never jump to the leader/goal.
         var origin = bot.Position;
         _recoveryOrigin ??= origin;
-        for (var attempt = 0; attempt < 4 && _probe < RescueRings.Length * 8; attempt++)
+        for (var attempt = 0; attempt < 4 && (_edgeProbe < EdgeProbeCount || _probe < RescueRings.Length * 8); attempt++)
         {
             if (!TakeQuery()) return;
-            var index = _probe++;
-            var angle = (index % 8) * Mathf.PI / 4f;
-            var candidate = _recoveryOrigin.Value + new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle)) * RescueRings[index / 8];
-            if (!NavMesh.SamplePosition(candidate, out var hit, 0.4f, NavMesh.AllAreas)) { Reject("no-sample"); continue; }
+            // Probe the failed segment closely before the coarse radial search. A narrow opening
+            // can fit a small correction even when every metre-spaced landing crosses a wall.
+            var edgeProbe = _edgeProbe < EdgeProbeCount;
+            Vector3 candidate;
+            if (edgeProbe)
+            {
+                var index = _edgeProbe++;
+                var lateral = new Vector3(-_edgeDirection.z, 0f, _edgeDirection.x);
+                candidate = _edgeOrigin + _edgeDirection * EdgeForward[index / EdgeSideways.Length]
+                    + lateral * EdgeSideways[index % EdgeSideways.Length];
+            }
+            else
+            {
+                var index = _probe++;
+                var angle = (index % 8) * Mathf.PI / 4f;
+                candidate = _recoveryOrigin.Value + new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle)) * RescueRings[index / 8];
+            }
+            if (!NavMesh.SamplePosition(candidate, out var hit, edgeProbe ? 0.1f : 0.4f, NavMesh.AllAreas)) { Reject("no-sample"); continue; }
             candidate = hit.position;
+            if (!Finite(candidate)) { Reject("nonfinite-sample"); continue; }
             if (Vector3.Distance(origin, candidate) > MaxRelocation
                 || Vector3.Distance(_recoveryOrigin.Value, candidate) > MaxRelocation
-                || (candidate - origin).sqrMagnitude < 0.25f || TriedLanding(candidate)) { Reject("bounds-or-repeat"); continue; }
+                || (candidate - origin).sqrMagnitude < (edgeProbe ? 0.01f : 0.25f)
+                || TriedLanding(candidate, edgeProbe ? 0.01f : 0.5625f)) { Reject("bounds-or-repeat"); continue; }
             if (Mathf.Abs(candidate.y - origin.y) > 0.75f || DangerZones.IsInside(candidate)) { Reject("height-or-danger"); continue; }
             if (!NativeGhostRelocation.IsSafe(bot, origin, candidate, doors, out var unsafeReason))
             { Reject("unsafe-" + unsafeReason); continue; }
@@ -261,13 +304,16 @@ internal sealed class NativeGhostNavigation(BotOwner bot, DoorSystem doors)
             // Preserve failures, search cursor and elapsed stuck time until real walking leaves
             // this area. Record the landing only as the start of the next walking measurement.
             _progressPosition = candidate;
-            Log.Info($"NATIVE GHOST: {bot.Profile.Nickname} relocated in Ghost: {Vector3.Distance(origin, candidate):F1}m from={origin} to={candidate} nativeTarget={target} nav={_status} end={end}");
+            Log.Info($"NATIVE GHOST: {bot.Profile.Nickname} relocated in Ghost: {Vector3.Distance(origin, candidate):F1}m from={origin} to={candidate} nativeTarget={target} nav={_status} end={end} probe={(edgeProbe ? "edge" : "radial")}");
             _rejections.Clear();
             return;
         }
-        if (_probe >= RescueRings.Length * 8)
+        if (_edgeProbe >= EdgeProbeCount && _probe >= RescueRings.Length * 8)
         {
             _probe = 0;
+            // Geometry and door state can change. Retry rejected edge candidates with the next
+            // bounded scan, while keeping successful landings in the no-repeat history.
+            _edgeProbe = _edgeDirection.sqrMagnitude > 0.0001f ? 0 : EdgeProbeCount;
             _rescueAt = Time.time + 30f;
             // Completing a scan is already limited by _rescueAt. Do not lose its rejection
             // summary because a routine pending-route report happened during the same scan.
@@ -323,41 +369,47 @@ internal sealed class NativeGhostNavigation(BotOwner bot, DoorSystem doors)
         finally { _adjustedPath = null; }
     }
 
-    private bool TriedLanding(Vector3 candidate)
+    private bool TriedLanding(Vector3 candidate, float radiusSqr)
     {
-        if (_triedLandings.Count >= RescueRings.Length * 8) return true;
+        if (_triedLandings.Count >= MaxLandings) return true;
         foreach (var previous in _triedLandings)
-            if ((candidate - previous).sqrMagnitude < 0.5625f) return true;
+            if ((candidate - previous).sqrMagnitude < radiusSqr) return true;
         return false;
     }
 
     // PathComplete alone can still lead straight back into a seam. Check the first two metres
     // with the same sampling and edge checks as the Ghost mover, including short corner segments.
     internal static bool CanStartRoute(Vector3 from, Vector3[] corners)
+        => CanStartRoute(from, corners, out _);
+
+    internal static bool CanStartRoute(Vector3 from, Vector3[] corners, out string reason)
     {
+        reason = null;
         var remaining = 2f;
         var moved = false;
         for (var i = 0; i < corners.Length && i < 16 && remaining > 0.001f; i++)
         {
             var corner = corners[i];
-            if (!Finite(corner)) return false;
+            if (!Finite(corner)) { reason = "nonfinite-corner"; return false; }
             for (var step = 0; step < 9 && remaining > 0.001f; step++)
             {
                 var distance = Vector3.Distance(from, corner);
                 if (distance < 0.01f) break;
                 var amount = Mathf.Min(0.25f, Mathf.Min(remaining, distance));
                 var next = Vector3.MoveTowards(from, corner, amount);
-                if (DangerZones.IsInside(next)
-                    || !NavMesh.SamplePosition(next, out var hit, 0.75f, NavMesh.AllAreas)
-                    || !Finite(hit.position) || DangerZones.IsInside(hit.position)
-                    || NavMesh.Raycast(from, hit.position, out _, NavMesh.AllAreas)
-                    || (hit.position - from).sqrMagnitude < 0.000001f) return false;
+                if (DangerZones.IsInside(next)) { reason = "start-danger"; return false; }
+                if (!NavMesh.SamplePosition(next, out var hit, 0.75f, NavMesh.AllAreas)) { reason = "start-off-navmesh"; return false; }
+                if (!Finite(hit.position)) { reason = "start-nonfinite"; return false; }
+                if (DangerZones.IsInside(hit.position)) { reason = "start-danger"; return false; }
+                if (NavMesh.Raycast(from, hit.position, out _, NavMesh.AllAreas)) { reason = "start-navmesh-edge"; return false; }
+                if ((hit.position - from).sqrMagnitude < 0.000001f) { reason = "start-no-progress"; return false; }
                 from = hit.position;
                 remaining -= amount;
                 moved = true;
                 if (distance <= amount) break;
             }
         }
+        if (!moved) reason = "start-no-progress";
         return moved;
     }
 

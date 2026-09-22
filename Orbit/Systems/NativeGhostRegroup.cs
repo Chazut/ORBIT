@@ -101,18 +101,29 @@ internal sealed class NativeGhostRegroup
         var candidate = _choose(_manager);
         if (!Eligible(bot, decision, navigation.Target) || !ReferenceEquals(bot.BotFollower.BossToFollow, leader)
             || (_point(_manager) - previous).sqrMagnitude > 0.0001f) return false;
-        if (!Finite(candidate) || Vector3.Distance(previous, candidate) < 1f || DangerZones.IsInside(candidate)
-            || !NavMesh.CalculatePath(bot.Position, candidate, NavMesh.AllAreas, _path)
-            || _path.status != NavMeshPathStatus.PathComplete || _path.corners.Length < 2
-            || Vector3.Distance(_path.corners[_path.corners.Length - 1], candidate) > 0.5f
-            || !NativeGhostNavigation.CanStartRoute(bot.Position, _path.corners))
+        var rejection = Rejection(bot.Position, previous, candidate);
+        if (rejection != null)
         {
-            Log.Info($"NATIVE GHOST: {bot.Profile.Nickname} regroup retry: no alternative reachable native point; current goal retained");
+            Log.Info($"NATIVE GHOST: {bot.Profile.Nickname} regroup retry: no alternative reachable native point; current goal retained reason={rejection} from={bot.Position} current={previous} candidate={candidate}");
             return false;
         }
         _setPoint(_manager, candidate);
         Log.Info($"NATIVE GHOST: {bot.Profile.Nickname} regroup retry: native point refreshed after 45s without progress from={previous} to={candidate}");
         return true;
+    }
+
+    private string Rejection(Vector3 from, Vector3 previous, Vector3 candidate)
+    {
+        if (!Finite(candidate)) return "nonfinite-point";
+        if (Vector3.Distance(previous, candidate) < 1f) return "unchanged-point";
+        if (DangerZones.IsInside(candidate)) return "danger";
+        if (!NavMesh.CalculatePath(from, candidate, NavMesh.AllAreas, _path)) return "no-path";
+        if (_path.status != NavMeshPathStatus.PathComplete) return "incomplete-path";
+        var corners = _path.corners;
+        if (corners.Length < 2) return "missing-corners";
+        if (!Finite(corners[corners.Length - 1]) || Vector3.Distance(corners[corners.Length - 1], candidate) > 0.5f)
+            return "end-outside-goal";
+        return NativeGhostNavigation.CanStartRoute(from, corners, out var reason) ? null : reason;
     }
 
     private static bool Finite(Vector3 p)
