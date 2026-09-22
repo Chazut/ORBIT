@@ -76,6 +76,10 @@ Defaults preserve the existing behaviour. Distance still reduces the final chanc
 down to half at the hearing limit; 0% disables that archetype's investigations.
 Settings belong to the selected preset and apply from the next raid. Native and
 faction bots keep their original hearing behaviour.
+Investigations of simulated fights target the nearest audible shooter rather than
+the centre between both sides. Each shooter's suppressor sets its own hearing range;
+RaidReview records the same source selected for the investigation. One curiosity
+roll per squad and fight is retained, with positions cached for the existing hearing poll.
 
 **2.1: Ghost meets awake bot.** By default, eligible awake groups go into Ghost
 before proximity wakes are evaluated, including ORBIT, vanilla and faction groups.
