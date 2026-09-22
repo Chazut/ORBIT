@@ -93,6 +93,13 @@ public class OrbitBrainLayer : CustomLayer
         var role = botOwner?.Profile?.Info?.Settings?.Role;
         if (!role.HasValue) return false;
 
+        // White Tusks always keep ISB's behaviour, independently of the takeover toggle.
+        if (IsbRolePolicy.IsWhiteTusk((int)role.Value))
+        {
+            Log.Info($"FACTION ISB: {botOwner.Profile.Nickname} role={role.Value} ({(int)role.Value}) keeps native White Tusk behaviour");
+            return true;
+        }
+
         // ORBIT registers on these vanilla brains only to drive custom factions that borrow them; never take over
         // the real vanilla bots, so exclude their WildSpawnTypes unconditionally. Custom faction types differ and
         // fall through to the toggle logic below.
@@ -101,12 +108,6 @@ public class OrbitBrainLayer : CustomLayer
             case EFT.WildSpawnType.exUsec:
             case EFT.WildSpawnType.bossGluhar:
             case EFT.WildSpawnType.followerGluharScout:
-                return true;
-            // ISB 1.0 "White Tusk" commanders (ISBBossCommander / ISBFollowerCommander). They run on the
-            // ExUsec brain with a permanent always-on Hunt layer — taking them over would break the mod's
-            // core mechanic (per Firefly, the ISB author).
-            case (EFT.WildSpawnType)13707:
-            case (EFT.WildSpawnType)13708:
                 return true;
         }
 

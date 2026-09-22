@@ -117,6 +117,11 @@ ISB checkpoints (including Black Division event checkpoints), tactical movement
 and Hunt/Camera Hunt preserve their original manager and squad membership during
 sleep. The optional lifecycle bridge checks the installed mod's method contracts;
 an incompatible tactical component keeps its bot awake.
+White Tusks always retain ISB's behaviour, even with **Take over ISB** enabled:
+the seven March roles and the two original commanders are excluded from takeover.
+They remain eligible for native Ghost movement under **Other factions**, subject
+to the same supported-action and sleep protections. Scout, Heavy, Assassin and
+Marksman continue to follow the ISB takeover toggle.
 Truncated paths are retried while the bots remain asleep. A stranded bot can
 receive a hidden relocation of up to 8 m to a point connected to its destination,
 subject to visibility, collision, floor and proximity checks. If no suitable
