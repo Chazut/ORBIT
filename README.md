@@ -17,7 +17,7 @@
 
 ---
 
-Every bot squad in your raid spawns with a plan: a rich area to strip, a
+Every bot squad in your raid follows a plan: a rich area to strip, a
 PvP hotspot to hunt, a quest spot to visit. They work it as a team, loot
 like players, upgrade their gear along the way, and head for extract when
 they're done. Kill one late in the raid and his backpack tells the story
@@ -29,9 +29,9 @@ Built on [Phobos](https://discord.com/channels/875684761291599922/13371314278039
 your CPU while ORBIT keeps playing them. The fps gains are massive
 (+45% average in my heavy-population benchmark, testers report +50 to
 +100%) and the world stays alive instead of freezing. A server **web UI**
-and visual **zone editor** let you shape your raids. **2.1 adds Ghost
-movement for vanilla and faction bots, zones by floor and bot type,
-and configuration presets.**
+and visual **zone editor** let you shape your raids. **Ghost Mode works with
+vanilla and faction bots, and you can target zones by floor and bot type
+or share your setup through presets.**
 
 [📷 Screenshot](https://i.imgur.com/WSWqb8d.png) · Pair with [Raid Review](https://forge.sp-tarkov.com/mod/1479/raid-review) to replay it all · Questions & feedback: [ORBIT Discord thread](https://discord.com/channels/875684761291599922/1509314495019745451)
 
@@ -71,7 +71,7 @@ wake range stretches with your magnification). Everything is tunable,
 down to which bot types sleep by default and how bloody ghost fights
 get.
 
-**2.1: vanilla and faction bots can move in Ghost too.** Enable their
+**Vanilla and faction bots can move in Ghost too.** Enable their
 **Dormant** toggle, **Ghost movement** and **Vanilla / faction movement**.
 Leave faction **Take over** toggles OFF, or keep **Vanilla xxx** checked,
 to preserve their original behaviour. These bots keep their own routing
@@ -136,7 +136,7 @@ Every behaviour setting lives in a **web UI** on your SPT server
 raid and works headless. Full-config export/import included, to back
 up or share your tuning.
 
-**Presets (2.1):** save, switch and share settings and zones together.
+**Presets:** save, switch and share settings and zones together.
 Your existing 2.0 tuning is kept as **Custom**. Editing **Default** or an
 addon creates a personal copy. Most settings apply next raid; faction
 takeover changes require a game restart.
@@ -162,7 +162,7 @@ own zones, mark which ones can host kill hunts. Export your setup as a
 **zone pack** and publish it on the Forge as an ORBIT addon, or import
 someone else's.
 
-**2.1:** name your custom zones and target specific bot types, factions
+Name your custom zones and target specific bot types, factions
 and floors. Reserve includes floors 2 through 5; Customs includes its fourth
 floor. Zones influence ORBIT-controlled bots, awake or Ghost, and still need
 a reachable route to the selected area.
