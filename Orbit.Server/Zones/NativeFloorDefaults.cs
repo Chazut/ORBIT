@@ -24,8 +24,8 @@ public static class NativeFloorDefaults
             ["ZoneScavBase"] = "base",
             ["ZoneSnipeBrige"] = "base",
             ["ZoneSnipeFactory"] = "2nd-floor",
-            ["ZoneSnipeTower"] = "base",
-            ["ZoneTankSquare"] = "base",
+            ["ZoneSnipeTower"] = "4th-floor",
+            ["ZoneTankSquare"] = "base|3rd-floor",
             ["ZoneWade"] = "base",
         },
         ["factory4_day"] = new()
@@ -114,11 +114,11 @@ public static class NativeFloorDefaults
         },
         ["RezervBase"] = new()
         {
-            ["ZoneBarrack"] = "base|bunkers",
+            ["ZoneBarrack"] = "base",
             ["ZoneBunkerStorage"] = "base|bunkers",
-            ["ZonePTOR1"] = "base|bunkers",
-            ["ZonePTOR2"] = "base|bunkers",
-            ["ZoneRailStrorage"] = "base|bunkers",
+            ["ZonePTOR1"] = "base",
+            ["ZonePTOR2"] = "base",
+            ["ZoneRailStrorage"] = "base",
             ["ZoneSubCommand"] = "bunkers",
             ["ZoneSubStorage"] = "bunkers",
         },

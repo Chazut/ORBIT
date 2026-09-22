@@ -263,7 +263,9 @@ someone else's.
 
 **2.1: bot types and floors.** Each zone can target several bot types or factions
 and a named floor. The editor shows the corresponding floor plan from tarkov.dev,
-using the same SPT map catalogue as RaidReview. Choose a floor and a bot preview
+with map bounds and heights matched to SPT. Reserve includes floors 2 through 5
+and bunker heights by sector; Customs includes the 0.16 buildings and fourth floor.
+Choose a floor and a bot preview
 before drawing, or edit a zone's **Bot types** and **Zone floor** afterwards.
 Copies, undo/redo and zone packs retain these choices. Existing custom zones still
 apply to all types and floors unless configured otherwise.
@@ -274,7 +276,8 @@ scene's spawn and patrol points, including zones that span several floors.
 Existing zone files migrate automatically when the server starts. Their original
 contents are kept in a `.pre-native-floors.bak` file beside each changed JSON.
 Migration preserves radii, forces, bot filters and custom zones. Older imported
-packs also adopt the built-ins' native floors.
+packs also adopt the built-ins' native floors. When a map's floor catalogue changes,
+older scene metadata is refreshed automatically without changing custom zones or tuning.
 
 Zones influence bots controlled by ORBIT, awake or Ghost. Shared squad destinations
 use the leader's type. Floor hotspots select destinations on that floor and check

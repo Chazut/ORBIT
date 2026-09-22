@@ -25,7 +25,7 @@ public sealed class ZonesRouter(JsonUtil jsonUtil, ZoneStoreService zoneStore, P
         "/orbit/zones/native-floors",
         (url, requestData, sessionId, output, cancellationToken) =>
         {
-            zoneStore.RecordNativeFloors(requestData.MapId, requestData.Floors);
+            zoneStore.RecordNativeFloors(requestData.MapId, requestData.Floors, requestData.CatalogRevision);
             return new ValueTask<string>("{}");
         }
     )
@@ -36,5 +36,6 @@ public sealed class ZonesRouter(JsonUtil jsonUtil, ZoneStoreService zoneStore, P
 public sealed class NativeFloorsRequest : IRequestData
 {
     [JsonPropertyName("MapId")] public string MapId { get; set; } = "";
+    [JsonPropertyName("CatalogRevision")] public int CatalogRevision { get; set; }
     [JsonPropertyName("Floors")] public Dictionary<string, string?> Floors { get; set; } = new();
 }

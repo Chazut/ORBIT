@@ -11,7 +11,14 @@ public partial class ZoneStoreService
         foreach (var mapId in MapIds) if (File.Exists(PathFor(mapId))) GetZones(mapId);
     }
     private Dictionary<string, Dictionary<string, string?>>? _nativeFloorCache;
+    private Dictionary<string, int> _nativeFloorRevisions = new();
     private string NativeCachePath => Path.Combine(ZonesDir, "native-floors.json");
+
+    public sealed class NativeFloorCacheDocument
+    {
+        public Dictionary<string, Dictionary<string, string?>> Floors { get; set; } = new();
+        public Dictionary<string, int> Revisions { get; set; } = new();
+    }
 
     private Dictionary<string, Dictionary<string, string?>> NativeCache
     {
@@ -20,12 +27,26 @@ public partial class ZoneStoreService
             if (_nativeFloorCache != null) return _nativeFloorCache;
             try
             {
-                _nativeFloorCache = File.Exists(NativeCachePath)
-                    ? JsonSerializer.Deserialize<Dictionary<string, Dictionary<string, string?>>>(File.ReadAllText(NativeCachePath), _json)
-                    : null;
+                if (File.Exists(NativeCachePath))
+                {
+                    var json = File.ReadAllText(NativeCachePath);
+                    using var document = JsonDocument.Parse(json);
+                    if (document.RootElement.TryGetProperty("Floors", out _))
+                    {
+                        var cached = JsonSerializer.Deserialize<NativeFloorCacheDocument>(json, _json);
+                        _nativeFloorCache = cached?.Floors;
+                        _nativeFloorRevisions = cached?.Revisions ?? new();
+                    }
+                    else
+                        _nativeFloorCache = JsonSerializer.Deserialize<Dictionary<string, Dictionary<string, string?>>>(json, _json);
+                }
             }
             catch (Exception ex) { logger.Error($"[ORBIT] Native floor cache load failed: {ex.Message}"); }
-            return _nativeFloorCache ??= new();
+            _nativeFloorCache ??= new();
+            foreach (var mapId in _nativeFloorCache.Keys.ToArray())
+                if (_nativeFloorRevisions.GetValueOrDefault(mapId) != FloorCatalog.RevisionFor(mapId))
+                    _nativeFloorCache.Remove(mapId);
+            return _nativeFloorCache;
         }
     }
 
@@ -66,18 +87,23 @@ public partial class ZoneStoreService
     }
 
     // Scene metadata is separate from user tuning. Updating it must preserve pending editor changes.
-    public void RecordNativeFloors(string mapId, Dictionary<string, string?> floors)
+    public void RecordNativeFloors(string mapId, Dictionary<string, string?> floors, int? catalogRevision = null)
     {
         if (!MapIds.Contains(mapId) || floors == null || floors.Count > 1000)
             throw new InvalidDataException("Invalid native floor report");
+        // An older client can still talk to this server, but its geometry cannot replace current metadata.
+        var revision = catalogRevision ?? FloorCatalog.RevisionFor(mapId);
+        if (revision != FloorCatalog.RevisionFor(mapId)) return;
         foreach (var (name, selection) in floors)
             if (string.IsNullOrWhiteSpace(name) || name.Length > 200 || !FloorSelection.IsKnown(mapId, selection))
                 throw new InvalidDataException("Invalid native floor selection");
         lock (_working)
         {
             NativeCache[mapId] = new(floors);
+            _nativeFloorRevisions[mapId] = revision;
             Directory.CreateDirectory(ZonesDir);
-            File.WriteAllText(NativeCachePath + ".tmp", JsonSerializer.Serialize(NativeCache, _json));
+            File.WriteAllText(NativeCachePath + ".tmp", JsonSerializer.Serialize(new NativeFloorCacheDocument
+                { Floors = NativeCache, Revisions = _nativeFloorRevisions }, _json));
             File.Move(NativeCachePath + ".tmp", NativeCachePath, overwrite: true);
             // Migrate the saved file too, without replacing any unsaved sliders, names or custom zones.
             GetZones(mapId);

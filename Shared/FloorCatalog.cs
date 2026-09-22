@@ -1,4 +1,4 @@
-// Floor/render metadata from tarkov.dev, matching the SPT layouts used by RaidReview.
+// Floor/render metadata from tarkov.dev, matched to the supported SPT layouts.
 // Source: https://github.com/the-hideout/tarkov-dev/blob/main/src/data/maps.json
 // Keep vanilla and rework entries separate when updating the catalogue.
 #nullable disable
@@ -8,6 +8,9 @@ namespace Orbit.Zones;
 
 public static class FloorCatalog
 {
+    // Increment only maps whose floor membership changes, so old scene reports cannot mask an update.
+    public static int RevisionFor(string mapId) => mapId == "bigmap" || mapId == "RezervBase" ? 1 : 0;
+
     public static readonly Dictionary<string, FloorMap> Maps = new Dictionary<string, FloorMap>
     {
         ["bigmap"] = new FloorMap
@@ -35,7 +38,7 @@ public static class FloorCatalog
                     HideLayers = null, ImageBounds = new float[] { 698.0f, -307.0f, -372.0f, 237.0f },
                     Extents = new FloorExtent[]
                     {
-                        new FloorExtent(-1000.0f, 0.5f, new float[] { 635.0f, -137.0f, 620.0f, -125.0f }, new float[] { 473.0f, -122.0f, 458.0f, -110.0f }, new float[] { 314.0f, -173.0f, 308.0f, -184.0f }, new float[] { 349.0f, -88.0f, 323.0f, -32.0f }, new float[] { 219.0f, -158.0f, 193.0f, -137.0f }),
+                        new FloorExtent(-1000.0f, 0.5f, new float[] { 635.0f, -137.0f, 620.0f, -125.0f }, new float[] { 473.0f, -122.0f, 458.0f, -110.0f }, new float[] { 314.0f, -173.0f, 308.0f, -184.0f }, new float[] { 349.0f, -88.0f, 323.0f, -32.0f }, new float[] { 219.0f, -158.0f, 193.0f, -137.0f }, new float[] { 122.0f, -61.0f, 88.0f, -40.0f }),
                     },
                 },
                 new MapFloor
@@ -48,6 +51,9 @@ public static class FloorCatalog
                         new FloorExtent(2.7f, 6.5f, new float[] { 243.0f, 190.0f, 165.0f, 125.0f }, new float[] { 116.0f, -83.0f, 72.0f, -170.0f }, new float[] { 356.0f, -30.0f, 341.0f, -84.0f }, new float[] { 334.0f, -52.0f, 321.0f, -59.0f }, new float[] { 589.0f, 10.0f, 577.0f, -1.0f }, new float[] { 580.0f, -104.0f, 532.0f, -134.0f }, new float[] { 625.0f, -120.0f, 599.0f, -139.0f }),
                         new FloorExtent(5.7f, 1000.0f, new float[] { 580.0f, -104.0f, 532.0f, -134.0f }, new float[] { -199.0f, -90.0f, -223.0f, -131.0f }, new float[] { 239.0f, 3.0f, 169.0f, -160.0f }, new float[] { 336.0f, -56.0f, 316.0f, -95.0f }, new float[] { 584.0f, -46.0f, 556.0f, -92.0f }, new float[] { 93.0f, 0.0f, 65.0f, -22.0f }),
                         new FloorExtent(14.0f, 15.0f, new float[] { 497.0f, -44.0f, 450.0f, -90.0f }),
+                        new FloorExtent(3.9f, 7.6f, new float[] { 73.0f, 57.0f, 22.0f, -38.0f }),
+                        new FloorExtent(4.4f, 6.5f, new float[] { 119.0f, -57.0f, 100.0f, -42.0f }),
+                        new FloorExtent(4.6f, 7.9f, new float[] { 279.0f, -79.0f, 246.0f, -1.4f }),
                     },
                 },
                 new MapFloor
@@ -58,6 +64,19 @@ public static class FloorCatalog
                     Extents = new FloorExtent[]
                     {
                         new FloorExtent(5.7f, 1000.0f, new float[] { 243.0f, 190.0f, 165.0f, 125.0f }),
+                        new FloorExtent(7.7f, 11.3f, new float[] { 73.0f, -73.0f, 22.0f, -38.0f }),
+                        new FloorExtent(6.7f, 11.6f, new float[] { 126.0f, -64.0f, 88.0f, -35.0f }),
+                        new FloorExtent(8.0f, 11.1f, new float[] { 279.0f, -79.0f, 246.0f, -1.4f }),
+                    },
+                },
+                new MapFloor
+                {
+                    Id = "4th-floor", Name = "4th Floor",
+                    Svg = null, TilePath = "https://assets.tarkov.dev/maps/customs_0.16/4th/{z}/{x}/{y}.png",
+                    HideLayers = null, ImageBounds = new float[] { 698.0f, -307.0f, -372.0f, 237.0f },
+                    Extents = new FloorExtent[]
+                    {
+                        new FloorExtent(11.2f, 54.7f, new float[] { 279.0f, -79.0f, 246.0f, -1.4f }),
                     },
                 },
             },
@@ -357,17 +376,77 @@ public static class FloorCatalog
                     HideLayers = null, ImageBounds = new float[] { 289.0f, -274.0f, -303.0f, 272.0f },
                     Extents = new FloorExtent[]
                     {
-                        new FloorExtent(-7.0f, 10000.0f),
+                        new FloorExtent(-10000.0f, 10000.0f),
+                    },
+                },
+                new MapFloor
+                {
+                    Id = "2nd-floor", Name = "2nd Floor",
+                    Svg = null, TilePath = "https://assets.tarkov.dev/maps/reserve/2nd/{z}/{x}/{y}.png",
+                    HideLayers = null, ImageBounds = new float[] { 289.0f, -274.0f, -303.0f, 272.0f },
+                    Extents = new FloorExtent[]
+                    {
+                        new FloorExtent(22.1f, 25.7f, new float[] { 1.0f, 164.0f, -17.0f, 199.0f }),
+                        new FloorExtent(-3.5f, -0.64f, new float[] { -77.0f, 26.0f, -177.0f, 106.0f }, new float[] { 62.0f, 59.0f, 51.0f, 108.0f }),
+                        new FloorExtent(-3.5f, -0.64f, new float[] { -104.0f, -37.0f, -177.0f, 5.0f }),
+                        new FloorExtent(-3.9f, -0.6f, new float[] { -47.0f, -47.0f, -85.0f, -18.0f }),
+                        new FloorExtent(-4.3f, -2.2f, new float[] { -19.91f, -13.0f, -78.0f, 39.0f }),
+                        new FloorExtent(-3.8f, -1.1f, new float[] { 99.0f, -50.0f, -2.0f, 7.0f }),
+                        new FloorExtent(-1.9f, 11.3f, new float[] { 191.0f, -175.0f, 137.0f, -120.0f }),
+                        new FloorExtent(1.0f, 8.0f, new float[] { -109.0f, -156.0f, -119.0f, -147.0f }, new float[] { 289.0f, -92.0f, 299.0f, -82.0f }, new float[] { 3.0f, -210.0f, -7.0f, -200.0f }, new float[] { 195.0f, -260.0f, 185.0f, -250.0f }, new float[] { 276.0f, 17.0f, 266.0f, 27.0f }),
+                        new FloorExtent(-4.1f, -1.2f, new float[] { -128.0f, -139.0f, -146.0f, -120.0f }),
+                    },
+                },
+                new MapFloor
+                {
+                    Id = "3rd-floor", Name = "3rd Floor",
+                    Svg = null, TilePath = "https://assets.tarkov.dev/maps/reserve/3rd/{z}/{x}/{y}.png",
+                    HideLayers = null, ImageBounds = new float[] { 289.0f, -274.0f, -303.0f, 272.0f },
+                    Extents = new FloorExtent[]
+                    {
+                        new FloorExtent(25.7f, 29.3f, new float[] { 1.0f, 164.0f, -17.0f, 199.0f }),
+                        new FloorExtent(-0.64f, 2.23f, new float[] { -77.0f, 26.0f, -177.0f, 106.0f }),
+                        new FloorExtent(-0.64f, 2.23f, new float[] { -104.0f, -37.0f, -177.0f, 5.0f }),
+                        new FloorExtent(-0.6f, 10.0f, new float[] { -47.0f, -47.0f, -85.0f, -18.0f }),
+                        new FloorExtent(-2.2f, 2.14f, new float[] { -19.91f, -13.0f, -78.0f, 39.0f }),
+                        new FloorExtent(-1.1f, 1.6f, new float[] { 99.0f, -50.0f, -2.0f, 7.0f }),
+                    },
+                },
+                new MapFloor
+                {
+                    Id = "4th-floor", Name = "4th Floor",
+                    Svg = null, TilePath = "https://assets.tarkov.dev/maps/reserve/4th/{z}/{x}/{y}.png",
+                    HideLayers = null, ImageBounds = new float[] { 289.0f, -274.0f, -303.0f, 272.0f },
+                    Extents = new FloorExtent[]
+                    {
+                        new FloorExtent(29.3f, 36.0f, new float[] { 1.0f, 164.0f, -17.0f, 199.0f }),
+                        new FloorExtent(2.23f, 5.0f, new float[] { -77.0f, 26.0f, -177.0f, 106.0f }),
+                        new FloorExtent(2.15f, 6.6f, new float[] { -19.91f, -13.0f, -78.0f, 39.0f }),
+                        new FloorExtent(1.6f, 4.7f, new float[] { 99.0f, -50.0f, -2.0f, 7.0f }),
+                    },
+                },
+                new MapFloor
+                {
+                    Id = "5th-floor", Name = "5th Floor",
+                    Svg = null, TilePath = "https://assets.tarkov.dev/maps/reserve/5th/{z}/{x}/{y}.png",
+                    HideLayers = null, ImageBounds = new float[] { 289.0f, -274.0f, -303.0f, 272.0f },
+                    Extents = new FloorExtent[]
+                    {
+                        new FloorExtent(5.0f, 9.5f, new float[] { -77.0f, 26.0f, -177.0f, 106.0f }),
                     },
                 },
                 new MapFloor
                 {
                     Id = "bunkers", Name = "Bunkers",
-                    Svg = "https://assets.tarkov.dev/maps/svg/Reserve-Bunkers.svg", TilePath = null,
+                    Svg = "https://assets.tarkov.dev/maps/svg/Reserve-Bunkers.svg", TilePath = "https://assets.tarkov.dev/maps/reserve/bunkers/{z}/{x}/{y}.png",
                     HideLayers = null, ImageBounds = new float[] { 289.0f, -274.0f, -303.0f, 272.0f },
                     Extents = new FloorExtent[]
                     {
-                        new FloorExtent(-10000.0f, -7.0f),
+                        new FloorExtent(-10000.0f, -7.27f, new float[] { 128.0f, -208.0f, 18.0f, -33.0f }, new float[] { -46.0f, -42.0f, -176.0f, 127.0f }),
+                        new FloorExtent(-10000.0f, -12.0f, new float[] { -40.0f, 124.0f, -124.0f, 189.0f }),
+                        new FloorExtent(-10000.0f, 18.0f, new float[] { 23.0f, 173.0f, -65.0f, 189.0f }),
+                        new FloorExtent(-7.27f, -3.2f, new float[] { 74.0f, -196.0f, 19.0f, -149.0f }),
+                        new FloorExtent(-11.0f, -4.6f, new float[] { -246.0f, -79.0f, -274.0f, -53.0f }, new float[] { 238.0f, -26.0f, 126.0f, 45.0f }),
                     },
                 },
             },

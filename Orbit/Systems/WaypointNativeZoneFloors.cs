@@ -45,7 +45,8 @@ public partial class WaypointSystem
             else Log.Info($"ZONE NATIVE: map={_zoneKey} zone={zone.name} floors={floors} points={points.Count}");
         }
         // Only immutable JSON crosses to the HTTP continuation; no Unity objects on background threads.
-        _ = ReportNativeZoneFloors(JsonConvert.SerializeObject(new { MapId = _zoneKey, Floors = result }));
+        _ = ReportNativeZoneFloors(JsonConvert.SerializeObject(new
+            { MapId = _zoneKey, CatalogRevision = FloorCatalog.RevisionFor(_zoneKey), Floors = result }));
         return result;
     }
 
