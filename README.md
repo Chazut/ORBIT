@@ -104,6 +104,9 @@ native manager or squad state to be available. Supported patrol layers can also
 walk or run to native covers, including Goons, Shturman, cultists and several
 boss guards. Cover destinations and arrival handling stay with the native brain.
 Sniper scavs follow the Scavs sleep toggle too. Their peaceful cover travel and
+native standby can hand over to Ghost without waiting for vanilla patrol to resume.
+The standby transition keeps their position, prevents its physical cover/teleport
+fallback while asleep, and restores the native standby preference on wake. Their
 settled prone overwatch can continue in Ghost, keeping their native positions and
 decisions. Combat, player proximity and scoped-wake protections still apply.
 In Ghost versus Ghost encounters, sniper scavs detect targets from at least

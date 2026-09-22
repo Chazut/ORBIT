@@ -144,7 +144,8 @@ public sealed class NativeGhostSystem
                 adapter?.Checkpoint, adapter?.Warband == true, NativeGhostPartisan.Supports(bot, decision.Value.ToString()),
                 NativeGhostCover.Supports(bot, decision.Value.ToString()), adapter?.Isb == true,
                 NativeGhostZryachiy.Supports(bot, decision.Value.ToString())
-                    || NativeGhostMarksman.SupportsLay(bot, decision.Value)))
+                    || NativeGhostMarksman.SupportsLay(bot, decision.Value),
+                NativeGhostMarksman.SupportsStandBy(bot, decision.Value)))
             {
                 if (_reportedUnsupported.Add(bot.ProfileId + "|" + name))
                     Log.Info($"NATIVE GHOST: {bot.Profile.Nickname} kept awake: unsupported {name} (role={bot.Profile.Info.Settings.Role}, hunt={hunt})");
@@ -208,6 +209,7 @@ public sealed class NativeGhostSystem
         Movers.Add(bot.Mover, state);
         NativeGhostOrders.AdoptOnSleep(bot.Mover, state.Navigation);
         bot.StandBy.CanDoStandBy = false;
+        NativeGhostMarksman.ReleaseStandBy(bot);
         state.Adapter?.ReissueOrder();
         if (state.Adapter != null)
             Log.Info($"NATIVE GHOST: {bot.Profile.Nickname} adapter={state.Adapter.Name} ready; original goals and waits retained");
@@ -440,7 +442,8 @@ public sealed class NativeGhostSystem
                 state.Adapter?.Checkpoint, state.Adapter?.Warband == true, NativeGhostPartisan.Supports(state.Bot, decision.ToString()),
                 NativeGhostCover.Supports(state.Bot, decision.ToString()), state.Adapter?.Isb == true,
                 NativeGhostZryachiy.Supports(state.Bot, decision.ToString())
-                    || NativeGhostMarksman.SupportsLay(state.Bot, decision))
+                    || NativeGhostMarksman.SupportsLay(state.Bot, decision),
+                NativeGhostMarksman.CanKeepStandByDecision(state.Bot, decision))
             || CombatRequiresBody(state.Bot)
             || NeedsBody(state.Bot))
         {
