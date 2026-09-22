@@ -17,7 +17,7 @@
 
 ---
 
-Every bot squad in your raid follows a plan: a rich area to strip, a
+Every bot squad in your raid spawns with a plan: a rich area to strip, a
 PvP hotspot to hunt, a quest spot to visit. They work it as a team, loot
 like players, upgrade their gear along the way, and head for extract when
 they're done. Kill one late in the raid and his backpack tells the story
@@ -25,14 +25,15 @@ of where he's been.
 
 Built on [Phobos](https://discord.com/channels/875684761291599922/1337131427803955200)'s foundations (MIT, with Janky's blessing - full credits below).
 
-**2.0's headliner is 👻 Ghost Mode**: far-away bots go dormant to free
+**👻 Ghost Mode**: far-away bots go dormant to free
 your CPU while ORBIT keeps playing them. The fps gains are massive
 (+45% average in my heavy-population benchmark, testers report +50 to
-+100%) and the world stays alive instead of freezing. 2.0 also adds
-a server **web UI** for every setting and a visual **zone editor** to
-draw your own hotspots on the map.
++100%) and the world stays alive instead of freezing. A server **web UI**
+and visual **zone editor** let you shape your raids. **2.1 adds Ghost
+movement for vanilla and faction bots, zones by floor and bot type,
+and configuration presets.**
 
-[📷 Screenshot](https://i.imgur.com/WSWqb8d.png) · Pair with [Raid Review]([https://forge.sp-tarkov.com/mod/1479/raid-review](https://sp-mod.com/mod/1479/raid-review)) to replay it all · Questions & feedback: [ORBIT Discord thread](https://discord.com/channels/875684761291599922/1509314495019745451)
+[📷 Screenshot](https://i.imgur.com/WSWqb8d.png) · Pair with [Raid Review](https://forge.sp-tarkov.com/mod/1479/raid-review) to replay it all · Questions & feedback: [ORBIT Discord thread](https://discord.com/channels/875684761291599922/1509314495019745451)
 
 ## What a raid looks like
 
@@ -46,7 +47,7 @@ draw your own hotspots on the map.
 
 ## The pillars
 
-### 👻 Ghost Mode (2.0) - the fps game changer
+### 👻 Ghost Mode - the fps game changer
 
 The biggest fps upgrade a bot-heavy raid can get. My heavy-population
 Shoreline benchmark measured **+45% average fps** with far fewer
@@ -70,105 +71,18 @@ wake range stretches with your magnification). Everything is tunable,
 down to which bot types sleep by default and how bloody ghost fights
 get.
 
-**2.1: configurable hearing.** The Ghost Mode page lets you set a base investigation
-chance from 0 to 100% for each PMC personality archetype and for PlayerScavs.
-Defaults preserve the existing behaviour. Distance still reduces the final chance,
-down to half at the hearing limit; 0% disables that archetype's investigations.
-Settings belong to the selected preset and apply from the next raid. Native and
-faction bots keep their original hearing behaviour.
-Investigations of simulated fights target the nearest audible shooter rather than
-the centre between both sides. Each shooter's suppressor sets its own hearing range;
-RaidReview records the same source selected for the investigation. One curiosity
-roll per squad and fight is retained, with positions cached for the existing hearing poll.
+**2.1: vanilla and faction bots can move in Ghost too.** Enable their
+**Dormant** toggle, **Ghost movement** and **Vanilla / faction movement**.
+Leave faction **Take over** toggles OFF, or keep **Vanilla xxx** checked,
+to preserve their original behaviour. These bots keep their own routing
+and are not influenced by ORBIT zones. ISB White Tusks always keep their
+native behaviour, even with takeover enabled.
 
-**2.1: Ghost meets awake bot.** By default, eligible awake groups go into Ghost
-before proximity wakes are evaluated, including ORBIT, vanilla and faction groups.
-Combat, player distance, scoped view, cooldowns and the population floor still apply.
-If a nearby group must stay awake, the existing proximity wake rules apply.
-Select "Wake the Ghost group" for the previous behaviour. Simulated combat is unchanged.
+The Ghost Mode page also lets you adjust investigation chances by personality
+and choose whether encounters put eligible awake bots to sleep or wake the ghosts.
 
-ORBIT loot sessions can continue in Ghost after their current body-dependent step
-finishes, preserving the target and inventory transactions. Door finalisation also
-continues outside the body. Nearby doors use a spatial index and a two-second cache,
-refreshed early when the bot leaves its covered area. Door state changes remain visible
-without rescanning. These transitions still need raid validation.
-
-**2.1: movement without takeover.** The Ghost Mode page's "Vanilla / faction
-movement" toggle preserves supported bots' original decisions while their
-bodies sleep: vanilla patrol and follower actions, MoreBotsAPI hunts, regrouping
-and searching, UNTAR/RUAF checkpoints, and RoguesVRaiders travel, patrol, lockdown
-and hunt objectives. Their original destinations determine where they move.
-Checkpoint waiting periods, cover changes and RoguesVRaiders squad objectives
-remain controlled by their original mods. Optional integrations require their
-native manager or squad state to be available. Supported patrol layers can also
-walk or run to native covers, including Goons, Shturman, cultists and several
-boss guards. Cover destinations and arrival handling stay with the native brain.
-Sniper scavs follow the Scavs sleep toggle too. Their peaceful cover travel and
-native standby can hand over to Ghost without waiting for vanilla patrol to resume.
-The standby transition keeps their position, prevents its physical cover/teleport
-fallback while asleep, and restores the native standby preference on wake. Their
-settled prone overwatch can continue in Ghost, keeping their native positions and
-decisions. Combat, player proximity and scoped-wake protections still apply.
-In Ghost versus Ghost encounters, sniper scavs detect targets from at least
-200 m horizontally, extended by optics up to 400 m before night penalties.
-Height does not reduce their detection radius. Terrain and buildings still block
-sight, and combat resolution uses the real distance between the bots.
-ISB checkpoints (including Black Division event checkpoints), tactical movement
-and Hunt/Camera Hunt preserve their original manager and squad membership during
-sleep. The optional lifecycle bridge checks the installed mod's method contracts;
-an incompatible tactical component keeps its bot awake.
-White Tusks always retain ISB's behaviour, even with **Take over ISB** enabled:
-the seven March roles and the two original commanders are excluded from takeover.
-They remain eligible for native Ghost movement under **Other factions**, subject
-to the same supported-action and sleep protections. Scout, Heavy, Assassin and
-Marksman continue to follow the ISB takeover toggle.
-Truncated paths are retried while the bots remain asleep. A stranded bot can
-receive a hidden relocation of up to 8 m to a point connected to its destination,
-subject to visibility, collision, floor and proximity checks. If no suitable
-point exists, it keeps retrying in Ghost. Repeated rescues stay within the
-original blocked area, avoid previously tried landings and check the start of
-the new route. Small relocation loops do not count as progress.
-At a repeatedly blocked navmesh edge, recovery also checks small landings along
-the failed segment, with the same collision and visibility protections. Identical
-segment failures progressively space path retries from 2 to 30 seconds.
-Already overlapping native Ghost allies can separate with a short correction of
-up to 1.5 m that increases horizontal clearance. Group identity, combat, player
-visibility, walls, doors and navigation checks still apply, and their native orders remain intact.
-After 45 seconds without leaving a
-small area on a checkpoint travel order, ORBIT asks the faction's own selector
-for another reachable cover at the same checkpoint. A failed selection keeps
-the current goal. Stalled MoreBotsAPI followers can similarly request another
-regroup point from their original hunt manager. The leader continues waiting
-until the original action acknowledges the follower's arrival.
-Rejected alternatives report whether the point was unchanged, the path was
-incomplete or its first steps were blocked.
-Native stops, checkpoint waits and simulated fights suspend
-this recovery.
-Doors, special interactions and unsupported behaviours keep the group awake.
-Other faction behaviours need their own compatibility support; this is not
-universal support for every custom brain. Requires "Ghost movement"; disabling
-either toggle restores stationary sleep for bots without takeover.
-Partizan can follow his native tactical mine approaches while asleep. His
-tracking timer remains active; placing traps, prewarming mines and weapon
-interactions require his body to wake. A distant remembered quarry can remain
-in memory during mine preparation, with visible, nearby or recently seen
-enemies still preventing sleep. Other specialized native actions can still
-require waking. Refusal snapshots identify the blocking state and brain layer.
-Reloads, weapon switches, grenade throws, medical use and door operations requested from native
-decision selection are deferred until the body wakes. ISB mission movement can
-retain a similarly distant, old enemy memory only while ISB's own mission guard
-also approves it. Combat layers and unknown specialized actions still wake.
-
-Simulated fights include ORBIT, vanilla and faction groups alike. Both sides
-hold position for the fight; an actual wake returns the encounter to real combat.
-Native movement still needs in-raid validation.
-
-UNTAR's legacy raider hunts follow the UNTAR takeover toggle even though their
-spawn role is `pmcBot`. Hunts whose owner cannot be identified retain their native
-behaviour. The startup configuration and `FACTION HUNT` logs show the applied policy.
-
-*Fika: designed for co-op (an optional `Orbit.Fika` addon syncs the
-fight sounds to every client) but untested so far.*
+*Fika: the optional `Orbit.Fika` addon syncs ghost fight sounds. Install it
+on the host (or headless) and all playing clients.*
 
 ### 🎯 Objectives and extraction
 
@@ -177,11 +91,6 @@ anchored on PvP hotspots, real EFT quest triggers. The leader takes the
 anchor, the others splinter to nearby loot and cover. They extract for
 real reasons - enough roubles, goals completed, or the raid clock - and
 they coordinate on shared exfils like the car.
-
-At a car, squads wait up to 90 seconds for their teammates before starting
-the 60-second countdown. A bot leaving solo skips the squad wait. After a
-combat interruption, a bot must return to the extraction area to leave;
-if the car has departed or its trigger cannot be reached, it seeks another exit.
 
 ### 🎒 Looting that feels human
 
@@ -220,45 +129,32 @@ picking up, how much of a room gets covered, who hunts and who rats, how
 early they extract, whether they force locked doors, even how strong a
 ghost squad fights off-screen. Two squads never play the same raid.
 
-### 🗺️ Your raid, your rules (2.0)
+### 🗺️ Your raid, your rules
 
 Every behaviour setting lives in a **web UI** on your SPT server
 (`/orbit`, one button away from the F12 menu). It applies at the next
 raid and works headless. Full-config export/import included, to back
 up or share your tuning.
 
-**2.1: configuration presets.** The preset selector is available on every page.
-Each personal preset keeps global settings and all zone maps together. Switches save
-the edits you are leaving; **Save** applies edits to the current preset. The built-in
-**Default** is protected: changing a setting or zone automatically creates **Custom**.
-Use **Presets** to duplicate, rename, delete inactive presets or export a complete setup.
-Undo history starts fresh when switching presets. Most settings apply next raid;
-faction takeover and personality brain lists still require a game restart.
+**Presets (2.1):** save, switch and share settings and zones together.
+Your existing 2.0 tuning is kept as **Custom**. Editing **Default** or an
+addon creates a personal copy. Most settings apply next raid; faction
+takeover changes require a game restart.
 
-Upgrading from 2.0 automatically keeps existing tuning as **Custom** if it differs
-from defaults, including changes made only in the zone editor. Unchanged installations
-start on **Default**. Original config and zone files are backed up under
-`user/mods/ORBIT/presets/legacy-2.0/`. Saved presets and the active selection live in
-`presets/library.json`; `config.json` and `zones/*.json` remain compatibility copies.
+<details>
+<summary>Sharing addon presets</summary>
 
-Drop JSON files into **`user/mods/ORBIT/addon/`** to add presets automatically.
-Each direct subfolder becomes one preset named after the folder, combining its JSON
-files, including nested folders. For example, `addon/Live-like/` can hold a global
-config and a zone pack: selecting **Live-like** applies both. Files directly in
-`addon/` remain individual presets. Existing global config exports, `orbit-zones/1` packs,
-single-map files named after their map ID, and complete `orbit-preset/1` exports are
-recognized. Scans run at startup, every five seconds in the UI, and before client
-config fetches (at most once per five seconds). Partial addons replace
-only the supplied settings and maps, keeping the rest of your current setup.
-Addon sources are protected too: edits create a personal copy. A valid update to the
-selected addon is applied automatically, including at server startup. Personal copies
-keep their own tuning. Missing or incomplete files keep the last valid active version.
-Keep the folder name when updating a folder addon; filenames inside may change.
-For individual files directly in `addon/`, keep the same filename. Files within a
-folder are applied in alphabetical path order; later files override the supplied
-settings and whole maps if they overlap. One invalid file rejects the entire folder
-update and keeps its last valid selection. Malformed addons are listed with an error
-and leave other presets available.
+Put your exported JSON files in one folder under the server's
+`user/mods/ORBIT/addon/`, for example `addon/MyPreset/config.json` and
+`addon/MyPreset/zones.orbitzones.json`. Each addon folder becomes one
+selectable preset; a partial preset keeps settings and maps it does not supply.
+
+Keep that folder structure in your ZIP, and keep the **same folder and
+filenames** for updates so they overwrite the previous files. Put version
+numbers in the ZIP name. Updates refresh the selected addon automatically;
+personal copies keep their own edits.
+
+</details>
 
 The **zone editor** renders each map and lets you draw the hotspots
 that steer squad routing: drag, resize, attract or repel, tune BSG's
@@ -266,33 +162,10 @@ own zones, mark which ones can host kill hunts. Export your setup as a
 **zone pack** and publish it on the Forge as an ORBIT addon, or import
 someone else's.
 
-**2.1: bot types and floors.** Each zone can target several bot types or factions
-and a named floor. The editor shows the corresponding floor plan from tarkov.dev,
-with map bounds and heights matched to SPT. Reserve includes floors 2 through 5
-and bunker heights by sector; Customs includes the 0.16 buildings and fourth floor.
-Choose a floor and a bot preview
-before drawing, or edit a zone's **Bot types** and **Zone floor** afterwards.
-Copies, undo/redo and zone packs retain these choices. Existing custom zones still
-apply to all types and floors unless configured otherwise.
-
-Built-in zones use automatic native floors, shown in read-only form. The initial
-editor data comes from SPT spawn positions; loading a map refreshes it from the
-scene's spawn and patrol points, including zones that span several floors.
-Existing zone files migrate automatically when the server starts. Their original
-contents are kept in a `.pre-native-floors.bak` file beside each changed JSON.
-Migration preserves radii, forces, bot filters and custom zones. Older imported
-packs also adopt the built-ins' native floors. When a map's floor catalogue changes,
-older scene metadata is refreshed automatically without changing custom zones or tuning.
-
-Zones influence bots controlled by ORBIT, awake or Ghost. Shared squad destinations
-use the leader's type. Floor hotspots select destinations on that floor and check
-the arrival height; bots use the existing navigation paths and stairs to reach them.
-Repellers remain preferences, not walls. Bots retaining their native behaviour
-without takeover keep their original routing.
-
-Map reworks that keep the vanilla location id (Interchange Rework, Manimal's
-Interchange and Lighthouse 1.0 backports) are detected per raid and get their own zone
-set and render, listed as "Interchange (1.0 rework)" in the editor.
+**2.1:** name your custom zones and target specific bot types, factions
+and floors. Reserve includes floors 2 through 5; Customs includes its fourth
+floor. Zones influence ORBIT-controlled bots, awake or Ghost, and still need
+a reachable route to the selected area.
 
 ## Install
 
@@ -348,30 +221,19 @@ first). Then come say hi on the [ORBIT thread](https://discord.com/channels/8756
 
 ## Roadmap highlights
 
-**Next (2.1)**: validate native Ghost movement and zones by bot type and floor
-in raids, and extend compatibility beyond vanilla patrols and MoreBotsAPI hunts.
-Per-map Ghost Mode settings are on the maybe list.
-
 No ETA, no promises: camp & ambush decisions, post-combat self-heal,
 squad splitting with radio comms, boss hunting and faction rivalries
 (Firefly's idea), airdrop ambushes, a "rally flare" item that pulls the
 whole map onto a point, multi-step objectives (Kiba alarm, ULTRA power,
 Reserve D-2...), switch-gated and Red-Rebel-style exfils, cross-raid
 player heatmaps feeding bot routing (Fiodor's idea), per-map ORBIT
-toggle. Suggestions land on the Discord thread.
+and Ghost Mode settings. Suggestions land on the Discord thread.
 
 ## Known issues
 
-- Ghost Mode and the zone editor are brand new in 2.0: expect tuning
-  passes. Fika support for the limiter is designed in but untested.
-- Native Ghost movement supports selected patrol and hunt behaviours.
-  Unsupported actions keep the group awake. With "Vanilla / faction movement"
-  disabled, bots without takeover still sleep in place. Native movement and
-  its interaction with modded brains need in-raid validation.
+- Some native or modded actions require bots to stay awake. Bosses that
+  normally hold position may also remain still in Ghost.
 - Most Reserve exfils need switches ORBIT can't operate yet.
-- Floor zones need a reachable navigation point on the selected floor. They do not
-  create paths through blocked stairs, operate switches or create spawn areas.
-  Floor routing and map height metadata still need in-raid validation.
 - Faction-mod takeover (RUAF / UNTAR / Black Division) can misbehave;
   leave those toggles OFF if it does. ISB takeover works.
 - Labs security gates can trap bots (BSG pathing quirk, checkpoint
