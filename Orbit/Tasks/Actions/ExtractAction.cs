@@ -53,6 +53,16 @@ public class ExtractAction(AgentData dataset, float hysteresis) : Task<Agent>(hy
         public float FirstArrivalTime;     // when the FIRST member reached the V-Ex
         public Entity Owner;              // IDs are recycled; never inherit another party's countdown
         public float CountdownStartTime = -1f;
+        public float CountdownStartFrameDuration;
+        public float DepartureTime = -1f;
+        public readonly List<Agent> Departing = new();
+        public System.Action<ExfiltrationPoint, EExfiltrationStatus> OnDeparture;
+
+        public void Unsubscribe()
+        {
+            if (OnDeparture != null) Exfil.OnStatusChanged -= OnDeparture;
+            OnDeparture = null;
+        }
     }
     private readonly Dictionary<int, VExState> _vexSquadStates = new();
     private readonly Dictionary<int, VExState> _vexSoloStates = new();
@@ -121,24 +131,28 @@ public class ExtractAction(AgentData dataset, float hysteresis) : Task<Agent>(hy
         var states = solo ? _vexSoloStates : _vexSquadStates;
         var location = agent.Objective.Location;
 
-        if (ExfilArrival.IsUnavailable(exfil))
-        {
-            states.Remove(owner.Id);
-            Log.Info($"{agent} ExtractAction: V-Ex {exfil.name} unavailable, selecting another exfil");
-            ExfilArrival.Abandon(agent, location);
-            return;
-        }
-
         states.TryGetValue(owner.Id, out var state);
         if (state != null && (!ReferenceEquals(state.Owner, owner) || state.Exfil != exfil))
         {
+            state.Unsubscribe();
             states.Remove(owner.Id);
             state = null;
+        }
+        if (ExfilArrival.IsUnavailable(exfil))
+        {
+            var departed = state != null && FinishNativeDeparture(state, exfil);
+            state?.Unsubscribe();
+            states.Remove(owner.Id);
+            if (departed && state.Departing.Contains(agent)) return;
+            Log.Info($"{agent} ExtractAction: V-Ex {exfil.name} unavailable, selecting another exfil");
+            ExfilArrival.Abandon(agent, location);
+            return;
         }
         var now = Time.time;
         if (state != null && state.CountdownStartTime >= 0f
             && now - state.CountdownStartTime >= VExCountdownSeconds)
         {
+            state.Unsubscribe();
             // A combat interruption does not pause the countdown, but only bots still at the car can leave.
             if (solo)
             {
@@ -171,8 +185,12 @@ public class ExtractAction(AgentData dataset, float hysteresis) : Task<Agent>(hy
                 Owner = owner,
                 FirstArrivalTime = now,
                 CountdownStartTime = solo ? now : -1f,
+                CountdownStartFrameDuration = Time.deltaTime,
             };
             states[owner.Id] = state;
+            var pending = state;
+            pending.OnDeparture = (point, previous) => CaptureNativeDeparture(pending, point, previous);
+            exfil.OnStatusChanged += pending.OnDeparture;
             if (solo)
                 Log.Info($"{agent} ExtractAction: solo V-Ex {exfil.name} countdown started ({VExCountdownSeconds:F0}s), no squad wait");
             else
@@ -189,6 +207,7 @@ public class ExtractAction(AgentData dataset, float hysteresis) : Task<Agent>(hy
         if (allReady || waitedTooLong)
         {
             state.CountdownStartTime = now;
+            state.CountdownStartFrameDuration = Time.deltaTime;
             Log.Info($"{squad}: V-Ex {exfil.name} countdown started ({VExCountdownSeconds:F0}s) — reason: {(allReady ? "all squad members arrived" : "wait timeout reached, leaving stragglers behind")}");
         }
     }
@@ -223,6 +242,51 @@ public class ExtractAction(AgentData dataset, float hysteresis) : Task<Agent>(hy
         }
         // NotPresent disables the trigger in BSG, so complete presence checks before changing its status.
         DepartCar(exfil);
+    }
+
+    private static void CaptureNativeDeparture(VExState state, ExfiltrationPoint exfil, EExfiltrationStatus previous)
+    {
+        if (previous != EExfiltrationStatus.Countdown || exfil.Status != EExfiltrationStatus.NotPresent) return;
+        state.DepartureTime = Time.time;
+        state.Unsubscribe();
+        // BSG starts on arrival, one frame before this action. Allow that frame only;
+        // a car leaving during the group's gathering wait must still be abandoned.
+        if (state.CountdownStartTime < 0f
+            || Time.time - state.CountdownStartTime + state.CountdownStartFrameDuration + 0.001f < VExCountdownSeconds) return;
+        if (state.Owner is Agent solo) Capture(solo);
+        else if (state.Owner is Squad squad)
+            for (var i = 0; i < squad.Size; i++)
+                if (squad.Members[i] is { SoloExtractRequested: false } member) Capture(member);
+
+        void Capture(Agent member)
+        {
+            if (member?.IsActive == true && member.Objective.Status == ObjectiveStatus.Extracting
+                && member.Objective.Location?.Target == exfil
+                && ExfilArrival.IsInsideDepartingCar(member, member.Objective.Location))
+                state.Departing.Add(member);
+        }
+    }
+
+    private static bool FinishNativeDeparture(VExState state, ExfiltrationPoint exfil)
+    {
+        // Only the bots captured at the actual departure may leave. Resuming combat or
+        // reaching this location later must not redeem a car that has already gone.
+        if (exfil.Status != EExfiltrationStatus.NotPresent || state.DepartureTime < 0f
+            || Time.time - state.DepartureTime > Mathf.Max(1f, Time.deltaTime * 2f)) return false;
+        for (var i = state.Departing.Count - 1; i >= 0; i--)
+        {
+            var member = state.Departing[i];
+            if (!member.IsActive || member.Objective.Status != ObjectiveStatus.Extracting
+                || member.Objective.Location?.Target != exfil
+                || !ExfilArrival.IsInsideDepartingCar(member, member.Objective.Location))
+            {
+                state.Departing.RemoveAt(i);
+                continue;
+            }
+            Log.Info($"{member} ExtractAction: V-Ex {exfil.name} native departure confirmed at trigger");
+            DespawnAgent(member);
+        }
+        return state.Departing.Count > 0;
     }
 
     private void FinishCarParticipant(Agent agent, ExfiltrationPoint exfil)

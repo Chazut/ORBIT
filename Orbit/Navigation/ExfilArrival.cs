@@ -11,6 +11,8 @@ internal static class ExfilArrival
     private sealed class Trigger(ExfiltrationPoint exfil)
     {
         public readonly Collider Collider = exfil.GetComponent<Collider>();
+        public Bounds LastBounds;
+        public bool HasBounds;
     }
 
     private static readonly ConditionalWeakTable<ExfiltrationPoint, Trigger> Triggers = new();
@@ -26,10 +28,30 @@ internal static class ExfilArrival
     internal static bool IsInside(Agent agent, Waypoint location)
     {
         if (location?.Target is not ExfiltrationPoint exfil) return false;
-        var collider = Triggers.GetValue(exfil, static point => new Trigger(point)).Collider;
+        var trigger = Triggers.GetValue(exfil, static point => new Trigger(point));
+        var collider = trigger.Collider;
+        if (collider != null)
+        {
+            var bounds = collider.bounds;
+            if (!IsUnavailable(exfil))
+            {
+                trigger.LastBounds = bounds;
+                trigger.HasBounds = true;
+            }
+            return bounds.Contains(agent.Position);
+        }
         // Match navigation's trigger bounds. A missing collider still requires the normal 15m arrival radius.
-        return collider != null
-            ? collider.bounds.Contains(agent.Position)
+        return (agent.Position - location.Position).sqrMagnitude <= 225f;
+    }
+
+    // NotPresent disables the collider before OnStatusChanged fires. Use the last live
+    // bounds with the bot's current position only for an already registered departure.
+    internal static bool IsInsideDepartingCar(Agent agent, Waypoint location)
+    {
+        if (location?.Target is not ExfiltrationPoint exfil
+            || !Triggers.TryGetValue(exfil, out var trigger)) return false;
+        return trigger.Collider != null
+            ? trigger.HasBounds && trigger.LastBounds.Contains(agent.Position)
             : (agent.Position - location.Position).sqrMagnitude <= 225f;
     }
 
