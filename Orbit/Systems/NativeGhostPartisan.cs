@@ -61,4 +61,33 @@ internal static class NativeGhostPartisan
         // Do not call BossLogicUpdate: it also consumes prewarm mines through InventoryController.
         // The caller rechecks BodyReason after the tracking timer and wakes before placing anything.
     }
+
+    internal static bool ReleaseInvalidCover(BotOwner bot, NativeGhostNavigation navigation)
+    {
+        if (!navigation.PersistentlyInvalid || !IsPartisan(bot)
+            || !NativeGhostSystem.OwnsInactiveMovement(bot) || NativeGhostSystem.MovementPinned(bot)
+            || bot.IsDead || bot.BotState != EBotState.Active
+            || bot.Brain.LastDecision != BotLogicDecision.goToCoverPointTactical
+            || bot.Brain.BaseBrain?.CurLayerInfo is not PartisanPlantingTargetManyLayer layer
+            || bot.Mover.Pause && bot.Mover.RemainPause > 0f
+            || bot.Mover.ActualPathController.HavePath || bot.Memory.IsInCover || bot.Memory.IsUnderFire
+            || bot.Memory.GoalEnemy != null && !IsDistantMemory(bot) || BodyReason(bot) != null)
+            return false;
+        var cover = bot.Memory.CurCustomCoverPoint;
+        if (cover == null || !ReferenceEquals(layer._cachePoint, cover)
+            || layer._cachePoints == null || !layer._cachePoints.Contains(cover)
+            || !navigation.Target.HasValue || (navigation.Target.Value - cover.Position).sqrMagnitude > 0.01f
+            || !navigation.ConfirmInvalidPath()) return false;
+
+        // EndGoToCoverPointTactical ends when its cover is absent. The next native GetDecision
+        // skips this already visited cover and chooses the mine approach itself. Keep its mine,
+        // visited-cover history and enemy memory intact; never fabricate arrival or plant a mine.
+        layer._cachePoint = null;
+        bot.Memory.SetCoverPoints(null);
+        navigation.Cancel();
+        bot.Mover.ActualPathController.Stop();
+        bot.Mover.IsMoving = false;
+        Log.Info($"NATIVE GHOST: {bot.Profile.Nickname} partisan cover retry: released unreachable cover={cover.Position}; native selection resumes");
+        return true;
+    }
 }

@@ -24,7 +24,7 @@ internal sealed class NativeGhostNavigation(BotOwner bot, DoorSystem doors)
     private readonly NavMeshPath _path = new();
     private Vector3? _target;
     private float _reach = 0.5f, _retryAt, _progressAt, _rescueAt, _reportAt, _repathReportAt, _blockedReportAt;
-    private Vector3 _progressPosition;
+    private Vector3 _progressPosition, _walkedDelta;
     private Vector3? _recoveryOrigin;
     private readonly List<Vector3> _triedLandings = new();
     private readonly List<Vector3> _reachedFrontiers = new();
@@ -32,7 +32,8 @@ internal sealed class NativeGhostNavigation(BotOwner bot, DoorSystem doors)
     private Vector3? _partialEnd;
     private object _adjustedPath;
     private float _originalPathReach;
-    private int _failures, _probe;
+    private int _failures, _probe, _invalidPaths;
+    private float _invalidSince;
     private NavMeshPathStatus _status = NavMeshPathStatus.PathInvalid;
     private string _source;
     private float _retainedReportAt;
@@ -40,12 +41,28 @@ internal sealed class NativeGhostNavigation(BotOwner bot, DoorSystem doors)
     private int _repeatedSegment;
     private int _edgeProbe = EdgeProbeCount;
     private Vector3 _edgeOrigin, _edgeDirection;
-    private float RetryDelay => _repeatedSegment >= 10 ? 30f : _repeatedSegment >= 6 ? 10f
-        : _repeatedSegment >= 3 ? 5f : RetryInterval;
+    private int RetryCount => Math.Max(_repeatedSegment, _invalidPaths);
+    private float RetryDelay => RetryCount >= 10 ? 30f : RetryCount >= 6 ? 10f
+        : RetryCount >= 3 ? 5f : RetryInterval;
     internal bool HasOrder => _target.HasValue;
     internal Vector3? Target => _target;
     internal float StalledFor => HasOrder ? Time.time - _progressAt : 0f;
     internal bool RecoveringLocally => _recoveryOrigin.HasValue;
+    internal bool PersistentlyInvalid => HasOrder && _status == NavMeshPathStatus.PathInvalid
+        && _invalidPaths >= 3 && StalledFor >= 45f && Time.time - _invalidSince >= 45f;
+
+    internal bool ConfirmInvalidPath()
+    {
+        if (!PersistentlyInvalid || !TakeQuery()) return false;
+        if (!NavMesh.CalculatePath(bot.Position, _target.Value, NavMesh.AllAreas, _path)
+            || _path.status == NavMeshPathStatus.PathInvalid) return true;
+        // Geometry changed during the backoff. Let the next movement update resume this
+        // original route, instead of rechecking it on every scheduled brain tick.
+        _invalidPaths = _failures = 0;
+        _status = _path.status;
+        _retryAt = 0f;
+        return false;
+    }
 
     internal void SetReachDistance(float reach)
     {
@@ -75,7 +92,8 @@ internal sealed class NativeGhostNavigation(BotOwner bot, DoorSystem doors)
         RestorePathReach();
         _target = null;
         _source = null;
-        _failures = _probe = 0;
+        _failures = _probe = _invalidPaths = 0;
+        _walkedDelta = default;
         _retryAt = _rescueAt = 0f;
         _recoveryOrigin = null;
         _triedLandings.Clear();
@@ -92,6 +110,34 @@ internal sealed class NativeGhostNavigation(BotOwner bot, DoorSystem doors)
     {
         _progressAt = Time.time;
         _progressPosition = bot.Position;
+        _walkedDelta = default;
+    }
+
+    // Count only validated walking. Rescue offsets never contribute, and walking back to the
+    // original obstruction cannot reset the search. This also permits successive nearby seams.
+    internal void Walked(Vector3 from, Vector3 to)
+    {
+        if (!_target.HasValue || !_recoveryOrigin.HasValue) return;
+        _walkedDelta += to - from;
+        if (_walkedDelta.sqrMagnitude <= ProgressDistance * ProgressDistance
+            || Vector3.Distance(to, _target.Value) > Vector3.Distance(_recoveryOrigin.Value, _target.Value) - ProgressDistance)
+            return;
+        Log.Info($"NATIVE GHOST: {bot.Profile.Nickname} local recovery completed by walking: from={_recoveryOrigin.Value} to={to} nativeTarget={_target.Value}");
+        ResetProgress();
+    }
+
+    private void ResetProgress()
+    {
+        Suspend();
+        _failures = _probe = _invalidPaths = 0;
+        _retryAt = _rescueAt = 0f;
+        _recoveryOrigin = null;
+        _triedLandings.Clear();
+        _rejections.Clear();
+        _edgeProbe = EdgeProbeCount;
+        _edgeDirection = default;
+        _repeatedSegment = 0;
+        _blockedFrom = _blockedCorner = null;
     }
 
     internal bool Blocked(string reason = null, Vector3? attempted = null, Vector3? corner = null,
@@ -190,20 +236,13 @@ internal sealed class NativeGhostNavigation(BotOwner bot, DoorSystem doors)
             Cancel();
             return;
         }
-        // Walking out of the local area is progress. A rescue and its return trip are not.
-        // Keep the search centred on the original blockage so successive rescues cannot drift.
+        // Preserve the fallback for large departures and ordinary routes. Within the rescue
+        // area, only validated walking with net progress can release the original anchor.
         if ((bot.Position - _progressPosition).sqrMagnitude > ProgressDistance * ProgressDistance
             && (!_recoveryOrigin.HasValue
                 || Vector3.Distance(bot.Position, _recoveryOrigin.Value) > MaxRelocation + ProgressDistance))
         {
-            Suspend();
-            _failures = _probe = 0;
-            _recoveryOrigin = null;
-            _triedLandings.Clear();
-            _edgeProbe = EdgeProbeCount;
-            _edgeDirection = default;
-            _repeatedSegment = 0;
-            _blockedFrom = _blockedCorner = null;
+            ResetProgress();
         }
         if (bot.Mover.ActualPathController.HavePath || Time.time < _retryAt) return;
         if (_partialEnd.HasValue && Vector3.Distance(bot.Position, _partialEnd.Value) <= _reach + 0.2f)
@@ -225,6 +264,12 @@ internal sealed class NativeGhostNavigation(BotOwner bot, DoorSystem doors)
         var target = _target.Value;
         var calculated = NavMesh.CalculatePath(bot.Position, target, NavMesh.AllAreas, _path);
         _status = calculated ? _path.status : NavMeshPathStatus.PathInvalid;
+        if (_status == NavMeshPathStatus.PathInvalid)
+        {
+            if (_invalidPaths++ == 0) _invalidSince = Time.time;
+            _retryAt = Time.time + RetryDelay;
+        }
+        else _invalidPaths = 0;
         var corners = _path.corners;
         if (calculated && _status != NavMeshPathStatus.PathInvalid && corners.Length > 1
             && Vector3.Distance(bot.Position, corners[corners.Length - 1]) > PathReach(corners[corners.Length - 1]))
@@ -238,7 +283,7 @@ internal sealed class NativeGhostNavigation(BotOwner bot, DoorSystem doors)
             return;
         }
         _failures++;
-        Report($"route pending in Ghost: {_status} target={target} remaining={Vector3.Distance(bot.Position, target):F1}m");
+        Report($"route pending in Ghost: {_status} target={target} remaining={Vector3.Distance(bot.Position, target):F1}m retryIn={RetryDelay:F1}s");
     }
 
     private void TryRelocate(Vector3 target)
@@ -301,9 +346,10 @@ internal sealed class NativeGhostNavigation(BotOwner bot, DoorSystem doors)
             NativeGhostSystem.SyncMover(bot);
             SetPath(corners, _path.status);
             _rescueAt = Time.time + 30f;
-            // Preserve failures, search cursor and elapsed stuck time until real walking leaves
-            // this area. Record the landing only as the start of the next walking measurement.
+            // Preserve the failure history until walking makes real progress. The relocation
+            // itself is excluded from that measurement, including any previous walking delta.
             _progressPosition = candidate;
+            _walkedDelta = default;
             Log.Info($"NATIVE GHOST: {bot.Profile.Nickname} relocated in Ghost: {Vector3.Distance(origin, candidate):F1}m from={origin} to={candidate} nativeTarget={target} nav={_status} end={end} probe={(edgeProbe ? "edge" : "radial")}");
             _rejections.Clear();
             return;
@@ -342,6 +388,7 @@ internal sealed class NativeGhostNavigation(BotOwner bot, DoorSystem doors)
     {
         RestorePathReach();
         _status = status;
+        if (status != NavMeshPathStatus.PathInvalid) _invalidPaths = 0;
         _partialEnd = status == NavMeshPathStatus.PathPartial ? corners[corners.Length - 1] : null;
         bot.Mover.ActualPathController.GoToByWay(corners, _reach);
         AdjustPathReach();

@@ -418,6 +418,7 @@ public sealed class NativeGhostSystem
                 return true;
             }
             if (state.Doors.Pending && WaitForDoor(state)) return true;
+            NativeGhostPartisan.ReleaseInvalidCover(state.Bot, state.Navigation);
             // Unity does not call this component while the body is inactive. Its own timers, target
             // selection and knowledge remain authoritative; the bridge never reads a hunt target directly.
             state.UpdateHunt?.Invoke();
@@ -572,6 +573,7 @@ public sealed class NativeGhostSystem
                 bot.GetPlayer.Transform.position = hit.position;
                 var travelled = Vector3.Distance(from, hit.position);
                 state.Travelled += travelled;
+                state.Navigation.Walked(from, hit.position);
                 SyncMover(bot);
                 mover.IsMoving = travelled > 0.001f;
                 if (travelled > 0.001f)
