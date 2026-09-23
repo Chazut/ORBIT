@@ -45,6 +45,7 @@ public class OrbitBrainLayer : CustomLayer
     private const string SainCombatLayerName = "SAIN : Combat Layer";
     private bool _sainCombatActive;
     private float _sainCombatEndedAt = float.NegativeInfinity;
+    private float _nextHandoffWarningAt;
 
     // Diag throttling — log gate state on transition and every 5s if off.
     private bool _lastIsActive = true;
@@ -201,38 +202,51 @@ public class OrbitBrainLayer : CustomLayer
 
     private void OnLayerChanged(AICoreLayer<BotLogicDecision> layer)
     {
-        var mover = _agent.Bot.Mover;
+        // BigBrain has already selected the new layer. Release our movement hooks before any
+        // physical operation can throw, otherwise both controllers can keep driving this bot.
+        var wasActive = _agent.IsActive;
+        _agent.IsActive = false;
         var layerName = layer.Name();
-
-        if (layerName == LayerName)
-        {
-            Log.Debug($"{_agent} stopping builtin bot mover");
-            mover.Stop();
-            _agent.IsActive = true;
-        }
-        else
-        {
-            // Should no longer happen for AvoidDanger (DormantDangerLayerBypassPatch); any other BSG layer
-            // grabbing a sleeper is worth a visible line, the body cannot act on it.
-            if (_agent.IsDormant)
-                Log.Info($"{_agent} dormant body handed to BSG layer {layerName} (priority {layer.Priority})");
-            if (_agent.IsActive)
-            {
-                Log.Debug($"{_agent} setting player to navmesh");
-                // Make every mover state variable reflect the current position so SetPlayerToNavMesh doesn't
-                // snap the bot back to a stale target after our layer hands the brain back to BSG.
-                mover._lastGoodCastPoint = mover._prevSuccessLinkedFrom = mover._prevLinkPos = mover.PositionOnWayInner = _agent.Position;
-                mover._lastGoodCastPointTime = Time.time;
-                mover._prevPosLinkedTime = 0f;
-                mover.SetPlayerToNavMesh(_agent.Position);
-                _agent.IsActive = false;
-            }
-        }
-
         var sainCombatNow = layerName == SainCombatLayerName;
         if (_sainCombatActive && !sainCombatNow)
             _sainCombatEndedAt = Time.time;
         _sainCombatActive = sainCombatNow;
+
+        try
+        {
+            var mover = _agent.Bot.Mover;
+            if (layerName == LayerName)
+            {
+                Log.Debug($"{_agent} stopping builtin bot mover");
+                mover.Stop();
+                _agent.IsActive = true;
+            }
+            else
+            {
+                if (_agent.IsDormant)
+                    Log.Info($"{_agent} dormant body handed to BSG layer {layerName} (priority {layer.Priority})");
+                if (wasActive)
+                {
+                    // Release our path/loot pause now, before the new layer starts its action.
+                    // Deferred loot cleanup must not unpause a mover subsequently owned by SAIN.
+                    mover.Pause = false;
+                    Log.Debug($"{_agent} setting player to navmesh");
+                    mover._lastGoodCastPoint = mover._prevSuccessLinkedFrom = mover._prevLinkPos = mover.PositionOnWayInner = _agent.Position;
+                    mover._lastGoodCastPointTime = Time.time;
+                    mover._prevPosLinkedTime = 0f;
+                    mover.SetPlayerToNavMesh(_agent.Position);
+                }
+            }
+        }
+        catch (Exception e)
+        {
+            // Do not abort the remaining layer-change subscribers or the new layer's Start.
+            if (Time.time >= _nextHandoffWarningAt)
+            {
+                _nextHandoffWarningAt = Time.time + 5f;
+                Log.Warning($"{_agent} layer handoff to {layerName} failed, ORBIT movement released: {e}");
+            }
+        }
 
         Log.Debug($"{_agent} layer changed to: {layerName} priority: {layer.Priority}");
     }

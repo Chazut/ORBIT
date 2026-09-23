@@ -290,7 +290,12 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
     {
         try
         {
-            if (_bot == null) return;
+            if (_bot == null || _bot.IsDead || DormantMode) return;
+            var agent = Singleton<BotRoster>.Instance?.GetAgent(_bot);
+            // Cancellation can finish after combat or Ghost has taken ownership of the body.
+            // The layer handoff already released our mover pause; leave the new owner's state alone.
+            if (agent == null || !agent.IsActive || agent.IsDormant) return;
+            if (_bot.Memory != null && (_bot.Memory.HaveEnemy || _bot.Memory.IsUnderFire)) return;
             try { _bot.PatrollingData?.Unpause(); } catch (System.Exception e) { Log.Warning($"OrbitLootHandler.UnfreezeBotAfterLootSession({Nick}): PatrollingData.Unpause THREW {e.Message}"); }
             try { if (_bot.Mover != null) _bot.Mover.Pause = false; } catch (System.Exception e) { Log.Warning($"OrbitLootHandler.UnfreezeBotAfterLootSession({Nick}): Mover.Pause THREW {e.Message}"); }
             try { _bot.SetPose(1f); } catch (System.Exception e) { Log.Warning($"OrbitLootHandler.UnfreezeBotAfterLootSession({Nick}): SetPose THREW {e.Message}"); }
