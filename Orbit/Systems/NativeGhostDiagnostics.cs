@@ -9,8 +9,34 @@ namespace Orbit.Systems;
 internal static class NativeGhostDiagnostics
 {
     private static readonly Dictionary<string, float> NextReport = new();
-    public static void Clear() => NextReport.Clear();
+    private static readonly HashSet<string> ReportedBrainFailures = new();
+    private const int MaxBrainFailureReports = 8;
+    public static void Clear()
+    {
+        NextReport.Clear();
+        ReportedBrainFailures.Clear();
+    }
     public static void Forget(BotOwner bot) { if (bot?.ProfileId != null) NextReport.Remove(bot.ProfileId); }
+
+    internal static void BrainFailure(BotOwner bot, string decision, Exception exception)
+    {
+        // The finalizer contains this exception, so Unity never prints its stack.
+        // Keep one full trace per bot, capped across the raid, with no work on healthy ticks.
+        if (bot?.ProfileId == null || ReportedBrainFailures.Count >= MaxBrainFailureReports
+            || !ReportedBrainFailures.Add(bot.ProfileId)) return;
+        Log.Warning($"NATIVE GHOST BRAIN FAILURE: {bot.Profile?.Nickname} [{bot.ProfileId}] decision={decision}\n{exception}");
+        try
+        {
+            var leader = bot.BotFollower?.BossToFollow;
+            Log.Warning($"NATIVE GHOST BRAIN CONTEXT: [{bot.ProfileId}] layer={NativeGhostPartisan.Layer(bot) ?? "none"}"
+                + $" state={bot.BotState} position={bot.Position} leaderPresent={leader != null} leaderAlive={leader?.IsAlive}"
+                + $" follower={bot.BotFollower?.PatrolDataFollower?.followerAIBase?.GetType().Name ?? "none"}");
+        }
+        catch (Exception e)
+        {
+            Log.Warning($"NATIVE GHOST BRAIN CONTEXT: [{bot.ProfileId}] unavailable ({e.GetType().Name})");
+        }
+    }
 
     public static bool Refuse(BotOwner bot, string reason, float humanDistance = -1f, int groupSize = 1)
     {
@@ -26,7 +52,10 @@ internal static class NativeGhostDiagnostics
                 + $" layer={NativeGhostPartisan.Layer(bot) ?? "none"} decision={bot.Brain?.LastDecision} state={bot.BotState} bodyActive={bot.gameObject.activeSelf}"
                 + $" human={humanDistance:F1}m group={groupSize} enemy={enemy != null} enemyId={enemy?.Person?.ProfileId ?? "none"} enemyDistance={distance:F1}m visible={enemy?.IsVisible} canShoot={enemy?.CanShoot}"
                 + $" seenAgo={seen:F1}s underFire={bot.Memory?.IsUnderFire} path={bot.Mover?.ActualPathController?.HavePath} position={bot.Position}"
-                + " " + NativeGhostPatrol.Snapshot(bot));
+                + " " + NativeGhostPatrol.Snapshot(bot)
+                + (bot.Profile?.Info?.Settings?.Role == WildSpawnType.marksman
+                    ? $" cover={bot.Memory?.IsInCover} prone={bot.GetPlayer?.MovementContext?.IsInPronePose} pose={bot.GetPlayer?.PoseLevel}"
+                    : ""));
         }
         catch (Exception e)
         {

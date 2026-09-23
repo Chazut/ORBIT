@@ -87,11 +87,10 @@ public class Squad(int id, float[] taskScores, int targetMembersCount) : Entity(
     public bool ExtractRequested;
 
     /// <summary>
-    /// AI-limiter temporal hysteresis (DormancySystem): Time.time of the squad's last wake and last
-    /// sleep entry. Fields on the squad rather than a DormancySystem dictionary on purpose — squad ids
-    /// are recycled, so id-based equality would bleed one squad's cooldowns into its successor.
+    /// Earliest next sleep after a wake, and last sleep entry. Stored on the squad because ids
+    /// are recycled; a replacement squad must not inherit its predecessor's cooldown.
     /// </summary>
-    public float DormancyWokeAt = -999f;
+    public float DormancySleepAllowedAt = -999f;
     public float DormancySleptAt = -999f;
 
     /// <summary>Time.time until which this squad is pinned in a simulated ghost fight — ghost movement

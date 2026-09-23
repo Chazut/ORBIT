@@ -17,15 +17,15 @@ public partial class DormancySystem
         {
             if (squad == null || squad.Members.Count == 0 || !IsSquadDormant(squad)) continue;
             var reason = WakeReason(squad, proximity: false);
-            if (reason != null) WakeSquad(squad, reason);
+            if (reason != null) WakeSquad(squad, reason.Value);
         }
         foreach (var kv in _vanillaGroups)
         {
             var dormant = VanillaDormantCount(kv.Value);
             if (dormant == 0) continue;
-            var reason = dormant != kv.Value.Count ? "group membership changed"
+            var reason = dormant != kv.Value.Count ? new GhostWakeReason(GhostWakeCause.GroupChanged, "group membership changed")
                 : VanillaWakeReason(kv.Key, kv.Value, proximity: false);
-            if (reason != null) WakeVanillaGroup(kv.Key, kv.Value, reason);
+            if (reason != null) WakeVanillaGroup(kv.Key, kv.Value, reason.Value);
         }
 
         var totalStandard = 0;
@@ -36,6 +36,7 @@ public partial class DormancySystem
             totalStandard++;
             if (!agent.IsDormant) awakeStandard++;
         }
+        CountNativeStandard(ref totalStandard, ref awakeStandard);
         var floor = Mathf.Min(_minAwakeBots, (totalStandard + 1) / 2);
         _encounterPlan.Clear();
         foreach (var squad in squads)
@@ -56,18 +57,18 @@ public partial class DormancySystem
         foreach (var kv in _vanillaGroups)
         {
             if (VanillaDormantCount(kv.Value) != 0 || !CanVanillaSleep(kv.Key, kv.Value)) continue;
-            var scoped = false;
-            foreach (var bot in kv.Value)
-                if (InScopedView(bot.Position, out _)) { scoped = true; break; }
-            if (scoped) continue;
+            var standard = NativeStandardCount(kv.Value);
+            if (standard > 0 && awakeStandard - standard < floor) { _blockedFloor++; continue; }
             var unit = _encounterPlan.Add(kv.Key);
             foreach (var bot in kv.Value) _encounterPlan.Member(unit, bot, bot.Position);
+            awakeStandard -= standard;
         }
         foreach (var player in _gameWorld.AllAlivePlayersList)
         {
             if (player == null || !player.AIData.IsAI || player.HealthController is not { IsAlive: true }
                 || DormantProfileIds.Contains(player.ProfileId)
                 || player.Profile?.Info?.Settings?.Role == WildSpawnType.shooterBTR) continue;
+            if (!IsActivatedNeighbour(player)) continue;
             _encounterPlan.Awake(player.AIData.BotOwner, player.Position);
         }
         _encounterPlan.Resolve(_hostileWakeDistanceSqr);
@@ -87,8 +88,7 @@ public partial class DormancySystem
             foreach (var agent in squad.Members)
             {
                 if (!AnyAwakeBotNear(agent.Position, squad)) continue;
-                _wakeByAwakeBot++;
-                WakeSquad(squad, $"awake bot near {agent}");
+                WakeSquad(squad, new(GhostWakeCause.BotProximity, $"awake bot near {agent}"));
                 break;
             }
         }
@@ -100,14 +100,15 @@ public partial class DormancySystem
             foreach (var bot in kv.Value)
             {
                 if (!AnyAwakeBotNear(bot.Position, null)) continue;
-                _wakeByAwakeBot++;
-                WakeVanillaGroup(kv.Key, kv.Value, $"awake bot near {bot.GetPlayer.Profile?.Nickname}");
+                WakeVanillaGroup(kv.Key, kv.Value, new(GhostWakeCause.BotProximity, $"awake bot near {bot.GetPlayer.Profile?.Nickname}"));
                 break;
             }
         }
         _lastAwakeStandard = 0;
         foreach (var agent in liveAgents)
             if (agent != null && !agent.IsDormant && !IsDefaultDormant(agent.Bot)) _lastAwakeStandard++;
+        var nativeTotal = 0;
+        CountNativeStandard(ref nativeTotal, ref _lastAwakeStandard);
     }
 
     private int VanillaDormantCount(List<BotOwner> bots)
@@ -116,4 +117,9 @@ public partial class DormancySystem
         foreach (var bot in bots) if (_vanillaDormant.Contains(bot)) count++;
         return count;
     }
+
+    // A player is listed before its BotOwner/brain finishes spawning. It cannot sleep yet,
+    // but must not block the plan or wake nearby ghosts during that transient state.
+    private static bool IsActivatedNeighbour(Player player)
+        => player.AIData.BotOwner is { BotState: EBotState.Active };
 }

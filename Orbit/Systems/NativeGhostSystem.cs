@@ -35,6 +35,7 @@ public sealed class NativeGhostSystem
         public float Travelled;
         public int SainStopsProtected;
         public bool ReportedSainProtection;
+        public bool ReportedProneDeferred;
         public float ReportAt;
         public NativeGhostDoors Doors;
         public string Decision;
@@ -260,6 +261,24 @@ public sealed class NativeGhostSystem
         return true;
     }
 
+    internal static bool DeferProne(BotOwner bot)
+    {
+        if (!RetainsNativeState(bot)) return false;
+        var state = Sleepers[bot];
+        if (state.WakeReason != null) return true;
+        if (NativeGhostMarksman.CanDeferProne(bot))
+        {
+            if (!state.ReportedProneDeferred)
+            {
+                state.ReportedProneDeferred = true;
+                Log.Info($"NATIVE GHOST: {bot.Profile.Nickname} sniper posture deferred; peaceful lay retained until wake");
+            }
+            return true;
+        }
+        RequestWake(state, "body operation deferred: BotLay.TryLay");
+        return true;
+    }
+
     internal static bool HandleDoorOperation(BotDoorOpener opener, Door requested, bool physical, out bool waiting)
     {
         waiting = false;
@@ -464,6 +483,7 @@ public sealed class NativeGhostSystem
     public static bool HandleBrainException(AICoreAgent<BotLogicDecision> brain, Exception exception)
     {
         if (exception == null || !Brains.TryGetValue(brain, out var state)) return false;
+        NativeGhostDiagnostics.BrainFailure(state.Bot, state.Decision, exception);
         RequestWake(state, $"brain failed: {exception.GetType().Name}: {exception.Message}");
         return true;
     }

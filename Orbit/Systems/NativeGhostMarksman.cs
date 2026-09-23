@@ -9,11 +9,14 @@ internal static class NativeGhostMarksman
             && bot.Memory is { IsUnderFire: false, GoalEnemy: null }
             && NativeGhostPartisan.Layer(bot) == "MarksmanTargetLayer";
 
-    // The native lay node can keep watching from cover once its physical posture is settled.
-    // Its combat sibling uses the same action, so permission must also match the peaceful layer.
+    // MarksmanTargetLayer selects lay from CanProne, before the physical pose has settled.
+    // LayNode's posture attempts are deferred while asleep; native cover/decision logic keeps
+    // running. Its combat sibling shares the action and must never borrow this permission.
     internal static bool SupportsLay(BotOwner bot, BotLogicDecision decision)
-        => decision == BotLogicDecision.lay && IsPeacefulLayer(bot) && bot.Memory.IsInCover
-            && bot.GetPlayer?.MovementContext?.IsInPronePose == true && bot.GetPlayer.PoseLevel <= 0f;
+        => decision == BotLogicDecision.lay && IsPeacefulLayer(bot);
+
+    internal static bool CanDeferProne(BotOwner bot)
+        => IsPeacefulLayer(bot) && bot.Brain.LastDecision is BotLogicDecision.lay or BotLogicDecision.holdPosition;
 
     internal static bool SupportsStandBy(BotOwner bot, BotLogicDecision decision)
         => decision == BotLogicDecision.standBy

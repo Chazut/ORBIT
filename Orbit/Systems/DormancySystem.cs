@@ -29,8 +29,8 @@ namespace Orbit.Systems;
 /// ORBIT squads sleep atomically, polled at 2 Hz, with TWO kinds of hysteresis learned from the test
 /// raids:
 ///  - spatial: sleep beyond SleepDistance from every human, wake within WakeDistance;
-///  - temporal: a woken squad stays awake at least WakeCooldownSeconds (so SAIN gets a real window to
-///    heal or fight — without it a bleeding sleeper looped wake/sleep every bleed tick and bled out),
+///  - temporal: wake reasons set a short transition delay or a full recovery window for damage,
+///    targeting, real fights and native fallbacks; independent health/combat checks still apply,
 ///    and a freshly-slept squad ignores the awake-bot trigger for SleepGraceSeconds (kills the 2 Hz
 ///    ping-pong pairs without muting encounter wakes: an active bot crossing a dormant squad MUST wake
 ///    it, that is where scav kills come from).
@@ -52,7 +52,6 @@ public partial class DormancySystem
     // walk stays free, only the trigger interaction runs on the real AI.
     private const float ExtractWakeDistance = 50f;
     private const float ExtractWakeDistanceSqr = ExtractWakeDistance * ExtractWakeDistance;
-    private const float WakeCooldownSeconds = 30f;
     private const float SleepGraceSeconds = 15f;
     private const float HpStableSeconds = 15f;
     // A far, out-of-combat bot whose HP keeps dropping gets a simulated patch-up at most this often.
@@ -171,7 +170,7 @@ public partial class DormancySystem
     private readonly HashSet<string> _targetedProfileIds = new();
     private readonly List<Squad> _sleepCandidates = new();
     private readonly List<Squad> _wakeQueue = new();
-    private readonly List<string> _wakeReasons = new();
+    private readonly List<GhostWakeReason> _wakeReasons = new();
 
     // Vanilla (non-ORBIT) sleeper state, keyed per bot. Groups are evaluated per BSG BotsGroup so a boss
     // and its followers sleep and wake together.
@@ -180,7 +179,7 @@ public partial class DormancySystem
     private readonly Dictionary<BotOwner, float> _vanillaHpBaseline = new();
     private readonly Dictionary<BotOwner, float> _vanillaLastHp = new();
     private readonly Dictionary<BotOwner, float> _vanillaHpDropAt = new();
-    private readonly Dictionary<object, float> _vanillaGroupWokeAt = new();
+    private readonly Dictionary<object, float> _vanillaSleepAllowedAt = new();
     private readonly Dictionary<object, float> _vanillaGroupSleptAt = new();
     private readonly Dictionary<object, List<BotOwner>> _vanillaGroups = new();
 
@@ -409,6 +408,7 @@ public partial class DormancySystem
 
     private void UpdateWakePreferred(List<Agent> liveAgents, List<Squad> squads)
     {
+        CollectVanillaGroups();
         // ── Pass 1: decide wakes, collect sleep candidates ──────────────
         _sleepCandidates.Clear();
         _wakeQueue.Clear();
@@ -424,7 +424,7 @@ public partial class DormancySystem
                 if (reason != null)
                 {
                     _wakeQueue.Add(squad);
-                    _wakeReasons.Add(reason);
+                    _wakeReasons.Add(reason.Value);
                 }
             }
             else
@@ -451,6 +451,7 @@ public partial class DormancySystem
             totalStandard++;
             if (!agent.IsDormant) awakeStandard++;
         }
+        CountNativeStandard(ref totalStandard, ref awakeStandard);
         var floor = Mathf.Min(_minAwakeBots, (totalStandard + 1) / 2);
 
         for (var i = 0; i < _sleepCandidates.Count; i++)
@@ -463,9 +464,8 @@ public partial class DormancySystem
             SleepSquad(squad);
             if (!defaultDormant) awakeStandard -= squad.Members.Count;
         }
+        UpdateVanilla(ref awakeStandard, floor);
         _lastAwakeStandard = awakeStandard;
-
-        UpdateVanilla();
 
     }
 
@@ -591,8 +591,8 @@ public partial class DormancySystem
             if (MinSqrDistanceToHumans(squad.Members[i].Position) <= gate)
                 return false;
 
-        // Temporal hysteresis: a woken squad stays awake long enough for SAIN to actually do something.
-        if (Time.time - squad.DormancyWokeAt < WakeCooldownSeconds)
+        // The wake cause selects the delay; all physical safety gates remain below.
+        if (Time.time < squad.DormancySleepAllowedAt)
         {
             _farBlockedCooldown++;
             return false;
@@ -697,14 +697,15 @@ public partial class DormancySystem
 
     /// <summary>Why a dormant squad must wake, or null to keep sleeping. The string goes straight to the
     /// wake log line so a single raid read tells premature wakes from legit ones.</summary>
-    private string WakeReason(Squad squad, bool proximity = true)
+    private GhostWakeReason? WakeReason(Squad squad, bool proximity = true)
     {
+        GhostWakeReason? reason = null;
         // Extract-bound squads ghost their way to the exfil and only wake shortly before its
         // radius, so the real AI handles just the trigger interaction (not the whole walk).
         if (squad.ExtractRequested)
         {
             var extractWake = ExtractProximityWake(squad);
-            if (extractWake != null) { _wakeByExtract++; return extractWake; }
+            if (extractWake != null) reason = new(GhostWakeCause.Extraction, extractWake);
         }
 
         // The awake-bot trigger gets a short grace after sleep entry — that alone killed the 2 Hz
@@ -716,25 +717,24 @@ public partial class DormancySystem
             var agent = squad.Members[i];
             if (agent.SoloExtractRequested && (agent.SoloExtractIsEmergency || NearOwnExfil(agent)))
             {
-                _wakeByExtract++;
-                return agent.SoloExtractIsEmergency ? $"{agent} emergency solo extract" : $"{agent} solo extract near exfil";
+                reason ??= new GhostWakeReason(GhostWakeCause.Extraction,
+                    agent.SoloExtractIsEmergency ? $"{agent} emergency solo extract" : $"{agent} solo extract near exfil");
             }
-            if (_targetedProfileIds.Contains(agent.Player.ProfileId)) { _wakeByTargeted++; return $"{agent} targeted"; }
+            if (_targetedProfileIds.Contains(agent.Player.ProfileId)) return new(GhostWakeCause.Targeted, $"{agent} targeted");
             // Position-based damage (border minefields at least) lands on inactive bodies, and a sleeper
             // can neither react nor heal — hand it back to SAIN immediately.
             var hp = TotalHp(agent);
             if (hp < agent.DormantHpBaseline - 1f)
             {
-                _wakeByDamage++;
-                return $"{agent} took {agent.DormantHpBaseline - hp:F0} damage while dormant at {agent.Position}" +
-                       (DangerZones.IsInside(agent.Position) ? " (inside a border/minefield zone)" : "");
+                return new(GhostWakeCause.Damage, $"{agent} took {agent.DormantHpBaseline - hp:F0} damage while dormant at {agent.Position}" +
+                       (DangerZones.IsInside(agent.Position) ? " (inside a border/minefield zone)" : ""));
             }
             var humanSqr = MinSqrDistanceToHumans(agent.Position);
-            if (humanSqr <= _wakeDistanceSqr) { _wakeByHuman++; return $"human at {Mathf.Sqrt(humanSqr):F0}m"; }
-            if (InScopedView(agent.Position, out var scopeDist)) { _wakeByScope++; return $"in scoped view at {scopeDist:F0}m"; }
-            if (proximity && awakeBotTriggerArmed && AnyAwakeBotNear(agent.Position, squad)) { _wakeByAwakeBot++; return $"awake bot near {agent}"; }
+            if (humanSqr <= _wakeDistanceSqr) reason ??= new GhostWakeReason(GhostWakeCause.HumanProximity, $"human at {Mathf.Sqrt(humanSqr):F0}m");
+            if (!reason.HasValue && InScopedView(agent.Position, out var scopeDist)) reason = new(GhostWakeCause.ScopedView, $"in scoped view at {scopeDist:F0}m");
+            if (!reason.HasValue && proximity && awakeBotTriggerArmed && AnyAwakeBotNear(agent.Position, squad)) reason = new(GhostWakeCause.BotProximity, $"awake bot near {agent}");
         }
-        return null;
+        return reason;
     }
 
     private float MinSqrDistanceToHumans(Vector3 position)
@@ -780,6 +780,7 @@ public partial class DormancySystem
             if (player.Profile?.Info?.Settings?.Role == WildSpawnType.shooterBTR) continue;
 
             var owner = player.AIData.BotOwner;
+            if (!IsActivatedNeighbour(player)) continue;
             if (owner != null && ownSquad != null && IsMemberBot(ownSquad, owner)) continue;
             if (excludeCandidates && owner != null && IsCandidateBot(owner)) continue;
             return true;
@@ -901,13 +902,27 @@ public partial class DormancySystem
         DormantProfileIds.Add(agent.Player.ProfileId);
     }
 
-    private void WakeSquad(Squad squad, string reason)
+    private void RecordWake(GhostWakeCause cause)
+    {
+        switch (cause)
+        {
+            case GhostWakeCause.HumanProximity: _wakeByHuman++; break;
+            case GhostWakeCause.ScopedView: _wakeByScope++; break;
+            case GhostWakeCause.BotProximity: _wakeByAwakeBot++; break;
+            case GhostWakeCause.Extraction: _wakeByExtract++; break;
+            case GhostWakeCause.Targeted: _wakeByTargeted++; break;
+            case GhostWakeCause.Damage: _wakeByDamage++; break;
+        }
+    }
+
+    private void WakeSquad(Squad squad, GhostWakeReason reason)
     {
         for (var i = 0; i < squad.Members.Count; i++)
             WakeAgent(squad.Members[i]);
-        squad.DormancyWokeAt = Time.time;
+        squad.DormancySleepAllowedAt = Time.time + reason.CooldownSeconds;
         _windowWakes++;
-        Log.Info($"{squad} awake: {reason} ({_dormantAgents.Count} still dormant)");
+        RecordWake(reason.Cause);
+        Log.Info($"{squad} awake: {reason.Message} ({_dormantAgents.Count} still dormant) wakeCause={reason.Cause} retryAfter={reason.CooldownSeconds:F0}s");
     }
 
     private void WakeAgent(Agent agent)
@@ -1886,11 +1901,11 @@ public partial class DormancySystem
     {
         if (unit.Squad != null)
         {
-            WakeSquad(unit.Squad, reason);
+            WakeSquad(unit.Squad, new(GhostWakeCause.RealFight, reason));
             return;
         }
         if (unit.VanillaKey != null && _vanillaGroups.TryGetValue(unit.VanillaKey, out var group))
-            WakeVanillaGroup(unit.VanillaKey, group, reason);
+            WakeVanillaGroup(unit.VanillaKey, group, new(GhostWakeCause.RealFight, reason));
     }
 
     private void ResolveFight(GhostUnit a, GhostUnit b, float distance, Vector3 posA, Vector3 posB)
@@ -2589,10 +2604,10 @@ public partial class DormancySystem
     // ── Vanilla (non-ORBIT) sleepers ────────────────────────────────────
 
     /// <summary>
-    /// The vanilla (non-ORBIT) side of the per-type policy: any alive bot ORBIT does not drive whose type
-    /// toggle is ON can sleep. Native movement preserves supported decisions and routes without takeover;
-    /// disabling it restores stationary sleep. Groups sleep and wake per BSG BotsGroup so a boss never sleeps apart from its
-    /// followers. Toggled-off types are left completely untouched.
+    /// Native side of the per-type policy: eligible AI without an ORBIT Agent retain their own driver.
+    /// Standard types use the normal distance and population floor; other native types require their
+    /// type toggle. Native movement preserves supported decisions and routes without takeover.
+    /// Groups sleep and wake per BSG BotsGroup. Disabling native movement restores stationary sleep.
     /// </summary>
     private void CollectVanillaGroups()
     {
@@ -2609,10 +2624,17 @@ public partial class DormancySystem
                 if (!player.AIData.IsAI) continue;
                 var owner = player.AIData.BotOwner;
                 if (owner == null) continue;
-                if (_botRoster.GetAgent(owner) != null) continue; // ORBIT-driven, handled above
+                var agent = _botRoster.GetAgent(owner);
+                if (agent != null)
+                {
+                    // A late brain registration transfers ownership back to the normal circuit.
+                    if (WakeVanillaBot(owner) && agent.Squad != null)
+                        agent.Squad.DormancySleepAllowedAt = Time.time + new GhostWakeReason(GhostWakeCause.GroupChanged, null).CooldownSeconds;
+                    continue;
+                }
                 var role = owner.Profile?.Info?.Settings?.Role;
-                if (role.HasValue && role.Value.ToString() == "shooterBTR") continue; // never touch the BTR
-                if (!IsDefaultDormant(owner)) continue; // type toggle OFF — leave fully vanilla
+                if (role == WildSpawnType.shooterBTR) continue; // never touch the BTR
+                if (!IsNativeGhostEligible(owner)) continue;
 
                 // A dead body that is still dormant must be re-activated NOW (hidden corpse otherwise).
                 if (player.HealthController is not { IsAlive: true } || owner.IsDead)
@@ -2646,9 +2668,8 @@ public partial class DormancySystem
 
     private readonly Stack<List<BotOwner>> _vanillaGroupPool = new();
 
-    private void UpdateVanilla()
+    private void UpdateVanilla(ref int awakeStandard, int floor)
     {
-        CollectVanillaGroups();
         foreach (var kv in _vanillaGroups)
         {
             var group = kv.Value;
@@ -2657,21 +2678,33 @@ public partial class DormancySystem
                 if (_vanillaDormant.Contains(group[i])) dormant++;
             if (dormant > 0)
             {
-                var reason = dormant == group.Count ? VanillaWakeReason(kv.Key, group) : "group membership changed";
-                if (reason != null) WakeVanillaGroup(kv.Key, group, reason);
+                var reason = dormant == group.Count ? VanillaWakeReason(kv.Key, group)
+                    : new GhostWakeReason(GhostWakeCause.GroupChanged, "group membership changed");
+                if (reason != null)
+                {
+                    var asleepStandard = 0;
+                    foreach (var bot in group)
+                        if (_vanillaDormant.Contains(bot) && !IsDefaultDormant(bot)) asleepStandard++;
+                    WakeVanillaGroup(kv.Key, group, reason.Value);
+                    awakeStandard += asleepStandard;
+                }
             }
             else if (CanVanillaSleep(kv.Key, group))
             {
+                var standard = NativeStandardCount(group);
+                if (standard > 0 && awakeStandard - standard < floor) { _blockedFloor++; continue; }
                 SleepVanillaGroup(kv.Key, group);
+                awakeStandard -= standard;
             }
         }
     }
 
     private bool CanVanillaSleep(object key, List<BotOwner> group)
     {
-        if (_vanillaGroupWokeAt.TryGetValue(key, out var wokeAt) && Time.time - wokeAt < WakeCooldownSeconds)
+        if (_vanillaSleepAllowedAt.TryGetValue(key, out var allowedAt) && Time.time < allowedAt)
             return NativeGhostDiagnostics.Refuse(group[0], "wake-cooldown", groupSize: group.Count);
 
+        var gate = NativeStandardCount(group) > 0 ? _sleepDistanceSqr : _scavSleepDistanceSqr;
         for (var i = 0; i < group.Count; i++)
         {
             var bot = group[i];
@@ -2683,7 +2716,8 @@ public partial class DormancySystem
             if (bot.Memory?.GoalEnemy != null && !(_cfg.NativeGhostMovement && GhostMovementEnabled
                 && NativeGhostSystem.CanRetainEnemy(bot))) return Refuse("goal-enemy");
             if (_targetedProfileIds.Contains(player.ProfileId)) return Refuse("targeted");
-            if (humanDistance * humanDistance <= _scavSleepDistanceSqr) return Refuse("human-distance");
+            if (humanDistance * humanDistance <= gate) return Refuse("human-distance");
+            if (InScopedView(player.Position, out _)) return Refuse("scoped-view");
             if (_cfg.NativeGhostMovement && GhostMovementEnabled && !_nativeGhosts.CanSleep(bot, humanDistance, group.Count)) return false;
 
             // Same bleed gate as ORBIT squads.
@@ -2699,8 +2733,9 @@ public partial class DormancySystem
         return true;
     }
 
-    private string VanillaWakeReason(object key, List<BotOwner> group, bool proximity = true)
+    private GhostWakeReason? VanillaWakeReason(object key, List<BotOwner> group, bool proximity = true)
     {
+        GhostWakeReason? reason = null;
         var awakeBotTriggerArmed = !_vanillaGroupSleptAt.TryGetValue(key, out var sleptAt)
                                    || Time.time - sleptAt >= SleepGraceSeconds;
 
@@ -2709,21 +2744,20 @@ public partial class DormancySystem
             var bot = group[i];
             var player = bot.GetPlayer;
             var nativeReason = _nativeGhosts.WakeReason(bot);
-            if (nativeReason != null) return nativeReason;
-            if (_targetedProfileIds.Contains(player.ProfileId)) { _wakeByTargeted++; return $"{player.Profile?.Nickname} targeted"; }
+            if (nativeReason != null) return new(GhostWakeCause.NativeFallback, nativeReason);
+            if (_targetedProfileIds.Contains(player.ProfileId)) return new(GhostWakeCause.Targeted, $"{player.Profile?.Nickname} targeted");
             var hp = VanillaHp(bot);
             if (_vanillaHpBaseline.TryGetValue(bot, out var baseline) && hp < baseline - 1f)
             {
-                _wakeByDamage++;
-                return $"{player.Profile?.Nickname} took {baseline - hp:F0} damage while dormant at {player.Position}" +
-                       (DangerZones.IsInside(player.Position) ? " (inside a border/minefield zone)" : "");
+                return new(GhostWakeCause.Damage, $"{player.Profile?.Nickname} took {baseline - hp:F0} damage while dormant at {player.Position}" +
+                       (DangerZones.IsInside(player.Position) ? " (inside a border/minefield zone)" : ""));
             }
             var humanSqr = MinSqrDistanceToHumans(player.Position);
-            if (humanSqr <= _wakeDistanceSqr) { _wakeByHuman++; return $"human at {Mathf.Sqrt(humanSqr):F0}m"; }
-            if (InScopedView(player.Position, out var scopeDist)) { _wakeByScope++; return $"in scoped view at {scopeDist:F0}m"; }
-            if (proximity && awakeBotTriggerArmed && AnyAwakeBotNear(player.Position, null)) { _wakeByAwakeBot++; return $"awake bot near {player.Profile?.Nickname}"; }
+            if (humanSqr <= _wakeDistanceSqr) reason ??= new GhostWakeReason(GhostWakeCause.HumanProximity, $"human at {Mathf.Sqrt(humanSqr):F0}m");
+            if (!reason.HasValue && InScopedView(player.Position, out var scopeDist)) reason = new(GhostWakeCause.ScopedView, $"in scoped view at {scopeDist:F0}m");
+            if (!reason.HasValue && proximity && awakeBotTriggerArmed && AnyAwakeBotNear(player.Position, null)) reason = new(GhostWakeCause.BotProximity, $"awake bot near {player.Profile?.Nickname}");
         }
-        return null;
+        return reason;
     }
 
     private void SleepVanillaGroup(object key, List<BotOwner> group)
@@ -2749,7 +2783,7 @@ public partial class DormancySystem
                 Log.Error($"vanilla sleeper {bot.GetPlayer?.Profile?.Nickname} sleep recipe failed: {e}");
                 // Roll back the entire group, including this member if deactivation partly succeeded.
                 _vanillaDormant.Add(bot);
-                WakeVanillaGroup(key, group, "sleep failed");
+                WakeVanillaGroup(key, group, new(GhostWakeCause.NativeFallback, "sleep failed"));
                 return;
             }
             ThrottleBrain(bot);
@@ -2759,35 +2793,40 @@ public partial class DormancySystem
         }
         _vanillaGroupSleptAt[key] = Time.time;
         _windowSleeps++;
-        Log.Info($"vanilla group ({group[0].GetPlayer?.Profile?.Nickname} +{group.Count - 1}) dormant {(native ? "with native movement" : "in place")} ({_vanillaDormant.Count} vanilla dormant)");
+        Log.Info($"vanilla group ({group[0].GetPlayer?.Profile?.Nickname} +{group.Count - 1}) dormant {(native ? "with native movement" : "in place")} ({_vanillaDormant.Count} vanilla dormant) policy={(NativeStandardCount(group) > 0 ? "standard" : "default")}");
     }
 
-    private void WakeVanillaGroup(object key, List<BotOwner> group, string reason)
+    private void WakeVanillaGroup(object key, List<BotOwner> group, GhostWakeReason reason)
     {
         for (var i = 0; i < group.Count; i++)
-        {
-            var bot = group[i];
-            if (!_vanillaDormant.Remove(bot)) continue;
-            var native = _nativeGhosts.Remove(bot);
-            UnthrottleBrain(bot);
-            DormantProfileIds.Remove(bot.GetPlayer.ProfileId);
-            _vanillaLastHp[bot] = VanillaHp(bot);
-            if (bot.IsDead) continue;
-            try
-            {
-                bot.gameObject.SetActive(true);
-                if (!native) bot.PatrollingData.Unpause();
-                bot.PostActivate();
-                if (native) NativeGhostSystem.ResyncAfterWake(bot);
-            }
-            catch (System.Exception e)
-            {
-                Log.Error($"vanilla sleeper {bot.GetPlayer?.Profile?.Nickname} wake recipe failed: {e}");
-            }
-        }
-        _vanillaGroupWokeAt[key] = Time.time;
+            WakeVanillaBot(group[i]);
+        _vanillaSleepAllowedAt[key] = Time.time + reason.CooldownSeconds;
         _windowWakes++;
-        Log.Info($"vanilla group ({group[0].GetPlayer?.Profile?.Nickname} +{group.Count - 1}) awake: {reason} ({_vanillaDormant.Count} vanilla dormant)");
+        RecordWake(reason.Cause);
+        Log.Info($"vanilla group ({group[0].GetPlayer?.Profile?.Nickname} +{group.Count - 1}) awake: {reason.Message} ({_vanillaDormant.Count} vanilla dormant) wakeCause={reason.Cause} retryAfter={reason.CooldownSeconds:F0}s");
+    }
+
+    private bool WakeVanillaBot(BotOwner bot)
+    {
+        if (!_vanillaDormant.Remove(bot)) return false;
+        var native = _nativeGhosts.Remove(bot);
+        UnthrottleBrain(bot);
+        DormantProfileIds.Remove(bot.GetPlayer.ProfileId);
+        _vanillaLastHp[bot] = VanillaHp(bot);
+        // A dead member also needs its body back, but must not reactivate its brain.
+        if (bot.IsDead) { bot.gameObject.SetActive(true); return true; }
+        try
+        {
+            bot.gameObject.SetActive(true);
+            if (!native) bot.PatrollingData.Unpause();
+            bot.PostActivate();
+            if (native) NativeGhostSystem.ResyncAfterWake(bot);
+        }
+        catch (System.Exception e)
+        {
+            Log.Error($"vanilla sleeper {bot.GetPlayer?.Profile?.Nickname} wake recipe failed: {e}");
+        }
+        return true;
     }
 
     private static float VanillaHp(BotOwner bot)
