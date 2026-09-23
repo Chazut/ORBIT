@@ -167,7 +167,7 @@ public partial class DormancySystem
     private readonly List<Agent> _dormantAgents = new();
     // Poll scratch buffers, reused to stay allocation-free at 2 Hz.
     private readonly List<Vector3> _humanPositions = new();
-    private readonly HashSet<string> _targetedProfileIds = new();
+    private readonly Dictionary<string, Player> _targetedBy = new();
     private readonly List<Squad> _sleepCandidates = new();
     private readonly List<Squad> _wakeQueue = new();
     private readonly List<GhostWakeReason> _wakeReasons = new();
@@ -522,7 +522,7 @@ public partial class DormancySystem
     private void ScanWorld()
     {
         _humanPositions.Clear();
-        _targetedProfileIds.Clear();
+        _targetedBy.Clear();
 
         var players = _gameWorld.AllAlivePlayersList;
         for (var i = 0; i < players.Count; i++)
@@ -539,11 +539,15 @@ public partial class DormancySystem
                     continue;
                 }
 
-                // Build the "who is being targeted" set from every awake bot's current goal enemy, ORBIT or not.
-                var goalPerson = player.AIData.BotOwner?.Memory?.GoalEnemy?.Person;
+                // Native ghosts can retain enemy memory during a simulated fight. Only a live,
+                // active body can supply a targeting threat, regardless of who drives its brain.
+                var bot = player.AIData.BotOwner;
+                if (DormantProfileIds.Contains(player.ProfileId) || bot is not { BotState: EBotState.Active }
+                    || !bot.gameObject.activeInHierarchy) continue;
+                var goalPerson = bot.Memory?.GoalEnemy?.Person;
                 if (goalPerson != null && !(_cfg.NativeGhostMovement && GhostMovementEnabled
-                    && NativeGhostSystem.CanRetainEnemy(player.AIData.BotOwner)))
-                    _targetedProfileIds.Add(goalPerson.ProfileId);
+                    && NativeGhostSystem.CanRetainEnemy(bot)))
+                    _targetedBy.TryAdd(goalPerson.ProfileId, player);
             }
             catch
             {
@@ -613,7 +617,7 @@ public partial class DormancySystem
             if (loot != null && loot.LootTaskRunning && !_cfg.GhostLooting)
             { _farBlockedLoot++; return false; }
             if (bot.Memory != null && (bot.Memory.GoalEnemy != null || bot.Memory.IsUnderFire)) { _farBlockedCombat++; return false; }
-            if (_targetedProfileIds.Contains(agent.Player.ProfileId)) { _farBlockedCombat++; return false; }
+            if (_targetedBy.ContainsKey(agent.Player.ProfileId)) { _farBlockedCombat++; return false; }
             var bodyReady = loot != null ? loot.CanEnterGhost : !GhostBodyTransition.Busy(agent.Player);
             if (!bodyReady)
             {
@@ -720,7 +724,8 @@ public partial class DormancySystem
                 reason ??= new GhostWakeReason(GhostWakeCause.Extraction,
                     agent.SoloExtractIsEmergency ? $"{agent} emergency solo extract" : $"{agent} solo extract near exfil");
             }
-            if (_targetedProfileIds.Contains(agent.Player.ProfileId)) return new(GhostWakeCause.Targeted, $"{agent} targeted");
+            if (_targetedBy.TryGetValue(agent.Player.ProfileId, out var targetingPlayer))
+                return new(GhostWakeCause.Targeted, $"{agent} targeted by {targetingPlayer.Profile?.Nickname} [{targetingPlayer.ProfileId}]");
             // Position-based damage (border minefields at least) lands on inactive bodies, and a sleeper
             // can neither react nor heal — hand it back to SAIN immediately.
             var hp = TotalHp(agent);
@@ -2715,7 +2720,7 @@ public partial class DormancySystem
             if (bot.Memory?.IsUnderFire == true) return Refuse("under-fire");
             if (bot.Memory?.GoalEnemy != null && !(_cfg.NativeGhostMovement && GhostMovementEnabled
                 && NativeGhostSystem.CanRetainEnemy(bot))) return Refuse("goal-enemy");
-            if (_targetedProfileIds.Contains(player.ProfileId)) return Refuse("targeted");
+            if (_targetedBy.ContainsKey(player.ProfileId)) return Refuse("targeted");
             if (humanDistance * humanDistance <= gate) return Refuse("human-distance");
             if (InScopedView(player.Position, out _)) return Refuse("scoped-view");
             if (_cfg.NativeGhostMovement && GhostMovementEnabled && !_nativeGhosts.CanSleep(bot, humanDistance, group.Count)) return false;
@@ -2745,7 +2750,8 @@ public partial class DormancySystem
             var player = bot.GetPlayer;
             var nativeReason = _nativeGhosts.WakeReason(bot);
             if (nativeReason != null) return new(GhostWakeCause.NativeFallback, nativeReason);
-            if (_targetedProfileIds.Contains(player.ProfileId)) return new(GhostWakeCause.Targeted, $"{player.Profile?.Nickname} targeted");
+            if (_targetedBy.TryGetValue(player.ProfileId, out var targetingPlayer))
+                return new(GhostWakeCause.Targeted, $"{player.Profile?.Nickname} targeted by {targetingPlayer.Profile?.Nickname} [{targetingPlayer.ProfileId}]");
             var hp = VanillaHp(bot);
             if (_vanillaHpBaseline.TryGetValue(bot, out var baseline) && hp < baseline - 1f)
             {
