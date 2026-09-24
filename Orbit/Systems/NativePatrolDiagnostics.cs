@@ -21,6 +21,9 @@ public static class NativePatrolDiagnostics
         public object LastChoiceWay;
         public float NextFollowerArrivalReport;
         public int FollowerChecks, FollowerArrivals;
+        public BotLogicDecision? LastDecision;
+        public float DecisionSince;
+        public bool WasGhost;
     }
 
     private const float StationarySeconds = 30f;
@@ -47,6 +50,7 @@ public static class NativePatrolDiagnostics
             Observations.Add(bot, observation);
         }
         UpdatePosition(bot, observation);
+        UpdateDecision(bot, observation, ghost: false);
         Snapshot(bot, observation, "before-sleep", ghost: false, fight: false);
     }
 
@@ -54,6 +58,7 @@ public static class NativePatrolDiagnostics
     {
         if (!Observations.TryGetValue(bot, out var observation)) return;
         UpdatePosition(bot, observation);
+        UpdateDecision(bot, observation, ghost: false);
         Snapshot(bot, observation, "after-wake", ghost: false, fight: false);
     }
 
@@ -63,8 +68,18 @@ public static class NativePatrolDiagnostics
         if (!Observations.TryGetValue(bot, out var observation)) return;
         if (bot == null || bot.IsDead) { Forget(bot); return; }
         UpdatePosition(bot, observation);
+        UpdateDecision(bot, observation, ghost);
         if (Time.time - observation.StillSince < StationarySeconds || Time.time < observation.NextReport) return;
         Snapshot(bot, observation, "stationary", ghost, fight);
+    }
+
+    private static void UpdateDecision(BotOwner bot, Observation observation, bool ghost)
+    {
+        var decision = bot.Brain?.LastDecision;
+        if (ghost || observation.WasGhost || decision != observation.LastDecision)
+            observation.DecisionSince = Time.time;
+        observation.LastDecision = decision;
+        observation.WasGhost = ghost;
     }
 
     private static void UpdatePosition(BotOwner bot, Observation observation)
@@ -184,6 +199,10 @@ public static class NativePatrolDiagnostics
                 + $" path={route?.HavePath} corner={path?.CurIndex}/{path?.Length} moverTarget={mover?.TargetPoint} moving={mover?.IsMoving}"
                 + $" paused={mover?.Pause} pauseLeft={mover?.RemainPause:F1}s speed={mover?.DestMoveSpeed:F2} standbyAllowed={bot.StandBy?.CanDoStandBy} enemy={bot.Memory?.GoalEnemy != null} fight={fight}"
                 + " " + NativeGhostPatrol.Snapshot(bot) + HuntSnapshot(bot));
+            if (!ghost && reason == "stationary" && observation.LastDecision.HasValue
+                && NativeGhostSystem.ActionName(observation.LastDecision.Value) == NativeAwakeGrenadeDiagnostics.ActionName)
+                NativeAwakeGrenadeDiagnostics.Report(bot, Time.time - observation.StillSince,
+                    Time.time - observation.DecisionSince);
         }
         catch (Exception e)
         {
