@@ -111,6 +111,7 @@ public class WaypointGatherer(float cellSize, BotsController botsController)
             // EligibleEntryPoints is empty here because BSG hasn't finished LoadSettings yet (we run before
             // it). Real entries surface at runtime via the OnStatusChanged log.
             Log.Info($"Exfil {exfil.Point.name} [{access}{coop}] status={exfil.Point.Status}");
+            var hasInterior = ExfilNavigation.TryInteriorPoint(exfil.Point, out var interior);
             // Bias the navmesh sample toward the inside of the trigger volume: transform.position can be
             // anywhere relative to the volume (Customs bunker-style hatches have transforms at the
             // surface marker while the actual trigger goes underground). Use bounds.center, then snap
@@ -127,7 +128,18 @@ public class WaypointGatherer(float cellSize, BotsController botsController)
                     pos.y = bounds.min.y + 0.75f;
                 if (bounds.size.sqrMagnitude > 100f) maxNavDist = 10f;
             }
+            var before = collection.Count;
             ValidateAndAddWaypoint(collection, WaypointCategory.Exfil, exfil.Point.name, pos, maxNavDist, target: exfil.Point);
+            if (hasInterior)
+            {
+                if (collection.Count == before)
+                    collection.Add(CreateBuiltinWaypoint(WaypointCategory.Exfil, exfil.Point.name, interior, exfil.Point));
+                var waypoint = collection[collection.Count - 1];
+                waypoint.ExfilInteriorPosition = interior;
+                Log.Info($"EXFIL NAV: {exfil.Point.name} interior target={interior} approach={waypoint.Position}");
+            }
+            else
+                Log.Info($"EXFIL NAV: {exfil.Point.name} no interior NavMesh point; retaining approach and local extraction fallback");
         }
 
         Log.Debug($"Collected {collection.Count} points of interest");

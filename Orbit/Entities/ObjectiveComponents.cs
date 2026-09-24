@@ -42,13 +42,13 @@ public class Objective
     public float DispatchTime;
 
     /// <summary>
-    /// Time.time when the agent first entered the loose 15 m arrival radius of an Exfil objective AND was
-    /// outside the actual trigger collider. Used by the exfil force-extract timer — if the agent stays
-    /// in this "within radius, outside trigger" state for <c>ExfilOutsideTriggerForceExtractSeconds</c>,
-    /// we despawn from current position anyway rather than make them wander forever. -1 = not in that
-    /// state. Reset when the agent exits the radius or actually enters the trigger.
+    /// Time.time when the agent last made meaningful progress inside the loose exfil radius
+    /// but outside its trigger. The local fallback can despawn a stuck bot from its current
+    /// position. Reset on movement, leaving the radius, entering the trigger or a new dispatch.
+    /// -1 means the outside-trigger timer is not armed.
     /// </summary>
     public float ExfilOutsideTriggerSince = -1f;
+    public Vector3 ExfilOutsideTriggerLastPosition;
 
     public override string ToString() => $"Objective({Location}, status: {Status})";
 }

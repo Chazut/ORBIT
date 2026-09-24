@@ -36,6 +36,8 @@ public class Waypoint(
     /// gameObject name (which doubles as the quest zone ID).</summary>
     public readonly string Name = name;
     public readonly Vector3 Position = position;
+    // Keep the original approach for selection and local fallback; navigation can aim inside a bunker.
+    public Vector3? ExfilInteriorPosition;
     public readonly float RadiusSqr = radiusSqr;
     public readonly WaypointCategory Category = category;
     public readonly List<Door> Doors = doors;

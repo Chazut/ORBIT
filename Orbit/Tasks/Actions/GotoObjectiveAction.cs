@@ -51,8 +51,8 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
     private const float DispatchGraceSeconds = 2f;
 
     /// <summary>
-    /// Seconds an agent can spend "within the loose 15 m exfil radius but outside the actual trigger
-    /// collider" before we force the despawn from their current position. 15 s gives the bot plenty of
+    /// Seconds without meaningful movement within the loose exfil radius but outside the trigger
+    /// before we force despawn from the current position. Movement renews the timer, allowing
     /// chances to descend a hatch / walk around the entry, but caps the worst case (without it a bot can
     /// sit at the exfil edge for minutes until SAIN combat takes over).
     /// </summary>
@@ -125,7 +125,10 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                     objective.DispatchTime = Time.time;
                     var startDistSqr = (objective.Location.Position - agent.Position).sqrMagnitude;
                     var shouldSprint = ShouldSprintToObjective(agent, startDistSqr);
-                    movementSystem.MoveToByPath(agent, objective.Location.Position, sprint: shouldSprint);
+                    var destination = objective.Location.Category == WaypointCategory.Exfil
+                        ? objective.Location.ExfilInteriorPosition ?? objective.Location.Position
+                        : objective.Location.Position;
+                    movementSystem.MoveToByPath(agent, destination, sprint: shouldSprint);
                     objective.Status = ObjectiveStatus.Moving;
                     break;
                 case ObjectiveStatus.Moving:
@@ -133,6 +136,8 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                         objective.ArrivalPath = agent.Movement.Path;
 
                     var distanceSqr = (objective.Location.Position - agent.Position).sqrMagnitude;
+                    if (objective.Location.Category == WaypointCategory.Exfil && objective.Location.ExfilInteriorPosition is Vector3 insideTarget)
+                        distanceSqr = Mathf.Min(distanceSqr, (insideTarget - agent.Position).sqrMagnitude);
 
                     // Stuck-en-route watchdog. Keys on actual position, NOT Movement.Status, so it catches a
                     // "Moving but not advancing" limbo at an off-navmesh loot spot where the Status-gated
@@ -288,33 +293,20 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                                 ExfilArrival.Abandon(agent, objective.Location);
                                 break;
                             }
-                            // The 15 m exfil radius is generous on purpose (BSG nav-snap drift, large
-                            // trigger volumes), but it lets bots "extract" while standing at the surface
-                            // above an underground exfil whose registered transform.position is at the
-                            // hatch but whose actual trigger volume goes below ground. Add a collider-
-                            // contains check so the bot has to be PHYSICALLY inside the trigger volume,
-                            // not just XZ-close. If the bot is outside the volume, keep walking — the
-                            // arrival radius still bounded re-dispatch via TrackArrivalFailure when the
-                            // BSG nav can't get them in (3-fail blacklist still applies, the squad picks
-                            // a different exfil).
+                            // The loose radius can include the surface above an underground exit.
+                            // Keep walking to the interior target until arrival or a local fallback.
                             if (!ExfilArrival.IsInside(agent, objective.Location))
                             {
-                                // Bot is within the loose arrival radius but outside the actual trigger
-                                // volume. The TrackArrivalFailure path is fragile here — if the agent
-                                // happens to re-dispatch between misses (sweep, splinter, anything that
-                                // touches LastFailedPoiId) the consecutive counter resets to 1 and never
-                                // reaches the 3-fail force-extract trigger; in practice only 1 arrival
-                                // miss would log, then the bot would stand at the exfil for minutes until
-                                // SAIN combat took over. Replace with a dedicated stuck
-                                // timer: start counting on first miss, force-extract after N s of being
-                                // continuously "within radius + outside trigger". Resets only when the
-                                // agent actually exits the radius or enters the trigger.
-                                if (objective.ExfilOutsideTriggerSince < 0f)
+                                // Renew the local fallback while making progress, including downstairs.
+                                // If the foot-exit approach stalls, still extract here without choosing
+                                // another exit. Shared-timer cars keep their stricter arrival rules.
+                                var firstWait = objective.ExfilOutsideTriggerSince < 0f;
+                                var outsideWait = ExfilArrival.OutsideTriggerWait(agent);
+                                if (firstWait)
                                 {
-                                    objective.ExfilOutsideTriggerSince = Time.time;
                                     Log.Debug($"{agent} within {Mathf.Sqrt(distanceSqr):F1}m of {objective.Location} but outside the trigger collider — counting as arrival miss (force-extract timer armed)");
                                 }
-                                else if (Time.time - objective.ExfilOutsideTriggerSince >= ExfilOutsideTriggerForceExtractSeconds)
+                                else if (outsideWait >= ExfilOutsideTriggerForceExtractSeconds)
                                 {
                                     if (ExfilArrival.IsSharedTimer(exfil))
                                     {

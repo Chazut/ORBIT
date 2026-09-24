@@ -992,7 +992,14 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                 // Distance check / already-in-radius short-circuit is per- AGENT (against their splinter or
                 // the squad anchor — whichever they got), not per-squad. Without this followers with a
                 // splinter would inherit the squad- anchor distance check and deadlock.
-                if (targetLoc != null)
+                if (targetLoc?.Category == WaypointCategory.Exfil)
+                {
+                    // Being above a bunker is inside its loose radius, not an extraction arrival.
+                    // Goto owns the real trigger check and the existing local fallback timeout.
+                    agentObjective.Status = ObjectiveStatus.None;
+                    agentObjective.ExfilOutsideTriggerSince = -1f;
+                }
+                else if (targetLoc != null)
                 {
                     var distSqr = (targetLoc.Position - agent.Position).sqrMagnitude;
                     if (distSqr <= targetLoc.RadiusSqr)

@@ -44,6 +44,18 @@ internal static class ExfilArrival
         return (agent.Position - location.Position).sqrMagnitude <= 225f;
     }
 
+    internal static float OutsideTriggerWait(Agent agent)
+    {
+        var objective = agent.Objective;
+        if (objective.ExfilOutsideTriggerSince < 0f
+            || (agent.Position - objective.ExfilOutsideTriggerLastPosition).sqrMagnitude > 1f)
+        {
+            objective.ExfilOutsideTriggerSince = Time.time;
+            objective.ExfilOutsideTriggerLastPosition = agent.Position;
+        }
+        return Time.time - objective.ExfilOutsideTriggerSince;
+    }
+
     // NotPresent disables the collider before OnStatusChanged fires. Use the last live
     // bounds with the bot's current position only for an already registered departure.
     internal static bool IsInsideDepartingCar(Agent agent, Waypoint location)
