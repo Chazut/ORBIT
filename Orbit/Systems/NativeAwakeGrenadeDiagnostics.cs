@@ -19,12 +19,53 @@ internal static class NativeAwakeGrenadeDiagnostics
     private static bool _resolved;
     private static Type _managerType;
 
-    internal static void Report(BotOwner bot, float stillFor, float decisionFor)
+    private sealed class Observation
+    {
+        internal Vector3 Position;
+        internal float StillSince, DecisionSince, NextReport;
+    }
+    private static readonly Dictionary<BotOwner, Observation> AgentObservations = new();
+
+    internal static void Clear() => AgentObservations.Clear();
+    internal static void Forget(BotOwner bot)
+    {
+        if (!ReferenceEquals(bot, null)) AgentObservations.Remove(bot);
+    }
+
+    // Called by the existing Ghost poll for registered Agents, including those never asleep.
+    // The common case only reads the current decision; reflection is reserved for a report.
+    internal static void ObserveAgent(BotOwner bot, bool ghost)
+    {
+        var decision = bot?.Brain?.LastDecision;
+        if (bot == null || bot.IsDead || ghost || !bot.gameObject.activeSelf
+            || bot.BotState != EBotState.Active || !decision.HasValue
+            || NativeGhostSystem.ActionName(decision.Value) != ActionName)
+        {
+            Forget(bot);
+            return;
+        }
+        if (!AgentObservations.TryGetValue(bot, out var observation))
+        {
+            observation = new Observation { Position = bot.Position, StillSince = Time.time,
+                DecisionSince = Time.time };
+            AgentObservations.Add(bot, observation);
+        }
+        if ((bot.Position - observation.Position).sqrMagnitude > 1f)
+        {
+            observation.Position = bot.Position;
+            observation.StillSince = Time.time;
+        }
+        if (Time.time - observation.StillSince < 30f || Time.time < observation.NextReport) return;
+        observation.NextReport = Time.time + 60f;
+        Report(bot, Time.time - observation.StillSince, Time.time - observation.DecisionSince, orbit: true);
+    }
+
+    internal static void Report(BotOwner bot, float stillFor, float decisionFor, bool orbit = false)
     {
         string state;
         try { state = Snapshot(bot); }
         catch (Exception e) { state = "sain=unavailable error=" + e.GetBaseException().GetType().Name; }
-        Log.Info($"NATIVE AWAKE GRENADE: {bot.Profile?.Nickname} [{bot.ProfileId}]"
+        Log.Info($"{(orbit ? "ORBIT" : "NATIVE")} AWAKE GRENADE: {bot.Profile?.Nickname} [{bot.ProfileId}]"
             + $" stillFor={stillFor:F1}s decisionFor={decisionFor:F1}s bodyActive={bot.gameObject.activeSelf}"
             + $" position={bot.Position} enemy={bot.Memory?.GoalEnemy != null} underFire={bot.Memory?.IsUnderFire} " + state);
     }

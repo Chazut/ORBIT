@@ -473,6 +473,7 @@ public partial class DormancySystem
     /// corpse or despawned bot is never left as an invisible inactive GameObject.</summary>
     public void OnAgentRemoved(Agent agent)
     {
+        NativeAwakeGrenadeDiagnostics.Forget(agent.Bot);
         if (!agent.IsDormant) return;
         agent.IsDormant = false;
         _dormantAgents.Remove(agent);
@@ -2632,6 +2633,7 @@ public partial class DormancySystem
                 var agent = _botRoster.GetAgent(owner);
                 if (agent != null)
                 {
+                    NativeAwakeGrenadeDiagnostics.ObserveAgent(owner, agent.IsDormant);
                     // A late brain registration transfers ownership back to the normal circuit.
                     if (WakeVanillaBot(owner) && agent.Squad != null)
                         agent.Squad.DormancySleepAllowedAt = Time.time + new GhostWakeReason(GhostWakeCause.GroupChanged, null).CooldownSeconds;

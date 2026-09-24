@@ -35,11 +35,16 @@ public static class NativePatrolDiagnostics
     private static Type _huntType;
     private static readonly Dictionary<string, FieldInfo> HuntFields = new();
 
-    public static void Clear() => Observations.Clear();
+    public static void Clear()
+    {
+        Observations.Clear();
+        NativeAwakeGrenadeDiagnostics.Clear();
+    }
 
     public static void Forget(BotOwner bot)
     {
         if (!ReferenceEquals(bot, null)) Observations.Remove(bot);
+        NativeAwakeGrenadeDiagnostics.Forget(bot);
     }
 
     public static void BeforeSleep(BotOwner bot)
