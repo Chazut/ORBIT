@@ -1366,6 +1366,9 @@ public partial class DormancySystem
             };
             for (var m = 0; m < group.Count; m++)
             {
+                // Spawns still initializing can coexist with sleepers until their next poll.
+                // Only actual Ghosts participate in simulated fights.
+                if (!_vanillaDormant.Contains(group[m])) continue;
                 unit.VanillaBots.Add(group[m]);
                 var memberReach = UnitMemberReach(group[m]);
                 unit.Reach = Mathf.Max(unit.Reach, memberReach);
@@ -2706,7 +2709,7 @@ public partial class DormancySystem
         }
     }
 
-    private bool CanVanillaSleep(object key, List<BotOwner> group)
+    private bool CanVanillaSleep(object key, List<BotOwner> group, bool joining = false)
     {
         if (_vanillaSleepAllowedAt.TryGetValue(key, out var allowedAt) && Time.time < allowedAt)
             return NativeGhostDiagnostics.Refuse(group[0], "wake-cooldown", groupSize: group.Count);
@@ -2715,6 +2718,8 @@ public partial class DormancySystem
         for (var i = 0; i < group.Count; i++)
         {
             var bot = group[i];
+            if (joining && (_vanillaDormant.Contains(bot)
+                || bot.BotState is EBotState.PreActive or EBotState.NonActive)) continue;
             var player = bot.GetPlayer;
             var humanDistance = Mathf.Sqrt(MinSqrDistanceToHumans(player.Position));
             bool Refuse(string reason) => NativeGhostDiagnostics.Refuse(bot, reason, humanDistance, group.Count);
@@ -2771,9 +2776,13 @@ public partial class DormancySystem
     private void SleepVanillaGroup(object key, List<BotOwner> group)
     {
         var native = _cfg.NativeGhostMovement && GhostMovementEnabled;
+        var joining = VanillaDormantCount(group) > 0;
+        var added = 0;
         for (var i = 0; i < group.Count; i++)
         {
             var bot = group[i];
+            if (_vanillaDormant.Contains(bot)) continue;
+            if (joining && bot.BotState is EBotState.PreActive or EBotState.NonActive) continue;
             try
             {
                 if (native)
@@ -2798,9 +2807,16 @@ public partial class DormancySystem
             _vanillaDormant.Add(bot);
             _vanillaHpBaseline[bot] = VanillaHp(bot);
             DormantProfileIds.Add(bot.GetPlayer.ProfileId);
+            added++;
         }
-        _vanillaGroupSleptAt[key] = Time.time;
+        if (added == 0) return;
+        if (!joining) _vanillaGroupSleptAt[key] = Time.time;
         _windowSleeps++;
+        if (joining)
+        {
+            Log.Info($"GHOST GROUP JOIN: {added} members joined sleeping group ({group[0].GetPlayer?.Profile?.Nickname} +{group.Count - 1}); existing Ghost state preserved");
+            return;
+        }
         Log.Info($"vanilla group ({group[0].GetPlayer?.Profile?.Nickname} +{group.Count - 1}) dormant {(native ? "with native movement" : "in place")} ({_vanillaDormant.Count} vanilla dormant) policy={(NativeStandardCount(group) > 0 ? "standard" : "default")}");
     }
 

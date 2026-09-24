@@ -23,8 +23,9 @@ public partial class DormancySystem
         {
             var dormant = VanillaDormantCount(kv.Value);
             if (dormant == 0) continue;
-            var reason = dormant != kv.Value.Count ? new GhostWakeReason(GhostWakeCause.GroupChanged, "group membership changed")
-                : VanillaWakeReason(kv.Key, kv.Value, proximity: false);
+            // A late spawn can join an existing Ghost group. Check real wake causes first,
+            // then let the sleep plan absorb its awake members without resetting the sleepers.
+            var reason = VanillaWakeReason(kv.Key, kv.Value, proximity: false);
             if (reason != null) WakeVanillaGroup(kv.Key, kv.Value, reason.Value);
         }
 
@@ -56,8 +57,10 @@ public partial class DormancySystem
         }
         foreach (var kv in _vanillaGroups)
         {
-            if (VanillaDormantCount(kv.Value) != 0 || !CanVanillaSleep(kv.Key, kv.Value)) continue;
-            var standard = NativeStandardCount(kv.Value);
+            var dormant = VanillaDormantCount(kv.Value);
+            if (dormant == kv.Value.Count || NativeAwakeCount(kv.Value) == 0
+                || !CanVanillaSleep(kv.Key, kv.Value, joining: dormant > 0)) continue;
+            var standard = NativeAwakeCount(kv.Value, standardOnly: true);
             if (standard > 0 && awakeStandard - standard < floor) { _blockedFloor++; continue; }
             var unit = _encounterPlan.Add(kv.Key);
             foreach (var bot in kv.Value) _encounterPlan.Member(unit, bot, bot.Position);
@@ -95,6 +98,14 @@ public partial class DormancySystem
         foreach (var kv in _vanillaGroups)
         {
             if (VanillaDormantCount(kv.Value) == 0) continue;
+            // An activated newcomer that could not join the plan still needs the group's
+            // bodies. PreActive/NonActive spawns wait for initialization instead.
+            if (NativeAwakeCount(kv.Value) > 0)
+            {
+                WakeVanillaGroup(kv.Key, kv.Value, new(GhostWakeCause.GroupChanged,
+                    "new members cannot enter Ghost"));
+                continue;
+            }
             if (_vanillaGroupSleptAt.TryGetValue(kv.Key, out var sleptAt)
                 && Time.time - sleptAt < SleepGraceSeconds) continue;
             foreach (var bot in kv.Value)
@@ -115,6 +126,15 @@ public partial class DormancySystem
     {
         var count = 0;
         foreach (var bot in bots) if (_vanillaDormant.Contains(bot)) count++;
+        return count;
+    }
+
+    private int NativeAwakeCount(List<BotOwner> bots, bool standardOnly = false)
+    {
+        var count = 0;
+        foreach (var bot in bots)
+            if (!_vanillaDormant.Contains(bot) && bot.BotState == EBotState.Active
+                && (!standardOnly || !IsDefaultDormant(bot))) count++;
         return count;
     }
 
