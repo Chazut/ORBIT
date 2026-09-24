@@ -146,7 +146,7 @@ public sealed class NativeGhostSystem
                 NativeGhostCover.Supports(bot, decision.Value.ToString()), adapter?.Isb == true,
                 NativeGhostZryachiy.Supports(bot, decision.Value.ToString())
                     || NativeGhostMarksman.SupportsLay(bot, decision.Value),
-                NativeGhostMarksman.SupportsStandBy(bot, decision.Value)))
+                NativeGhostMarksman.SupportsStandBy(bot, decision.Value), NativeGhostLoot.Supports(bot, decision.Value)))
             {
                 if (_reportedUnsupported.Add(bot.ProfileId + "|" + name))
                     Log.Info($"NATIVE GHOST: {bot.Profile.Nickname} kept awake: unsupported {name} (role={bot.Profile.Info.Settings.Role}, hunt={hunt})");
@@ -179,6 +179,8 @@ public sealed class NativeGhostSystem
             || bot.Mover?.CurrentState == EBotMoverState.NearDoor) return "door-sequence";
         var patrol = NativeGhostPatrol.BodyReason(bot);
         if (patrol != null) return patrol;
+        var loot = NativeGhostLoot.BodyReason(bot);
+        if (loot != null) return loot;
         var inventory = bot.GetPlayer?.InventoryController;
         if (inventory != null)
             foreach (var operation in inventory.SelectEvents<ItemEventArgs>()) return "inventory-operation";
@@ -477,7 +479,7 @@ public sealed class NativeGhostSystem
                 NativeGhostCover.Supports(state.Bot, decision.ToString()), state.Adapter?.Isb == true,
                 NativeGhostZryachiy.Supports(state.Bot, decision.ToString())
                     || NativeGhostMarksman.SupportsLay(state.Bot, decision),
-                NativeGhostMarksman.CanKeepStandByDecision(state.Bot, decision))
+                NativeGhostMarksman.CanKeepStandByDecision(state.Bot, decision), NativeGhostLoot.Supports(state.Bot, decision))
             || CombatRequiresBody(state.Bot)
             || NeedsBody(state.Bot))
         {

@@ -39,6 +39,7 @@ internal static class NativeGhostBodyPatches
             Bind(harmony, typeof(BotSurgicalKit), "ApplyToCurrentPart");
             Bind(harmony, typeof(BotStimulators), "StartApplyToTarget", "TryApply");
             Bind(harmony, typeof(PatrollingData), "ComeToPoint");
+            Bind(harmony, typeof(PatrolLootPointsData), "ComeToLootPoint", "UpdateLootState");
             Bind(harmony, typeof(PatrollingAlternative), "UpdateNodeByBrain");
             harmony.Patch(AccessTools.Method(typeof(PatrollingAlternative), "UpdateNodeByBrain"),
                 transpiler: new HarmonyMethod(typeof(NativeGhostBodyPatches), nameof(GuardPatrolUpdate)));
@@ -89,6 +90,9 @@ internal static class NativeGhostBodyPatches
                 __originalMethod.Name != "ManualUpdate" && opener._currentDoorLink == null, out _);
         var bot = Owners[__originalMethod](__instance);
         if (__instance is BotLay) return !NativeGhostSystem.DeferProne(bot);
+        if (__instance is PatrolLootPointsData)
+            return __originalMethod.Name == "ComeToLootPoint"
+                ? !NativeGhostLoot.DeferArrival(bot) : !NativeGhostLoot.DeferUpdate(bot);
         if (__instance is PatrollingData) return !NativeGhostPatrol.DeferArrival(bot);
         if (__instance is PatrollingAlternative) return !NativeGhostPatrol.DeferUpdate(bot);
         return !NativeGhostSystem.DeferBodyOperation(bot,

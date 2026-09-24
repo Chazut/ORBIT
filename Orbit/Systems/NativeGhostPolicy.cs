@@ -4,7 +4,7 @@ internal static class NativeGhostPolicy
 {
     public static bool Supports(string decision, string customLogic, bool customRole, bool huntAdapter,
         string checkpoint = null, bool warband = false, bool partisanTravel = false, bool coverTravel = false, bool isb = false,
-        bool peacefulLay = false, bool peacefulStandBy = false)
+        bool peacefulLay = false, bool peacefulStandBy = false, bool lootTravel = false)
     {
         if (customLogic != null)
         {
@@ -31,6 +31,7 @@ internal static class NativeGhostPolicy
         }
 
         if (customRole && !huntAdapter && checkpoint == null && !isb) return false;
+        if (lootTravel && decision == "goToLootPointNode") return true;
         if (peacefulLay && decision == "lay") return true;
         if (peacefulStandBy && decision == "standBy") return true;
         if (coverTravel && decision is "goToCoverPoint" or "runToCover") return true;
