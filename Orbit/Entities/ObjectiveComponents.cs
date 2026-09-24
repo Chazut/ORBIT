@@ -73,6 +73,10 @@ public class SquadObjective
     public float Duration;
     public bool DurationAdjusted;
 
+    // Bound full waypoint re-selection when every member has exhausted nearby loot.
+    // Kept across anchor changes so repeated empty picks cannot spin each strategy tick.
+    public float NextLootExhaustionRecheckAt;
+
     public override string ToString()
         => $"SquadObjective({Location}, {Status}, timeout: {Time.time - StartTime} / {Duration})";
 }

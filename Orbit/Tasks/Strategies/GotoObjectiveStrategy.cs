@@ -293,7 +293,10 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                 continue;
             }
 
-            var finishedCount = UpdateAgents(squad);
+            var finishedCount = UpdateAgents(squad, out var locallyExhaustedLootCount);
+
+            if (TryAdvanceExhaustedLoot(squad, finishedCount, locallyExhaustedLootCount))
+                continue;
 
             if (finishedCount == squad.Size)
             {
@@ -617,10 +620,11 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
         return max > 0f ? cur / max : 1f;
     }
 
-    private int UpdateAgents(Squad squad)
+    private int UpdateAgents(Squad squad, out int locallyExhaustedLootCount)
     {
         var squadObjective = squad.Objective;
         var finishedCount = 0;
+        locallyExhaustedLootCount = 0;
         _splinterScratch.Clear();
 
         // Independent-dispatch mode: each member picks their own roam splinter (extended radius + category
@@ -642,6 +646,10 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
         var roamContainerLoot = useRoam;
         var roamCorpse = useRoam;
         var roamSynthetic = useRoam && activeType == MainObjectiveType.Kills;
+        var trackLootExhaustion = useRoam && activeType == MainObjectiveType.LootValue
+                                 && activeMain.LootValueEnteredAt > 0f
+                                 && squadObjective.Location != null
+                                 && IsLootPoi(squadObjective.Location.Category);
 
         for (var i = 0; i < squad.Size; i++)
         {
@@ -809,6 +817,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                 //   5. Fallback to squad anchor (no splinter found).
                 Waypoint targetLoc;
                 Waypoint splinterParent;
+                var locallyExhausted = false;
                 var tookOwnKillCorpse = false;
                 var ownKillAgentId = squad.PendingOwnKillKillerAgentId;
                 var anchorReservedForOwnKill = ownKillAgentId >= 0
@@ -888,11 +897,15 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                     else if (squadObjective.Location != null
                              && (squadObjective.Location.Position - agent.Position).sqrMagnitude <= squadObjective.Location.RadiusSqr)
                     {
-                        // No roam splinter left and this member is already on the anchor; re-picking it just
-                        // loops every tick without moving. Null it so it settles into a guard and the squad wait
-                        // timer (or cell-clean completion) moves the squad on.
+                        // This search, rather than an arbitrary null objective, proves local exhaustion.
+                        // Once all members settle, re-evaluate the wider cell instead of waiting at this POI.
                         targetLoc = null;
                         splinterParent = null;
+                        if (trackLootExhaustion)
+                        {
+                            locallyExhausted = true;
+                            locallyExhaustedLootCount++;
+                        }
                     }
                     else
                     {
@@ -965,6 +978,12 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                         }
                     }
                 }
+
+                // Keep searching on later ticks (claims can be released and corpses can appear), but do not
+                // repeatedly reset/log the same empty assignment while another member is still looting.
+                if (locallyExhausted && agentObjective.Location == null
+                    && agentObjective.SplinterParent == null && agentObjective.Status == ObjectiveStatus.None)
+                    continue;
 
                 agentObjective.Location = targetLoc;
                 agentObjective.SplinterParent = splinterParent;
@@ -1086,6 +1105,39 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
         }
 
         return finishedCount;
+    }
+
+    private bool TryAdvanceExhaustedLoot(Squad squad, int finishedCount, int locallyExhaustedCount)
+    {
+        // UpdateAgents reports exhaustion only after a LootValue local search found no eligible target
+        // while the member was already at a loot anchor. Unknown nulls and failed travel do not qualify.
+        if (locallyExhaustedCount == 0 || finishedCount + locallyExhaustedCount != squad.Size
+            || squad.ExtractRequested || squad.CombatCallerMemberIdx >= 0
+            || squad.PreInterruptObjectiveLocation != null || Time.time < squad.GhostFightUntil
+            || waypointSystem.IsClaimed(squad.Objective.Location.Id))
+            return false;
+
+        for (var i = 0; i < squad.Size; i++)
+        {
+            var member = squad.Members[i];
+            if (!member.IsActive || member.SoloExtractRequested
+                || member.Bot?.Memory is { HaveEnemy: true } or { IsUnderFire: true }
+                || member.LootHandler is { LootTaskRunning: true }
+                || (member.Objective.Location != null && waypointSystem.IsClaimed(member.Objective.Location.Id))
+                || member.Objective.Status == ObjectiveStatus.Failed)
+                return false;
+        }
+
+        var objective = squad.Objective;
+        // A null/unchanged result still uses the cooldown. Do not fall through to the expired generic
+        // wait timer and bypass it. Active members continue through the normal dispatch path above.
+        if (Time.time < objective.NextLootExhaustionRecheckAt) return true;
+        objective.NextLootExhaustionRecheckAt = Time.time + 2f;
+        Log.Debug($"{squad} local loot exhausted: {locallyExhaustedCount} without a target, {finishedCount} finished; re-evaluating {objective.Location}");
+        // RequestNear applies the normal claims, floor and reachability checks. Exhausting a local
+        // radius alone never marks the main cell clean or increments an en-route failure streak.
+        AssignNewObjective(squad, completedCurrent: true);
+        return true;
     }
 
     // ── Main objectives: tick + completion + extract trigger ────────
