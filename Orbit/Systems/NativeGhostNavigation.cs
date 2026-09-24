@@ -8,13 +8,15 @@ using UnityEngine.AI;
 
 namespace Orbit.Systems;
 
-/// <summary>Repairs execution of a native order without choosing a new destination or behaviour.</summary>
+/// <summary>Owns native Ghost orders, route execution retries and failure, leaving destination choice to the author.</summary>
 internal sealed class NativeGhostNavigation(BotOwner bot, DoorSystem doors)
 {
     private const float RetryInterval = 2f;
     private const float StuckSeconds = 12f;
     private const float MaxRelocation = 8f;
     private const float ProgressDistance = 3f;
+    private const float FailureSeconds = 90f;
+    private const float FailedRetrySeconds = 60f;
     private const int EdgeProbeCount = 15;
     private const int MaxLandings = 32 + EdgeProbeCount;
     private static readonly float[] RescueRings = { 1f, 2f, 4f, MaxRelocation };
@@ -41,6 +43,10 @@ internal sealed class NativeGhostNavigation(BotOwner bot, DoorSystem doors)
     private int _repeatedSegment;
     private int _edgeProbe = EdgeProbeCount;
     private Vector3 _edgeOrigin, _edgeDirection;
+    private float _failedRetryAt;
+    private bool _failureHandled;
+    internal bool Failed { get; private set; }
+    internal bool HasUnhandledFailure => Failed && !_failureHandled;
     private int RetryCount => Math.Max(_repeatedSegment, _invalidPaths);
     private float RetryDelay => RetryCount >= 10 ? 30f : RetryCount >= 6 ? 10f
         : RetryCount >= 3 ? 5f : RetryInterval;
@@ -59,6 +65,7 @@ internal sealed class NativeGhostNavigation(BotOwner bot, DoorSystem doors)
         // Geometry changed during the backoff. Let the next movement update resume this
         // original route, instead of rechecking it on every scheduled brain tick.
         _invalidPaths = _failures = 0;
+        Failed = false;
         _status = _path.status;
         _retryAt = 0f;
         return false;
@@ -74,7 +81,7 @@ internal sealed class NativeGhostNavigation(BotOwner bot, DoorSystem doors)
     }
 
     internal string Summary => _target.HasValue
-        ? $"order={_target.Value} remaining={Vector3.Distance(bot.Position, _target.Value):F1}m nav={_status} retries={_failures} source={_source} reach={_reach:F2}m stalled={StalledFor:F1}s rescues={_triedLandings.Count}"
+        ? $"order={_target.Value} remaining={Vector3.Distance(bot.Position, _target.Value):F1}m nav={_status} retries={_failures} source={_source} reach={_reach:F2}m stalled={StalledFor:F1}s rescues={_triedLandings.Count} failed={Failed}"
         : "order=none";
 
     internal static void ResetBudget() { _budgetFrame = -1; _queries = 0; }
@@ -91,6 +98,8 @@ internal sealed class NativeGhostNavigation(BotOwner bot, DoorSystem doors)
     {
         RestorePathReach();
         _target = null;
+        Failed = _failureHandled = false;
+        _failedRetryAt = 0f;
         _source = null;
         _failures = _probe = _invalidPaths = 0;
         _walkedDelta = default;
@@ -128,6 +137,7 @@ internal sealed class NativeGhostNavigation(BotOwner bot, DoorSystem doors)
 
     private void ResetProgress()
     {
+        Failed = _failureHandled = false;
         Suspend();
         _failures = _probe = _invalidPaths = 0;
         _retryAt = _rescueAt = 0f;
@@ -138,6 +148,30 @@ internal sealed class NativeGhostNavigation(BotOwner bot, DoorSystem doors)
         _edgeDirection = default;
         _repeatedSegment = 0;
         _blockedFrom = _blockedCorner = null;
+    }
+
+    internal bool SameGoal(Vector3 target)
+        => _target.HasValue && Finite(target) && (_target.Value - target).sqrMagnitude <= 0.0025f;
+
+    internal NavMeshPathStatus Repeat() { Update(); return _status; }
+
+    // Goal identity belongs to the destination, not the API, path corners or arrival radius.
+    // A native refresh must never replace a recovery path or postpone its next attempt.
+    private bool BeginOrder(Vector3 target, float reach, string source)
+    {
+        if (reach < 0f) reach = bot.Settings.FileSettings.Move.REACH_DIST;
+        if (float.IsNaN(reach) || float.IsInfinity(reach)) reach = 0.5f;
+        var changed = !SameGoal(target);
+        if (changed)
+        {
+            Cancel();
+            _target = target;
+            _status = NavMeshPathStatus.PathInvalid;
+            _source = source;
+            Suspend();
+        }
+        SetReachDistance(reach);
+        return changed;
     }
 
     internal bool Blocked(string reason = null, Vector3? attempted = null, Vector3? corner = null,
@@ -183,43 +217,52 @@ internal sealed class NativeGhostNavigation(BotOwner bot, DoorSystem doors)
     internal NavMeshPathStatus Request(Vector3 target, float reach)
     {
         if (!Finite(target)) { Cancel(); bot.Mover.ActualPathController.Stop(); return NavMeshPathStatus.PathInvalid; }
-        if (reach < 0f) reach = bot.Settings.FileSettings.Move.REACH_DIST;
-        if (float.IsNaN(reach) || float.IsInfinity(reach)) reach = 0.5f;
-        reach = Mathf.Max(0.1f, reach);
-        if (!_target.HasValue || (_target.Value - target).sqrMagnitude > 0.0025f || Mathf.Abs(_reach - reach) > 0.01f)
-        {
-            Cancel();
-            _target = target;
-            _source = "go-to-point";
-            _reach = reach;
-            _status = NavMeshPathStatus.PathInvalid;
-            Suspend();
-            bot.Mover.ActualPathController.Stop();
-        }
+        if (BeginOrder(target, reach, "go-to-point")) bot.Mover.ActualPathController.Stop();
         Update();
         return _status;
+    }
+
+    internal void RequestWay(Vector3 target, Vector3[] corners, float reach, string source)
+    {
+        if (!Finite(target) || !NativeGhostOrders.ValidWay(corners))
+        { Cancel(); bot.Mover.ActualPathController.Stop(); return; }
+        if (BeginOrder(target, reach, source))
+        {
+            // Keep a genuinely new author's route verbatim. Only the controller can install it.
+            SetPath(corners, NavMeshPathStatus.PathComplete);
+            Report($"retained native order: {Summary}");
+        }
+        Update();
     }
 
     // Adopting an existing native route must not stop it, consume corners, or recalculate it.
     internal void Retain(Vector3 target, float reach, NavMeshPathStatus status, string source)
     {
         if (!Finite(target)) { Cancel(); return; }
-        if (reach < 0f) reach = bot.Settings.FileSettings.Move.REACH_DIST;
-        if (float.IsNaN(reach) || float.IsInfinity(reach)) reach = 0.5f;
-        reach = Mathf.Max(0.1f, reach);
-        if (!_target.HasValue || (_target.Value - target).sqrMagnitude > 0.0025f)
-        {
-            Cancel();
-            Suspend();
-        }
-        _target = target;
-        _reach = reach;
+        BeginOrder(target, reach, source);
         _status = status;
-        _source = source;
         AdjustPathReach();
         if (Time.time < _retainedReportAt) return;
         _retainedReportAt = Time.time + 30f;
         Log.Info($"NATIVE GHOST: {bot.Profile.Nickname} retained native order: {Summary}");
+    }
+
+    internal bool TakeFailure()
+    {
+        if (!Failed || _failureHandled) return false;
+        _failureHandled = true;
+        return true;
+    }
+
+    private void Fail()
+    {
+        Failed = true;
+        _failureHandled = false;
+        _failedRetryAt = Time.time + FailedRetrySeconds;
+        _status = NavMeshPathStatus.PathInvalid;
+        bot.Mover.ActualPathController.Stop();
+        bot.Mover.IsMoving = false;
+        Log.Info($"NATIVE GHOST: {bot.Profile.Nickname} native order failed: {Summary} retryIn={FailedRetrySeconds:F0}s; awaiting native selection");
     }
 
     internal void Update()
@@ -244,6 +287,15 @@ internal sealed class NativeGhostNavigation(BotOwner bot, DoorSystem doors)
         {
             ResetProgress();
         }
+        if (Failed)
+        {
+            if (Time.time < _failedRetryAt) return;
+            // A door or geometry can change later. Retry at a bounded interval, even if the
+            // author has no alternate destination. Duplicate orders cannot shorten this wait.
+            Failed = false;
+            ResetProgress();
+        }
+        if (_failures >= 3 && StalledFor >= FailureSeconds) { Fail(); return; }
         if (bot.Mover.ActualPathController.HavePath || Time.time < _retryAt) return;
         if (_partialEnd.HasValue && Vector3.Distance(bot.Position, _partialEnd.Value) <= _reach + 0.2f)
         {

@@ -57,8 +57,8 @@ public class NativeGhostWayOrderPatch : ModulePatch
         => AccessTools.Method(typeof(BotMover), nameof(BotMover.GoToByWay), new[] { typeof(Vector3[]), typeof(float) });
 
     [PatchPrefix]
-    public static bool Prefix(BotMover __instance, Vector3[] __0)
-        => NativeGhostSystem.AllowWayOrder(__instance, __0);
+    public static bool Prefix(BotMover __instance, Vector3[] __0, float __1)
+        => NativeGhostSystem.AllowWayOrder(__instance, __0, __1);
 
     [PatchPostfix]
     public static void Postfix(BotMover __instance, Vector3[] __0, float __1)
@@ -66,7 +66,7 @@ public class NativeGhostWayOrderPatch : ModulePatch
 }
 
 // The original goal is lost when native zigzag navigation hands the mover only its corners.
-// Keep it scoped to this call, including nested calls and failures; never replace the native route.
+// Keep new routes scoped to this call; repeated goals use the existing controller and its backoff.
 public class NativeGhostZigzagGoalPatch : ModulePatch
 {
     protected override MethodBase GetTargetMethod()
@@ -74,8 +74,26 @@ public class NativeGhostZigzagGoalPatch : ModulePatch
             new[] { typeof(Vector3), typeof(BotOwner), typeof(EZigZAgType) });
 
     [PatchPrefix]
-    private static void Prefix(Vector3 __0, BotOwner __1, out NativeGhostOrders.GoalScope __state)
-        => __state = NativeGhostOrders.BeginGoal(__1?.Mover, __0);
+    private static bool Prefix(Vector3 __0, BotOwner __1, ref bool __result, out NativeGhostOrders.GoalScope __state)
+    {
+        __state = null;
+        if (NativeGhostSystem.TryRepeatGoal(__1?.Mover, __0, out var success))
+        {
+            __result = success;
+            return false;
+        }
+        __state = NativeGhostOrders.BeginGoal(__1?.Mover, __0);
+        return true;
+    }
+
+    [PatchPostfix]
+    private static void Postfix(Vector3 __0, BotOwner __1, ref bool __result)
+    {
+        // Native zigzag can fail before issuing any corners. Retain that goal as well so
+        // subsequent point/cover fallbacks share its bounded retry state.
+        if (!__result && __1 != null && NativeGhostSystem.TryMoveOrder(__1.Mover, __0, -1f, out var status))
+            __result = status == NavMeshPathStatus.PathComplete;
+    }
 
     [PatchFinalizer]
     private static Exception Finalizer(Exception __exception, NativeGhostOrders.GoalScope __state)

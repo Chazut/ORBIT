@@ -330,27 +330,41 @@ public sealed class NativeGhostSystem
         if (!Movers.ContainsKey(mover)) NativeGhostOrders.Record(mover, destination, status, source);
     }
 
-    public static bool AllowWayOrder(BotMover mover, Vector3[] way)
+    public static bool AllowWayOrder(BotMover mover, Vector3[] way, float reach)
     {
         if (!Movers.TryGetValue(mover, out var state) || !RetainsNativeState(state.Bot)) return true;
         if (state.WakeReason != null) return false;
-        if (NativeGhostOrders.ValidWay(way)) return true;
-        CancelMoveOrder(mover);
-        mover.ActualPathController.Stop();
+        try
+        {
+            var original = false;
+            var target = NativeGhostOrders.ValidWay(way)
+                ? NativeGhostOrders.WayGoal(mover, way[way.Length - 1], out original) : new Vector3(float.NaN, 0f, 0f);
+            state.Navigation.RequestWay(target, way, reach, original ? "go-to-way-goal" : "go-to-way");
+        }
+        catch (Exception e) { RequestWake(state, $"navigation failed: {e.GetType().Name}: {e.Message}"); }
         return false;
+    }
+
+    public static bool TryRepeatGoal(BotMover mover, Vector3 target, out bool success)
+    {
+        success = false;
+        if (mover == null || !Movers.TryGetValue(mover, out var state) || !RetainsNativeState(state.Bot)) return false;
+        if (state.WakeReason != null) return true;
+        if (!state.Navigation.SameGoal(target)) return false;
+        try { success = state.Navigation.Repeat() == NavMeshPathStatus.PathComplete; }
+        catch (Exception e) { RequestWake(state, $"navigation failed: {e.GetType().Name}: {e.Message}"); }
+        return true;
     }
 
     public static void RetainWayOrder(BotMover mover, Vector3[] way, float reach)
     {
+        // Ghost orders were accepted before the original mover ran. A postfix must not
+        // overwrite a recovery's status, including its explicit failure result.
+        if (Movers.ContainsKey(mover)) return;
         if (!NativeGhostOrders.ValidWay(way)) { CancelMoveOrder(mover); return; }
         var target = NativeGhostOrders.WayGoal(mover, way[way.Length - 1], out var original);
         var source = original ? "go-to-way-goal" : "go-to-way";
-        if (Movers.TryGetValue(mover, out var state))
-        {
-            if (OwnsInactiveMovement(state.Bot) && mover.ActualPathController.HavePath)
-                state.Navigation.Retain(target, reach, NavMeshPathStatus.PathComplete, source);
-        }
-        else NativeGhostOrders.Record(mover, target, NavMeshPathStatus.PathComplete, source);
+        NativeGhostOrders.Record(mover, target, NavMeshPathStatus.PathComplete, source);
     }
 
     public static void SetReachDistance(BotMover mover, float reach)
@@ -525,6 +539,7 @@ public sealed class NativeGhostSystem
             if (mover.Pause) mover.MovementResume();
             if (state.Doors.Pending && WaitForDoor(state)) return;
             state.Navigation.Update();
+            NativeGhostPatrolRecovery.Update(bot, state.Decision, state.Navigation);
             if (state.Adapter?.RefreshStalledCheckpoint(bot, state.Decision, state.Navigation.Target, state.Navigation.RecoveringLocally) == true
                 || state.Regroup?.Refresh(bot, state.Decision, state.Navigation) == true)
             {
