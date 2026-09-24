@@ -75,6 +75,7 @@ public class MovementSystem
 
             if (!agent.IsActive)
             {
+                agent.Stuck.Recovery.Suspend();
                 if (agent.Movement.HasPath)
                     ResetPath(agent);
                 continue;
@@ -85,6 +86,7 @@ public class MovementSystem
             // (world keeps moving); everything else waits for the wake resync in DormancySystem.
             if (agent.IsDormant)
             {
+                agent.Stuck.Recovery.Suspend();
                 // Pinned while a simulated ghost fight plays out: nobody walks their route mid-firefight.
                 if (agent.Squad != null && Time.time < agent.Squad.GhostFightUntil) continue;
                 // The island rescues run for sleepers too. A ghost that spawned on a disconnected chunk only
@@ -99,21 +101,8 @@ public class MovementSystem
                 continue;
             }
 
-            // Keep BSG's BotMover anchored to where the bot ACTUALLY is. BotMover.CastFromPos (the hard rescue
-            // teleport) snaps the bot to _lastGoodCastPoint when it decides the bot is stuck. The brain layer
-            // sets _lastGoodCastPoint to agent.Position only at the layer *transition* — so while we're in
-            // control, it stays frozen at wherever the bot was when handed off. A rescue then yeets the bot
-            // back to that stale anchor (sometimes their spawn). Refreshing every frame makes any rescue land
-            // as a teleport-to-self no-op.
-            var mover = agent.Bot?.Mover;
-            if (mover != null)
-            {
-                var pos = agent.Position;
-                mover._lastGoodCastPoint = pos;
-                mover._prevSuccessLinkedFrom = pos;
-                mover._prevLinkPos = pos;
-                mover.PositionOnWayInner = pos;
-            }
+            if (agent.Stuck.Recovery.Observe(agent.Position, agent.Bot?.Mover))
+                TryReturnToValidatedAnchor(agent);
 
             // Runs before UpdateMovement: an islanded bot has no path, so UpdateMovement early-returns and the
             // stuck remediation never sees it.
@@ -227,6 +216,7 @@ public class MovementSystem
         }
         if (++stuck.GhostInvalidPathStreak < GhostInvalidPathRescueStreak) return;
         stuck.GhostInvalidPathStreak = 0;
+        if (!stuck.Recovery.ProbeDue(agent.Position)) return;
         var from = agent.Position;
         if (RescueTeleportToConnectedPoint(agent, job.Target) || RescueTeleportNearSquadmate(agent))
             Log.Info($"{agent} ghost rescue: {GhostInvalidPathRescueStreak} invalid paths in a row from {from}, body moved to a connected navmesh point");
@@ -1462,11 +1452,36 @@ public class MovementSystem
         stuck.IdleRescueSince = Time.time;
     }
 
+    private void TryReturnToValidatedAnchor(Agent agent)
+    {
+        var recovery = agent.Stuck.Recovery;
+        if (agent.Bot.Memory.IsUnderFire || agent.Bot.Memory.GoalEnemy != null
+            || GhostBodyTransition.Busy(agent.Player) || !recovery.ProbeDue(agent.Position)
+            || !recovery.TryReturnPoint(out var point) || !TeleportSafe(agent, _humanPlayers)) return;
+        // Check the destination too: recovering a hidden body must not make it appear in view.
+        foreach (var human in _humanPlayers)
+        {
+            if (human?.HealthController is not { IsAlive: true }) continue;
+            if ((human.Position - point).sqrMagnitude <= 100f) return;
+            var head = human.PlayerBones.Head.Original.position;
+            for (var height = 0.3f; height <= 1.8f; height += 0.6f)
+                if (!Physics.Linecast(head, point + Vector3.up * height, out _, TeleportVisLayerMask.value)) return;
+        }
+        recovery.BeginProbe(agent.Position);
+        var from = agent.Position;
+        agent.Player.Teleport(point + Vector3.up * 0.25f);
+        recovery.Recovered(agent.Position);
+        recovery.Observe(agent.Position, agent.Bot.Mover, force: true);
+        ResetPath(agent);
+        Log.Warning($"{agent} movement recovery: returned to validated NavMesh anchor from={from} to={point}");
+    }
+
     private bool RescueTeleportToConnectedPoint(Agent agent, Vector3 objectivePos, int startRing = 0)
     {
         if (!TeleportSafe(agent, _humanPlayers)) return false;
 
         var pos = agent.Position;
+        if (!agent.Stuck.Recovery.BeginProbe(pos)) return false;
         for (var ri = startRing; ri < IdleRescueRingRadii.Length; ri++)
         {
             var r = IdleRescueRingRadii[ri];
@@ -1482,12 +1497,14 @@ public class MovementSystem
                 var dest = hit.position;
                 dest.y += 0.25f;
                 agent.Player.Teleport(dest);
+                agent.Stuck.Recovery.Recovered(dest);
                 ResetPath(agent);
                 Log.Info($"{agent} idle-island rescue: teleported {Vector3.Distance(pos, dest):F0}m to a navmesh point connected to its objective (stranded {IdleRescueThresholdSeconds:F0}s)");
                 return true;
             }
         }
-        Log.Debug($"{agent} idle-island rescue: no connected navmesh point within {IdleRescueRingRadii[^1]:F0}m — trying squadmate fallback");
+        agent.Stuck.Recovery.ProbeFailed();
+        Log.Debug($"{agent} idle-island rescue: no connected navmesh point within {IdleRescueRingRadii[^1]:F0}m; backing off before another local search");
         return false;
     }
 

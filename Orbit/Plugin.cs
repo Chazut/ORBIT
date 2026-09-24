@@ -111,6 +111,7 @@ public class Plugin : BaseUnityPlugin
         EnableSafe(new MovementContextHumanizePatch());
         EnableSafe(new BotVaultingPatch());
         EnableSafe(new ManualFixedUpdateSkipPatch());
+        EnableSafe(new OrbitMoverMotionPatch());
 
         // Ghost Mode: awake bots must not raycast dormant (deactivated) ones. Inert while the limiter is
         // OFF — the dormant set stays empty and the prefix falls through.
