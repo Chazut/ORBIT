@@ -15,8 +15,11 @@ internal static class NativeGhostMarksman
     internal static bool SupportsLay(BotOwner bot, BotLogicDecision decision)
         => decision == BotLogicDecision.lay && IsPeacefulLayer(bot);
 
-    internal static bool CanDeferProne(BotOwner bot)
-        => IsPeacefulLayer(bot) && bot.Brain.LastDecision is BotLogicDecision.lay or BotLogicDecision.holdPosition;
+    // LastDecision is committed after the new node runs. Use the action already accepted by
+    // GuardDecision so the first peaceful LayNode tick does not see the previous runToCover.
+    internal static bool CanDeferProne(BotOwner bot, string validatedDecision)
+        => IsPeacefulLayer(bot)
+            && validatedDecision is nameof(BotLogicDecision.lay) or nameof(BotLogicDecision.holdPosition);
 
     internal static bool SupportsStandBy(BotOwner bot, BotLogicDecision decision)
         => decision == BotLogicDecision.standBy

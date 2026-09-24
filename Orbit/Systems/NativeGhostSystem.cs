@@ -266,7 +266,7 @@ public sealed class NativeGhostSystem
         if (!RetainsNativeState(bot)) return false;
         var state = Sleepers[bot];
         if (state.WakeReason != null) return true;
-        if (NativeGhostMarksman.CanDeferProne(bot))
+        if (NativeGhostMarksman.CanDeferProne(bot, state.Decision))
         {
             if (!state.ReportedProneDeferred)
             {
