@@ -41,6 +41,7 @@ internal static class NativeGhostDiagnostics
     public static bool Refuse(BotOwner bot, string reason, float humanDistance = -1f, int groupSize = 1)
     {
         if (bot?.ProfileId == null) return false;
+        NativeMedicalDiagnostics.Refused(bot, reason);
         if (NextReport.TryGetValue(bot.ProfileId, out var next) && Time.time < next) return false;
         NextReport[bot.ProfileId] = Time.time + 60f;
         try

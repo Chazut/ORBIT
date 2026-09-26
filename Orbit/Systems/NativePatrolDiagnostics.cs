@@ -39,12 +39,14 @@ public static class NativePatrolDiagnostics
     {
         Observations.Clear();
         NativeAwakeGrenadeDiagnostics.Clear();
+        NativeMedicalDiagnostics.Clear();
     }
 
     public static void Forget(BotOwner bot)
     {
         if (!ReferenceEquals(bot, null)) Observations.Remove(bot);
         NativeAwakeGrenadeDiagnostics.Forget(bot);
+        NativeMedicalDiagnostics.Forget(bot);
     }
 
     public static void BeforeSleep(BotOwner bot)
@@ -70,6 +72,8 @@ public static class NativePatrolDiagnostics
     // Called by the existing vanilla poll, including while the body stays awake near other bots.
     public static void Observe(BotOwner bot, bool ghost, bool fight)
     {
+        // Medical blockers need observations even when the group has never been allowed to sleep.
+        NativeMedicalDiagnostics.Observe(bot, ghost);
         if (!Observations.TryGetValue(bot, out var observation)) return;
         if (bot == null || bot.IsDead) { Forget(bot); return; }
         UpdatePosition(bot, observation);

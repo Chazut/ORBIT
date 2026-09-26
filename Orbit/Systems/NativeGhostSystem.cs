@@ -86,6 +86,7 @@ public sealed class NativeGhostSystem
         CustomActions.Clear();
         NativePatrolDiagnostics.Clear();
         NativeGhostDiagnostics.Clear();
+        SanitarPatrolMedicinePatch.Clear();
     }
 
     private static string CustomAction(BotLogicDecision decision)

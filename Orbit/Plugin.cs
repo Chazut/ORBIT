@@ -129,6 +129,7 @@ public class Plugin : BaseUnityPlugin
         EnableSafe(new NativeFollowerArrivalDiagnosticPatch());
         EnableSafe(new NativeGlukharChoiceDiagnosticPatch());
         NativeGhostBodyPatches.Enable();
+        SanitarPatrolMedicinePatch.Enable();
         EnableSafe(new DormantDamageProbePatch());
         EnableSafe(new DormantGroundCollisionPatch());
         EnableSafe(new DormantAvoidDangerBypassPatch());
