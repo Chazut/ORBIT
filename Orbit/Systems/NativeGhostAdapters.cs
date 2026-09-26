@@ -139,6 +139,12 @@ internal sealed class NativeGhostAdapters
             () => _rvrOrders(board).Remove(bot));
     }
 
+    internal static bool IsWarbandMember(BotOwner bot)
+    {
+        ResolveBindings();
+        return bot?.BotsGroup != null && _rvrMember != null && _rvrMember(bot);
+    }
+
     private static NativeGhostAdapters CheckpointAdapter(BotOwner bot, CheckpointBinding binding, string faction)
     {
         if (binding?.Available == null || binding.Point == null) return null;

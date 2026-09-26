@@ -42,7 +42,7 @@ public static class OrbitTelemetry
         for (var i = 0; i < agents.Count; i++)
             if (agents[i]?.Player?.ProfileId == profileId)
                 return manager.DormancySystem.GetGhostHearingState(agents[i]);
-        return new OrbitGhostHearingState();
+        return manager.DormancySystem.GetNativeGhostHearingState(profileId);
     }
 
     // ── Simulated ghost fights (Ghost Mode) ─────────────────────────────
@@ -358,7 +358,7 @@ public class OrbitGhostFight
     public int Casualties;
 }
 
-/// <summary>An eligible dormant ORBIT squad heard a noise and chose whether to investigate it.
+/// <summary>An eligible dormant group heard a noise and chose whether to investigate it.
 /// Positions and membership are captured at the decision, not at the consumer's next poll.</summary>
 public class OrbitGhostHearing
 {

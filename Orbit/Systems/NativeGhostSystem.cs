@@ -14,7 +14,7 @@ using UnityEngine.AI;
 namespace Orbit.Systems;
 
 /// <summary>Executes native movement orders without registering an ORBIT Agent or assigning objectives.</summary>
-public sealed class NativeGhostSystem
+public sealed partial class NativeGhostSystem
 {
     private const float DecisionInterval = 0.25f;
     private const float WalkSpeed = 1.52f;
@@ -43,6 +43,7 @@ public sealed class NativeGhostSystem
         public NativeGhostNavigation Navigation;
         public NativeGhostAdapters Adapter;
         public NativeGhostRegroup Regroup;
+        public HearingDetour Hearing;
     }
 
     private static readonly Dictionary<BotOwner, Sleeper> Sleepers = new();
@@ -73,6 +74,7 @@ public sealed class NativeGhostSystem
     {
         foreach (var state in Sleepers.Values)
         {
+            EndHearing(state, "raid cleanup", false);
             RestoreStandBy(state);
             try { state.Navigation.RestorePathReach(); }
             catch (Exception e) { Log.Warning($"NATIVE GHOST: path restore during cleanup failed: {e.GetType().Name}"); }
@@ -87,6 +89,7 @@ public sealed class NativeGhostSystem
         NativePatrolDiagnostics.Clear();
         NativeGhostDiagnostics.Clear();
         SanitarPatrolMedicinePatch.Clear();
+        HearingWakeGoals.Clear();
     }
 
     private static string CustomAction(BotLogicDecision decision)
@@ -229,6 +232,7 @@ public sealed class NativeGhostSystem
     public bool Remove(BotOwner bot)
     {
         if (ReferenceEquals(bot, null) || !Sleepers.TryGetValue(bot, out var state)) return false;
+        PrepareHearingWake(state);
         Sleepers.Remove(bot);
         Brains.Remove(state.Brain);
         Movers.Remove(state.Mover);
@@ -317,6 +321,12 @@ public sealed class NativeGhostSystem
         // A door/reload request can defer midway through a native action. Suppress its remaining
         // movement calls until wake instead of falling through to the inactive physical mover.
         if (state.WakeReason != null) return true;
+        if (state.Hearing != null)
+        {
+            state.Hearing.Previous.Queue(destination, reach);
+            status = NavMeshPathStatus.PathPartial;
+            return true;
+        }
         try { status = state.Navigation.Request(destination, reach); }
         catch (Exception e) { RequestWake(state, $"navigation failed: {e.GetType().Name}: {e.Message}"); }
         return true;
@@ -325,7 +335,7 @@ public sealed class NativeGhostSystem
     public static void CancelMoveOrder(BotMover mover)
     {
         NativeGhostOrders.Forget(mover);
-        if (Movers.TryGetValue(mover, out var state)) state.Navigation.Cancel();
+        if (Movers.TryGetValue(mover, out var state)) (state.Hearing?.Previous ?? state.Navigation).Cancel();
     }
 
     public static void RecordMoveOrder(BotMover mover, Vector3 destination, NavMeshPathStatus status, string source)
@@ -342,6 +352,7 @@ public sealed class NativeGhostSystem
             var original = false;
             var target = NativeGhostOrders.ValidWay(way)
                 ? NativeGhostOrders.WayGoal(mover, way[way.Length - 1], out original) : new Vector3(float.NaN, 0f, 0f);
+            if (state.Hearing != null) { state.Hearing.Previous.Queue(target, reach); return false; }
             state.Navigation.RequestWay(target, way, reach, original ? "go-to-way-goal" : "go-to-way");
         }
         catch (Exception e) { RequestWake(state, $"navigation failed: {e.GetType().Name}: {e.Message}"); }
@@ -353,6 +364,7 @@ public sealed class NativeGhostSystem
         success = false;
         if (mover == null || !Movers.TryGetValue(mover, out var state) || !RetainsNativeState(state.Bot)) return false;
         if (state.WakeReason != null) return true;
+        if (state.Hearing != null) { state.Hearing.Previous.Queue(target, -1f); success = true; return true; }
         if (!state.Navigation.SameGoal(target)) return false;
         try { success = state.Navigation.Repeat() == NavMeshPathStatus.PathComplete; }
         catch (Exception e) { RequestWake(state, $"navigation failed: {e.GetType().Name}: {e.Message}"); }
@@ -373,7 +385,7 @@ public sealed class NativeGhostSystem
     public static void SetReachDistance(BotMover mover, float reach)
     {
         if (Movers.TryGetValue(mover, out var state) && OwnsInactiveMovement(state.Bot))
-            state.Navigation.SetReachDistance(reach);
+            (state.Hearing?.Previous ?? state.Navigation).SetReachDistance(reach);
     }
 
     public static bool PreservePathDuringSainCleanup(BotOwner bot, BotMover mover)
@@ -450,6 +462,7 @@ public sealed class NativeGhostSystem
                     state.Adapter.ReissueOrder();
             }
             SyncMover(state.Bot);
+            if (state.Hearing != null) return true;
             skip = false;
         }
         catch (Exception e) { RequestWake(state, $"adapter failed: {e.GetType().Name}: {e.Message}"); }
@@ -489,6 +502,7 @@ public sealed class NativeGhostSystem
             return;
         }
         var name = CustomAction(decision) ?? decision.ToString();
+        if (state.Hearing != null) { result = null; return; }
         if (name != state.Decision)
         {
             CancelMoveOrder(state.Bot.Mover);
@@ -541,10 +555,11 @@ public sealed class NativeGhostSystem
             { state.Navigation.Suspend(); state.Adapter?.SuspendProgress(); return; }
             if (mover.Pause) mover.MovementResume();
             if (state.Doors.Pending && WaitForDoor(state)) return;
+            UpdateHearing(state);
             state.Navigation.Update();
-            NativeGhostPatrolRecovery.Update(bot, state.Decision, state.Navigation);
-            if (state.Adapter?.RefreshStalledCheckpoint(bot, state.Decision, state.Navigation.Target, state.Navigation.RecoveringLocally) == true
-                || state.Regroup?.Refresh(bot, state.Decision, state.Navigation) == true)
+            if (state.Hearing == null) NativeGhostPatrolRecovery.Update(bot, state.Decision, state.Navigation);
+            if (state.Hearing == null && (state.Adapter?.RefreshStalledCheckpoint(bot, state.Decision, state.Navigation.Target, state.Navigation.RecoveringLocally) == true
+                || state.Regroup?.Refresh(bot, state.Decision, state.Navigation) == true))
             {
                 state.Navigation.Cancel();
                 mover.ActualPathController.Stop();
@@ -555,7 +570,7 @@ public sealed class NativeGhostSystem
             if (!path.HavePath || !path.CheckShouldMove()) { mover.IsMoving = false; return; }
 
             var dt = Mathf.Min(Time.deltaTime, 0.1f);
-            var sprint = mover.Sprinting && !mover.NoSprint && !state.Exhausted && mover.TargetPose >= 0.5f;
+            var sprint = state.Hearing == null && mover.Sprinting && !mover.NoSprint && !state.Exhausted && mover.TargetPose >= 0.5f;
             if (sprint)
             {
                 state.Stamina = Mathf.Max(0f, state.Stamina - dt);
@@ -566,8 +581,8 @@ public sealed class NativeGhostSystem
                 state.Stamina = Mathf.Min(14f, state.Stamina + dt * 14f / 22f);
                 if (state.Stamina >= 8.4f) state.Exhausted = false;
             }
-            var speed = sprint ? SprintSpeed : WalkSpeed * Mathf.Clamp(mover.DestMoveSpeed, 0f, 1f);
-            if (!sprint && mover.TargetPose < 0.5f) speed *= 0.55f;
+            var speed = state.Hearing != null ? WalkSpeed : sprint ? SprintSpeed : WalkSpeed * Mathf.Clamp(mover.DestMoveSpeed, 0f, 1f);
+            if (state.Hearing == null && !sprint && mover.TargetPose < 0.5f) speed *= 0.55f;
             var budget = speed * dt;
             for (var i = 0; i < 16 && path.HavePath && budget > 0f; i++)
             {
@@ -634,6 +649,7 @@ public sealed class NativeGhostSystem
             if (NavMesh.SamplePosition(player.Position, out var hit, 0.75f, NavMesh.AllAreas))
                 player.Teleport(hit.position);
             SyncMover(bot);
+            ResumeHearingAfterWake(bot);
             if (bot.Mover.HasPathAndNoComplete) bot.Mover.RecalcWay();
             NativePatrolDiagnostics.AfterWake(bot);
         }

@@ -139,6 +139,17 @@ public static class ServerConfig
         [JsonProperty("ghost_hearing_cautious_pct")] public int GhostHearingCautiousPct = 8;
         [JsonProperty("ghost_hearing_timmy_pct")] public int GhostHearingTimmyPct = 3;
         [JsonProperty("ghost_hearing_player_scav_pct")] public int GhostHearingPlayerScavPct = 20;
+        [JsonProperty("ghost_hearing_scav_pct")] public int GhostHearingScavPct = 30;
+        [JsonProperty("ghost_hearing_goons_pct")] public int GhostHearingGoonsPct = 75;
+        [JsonProperty("ghost_hearing_bosses_pct")] public int GhostHearingBossesPct = 0;
+        [JsonProperty("ghost_hearing_cultists_pct")] public int GhostHearingCultistsPct = 0;
+        [JsonProperty("ghost_hearing_raiders_pct")] public int GhostHearingRaidersPct = 50;
+        [JsonProperty("ghost_hearing_bloodhounds_pct")] public int GhostHearingBloodhoundsPct = 50;
+        [JsonProperty("ghost_hearing_untar_ruaf_hunters_pct")] public int GhostHearingUntarRuafHuntersPct = 50;
+        [JsonProperty("ghost_hearing_rogues_vs_raiders_pct")] public int GhostHearingRoguesVsRaidersPct = 50;
+        [JsonProperty("ghost_hearing_army_of_two_pct")] public int GhostHearingArmyOfTwoPct = 75;
+        [JsonProperty("ghost_hearing_isb_pct")] public int GhostHearingIsbPct = 75;
+        [JsonProperty("ghost_hearing_black_division_pct")] public int GhostHearingBlackDivisionPct = 75;
         [JsonProperty("ghost_fight_frequency")] public string GhostFightFrequency = "normal";
         [JsonProperty("ghost_fight_lethality")] public float GhostFightLethality = 1f;
 

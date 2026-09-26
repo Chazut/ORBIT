@@ -85,6 +85,7 @@ internal sealed class NativeGhostNavigation(BotOwner bot, DoorSystem doors)
         : "order=none";
 
     internal static void ResetBudget() { _budgetFrame = -1; _queries = 0; }
+    internal static bool QueryAvailable => _budgetFrame != Time.frameCount || _queries < 4;
 
     internal static bool TakeQuery()
     {
@@ -154,6 +155,15 @@ internal sealed class NativeGhostNavigation(BotOwner bot, DoorSystem doors)
         => _target.HasValue && Finite(target) && (_target.Value - target).sqrMagnitude <= 0.0025f;
 
     internal NavMeshPathStatus Repeat() { Update(); return _status; }
+
+    // An external controller may refresh its mission while a hearing detour owns the live path.
+    // Keep that latest destination without touching the detour's path controller.
+    internal void Queue(Vector3 target, float reach)
+    {
+        if (!Finite(target)) { Cancel(); return; }
+        BeginOrder(target, reach, "queued-native-order");
+        _retryAt = 0f;
+    }
 
     // Goal identity belongs to the destination, not the API, path corners or arrival radius.
     // A native refresh must never replace a recovery path or postpone its next attempt.

@@ -70,8 +70,8 @@ public class GhostModeConfig
     // ON (default): sleeping ORBIT squads keep looting along their routes. OFF: sleepers walk past
     // everything and the loot waits for the players.
     public bool GhostLooting { get; set; } = true;
-    // ON (default): sleeping PMC / PlayerScav squads hear firefights (simulated ghost fights and real
-    // gunfire alike) and may go and investigate, with odds driven by their SAIN personality.
+    // Sleeping squads hear real and simulated firefights. PMC odds follow personality;
+    // other supported bots use their category, with UNTAR/RUAF limited to hunters.
     public bool GhostHearing { get; set; } = true;
     // Base investigation odds in percent; distance still reduces the final roll.
     public int GhostHearingVeryAggressivePct { get; set; } = 85;
@@ -80,6 +80,17 @@ public class GhostModeConfig
     public int GhostHearingCautiousPct { get; set; } = 8;
     public int GhostHearingTimmyPct { get; set; } = 3;
     public int GhostHearingPlayerScavPct { get; set; } = 20;
+    public int GhostHearingScavPct { get; set; } = 30;
+    public int GhostHearingGoonsPct { get; set; } = 75;
+    public int GhostHearingBossesPct { get; set; } = 0;
+    public int GhostHearingCultistsPct { get; set; } = 0;
+    public int GhostHearingRaidersPct { get; set; } = 50;
+    public int GhostHearingBloodhoundsPct { get; set; } = 50;
+    public int GhostHearingUntarRuafHuntersPct { get; set; } = 50;
+    public int GhostHearingRoguesVsRaidersPct { get; set; } = 50;
+    public int GhostHearingArmyOfTwoPct { get; set; } = 75;
+    public int GhostHearingIsbPct { get; set; } = 75;
+    public int GhostHearingBlackDivisionPct { get; set; } = 75;
     // "rare" | "normal" | "frequent": scales the ghost-fight contact odds and the per-pair cooldown.
     public string GhostFightFrequency { get; set; } = "normal";
     // 0.5 to 2.0: casualty multiplier for simulated fights (0.5 = often bloodless, 2 = bloodbaths).
