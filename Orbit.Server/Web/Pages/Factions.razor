@@ -31,8 +31,10 @@
                      Tooltip="Knight, Big Pipe and Bird Eye run on BSG's vanilla brain." />
         <OrbitSwitch Value="Cfg.Factions.VanillaCultists" ValueChanged="@((bool v) => SetVanilla(v, x => Cfg.Factions.VanillaCultists = x))" Label="Vanilla cultists"
                      Tooltip="Priest, warriors and cursed scavs run on BSG's vanilla brain." />
-        <OrbitSwitch Value="Cfg.Factions.VanillaRaiders" ValueChanged="@((bool v) => SetVanilla(v, x => Cfg.Factions.VanillaRaiders = x))" Label="Vanilla raiders and rogues"
-                     Tooltip="ON (default): Raiders and Rogues keep BSG's vanilla guard behaviour. Faction hunt squads spawned through MoreBotsAPI (UNTAR, RUAF) are not vanilla raiders and follow their faction toggle instead." />
+        <OrbitSwitch Value="Cfg.Factions.VanillaRaiders" ValueChanged="@((bool v) => SetVanilla(v, x => Cfg.Factions.VanillaRaiders = x))" Label="Vanilla raiders"
+                     Tooltip="ON (default): Raiders keep their vanilla behaviour. OFF: ORBIT directs their activities outside combat. Rogues have their own switch. Faction hunt squads spawned through MoreBotsAPI (UNTAR, RUAF) follow their faction toggle instead." />
+        <OrbitSwitch Value="Cfg.Factions.VanillaRogues" ValueChanged="@((bool v) => SetVanilla(v, x => Cfg.Factions.VanillaRogues = x))" Label="Vanilla rogues"
+                     Tooltip="ON (default): Rogues keep their vanilla behaviour. OFF: ORBIT directs their activities outside combat, including Rogues added to other maps. Raiders have their own switch." />
         <OrbitSwitch Value="Cfg.Factions.VanillaBloodhounds" ValueChanged="@((bool v) => SetVanilla(v, x => Cfg.Factions.VanillaBloodhounds = x))" Label="Vanilla bloodhounds"
                      Tooltip="Bloodhounds (smugglers / arena spawns) run on BSG's vanilla brain." />
     </SettingsCard>
@@ -84,6 +86,7 @@
         Cfg.Factions.VanillaGoons = d.VanillaGoons;
         Cfg.Factions.VanillaCultists = d.VanillaCultists;
         Cfg.Factions.VanillaRaiders = d.VanillaRaiders;
+        Cfg.Factions.VanillaRogues = d.VanillaRogues;
         Cfg.Factions.VanillaBloodhounds = d.VanillaBloodhounds;
     }
 

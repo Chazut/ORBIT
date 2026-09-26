@@ -31,6 +31,7 @@ public static class ServerConfig
         [JsonProperty("vanilla_goons")] public bool VanillaGoons;
         [JsonProperty("vanilla_cultists")] public bool VanillaCultists;
         [JsonProperty("vanilla_raiders")] public bool VanillaRaiders = true;
+        [JsonProperty("vanilla_rogues")] public bool VanillaRogues = true;
         [JsonProperty("vanilla_bloodhounds")] public bool VanillaBloodhounds;
 
         [JsonProperty("scav_area_roaming_pct")] public int ScavAreaRoamingPct = 20;

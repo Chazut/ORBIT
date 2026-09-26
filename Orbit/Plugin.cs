@@ -172,11 +172,12 @@ public class Plugin : BaseUnityPlugin
         OrbitBrainLayer.SetVanillaGoonExclusion(ServerConfig.Factions.VanillaGoons);
         OrbitBrainLayer.SetVanillaCultistExclusion(ServerConfig.Factions.VanillaCultists);
         OrbitBrainLayer.SetVanillaRaiderExclusion(ServerConfig.Factions.VanillaRaiders);
+        OrbitBrainLayer.SetVanillaRogueExclusion(ServerConfig.Factions.VanillaRogues);
         OrbitBrainLayer.SetVanillaBloodhoundExclusion(ServerConfig.Factions.VanillaBloodhounds);
         if (ServerConfig.Factions.VanillaScavs) Logger.LogInfo("Disable ORBIT on scavs ON — bot scavs running on BSG's vanilla brain (PlayerScavs unaffected).");
         if (ServerConfig.Factions.VanillaGoons) Logger.LogInfo("Disable ORBIT on goons ON — Goons (Knight / Big Pipe / Bird Eye) running on BSG's vanilla brain.");
         if (ServerConfig.Factions.VanillaCultists) Logger.LogInfo("Disable ORBIT on cultists ON — Cultists (Priest / Warriors / cursed scavs) running on BSG's vanilla brain.");
-        if (ServerConfig.Factions.VanillaRaiders) Logger.LogInfo("Disable ORBIT on raiders ON — Raiders (pmcBot) and Rogues (exUsec) running on BSG's vanilla brain.");
+        Logger.LogInfo($"FACTION CONTROL: raiders={(ServerConfig.Factions.VanillaRaiders ? "native" : "ORBIT")} rogues={(ServerConfig.Factions.VanillaRogues ? "native" : "ORBIT")}");
         if (ServerConfig.Factions.VanillaBloodhounds) Logger.LogInfo("Disable ORBIT on bloodhounds ON — Bloodhounds (Smugglers / arena spawns) running on BSG's vanilla brain.");
 
         var brains = new List<string>
@@ -199,9 +200,8 @@ public class Plugin : BaseUnityPlugin
         // brains would silently extend the LootPatrol strip to them too.
         BrainManager.RemoveLayer("LootPatrol", new List<string>(brains));
 
-        // Custom factions borrow these vanilla brains, so register the layer here to drive them. The real vanilla
-        // bots sharing them are excluded unconditionally in OrbitBrainLayer.IsExcludedRole, so the layer is inert
-        // for them and their LootPatrol stays intact (not stripped above), keeping them 100% vanilla.
+        // Custom factions borrow these brains. Rogues use their own opt-out; Gluhar and his scouts
+        // remain excluded by role. Keep native LootPatrol on these shared brains for excluded bots.
         brains.Add(nameof(BsgBrain.ExUsec));
         brains.Add(nameof(BsgBrain.BossGluhar));
         brains.Add(nameof(BsgBrain.FollowerGluharScout));

@@ -118,6 +118,7 @@ public class FactionsConfig
     public bool VanillaGoons { get; set; }
     public bool VanillaCultists { get; set; }
     public bool VanillaRaiders { get; set; } = true;
+    public bool VanillaRogues { get; set; } = true;
     public bool VanillaBloodhounds { get; set; }
 
     // Percentage of each faction's squads that roll permission to leave their spawn area and use

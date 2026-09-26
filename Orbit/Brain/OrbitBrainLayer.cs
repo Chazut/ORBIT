@@ -61,6 +61,7 @@ public class OrbitBrainLayer : CustomLayer
     private static bool _vanillaGoons;
     private static bool _vanillaCultists;
     private static bool _vanillaRaiders;
+    private static bool _vanillaRogues;
     private static bool _vanillaBloodhounds;
     internal static bool LegacyUntarHunts { get; set; }
 
@@ -73,6 +74,7 @@ public class OrbitBrainLayer : CustomLayer
     public static void SetVanillaGoonExclusion(bool excluded) => _vanillaGoons = excluded;
     public static void SetVanillaCultistExclusion(bool excluded) => _vanillaCultists = excluded;
     public static void SetVanillaRaiderExclusion(bool excluded) => _vanillaRaiders = excluded;
+    public static void SetVanillaRogueExclusion(bool excluded) => _vanillaRogues = excluded;
     public static void SetVanillaBloodhoundExclusion(bool excluded) => _vanillaBloodhounds = excluded;
 
     /// <summary>The spawn id of a MoreBotsAPI hunt squad member, null for everything else.</summary>
@@ -106,7 +108,6 @@ public class OrbitBrainLayer : CustomLayer
         // fall through to the toggle logic below.
         switch (role.Value)
         {
-            case EFT.WildSpawnType.exUsec:
             case EFT.WildSpawnType.bossGluhar:
             case EFT.WildSpawnType.followerGluharScout:
                 return true;
@@ -147,7 +148,12 @@ public class OrbitBrainLayer : CustomLayer
             return true;
         }
 
-        if (_vanillaRaiders && role.Value.IsRaider())
+        if (_vanillaRaiders && role.Value == WildSpawnType.pmcBot)
+        {
+            return true;
+        }
+
+        if (_vanillaRogues && role.Value == WildSpawnType.exUsec)
         {
             return true;
         }
