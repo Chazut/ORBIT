@@ -192,7 +192,10 @@
                         <OrbitSlider T="int" @bind-Value="Cfg.GhostMode.GhostHearingCultistsPct" Label="Cultists" Unit="%" Min="0" Max="100" Step="1" />
                     </MudItem>
                     <MudItem xs="12" sm="6">
-                        <OrbitSlider T="int" @bind-Value="Cfg.GhostMode.GhostHearingRaidersPct" Label="Vanilla raiders and rogues" Unit="%" Min="0" Max="100" Step="1" />
+                        <OrbitSlider T="int" @bind-Value="Cfg.GhostMode.GhostHearingRaidersPct" Label="Vanilla raiders" Unit="%" Min="0" Max="100" Step="1" />
+                    </MudItem>
+                    <MudItem xs="12" sm="6">
+                        <OrbitSlider T="int" @bind-Value="Cfg.GhostMode.GhostHearingRoguesPct" Label="Vanilla rogues" Unit="%" Min="0" Max="100" Step="1" />
                     </MudItem>
                     <MudItem xs="12" sm="6">
                         <OrbitSlider T="int" @bind-Value="Cfg.GhostMode.GhostHearingBloodhoundsPct" Label="Bloodhounds" Unit="%" Min="0" Max="100" Step="1" />
@@ -292,6 +295,7 @@
         Cfg.GhostMode.GhostHearingBossesPct = d.GhostHearingBossesPct;
         Cfg.GhostMode.GhostHearingCultistsPct = d.GhostHearingCultistsPct;
         Cfg.GhostMode.GhostHearingRaidersPct = d.GhostHearingRaidersPct;
+        Cfg.GhostMode.GhostHearingRoguesPct = d.GhostHearingRoguesPct;
         Cfg.GhostMode.GhostHearingBloodhoundsPct = d.GhostHearingBloodhoundsPct;
         Cfg.GhostMode.GhostHearingUntarRuafHuntersPct = d.GhostHearingUntarRuafHuntersPct;
         Cfg.GhostMode.GhostHearingRoguesVsRaidersPct = d.GhostHearingRoguesVsRaidersPct;

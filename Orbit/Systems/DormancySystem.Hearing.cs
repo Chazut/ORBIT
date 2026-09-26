@@ -177,6 +177,7 @@ public partial class DormancySystem
             case GhostHearingCategory.Bosses:
             case GhostHearingCategory.Cultists:
             case GhostHearingCategory.Raiders:
+            case GhostHearingCategory.Rogues:
             case GhostHearingCategory.Bloodhounds:
             case GhostHearingCategory.OtherVanilla:
                 return (ClampHearingRange(_cfg.GhostHearingVanillaRange, 200f),
@@ -371,6 +372,7 @@ public partial class DormancySystem
             GhostHearingCategory.Bosses => _cfg.GhostHearingBossesPct,
             GhostHearingCategory.Cultists => _cfg.GhostHearingCultistsPct,
             GhostHearingCategory.Raiders => _cfg.GhostHearingRaidersPct,
+            GhostHearingCategory.Rogues => _cfg.GhostHearingRoguesPct,
             GhostHearingCategory.Bloodhounds => _cfg.GhostHearingBloodhoundsPct,
             GhostHearingCategory.UntarHunters or GhostHearingCategory.RuafHunters => _cfg.GhostHearingUntarRuafHuntersPct,
             GhostHearingCategory.RoguesVsRaiders => _cfg.GhostHearingRoguesVsRaidersPct,

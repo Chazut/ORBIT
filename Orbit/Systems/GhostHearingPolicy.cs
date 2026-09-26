@@ -11,7 +11,7 @@ namespace Orbit.Systems;
 internal enum GhostHearingCategory
 {
     None, Pmc, PlayerScav, Scav, Goons, Bosses, Cultists, Raiders, Bloodhounds,
-    OtherVanilla, UntarHunters, RuafHunters, RoguesVsRaiders, ArmyOfTwo, Isb, BlackDivision,
+    OtherVanilla, UntarHunters, RuafHunters, RoguesVsRaiders, ArmyOfTwo, Isb, BlackDivision, Rogues,
 }
 
 internal static class GhostHearingPolicy
@@ -98,7 +98,8 @@ internal static class GhostHearingPolicy
         if (role.IsScav()) return GhostHearingCategory.Scav;
         if (role.IsGoon()) return GhostHearingCategory.Goons;
         if (role.IsCultist()) return GhostHearingCategory.Cultists;
-        if (role.IsRaider()) return GhostHearingCategory.Raiders;
+        if (role == WildSpawnType.exUsec) return GhostHearingCategory.Rogues;
+        if (role == WildSpawnType.pmcBot) return GhostHearingCategory.Raiders;
         if (role.IsBloodhound()) return GhostHearingCategory.Bloodhounds;
         if (BotTypeUtils.IsBoss(role) || (int)role < 200 && name.StartsWith("follower", StringComparison.Ordinal))
             return GhostHearingCategory.Bosses;
