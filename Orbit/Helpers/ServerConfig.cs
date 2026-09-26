@@ -143,7 +143,7 @@ public static class ServerConfig
         [JsonProperty("ghost_hearing_player_scav_pct")] public int GhostHearingPlayerScavPct = 20;
         [JsonProperty("ghost_hearing_scav_pct")] public int GhostHearingScavPct = 30;
         [JsonProperty("ghost_hearing_goons_pct")] public int GhostHearingGoonsPct = 75;
-        [JsonProperty("ghost_hearing_bosses_pct")] public int GhostHearingBossesPct = 0;
+        [JsonProperty("ghost_hearing_bosses_pct")] public int GhostHearingBossesPct = 30;
         [JsonProperty("ghost_hearing_cultists_pct")] public int GhostHearingCultistsPct = 0;
         [JsonProperty("ghost_hearing_raiders_pct")] public int GhostHearingRaidersPct = 50;
         [JsonProperty("ghost_hearing_bloodhounds_pct")] public int GhostHearingBloodhoundsPct = 50;

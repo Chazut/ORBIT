@@ -83,7 +83,7 @@ public class GhostModeConfig
     public int GhostHearingPlayerScavPct { get; set; } = 20;
     public int GhostHearingScavPct { get; set; } = 30;
     public int GhostHearingGoonsPct { get; set; } = 75;
-    public int GhostHearingBossesPct { get; set; } = 0;
+    public int GhostHearingBossesPct { get; set; } = 30;
     public int GhostHearingCultistsPct { get; set; } = 0;
     public int GhostHearingRaidersPct { get; set; } = 50;
     public int GhostHearingBloodhoundsPct { get; set; } = 50;
