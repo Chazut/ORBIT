@@ -755,12 +755,10 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
             // Fix A: an agent still owed its own kill's corpse must not stay stuck on a lower-priority loot
             // splinter (or any non-corpse objective). Resolve the re-route here so the alignment check treats it
             // as misaligned and the dispatch block below routes it to its body. Computed once, reused there.
-            Waypoint ownKillReroute = null;
-            if (agent.OwnKillCorpseLocId != 0)
-            {
-                ownKillReroute = waypointSystem.TryGetOwnKillCorpseForAgent(squad, agent, agent.OwnKillCorpseLocId);
-                if (ownKillReroute == null) agent.OwnKillCorpseLocId = 0;
-            }
+            // A new corpse must never cancel an in-flight search/transfer on the current body.
+            if (agentObjective.Status == ObjectiveStatus.Looting || agent.LootHandler?.LootTaskRunning == true)
+                continue;
+            var ownKillReroute = waypointSystem.TryGetNextOwnKillCorpseForAgent(squad, agent);
             var aligned = !splinterAlreadyDone && !leaderFinishedAnchorInRoam
                           && (ownKillReroute == null || agentObjective.Location == ownKillReroute)
                           && (agentObjective.Location == squadObjective.Location
@@ -770,14 +768,6 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
             if (leaderFinishedAnchorInRoam)
             {
                 Log.Debug($"{agent} leader roam continuation: finished anchor {agentObjective.Location}, picking a splinter instead of guarding");
-                // A double-kill only arms the single PendingOwnKill slot for the latest corpse; the earlier
-                // tagged kill is never re-picked here (roam splinters bypass RequestNear's own-kill pre-scan).
-                // Force a squad re-dispatch so the pre-scan re-anchors onto it before roaming off.
-                if (waypointSystem.TryPickOwnKillCorpse(squad) != null)
-                {
-                    squad.Objective.Duration = 0;
-                    Log.Info($"{agent} finished an own-kill corpse but another tagged own-kill is still unlooted nearby — forcing squad re-anchor onto it before roaming");
-                }
             }
 
             if (aligned && agentObjective.Location != null)
@@ -805,8 +795,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
             {
                 // Dispatch priority:
                 //   1. Own-kill direct: the specific agent who landed the
-                // fresh corpse kill goes straight to that corpse, not a random splinter around it. Cleared
-                // after first use.
+                // corpse kill goes to its oldest eligible pending body, not a random splinter.
                 //   2. Anchor-first for the leader (i=0): exactly one
                 // member works the anchor itself, others get splinters. Solo squads naturally end up here
                 // too, so the bot loots the anchor before its splinters. Falls through to the splinter branch
@@ -819,10 +808,8 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                 Waypoint splinterParent;
                 var locallyExhausted = false;
                 var tookOwnKillCorpse = false;
-                var ownKillAgentId = squad.PendingOwnKillKillerAgentId;
-                var anchorReservedForOwnKill = ownKillAgentId >= 0
-                                               && squadObjective.Location != null
-                                               && squadObjective.Location.Id == squad.PendingOwnKillCorpseLocId;
+                var anchorReservedForOwnKill = squadObjective.Location != null
+                                               && AnyMemberDesignatedForCorpse(squad, squadObjective.Location.Id);
                 // Persistent own-kill re-route (highest priority): resolved above, where it also broke this
                 // agent's sticky-splinter alignment so we reach here. A killer pulled off its body by combat /
                 // heal / solo-extract is routed straight back to it.
@@ -831,24 +818,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                     targetLoc = ownKillReroute;
                     splinterParent = squadObjective.Location;
                     tookOwnKillCorpse = true;
-                    // Consume the one-shot squad pending for this same body even when the anchor hasn't flipped
-                    // onto it yet — leaving it armed re-fires a second direct-route (and a second full loot
-                    // session) on a corpse the killer has already emptied.
-                    if (agent.Id == ownKillAgentId && squad.PendingOwnKillCorpseLocId == ownKillReroute.Id)
-                    {
-                        squad.PendingOwnKillKillerAgentId = -1;
-                        squad.PendingOwnKillCorpseLocId = 0;
-                    }
                     Log.Debug($"{agent} own-kill re-route to its corpse {targetLoc} (reactivated after a combat / heal / extract detour)");
-                }
-                else if (anchorReservedForOwnKill && agent.Id == ownKillAgentId)
-                {
-                    targetLoc = squadObjective.Location;
-                    splinterParent = null;
-                    tookOwnKillCorpse = true;
-                    squad.PendingOwnKillKillerAgentId = -1;
-                    squad.PendingOwnKillCorpseLocId = 0;
-                    Log.Debug($"{agent} own-kill direct-route to {targetLoc} (skipped splinter)");
                 }
                 else if (i == 0
                          && !anchorReservedForOwnKill
@@ -949,12 +919,8 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                 {
                     if (i == 0 && !AnyMemberDesignatedForCorpse(squad, targetLoc.Id))
                     {
-                        // No designated killer is coming for this anchored body (own-kill memory cleared by the
-                        // distance gate, or the killer left the squad). The leader keeps it and goes to loot it —
-                        // nulling everyone here left the squad frozen around an unlooted corpse anchor it could
-                        // never complete. Keyed on the members' agent-level own-kill memory, NOT the one-shot
-                        // squad pending: that slot is consumed at the killer's FIRST dispatch, so testing it
-                        // would send the leader racing the still-travelling killer for the claim.
+                        // No eligible killer is currently coming for this body. The leader may take it
+                        // rather than parking the whole squad around an unreachable follower's queue.
                     }
                     else
                     {
@@ -1519,19 +1485,17 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
     // hung, so force-blacklist and re-dispatch.
     private const float CorpseStuckTimeoutSeconds = 180f;
 
-    // True when a LIVE member is designated to loot this corpse — via their agent-level own-kill memory
-    // (branch-1 re-route will take them there) or via the still-armed squad pending (branch-2 direct-route).
-    // A designation held by an agent who left the squad doesn't count: nobody is coming, the body is up for
-    // grabs by the leader.
-    private static bool AnyMemberDesignatedForCorpse(Squad squad, int locId)
+    // A pending corpse is reserved for its killer while that agent remains in the squad.
+    private bool AnyMemberDesignatedForCorpse(Squad squad, int locId)
     {
         if (squad?.Members == null) return false;
         for (var i = 0; i < squad.Members.Count; i++)
         {
             var m = squad.Members[i];
             if (m == null) continue;
-            if (m.OwnKillCorpseLocId == locId) return true;
-            if (squad.PendingOwnKillCorpseLocId == locId && squad.PendingOwnKillKillerAgentId == m.Id) return true;
+            if (m.OwnKillCorpseIds.Contains(locId) && !m.ValueSkippedPoiIds.Contains(locId)
+                && (waypointSystem.IsClaimed(locId)
+                    || waypointSystem.TryGetOwnKillCorpseForAgent(squad, m, locId) != null)) return true;
         }
         return false;
     }
@@ -1635,9 +1599,11 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
             // pool has collapsed to a single exhausted candidate (value-skips are per-agent, so the POI
             // never enters CompletedPoiIds on its own, and loot waits are zero-duration — nothing else
             // breaks the cycle). Squad-complete it and re-pick once; en-route failures keep their own
-            // 3-strike blacklist path via completedCurrent=false.
+            // 3-strike blacklist path via completedCurrent=false. Corpses are completed by loot outcomes,
+            // never by timer expiry or by selecting the same still-unlooted body again.
             if (completedCurrent && newLocation != null && objective.Location != null
                 && newLocation.Id == objective.Location.Id
+                && newLocation.Category != WaypointCategory.Corpse
                 && IsLootPoi(newLocation.Category))
             {
                 squad.CompletedPoiIds.Add(newLocation.Id);

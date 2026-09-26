@@ -822,6 +822,10 @@ public partial class WaypointSystem
             if (kvp.Value != squad.Id) continue;
             var locId = kvp.Key;
             if (squad.CompletedPoiIds.Contains(locId)) continue;
+            var anyEligibleMember = false;
+            for (var member = 0; member < squad.Members.Count; member++)
+                if (!squad.Members[member].ValueSkippedPoiIds.Contains(locId)) { anyEligibleMember = true; break; }
+            if (!anyEligibleMember) continue;
             if (_claims.ContainsKey(locId)) continue;
             if (!_waypointCells.TryGetValue(locId, out var coords)) continue;
             // Stale-kill gate: if the corpse is too far from the leader, skip the bee-line and let normal
@@ -858,7 +862,7 @@ public partial class WaypointSystem
     /// <summary>
     /// Own-kill re-route resolver for ONE corpse, gated on the killer agent's own position rather than the
     /// squad leader's, so a follower pulled off its kill is routed back without dragging the whole squad.
-    /// Returns null if it no longer qualifies (the caller drops its OwnKillCorpseLocId memory on null).
+    /// Temporary claims and path failures do not consume the pending kill credit.
     /// </summary>
     internal Waypoint TryGetOwnKillCorpseForAgent(Squad squad, Agent agent, int locId)
     {
@@ -888,6 +892,27 @@ public partial class WaypointSystem
         if (corpse == null || corpse.Category != WaypointCategory.Corpse) return null;
         if (!IsWaypointReachable(corpse, squad)) return null;
         return corpse;
+    }
+
+    internal Waypoint TryGetNextOwnKillCorpseForAgent(Squad squad, Agent agent)
+    {
+        // FIFO preserves a route already being worked when another Ghost kill arrives.
+        // Only definitive outcomes consume credit; a claim or a temporary path failure can clear later.
+        var pending = agent.OwnKillCorpseIds;
+        for (var i = 0; i < pending.Count;)
+        {
+            var id = pending[i];
+            if (squad.CompletedPoiIds.Contains(id) || agent.ValueSkippedPoiIds.Contains(id)
+                || !WasCorpseKilledBySquad(id, squad.Id) || !_waypointCells.ContainsKey(id))
+            {
+                pending.RemoveAt(i);
+                continue;
+            }
+            var corpse = TryGetOwnKillCorpseForAgent(squad, agent, id);
+            if (corpse != null) return corpse;
+            i++;
+        }
+        return null;
     }
 
     /// <summary>

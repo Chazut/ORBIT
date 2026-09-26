@@ -80,11 +80,10 @@ public class Agent(int id, BotOwner bot, float[] taskScores) : Entity(id, taskSc
     public int LastFailedPoiId = -1;
 
     /// <summary>
-    /// Waypoint.Id of a corpse this agent killed but was pulled away from before looting (SAIN combat, healing,
-    /// solo-extract). 0 = none. While set, dispatch re-routes the agent back onto its own kill as a personal
-    /// splinter, gated on the corpse still being unlooted, reachable and nearby.
+    /// Corpses credited to this agent, kept across combat and normal extraction detours.
+    /// Dispatch removes definitive skips/completions and retries temporary claims or path failures.
     /// </summary>
-    public int OwnKillCorpseLocId;
+    public readonly List<int> OwnKillCorpseIds = new(4);
 
     /// <summary>
     /// Counter incremented every time Goto fails on

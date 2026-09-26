@@ -259,21 +259,6 @@ public class Squad(int id, float[] taskScores, int targetMembersCount) : Entity(
     public Waypoint CombatCallerWaypoint;
 
     /// <summary>
-    /// Agent.Id of the squad member who landed the most recent killing blow whose corpse is still "fresh"
-    /// (not yet looted / claimed by anyone). When the strategy's own-kill priority pick has promoted the
-    /// corpse to <see cref="SquadObjective.Location"/>, UpdateAgents routes THIS specific agent directly to
-    /// the corpse instead of rolling a random roam splinter for them. -1 = no pending kill credit.
-    /// </summary>
-    public int PendingOwnKillKillerAgentId = -1;
-
-    /// <summary>
-    /// Waypoint.Id of the corpse the <see cref="PendingOwnKillKillerAgentId"/> flag is currently armed for.
-    /// Compared against the squad's current objective so a stale credit (squad anchor has since moved to a
-    /// different POI) silently no-ops instead of mis-routing the killer. 0 = no pending kill credit.
-    /// </summary>
-    public int PendingOwnKillCorpseLocId;
-
-    /// <summary>
     /// ProfileId of a squad member who just died WITH meaningful loot — the surviving members should
     /// bee-line to their corpse to recover the goods (their kit dropped with them). Set in
     /// LootContainerAction.ReevaluateExtractOnDeath when a loot-threshold extract gets cancelled by the

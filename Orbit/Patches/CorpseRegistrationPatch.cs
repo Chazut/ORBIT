@@ -137,19 +137,10 @@ public class CorpseRegistrationPatch : ModulePatch
                     Log.Info($"CorpseRegistration: {a} ({a.Squad}) credited with {loc} but role={role} is not PMC / PlayerScav / scav — skipping own-kill bee-line (Goons / bosses / cultists don't have a loot layer to consume the dispatch)");
                     return;
                 }
-                // Force immediate re-dispatch so the own-kill priority-pick fires before the killer drifts
-                // away from the body.
-                a.Squad.Objective.Duration = 0;
-                // Route the killer specifically onto the corpse on the next dispatch tick — without this
-                // they'd be just one of N candidates in the roam splinter reservoir sample, with a ~1/N
-                // chance of being chosen. UpdateAgents reads these two fields and clears them once the
-                // dispatch is set.
-                a.Squad.PendingOwnKillKillerAgentId = a.Id;
-                a.Squad.PendingOwnKillCorpseLocId = loc.Id;
-                // Persistent backup: re-routes the killer back to this body on reactivation even if it detaches
-                // (SAIN combat / healing / solo-extract) before the one-shot squad pending above fires.
-                a.OwnKillCorpseLocId = loc.Id;
-                Log.Info($"CorpseRegistration: {a} ({a.Squad}) credited with {loc} — forced squad re-dispatch + direct-route on next tick");
+                // Keep every kill in arrival order. The per-agent dispatch loop can resume these
+                // after combat or an extraction detour without expiring the squad's current objective.
+                if (!a.OwnKillCorpseIds.Contains(loc.Id)) a.OwnKillCorpseIds.Add(loc.Id);
+                Log.Info($"CorpseRegistration: {a} ({a.Squad}) credited with {loc}, queued own-kill loot (pending={a.OwnKillCorpseIds.Count})");
                 return;
             }
             Log.Debug($"CorpseRegistration: aggressor profileId={aggressorProfileId.Substring(0, 8)}… is not ORBIT-managed for {loc} — registered but no squad credited");
