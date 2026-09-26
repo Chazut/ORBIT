@@ -53,7 +53,6 @@ public class ExtractAction(AgentData dataset, float hysteresis) : Task<Agent>(hy
         public float FirstArrivalTime;     // when the FIRST member reached the V-Ex
         public Entity Owner;              // IDs are recycled; never inherit another party's countdown
         public float CountdownStartTime = -1f;
-        public float CountdownStartFrameDuration;
         public float DepartureTime = -1f;
         public readonly List<Agent> Departing = new();
         public System.Action<ExfiltrationPoint, EExfiltrationStatus> OnDeparture;
@@ -185,7 +184,6 @@ public class ExtractAction(AgentData dataset, float hysteresis) : Task<Agent>(hy
                 Owner = owner,
                 FirstArrivalTime = now,
                 CountdownStartTime = solo ? now : -1f,
-                CountdownStartFrameDuration = Time.deltaTime,
             };
             states[owner.Id] = state;
             var pending = state;
@@ -207,7 +205,6 @@ public class ExtractAction(AgentData dataset, float hysteresis) : Task<Agent>(hy
         if (allReady || waitedTooLong)
         {
             state.CountdownStartTime = now;
-            state.CountdownStartFrameDuration = Time.deltaTime;
             Log.Info($"{squad}: V-Ex {exfil.name} countdown started ({VExCountdownSeconds:F0}s) — reason: {(allReady ? "all squad members arrived" : "wait timeout reached, leaving stragglers behind")}");
         }
     }
@@ -249,10 +246,10 @@ public class ExtractAction(AgentData dataset, float hysteresis) : Task<Agent>(hy
         if (previous != EExfiltrationStatus.Countdown || exfil.Status != EExfiltrationStatus.NotPresent) return;
         state.DepartureTime = Time.time;
         state.Unsubscribe();
-        // BSG starts on arrival, one frame before this action. Allow that frame only;
-        // a car leaving during the group's gathering wait must still be abandoned.
-        if (state.CountdownStartTime < 0f
-            || Time.time - state.CountdownStartTime + state.CountdownStartFrameDuration + 0.001f < VExCountdownSeconds) return;
+        // The car has actually left. Capture waiting participants at its last live
+        // bounds regardless of ORBIT's countdown or the squad's gathering timer.
+        // BSG disables the trigger before this event; complete removal on the next
+        // action update so we do not mutate bot collections inside BSG's callback.
         if (state.Owner is Agent solo) Capture(solo);
         else if (state.Owner is Squad squad)
             for (var i = 0; i < squad.Size; i++)
