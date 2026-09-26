@@ -313,7 +313,14 @@ public partial class DormancySystem
         _hearingTimmy = Mathf.Clamp(cfg.GhostHearingTimmyPct, 0, 100) / 100f;
         _hearingPlayerScav = Mathf.Clamp(cfg.GhostHearingPlayerScavPct, 0, 100) / 100f;
         if (_hearingEnabled)
+        {
             Log.Always($"Ghost hearing chances: veryAggressive={_hearingVeryAggressive:P0} aggressive={_hearingAggressive:P0} average={_hearingAverage:P0} cautious={_hearingCautious:P0} timmy={_hearingTimmy:P0} playerScav={_hearingPlayerScav:P0}");
+            var players = HearingRanges(GhostHearingCategory.Pmc);
+            var vanilla = HearingRanges(GhostHearingCategory.Scav);
+            var factions = HearingRanges(GhostHearingCategory.Isb);
+            Log.Always($"Ghost hearing ranges: players={players.Loud:F0}/{players.Suppressed:F0}m vanilla={vanilla.Loud:F0}/{vanilla.Suppressed:F0}m factions={factions.Loud:F0}/{factions.Suppressed:F0}m (unsuppressed/suppressed)");
+            Log.Always($"Ghost hearing rules: minShots={NoiseMinRealShots} cooldown={NoiseReactionCooldownSeconds:F0}s memory={NoiseLingerSeconds:F0}s cluster={NoiseClusterRadius:F0}m");
+        }
         _scopedWakeMax = Mathf.Clamp(cfg.ScopedWakeMaxDistance, 100f, 1500f);
         // FullSleep (default): no population floor — far from every human, the whole map may sleep.
         _minAwakeBots = cfg.FullSleep ? 0 : Mathf.Max(0, cfg.MinAwakeBots);

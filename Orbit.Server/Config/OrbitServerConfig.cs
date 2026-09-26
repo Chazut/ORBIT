@@ -74,6 +74,17 @@ public class GhostModeConfig
     // Sleeping squads hear real and simulated firefights. PMC odds follow personality;
     // other supported bots use their category, with UNTAR/RUAF limited to hunters.
     public bool GhostHearing { get; set; } = true;
+    // Hearing ranges belong to the listening group, independently of investigation odds.
+    public float GhostHearingPlayersRange { get; set; } = 350f;
+    public float GhostHearingPlayersSuppressedRange { get; set; } = 120f;
+    public float GhostHearingVanillaRange { get; set; } = 200f;
+    public float GhostHearingVanillaSuppressedRange { get; set; } = 80f;
+    public float GhostHearingFactionsRange { get; set; } = 350f;
+    public float GhostHearingFactionsSuppressedRange { get; set; } = 120f;
+    public int GhostHearingMinShots { get; set; } = 4;
+    public float GhostHearingCooldownSeconds { get; set; } = 150f;
+    public float GhostHearingMemorySeconds { get; set; } = 45f;
+    public float GhostHearingClusterRadius { get; set; } = 60f;
     // Base investigation odds in percent; distance still reduces the final roll.
     public int GhostHearingVeryAggressivePct { get; set; } = 85;
     public int GhostHearingAggressivePct { get; set; } = 60;

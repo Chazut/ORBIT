@@ -135,6 +135,16 @@ public static class ServerConfig
         [JsonProperty("ghost_fight_sounds")] public bool GhostFightSounds = true;
         [JsonProperty("ghost_looting")] public bool GhostLooting = true;
         [JsonProperty("ghost_hearing")] public bool GhostHearing = true;
+        [JsonProperty("ghost_hearing_players_range")] public float GhostHearingPlayersRange = 350f;
+        [JsonProperty("ghost_hearing_players_suppressed_range")] public float GhostHearingPlayersSuppressedRange = 120f;
+        [JsonProperty("ghost_hearing_vanilla_range")] public float GhostHearingVanillaRange = 200f;
+        [JsonProperty("ghost_hearing_vanilla_suppressed_range")] public float GhostHearingVanillaSuppressedRange = 80f;
+        [JsonProperty("ghost_hearing_factions_range")] public float GhostHearingFactionsRange = 350f;
+        [JsonProperty("ghost_hearing_factions_suppressed_range")] public float GhostHearingFactionsSuppressedRange = 120f;
+        [JsonProperty("ghost_hearing_min_shots")] public int GhostHearingMinShots = 4;
+        [JsonProperty("ghost_hearing_cooldown_seconds")] public float GhostHearingCooldownSeconds = 150f;
+        [JsonProperty("ghost_hearing_memory_seconds")] public float GhostHearingMemorySeconds = 45f;
+        [JsonProperty("ghost_hearing_cluster_radius")] public float GhostHearingClusterRadius = 60f;
         [JsonProperty("ghost_hearing_very_aggressive_pct")] public int GhostHearingVeryAggressivePct = 85;
         [JsonProperty("ghost_hearing_aggressive_pct")] public int GhostHearingAggressivePct = 60;
         [JsonProperty("ghost_hearing_average_pct")] public int GhostHearingAveragePct = 30;

@@ -77,9 +77,82 @@
     <SettingsCard Title="Ghost hearing" OnReset="ResetHearing"
                   Subtitle="Investigate real and simulated gunfire while in Ghost. Includes vanilla bots and supported factions; UNTAR/RUAF checkpoint guards keep their posts.">
         <OrbitSwitch @bind-Value="Cfg.GhostMode.GhostHearing" Label="Investigate gunfire while in Ghost"
-                     Tooltip="Hear real gunfire and simulated fights (about 350 m unsuppressed, 120 m suppressed). Eligible squads may leave their current route to investigate. Saves apply from the next raid." />
+                     Tooltip="Hear real gunfire and simulated fights within the distances configured below. Eligible groups may leave their current route to investigate. Saves apply from the next raid." />
         @if (Cfg.GhostMode.GhostHearing)
         {
+            <details class="mt-3 mb-3">
+                <summary style="cursor:pointer; font-weight:500; padding:6px 0">Hearing distances</summary>
+                <MudText Typo="Typo.body2" Class="mt-2 mb-2" Style="opacity:.65">
+                    How far each group can hear gunfire while in Ghost. Applies to real and simulated fights. Save for the next raid.
+                </MudText>
+                <MudGrid Spacing="2" Class="align-center">
+                    <MudItem xs="12" sm="4"><MudText Typo="Typo.body2">PMCs / PlayerScavs</MudText></MudItem>
+                    <MudItem xs="6" sm="4">
+                        <MudNumericField T="float" @bind-Value="Cfg.GhostMode.GhostHearingPlayersRange" Label="Unsuppressed"
+                                         Min="50f" Max="1000f" Step="10f" Format="0" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                         Adornment="Adornment.End" AdornmentText="m" />
+                    </MudItem>
+                    <MudItem xs="6" sm="4">
+                        <MudNumericField T="float" @bind-Value="Cfg.GhostMode.GhostHearingPlayersSuppressedRange" Label="Suppressed"
+                                         Min="50f" Max="1000f" Step="10f" Format="0" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                         Adornment="Adornment.End" AdornmentText="m" />
+                    </MudItem>
+                    <MudItem xs="12" sm="4">
+                        <MudTooltip Text="Scavs, bosses and followers, Goons, Cultists, Raiders, Rogues and Bloodhounds.">
+                            <MudText Typo="Typo.body2">Vanilla bots</MudText>
+                        </MudTooltip>
+                    </MudItem>
+                    <MudItem xs="6" sm="4">
+                        <MudNumericField T="float" @bind-Value="Cfg.GhostMode.GhostHearingVanillaRange" Label="Unsuppressed"
+                                         Min="50f" Max="1000f" Step="10f" Format="0" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                         Adornment="Adornment.End" AdornmentText="m" />
+                    </MudItem>
+                    <MudItem xs="6" sm="4">
+                        <MudNumericField T="float" @bind-Value="Cfg.GhostMode.GhostHearingVanillaSuppressedRange" Label="Suppressed"
+                                         Min="50f" Max="1000f" Step="10f" Format="0" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                         Adornment="Adornment.End" AdornmentText="m" />
+                    </MudItem>
+                    <MudItem xs="12" sm="4">
+                        <MudTooltip Text="UNTAR / RUAF hunters, Raiders vs Rogues, Rook and Tombstone, ISB and Black Division.">
+                            <MudText Typo="Typo.body2">Modded factions</MudText>
+                        </MudTooltip>
+                    </MudItem>
+                    <MudItem xs="6" sm="4">
+                        <MudNumericField T="float" @bind-Value="Cfg.GhostMode.GhostHearingFactionsRange" Label="Unsuppressed"
+                                         Min="50f" Max="1000f" Step="10f" Format="0" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                         Adornment="Adornment.End" AdornmentText="m" />
+                    </MudItem>
+                    <MudItem xs="6" sm="4">
+                        <MudNumericField T="float" @bind-Value="Cfg.GhostMode.GhostHearingFactionsSuppressedRange" Label="Suppressed"
+                                         Min="50f" Max="1000f" Step="10f" Format="0" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                         Adornment="Adornment.End" AdornmentText="m" />
+                    </MudItem>
+                </MudGrid>
+            </details>
+            <details class="mb-3">
+                <summary style="cursor:pointer; font-weight:500; padding:6px 0">Investigation rules</summary>
+                <MudGrid Spacing="3" Class="mt-1">
+                    <MudItem xs="12" sm="6">
+                        <OrbitSlider T="int" @bind-Value="Cfg.GhostMode.GhostHearingMinShots" Label="Minimum shots" Min="1" Max="30" Step="1"
+                                     Tooltip="Real gunfire needs this many shots in the same area before a group can roll to investigate. Simulated Ghost fights already count as a combat." />
+                    </MudItem>
+                    <MudItem xs="12" sm="6">
+                        <OrbitSlider T="float" @bind-Value="Cfg.GhostMode.GhostHearingCooldownSeconds" Label="Investigation cooldown" Unit="s"
+                                     Min="0f" Max="600f" Step="5f" Fmt="0"
+                                     Tooltip="Minimum time between starting two investigations for the same group. A busy group still finishes its current activity before investigating again." />
+                    </MudItem>
+                    <MudItem xs="12" sm="6">
+                        <OrbitSlider T="float" @bind-Value="Cfg.GhostMode.GhostHearingMemorySeconds" Label="Gunfire memory" Unit="s"
+                                     Min="1f" Max="180f" Step="1f" Fmt="0"
+                                     Tooltip="How long a combat remains eligible after its last real shot or the end of a simulated fight. Each group still rolls only once per combat." />
+                    </MudItem>
+                    <MudItem xs="12" sm="6">
+                        <OrbitSlider T="float" @bind-Value="Cfg.GhostMode.GhostHearingClusterRadius" Label="Gunfire grouping radius" Unit="m"
+                                     Min="1f" Max="150f" Step="1f" Fmt="0"
+                                     Tooltip="Real shots within this distance of a remembered combat count toward that same combat. Smaller values separate nearby firefights; larger values combine them." />
+                    </MudItem>
+                </MudGrid>
+            </details>
             <MudText Typo="Typo.body2" Class="mt-2 mb-3" Style="opacity:.65">
                 Base chance per group, using PMC personality or bot category. Distance reduces it to half at the hearing limit.
                 0% disables investigations for that category; 100% is still affected by distance. Native bots require native Ghost movement.
@@ -195,6 +268,16 @@
     {
         var d = new GhostModeConfig();
         Cfg.GhostMode.GhostHearing = d.GhostHearing;
+        Cfg.GhostMode.GhostHearingPlayersRange = d.GhostHearingPlayersRange;
+        Cfg.GhostMode.GhostHearingPlayersSuppressedRange = d.GhostHearingPlayersSuppressedRange;
+        Cfg.GhostMode.GhostHearingVanillaRange = d.GhostHearingVanillaRange;
+        Cfg.GhostMode.GhostHearingVanillaSuppressedRange = d.GhostHearingVanillaSuppressedRange;
+        Cfg.GhostMode.GhostHearingFactionsRange = d.GhostHearingFactionsRange;
+        Cfg.GhostMode.GhostHearingFactionsSuppressedRange = d.GhostHearingFactionsSuppressedRange;
+        Cfg.GhostMode.GhostHearingMinShots = d.GhostHearingMinShots;
+        Cfg.GhostMode.GhostHearingCooldownSeconds = d.GhostHearingCooldownSeconds;
+        Cfg.GhostMode.GhostHearingMemorySeconds = d.GhostHearingMemorySeconds;
+        Cfg.GhostMode.GhostHearingClusterRadius = d.GhostHearingClusterRadius;
         Cfg.GhostMode.GhostHearingVeryAggressivePct = d.GhostHearingVeryAggressivePct;
         Cfg.GhostMode.GhostHearingAggressivePct = d.GhostHearingAggressivePct;
         Cfg.GhostMode.GhostHearingAveragePct = d.GhostHearingAveragePct;

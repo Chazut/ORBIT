@@ -16,27 +16,26 @@ public partial class DormancySystem
     // simulated ghost fights (their window and their weapons are known) and real gunfire, read from the
     // game's own AI sound event, the one BSG's hearing sensor subscribes to, so the player's shots and any
     // awake bot's shots count. A single stray shot is not a fight: a real cluster needs a few shots first.
-    private const float NoiseRangeLoud = 350f;
-    private const float NoiseRangeSuppressed = 120f;
     private const float NoiseMinDistance = 40f;          // closer than this the skirmish / wake logic owns it
-    private const float NoiseClusterRadius = 60f;        // shots this close together are the same firefight
-    private const float NoiseLingerSeconds = 45f;        // a fight stays "audible" this long after its last shot
-    private const int NoiseMinRealShots = 4;
-    private const float NoiseReactionCooldownSeconds = 150f;
+    private float NoiseClusterRadius => ClampHearingSetting(_cfg.GhostHearingClusterRadius, 60f, 1f, 150f);
+    private float NoiseLingerSeconds => ClampHearingSetting(_cfg.GhostHearingMemorySeconds, 45f, 1f, 180f);
+    private int NoiseMinRealShots => (int)Mathf.Clamp(_cfg.GhostHearingMinShots, 1, 30);
+    private float NoiseReactionCooldownSeconds => ClampHearingSetting(_cfg.GhostHearingCooldownSeconds, 150f, 0f, 600f);
     private const float NoisePollIntervalSeconds = 2f;
 
     private readonly struct NoiseSource
     {
         public readonly Vector3 Position;
-        public readonly float Range;
-        public NoiseSource(Vector3 position, float range) { Position = position; Range = range; }
+        public readonly bool Suppressed;
+        public NoiseSource(Vector3 position, bool suppressed) { Position = position; Suppressed = suppressed; }
     }
 
     private sealed class NoiseEvent
     {
         public int Id;
         public Vector3 Position;
-        public float Range;
+        public bool HasLoudShots;
+        public bool HasSuppressedShots;
         public float LastShotAt;
         public int Shots;
         public bool Simulated;
@@ -88,7 +87,7 @@ public partial class DormancySystem
         if (type != AISoundType.gun && type != AISoundType.silencedGun) return;
         try
         {
-            var range = type == AISoundType.gun ? NoiseRangeLoud : NoiseRangeSuppressed;
+            var suppressed = type == AISoundType.silencedGun;
             var sourceSquadId = -1;
             if (player is Player shooter && shooter.IsAI)
             {
@@ -97,7 +96,7 @@ public partial class DormancySystem
                 if (agent != null && agent.IsDormant) return;
                 if (agent?.Squad != null) sourceSquadId = agent.Squad.Id;
             }
-            RegisterNoise(position, range, Time.time, simulated: false, sourceSquadId, -1, player?.ProfileId);
+            RegisterNoise(position, suppressed, Time.time, simulated: false, sourceSquadId, -1, player?.ProfileId);
         }
         catch
         {
@@ -105,7 +104,7 @@ public partial class DormancySystem
         }
     }
 
-    private void RegisterNoise(Vector3 position, float range, float lastShotAt, bool simulated, int sourceA, int sourceB, string profileId = null)
+    private void RegisterNoise(Vector3 position, bool suppressed, float lastShotAt, bool simulated, int sourceA, int sourceB, string profileId = null)
     {
         NoiseEvent noise = null;
         for (var i = 0; i < _noises.Count; i++)
@@ -122,7 +121,8 @@ public partial class DormancySystem
             noise = new NoiseEvent { Id = ++_nextNoiseId, Position = position, Simulated = simulated };
             _noises.Add(noise);
         }
-        noise.Range = Mathf.Max(noise.Range, range);
+        if (suppressed) noise.HasSuppressedShots = true;
+        else noise.HasLoudShots = true;
         noise.LastShotAt = Mathf.Max(noise.LastShotAt, lastShotAt);
         noise.Shots++;
         if (sourceA >= 0) noise.SourceSquadIds.Add(sourceA);
@@ -130,7 +130,7 @@ public partial class DormancySystem
         if (profileId != null) noise.SourceProfiles.Add(profileId);
     }
 
-    /// <summary>Capture each shooter's position and hearing range once per simulated fight.</summary>
+    /// <summary>Capture each shooter's position and suppressor state once per simulated fight.</summary>
     private void RegisterFightNoise(GhostUnit a, GhostUnit b, float duration)
     {
         if (!_hearingEnabled) return;
@@ -160,27 +160,70 @@ public partial class DormancySystem
         if (player?.HealthController is not { IsAlive: true }) return;
         noise.SourceProfiles.Add(player.ProfileId);
         var sound = WeaponSoundFromProfile(player.ProfileId);
-        // Preserve the existing conservative range for an unresolved weapon.
-        noise.Shooters.Add(new NoiseSource(player.Position, sound?.IsSilenced == true ? NoiseRangeSuppressed : NoiseRangeLoud));
+        // An unresolved weapon keeps the existing unsuppressed fallback.
+        noise.Shooters.Add(new NoiseSource(player.Position, sound?.IsSilenced == true));
     }
 
-    private static bool TryGetNoiseSource(NoiseEvent noise, Vector3 listener,
+    private (float Loud, float Suppressed) HearingRanges(GhostHearingCategory category)
+    {
+        switch (category)
+        {
+            case GhostHearingCategory.Pmc:
+            case GhostHearingCategory.PlayerScav:
+                return (ClampHearingRange(_cfg.GhostHearingPlayersRange, 350f),
+                    ClampHearingRange(_cfg.GhostHearingPlayersSuppressedRange, 120f));
+            case GhostHearingCategory.Scav:
+            case GhostHearingCategory.Goons:
+            case GhostHearingCategory.Bosses:
+            case GhostHearingCategory.Cultists:
+            case GhostHearingCategory.Raiders:
+            case GhostHearingCategory.Bloodhounds:
+            case GhostHearingCategory.OtherVanilla:
+                return (ClampHearingRange(_cfg.GhostHearingVanillaRange, 200f),
+                    ClampHearingRange(_cfg.GhostHearingVanillaSuppressedRange, 80f));
+            case GhostHearingCategory.UntarHunters:
+            case GhostHearingCategory.RuafHunters:
+            case GhostHearingCategory.RoguesVsRaiders:
+            case GhostHearingCategory.ArmyOfTwo:
+            case GhostHearingCategory.Isb:
+            case GhostHearingCategory.BlackDivision:
+                return (ClampHearingRange(_cfg.GhostHearingFactionsRange, 350f),
+                    ClampHearingRange(_cfg.GhostHearingFactionsSuppressedRange, 120f));
+            default: return (0f, 0f);
+        }
+    }
+
+    private static float ClampHearingRange(float value, float fallback)
+    {
+        return ClampHearingSetting(value, fallback, 50f, 1000f);
+    }
+
+    private static float ClampHearingSetting(float value, float fallback, float min, float max)
+    {
+        return float.IsNaN(value) || float.IsInfinity(value) ? fallback : Mathf.Clamp(value, min, max);
+    }
+
+    private static bool TryGetNoiseSource(NoiseEvent noise, Vector3 listener, (float Loud, float Suppressed) hearing,
         out Vector3 position, out float range, out float distance)
     {
         position = noise.Position;
-        range = noise.Range;
+        range = 0f;
         distance = 0f;
         var nearest = float.PositiveInfinity;
         var count = noise.Shooters?.Count ?? 0;
         for (var i = 0; i < (count == 0 ? 1 : count); i++)
         {
-            var source = count == 0 ? new NoiseSource(noise.Position, noise.Range) : noise.Shooters[i];
-            var squared = (source.Position - listener).sqrMagnitude;
-            if (squared < NoiseMinDistance * NoiseMinDistance || squared > source.Range * source.Range
+            var sourcePosition = count == 0 ? noise.Position : noise.Shooters[i].Position;
+            // A real cluster can contain both kinds of shot; use the farthest audible one for this listener.
+            var sourceRange = count == 0
+                ? Mathf.Max(noise.HasLoudShots ? hearing.Loud : 0f, noise.HasSuppressedShots ? hearing.Suppressed : 0f)
+                : noise.Shooters[i].Suppressed ? hearing.Suppressed : hearing.Loud;
+            var squared = (sourcePosition - listener).sqrMagnitude;
+            if (squared < NoiseMinDistance * NoiseMinDistance || squared > sourceRange * sourceRange
                 || squared >= nearest) continue;
             nearest = squared;
-            position = source.Position;
-            range = source.Range;
+            position = sourcePosition;
+            range = sourceRange;
         }
         if (float.IsPositiveInfinity(nearest)) return false;
         distance = Mathf.Sqrt(nearest);
@@ -222,6 +265,7 @@ public partial class DormancySystem
             return new Api.OrbitGhostHearingState();
 
         var now = Time.time;
+        var hearing = HearingRanges(HearingCategory(squad));
         var state = squad.ExtractRequested ? "Extracting"
             : squad.InvestigateNoisePosition.HasValue ? "Investigating"
             : now < squad.GhostFightUntil ? "Fighting"
@@ -229,8 +273,8 @@ public partial class DormancySystem
             : "Listening";
         return new Api.OrbitGhostHearingState
         {
-            Range = NoiseRangeLoud,
-            SuppressedRange = NoiseRangeSuppressed,
+            Range = hearing.Loud,
+            SuppressedRange = hearing.Suppressed,
             MinimumDistance = NoiseMinDistance,
             State = state,
         };
@@ -259,13 +303,14 @@ public partial class DormancySystem
             if (curiosity <= 0f) continue;
 
             var listener = squad.Members[0].Position;
+            var hearing = HearingRanges(HearingCategory(squad));
             for (var n = 0; n < _noises.Count; n++)
             {
                 var noise = _noises[n];
                 if (!noise.Simulated && noise.Shots < NoiseMinRealShots) continue;
                 if (noise.SourceSquadIds.Contains(squad.Id) || noise.RolledSquadIds.Contains(squad.Id)
                     || SquadMadeNoise(squad, noise)) continue;
-                if (!TryGetNoiseSource(noise, listener, out var sourcePosition, out var sourceRange, out var dist)) continue;
+                if (!TryGetNoiseSource(noise, listener, hearing, out var sourcePosition, out var sourceRange, out var dist)) continue;
 
                 noise.RolledSquadIds.Add(squad.Id); // one roll per squad per firefight, whatever the outcome
                 // A fight at the edge of earshot is less tempting than one next door.
@@ -381,13 +426,14 @@ public partial class DormancySystem
             if (!available) continue;
             var lead = group[0];
             var listener = lead.Position;
+            var hearing = HearingRanges(category);
             for (var n = 0; n < _noises.Count; n++)
             {
                 var noise = _noises[n];
                 if (!noise.Simulated && noise.Shots < NoiseMinRealShots || noise.RolledNativeGroups.Contains(entry.Key)) continue;
                 var own = false;
                 for (var i = 0; i < group.Count; i++) own |= noise.SourceProfiles.Contains(group[i].ProfileId);
-                if (own || !TryGetNoiseSource(noise, listener, out var source, out var range, out var distance)) continue;
+                if (own || !TryGetNoiseSource(noise, listener, hearing, out var source, out var range, out var distance)) continue;
                 // Budget contention postpones the first roll, rather than silently consuming it.
                 if (!NativeGhostNavigation.QueryAvailable) break;
                 var chance = CategoryCuriosity(category) * Mathf.Lerp(1f, 0.5f, distance / range);
@@ -430,7 +476,7 @@ public partial class DormancySystem
             foreach (var entry in _vanillaGroups)
             {
                 var group = entry.Value;
-                if (group.Count == 0 || group[0].ProfileId != profileId || !NativeHearingGroup(group, out _)) continue;
+                if (group.Count == 0 || group[0].ProfileId != profileId || !NativeHearingGroup(group, out var category)) continue;
                 var fighting = false;
                 var investigating = false;
                 var available = true;
@@ -441,9 +487,10 @@ public partial class DormancySystem
                     available &= _nativeGhosts.CanInvestigate(group[i]);
                 }
                 var cooldown = _nativeNoiseReactionAt.TryGetValue(entry.Key, out var at) && Time.time - at < NoiseReactionCooldownSeconds;
+                var hearing = HearingRanges(category);
                 return new Api.OrbitGhostHearingState
                 {
-                    Range = NoiseRangeLoud, SuppressedRange = NoiseRangeSuppressed, MinimumDistance = NoiseMinDistance,
+                    Range = hearing.Loud, SuppressedRange = hearing.Suppressed, MinimumDistance = NoiseMinDistance,
                     State = fighting ? "Fighting" : investigating ? "Investigating" : cooldown ? "Cooldown" : available ? "Listening" : "Busy",
                 };
             }
