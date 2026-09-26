@@ -130,6 +130,7 @@ public class Plugin : BaseUnityPlugin
         EnableSafe(new NativeGlukharChoiceDiagnosticPatch());
         NativeGhostBodyPatches.Enable();
         SanitarPatrolMedicinePatch.Enable();
+        LootPatrolResumePatch.Enable();
         EnableSafe(new DormantDamageProbePatch());
         EnableSafe(new DormantGroundCollisionPatch());
         EnableSafe(new DormantAvoidDangerBypassPatch());

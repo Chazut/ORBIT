@@ -1255,7 +1255,8 @@ public partial class WaypointSystem
         // The extract-interrupt gate polls this every tick and it now path-checks each candidate (below), so
         // cache the verdict briefly. Reachability from a moving leader changes slowly; 2 s stays responsive
         // without re-pathing every exfil each frame.
-        if (Time.time - squad.NearestExfilCachedAt < NearestExfilCacheTtlSeconds)
+        if (Time.time - squad.NearestExfilCachedAt < NearestExfilCacheTtlSeconds
+            && (squad.NearestExfilCached == null || !squad.CompletedPoiIds.Contains(squad.NearestExfilCached.Id)))
             return squad.NearestExfilCached;
 
         bool? squadIsPmc = null;

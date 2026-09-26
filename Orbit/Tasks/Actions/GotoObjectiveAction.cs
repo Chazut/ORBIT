@@ -164,8 +164,8 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                         {
                             // Exfils get the 3-strike treatment instead of a one-shot blacklist: a
                             // partial-path trip legitimately stalls where the mesh ends, and conditions can
-                            // change between tries. At 3 strikes TrackArrivalFailure force-despawns near the
-                            // exit or blacklists the exfil.
+                            // change between tries. Keep an available foot exit while local recovery runs;
+                            // the existing proximity fallback still handles a blocked final entrance.
                             objective.Status = ObjectiveStatus.Failed;
                             Log.Info($"{agent} stalled en-route to exfil {objective.Location} for {StuckEnRouteThresholdSeconds:F0}s — registering arrival strike");
                             TrackArrivalFailure(agent, objective.Location);
@@ -503,9 +503,8 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                 && location.Target is ExfiltrationPoint exfil
                 && (agent.Squad.ExtractRequested || agent.SoloExtractRequested))
             {
-                // Force the despawn only when the bot made it near the exit (blocked trigger, nav quirk on
-                // the last meters). Far away — a genuinely dead-ended partial path — blacklist this exfil
-                // instead so the next scan picks another; despawning mid-map is never acceptable.
+                // Force the despawn only near the exit. A distant local blockage says nothing about
+                // whether the exit is reachable from a nearby NavMesh point.
                 if (!ExfilArrival.IsSharedTimer(exfil)
                     && (agent.Position - location.Position).sqrMagnitude <= ExfilForceDespawnProximitySqr)
                 {
@@ -516,13 +515,26 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                     agent.LastFailedPoiId = -1;
                     return;
                 }
+                if (exfil.Settings?.ExfiltrationType == EExfiltrationType.Individual
+                    && exfil.Status != EExfiltrationStatus.NotPresent && exfil.Status != EExfiltrationStatus.Hidden)
+                {
+                    // Keep both solo and squad pins. The position-based watchdog survives these short
+                    // retries and can relocate the bot onto a nearby path to this same exit.
+                    agent.Objective.Status = ObjectiveStatus.None;
+                    if (agent.ConsecutiveSamePoiFailures == 3)
+                        Log.Info($"{agent} exfil recovery: keeping {location} despite blocked approach ({distance:F0}m remaining), awaiting local unsticking");
+                    return;
+                }
                 Log.Info($"{agent} still {Vector3.Distance(agent.Position, location.Position):F0}m short of {location} after 3 attempts — blacklisting this exfil for {agent.Squad}, re-scanning");
                 // Fall through to the generic blacklist + pin-clearing below.
             }
 
             agent.Squad.CompletedPoiIds.Add(locId);
-            if (location.Target is ExfiltrationPoint failedExfil && ExfilArrival.IsSharedTimer(failedExfil))
+            if (location.Category == WaypointCategory.Exfil)
+            {
                 ExfilArrival.Abandon(agent, location);
+                Log.Debug($"{agent} exfil recovery: cleared failed exit {location} and selection cache, extraction intent preserved");
+            }
             // Adding to CompletedPoiIds only filters FUTURE picks; the current dispatch still has
             // agent.Objective.Location pinned at the bad POI (set by AssignNewObjective, by a follower
             // splinter pick, or by the loot routine's scavenge sweep which pins squad.Objective.Location at

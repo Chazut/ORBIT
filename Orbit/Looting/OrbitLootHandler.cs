@@ -305,7 +305,7 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
             // The layer handoff already released our mover pause; leave the new owner's state alone.
             if (agent == null || !agent.IsActive || agent.IsDormant) return;
             if (_bot.Memory != null && (_bot.Memory.HaveEnemy || _bot.Memory.IsUnderFire)) return;
-            try { _bot.PatrollingData?.Unpause(); } catch (System.Exception e) { Log.Warning($"OrbitLootHandler.UnfreezeBotAfterLootSession({Nick}): PatrollingData.Unpause THREW {e.Message}"); }
+            try { Orbit.Patches.LootPatrolResumePatch.Resume(_bot); } catch (System.Exception e) { Log.Warning($"OrbitLootHandler.UnfreezeBotAfterLootSession({Nick}): PatrollingData.Unpause THREW {e.Message}"); }
             try { if (_bot.Mover != null) _bot.Mover.Pause = false; } catch (System.Exception e) { Log.Warning($"OrbitLootHandler.UnfreezeBotAfterLootSession({Nick}): Mover.Pause THREW {e.Message}"); }
             try { _bot.SetPose(1f); } catch (System.Exception e) { Log.Warning($"OrbitLootHandler.UnfreezeBotAfterLootSession({Nick}): SetPose THREW {e.Message}"); }
             Log.Debug($"OrbitLootHandler.UnfreezeBotAfterLootSession({Nick}): bot movement resumed + standing + patrol data resumed");

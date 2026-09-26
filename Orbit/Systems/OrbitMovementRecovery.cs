@@ -14,6 +14,32 @@ internal sealed class OrbitMovementRecovery
     private Vector3 _probeOrigin;
     private int _failedProbes;
     private float _nextProbe;
+    private readonly Vector3[] _rescuePoints = new Vector3[16];
+    private readonly float[] _rescueTimes = new float[16];
+    private int _rescueCount, _rescueIndex;
+
+    internal bool RecentlyRescuedAt(Vector3 point)
+    {
+        for (var i = 0; i < _rescueCount; i++)
+            if (Time.time - _rescueTimes[i] < 120f && (point - _rescuePoints[i]).sqrMagnitude < 6f * 6f)
+                return true;
+        return false;
+    }
+
+    internal void RecordLocalRescue(Vector3 from, Vector3 to)
+    {
+        RememberRescuePoint(from);
+        RememberRescuePoint(to);
+        Recovered(to);
+    }
+
+    private void RememberRescuePoint(Vector3 point)
+    {
+        _rescuePoints[_rescueIndex] = point;
+        _rescueTimes[_rescueIndex] = Time.time;
+        _rescueIndex = (_rescueIndex + 1) % _rescuePoints.Length;
+        if (_rescueCount < _rescuePoints.Length) _rescueCount++;
+    }
 
     internal bool Observe(Vector3 position, BotMover mover, bool force = false)
     {

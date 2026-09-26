@@ -674,6 +674,8 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
             UpdateEmergencyExtract(agent);
             if (agent.SoloExtractRequested)
             {
+                if (agent.SoloExtractTarget != null && squad.CompletedPoiIds.Contains(agent.SoloExtractTarget.Id))
+                    ExfilArrival.Abandon(agent, agent.SoloExtractTarget);
                 if (agent.IsActive && agent.SoloExtractTarget?.Target is EFT.Interactive.ExfiltrationPoint soloExfil
                     && ExfilArrival.IsSharedTimer(soloExfil) && ExfilArrival.IsUnavailable(soloExfil))
                 {
