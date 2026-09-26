@@ -153,64 +153,67 @@
                     </MudItem>
                 </MudGrid>
             </details>
-            <MudText Typo="Typo.body2" Class="mt-2 mb-3" Style="opacity:.65">
-                Base chance per group, using PMC personality or bot category. Distance reduces it to half at the hearing limit.
-                0% disables investigations for that category; 100% is still affected by distance. Native bots require native Ghost movement.
-            </MudText>
-            <MudGrid Spacing="3">
-                <MudItem xs="12" sm="6">
-                    <OrbitSlider T="int" @bind-Value="Cfg.GhostMode.GhostHearingVeryAggressivePct" Label="Very aggressive" Unit="%" Min="0" Max="100" Step="1" />
-                </MudItem>
-                <MudItem xs="12" sm="6">
-                    <OrbitSlider T="int" @bind-Value="Cfg.GhostMode.GhostHearingAggressivePct" Label="Aggressive" Unit="%" Min="0" Max="100" Step="1" />
-                </MudItem>
-                <MudItem xs="12" sm="6">
-                    <OrbitSlider T="int" @bind-Value="Cfg.GhostMode.GhostHearingAveragePct" Label="Average" Unit="%" Min="0" Max="100" Step="1" />
-                </MudItem>
-                <MudItem xs="12" sm="6">
-                    <OrbitSlider T="int" @bind-Value="Cfg.GhostMode.GhostHearingCautiousPct" Label="Cautious" Unit="%" Min="0" Max="100" Step="1" />
-                </MudItem>
-                <MudItem xs="12" sm="6">
-                    <OrbitSlider T="int" @bind-Value="Cfg.GhostMode.GhostHearingTimmyPct" Label="Timmy" Unit="%" Min="0" Max="100" Step="1" />
-                </MudItem>
-                <MudItem xs="12" sm="6">
-                    <OrbitSlider T="int" @bind-Value="Cfg.GhostMode.GhostHearingPlayerScavPct" Label="PlayerScav" Unit="%" Min="0" Max="100" Step="1" />
-                </MudItem>
-                <MudItem xs="12" sm="6">
-                    <OrbitSlider T="int" @bind-Value="Cfg.GhostMode.GhostHearingScavPct" Label="Scavs" Unit="%" Min="0" Max="100" Step="1"
-                                 Tooltip="Sniper scavs keep their posts and never investigate gunfire while in Ghost." />
-                </MudItem>
-                <MudItem xs="12" sm="6">
-                    <OrbitSlider T="int" @bind-Value="Cfg.GhostMode.GhostHearingGoonsPct" Label="Goons" Unit="%" Min="0" Max="100" Step="1" />
-                </MudItem>
-                <MudItem xs="12" sm="6">
-                    <OrbitSlider T="int" @bind-Value="Cfg.GhostMode.GhostHearingBossesPct" Label="Vanilla bosses and followers" Unit="%" Min="0" Max="100" Step="1" />
-                </MudItem>
-                <MudItem xs="12" sm="6">
-                    <OrbitSlider T="int" @bind-Value="Cfg.GhostMode.GhostHearingCultistsPct" Label="Cultists" Unit="%" Min="0" Max="100" Step="1" />
-                </MudItem>
-                <MudItem xs="12" sm="6">
-                    <OrbitSlider T="int" @bind-Value="Cfg.GhostMode.GhostHearingRaidersPct" Label="Vanilla raiders and rogues" Unit="%" Min="0" Max="100" Step="1" />
-                </MudItem>
-                <MudItem xs="12" sm="6">
-                    <OrbitSlider T="int" @bind-Value="Cfg.GhostMode.GhostHearingBloodhoundsPct" Label="Bloodhounds" Unit="%" Min="0" Max="100" Step="1" />
-                </MudItem>
-                <MudItem xs="12" sm="6">
-                    <OrbitSlider T="int" @bind-Value="Cfg.GhostMode.GhostHearingUntarRuafHuntersPct" Label="UNTAR / RUAF hunters" Unit="%" Min="0" Max="100" Step="1" />
-                </MudItem>
-                <MudItem xs="12" sm="6">
-                    <OrbitSlider T="int" @bind-Value="Cfg.GhostMode.GhostHearingRoguesVsRaidersPct" Label="Raiders vs Rogues" Unit="%" Min="0" Max="100" Step="1" />
-                </MudItem>
-                <MudItem xs="12" sm="6">
-                    <OrbitSlider T="int" @bind-Value="Cfg.GhostMode.GhostHearingArmyOfTwoPct" Label="Rook and Tombstone" Unit="%" Min="0" Max="100" Step="1" />
-                </MudItem>
-                <MudItem xs="12" sm="6">
-                    <OrbitSlider T="int" @bind-Value="Cfg.GhostMode.GhostHearingIsbPct" Label="ISB (including White Tusk)" Unit="%" Min="0" Max="100" Step="1" />
-                </MudItem>
-                <MudItem xs="12" sm="6">
-                    <OrbitSlider T="int" @bind-Value="Cfg.GhostMode.GhostHearingBlackDivisionPct" Label="Black Division" Unit="%" Min="0" Max="100" Step="1" />
-                </MudItem>
-            </MudGrid>
+            <details class="mb-3">
+                <summary style="cursor:pointer; font-weight:500; padding:6px 0">Investigation probabilities</summary>
+                <MudText Typo="Typo.body2" Class="mt-2 mb-3" Style="opacity:.65">
+                    Base chance per group, using PMC personality or bot category. Distance reduces it to half at the hearing limit.
+                    0% disables investigations for that category; 100% is still affected by distance. Native bots require native Ghost movement.
+                </MudText>
+                <MudGrid Spacing="3">
+                    <MudItem xs="12" sm="6">
+                        <OrbitSlider T="int" @bind-Value="Cfg.GhostMode.GhostHearingVeryAggressivePct" Label="Very aggressive" Unit="%" Min="0" Max="100" Step="1" />
+                    </MudItem>
+                    <MudItem xs="12" sm="6">
+                        <OrbitSlider T="int" @bind-Value="Cfg.GhostMode.GhostHearingAggressivePct" Label="Aggressive" Unit="%" Min="0" Max="100" Step="1" />
+                    </MudItem>
+                    <MudItem xs="12" sm="6">
+                        <OrbitSlider T="int" @bind-Value="Cfg.GhostMode.GhostHearingAveragePct" Label="Average" Unit="%" Min="0" Max="100" Step="1" />
+                    </MudItem>
+                    <MudItem xs="12" sm="6">
+                        <OrbitSlider T="int" @bind-Value="Cfg.GhostMode.GhostHearingCautiousPct" Label="Cautious" Unit="%" Min="0" Max="100" Step="1" />
+                    </MudItem>
+                    <MudItem xs="12" sm="6">
+                        <OrbitSlider T="int" @bind-Value="Cfg.GhostMode.GhostHearingTimmyPct" Label="Timmy" Unit="%" Min="0" Max="100" Step="1" />
+                    </MudItem>
+                    <MudItem xs="12" sm="6">
+                        <OrbitSlider T="int" @bind-Value="Cfg.GhostMode.GhostHearingPlayerScavPct" Label="PlayerScav" Unit="%" Min="0" Max="100" Step="1" />
+                    </MudItem>
+                    <MudItem xs="12" sm="6">
+                        <OrbitSlider T="int" @bind-Value="Cfg.GhostMode.GhostHearingScavPct" Label="Scavs" Unit="%" Min="0" Max="100" Step="1"
+                                     Tooltip="Sniper scavs keep their posts and never investigate gunfire while in Ghost." />
+                    </MudItem>
+                    <MudItem xs="12" sm="6">
+                        <OrbitSlider T="int" @bind-Value="Cfg.GhostMode.GhostHearingGoonsPct" Label="Goons" Unit="%" Min="0" Max="100" Step="1" />
+                    </MudItem>
+                    <MudItem xs="12" sm="6">
+                        <OrbitSlider T="int" @bind-Value="Cfg.GhostMode.GhostHearingBossesPct" Label="Vanilla bosses and followers" Unit="%" Min="0" Max="100" Step="1" />
+                    </MudItem>
+                    <MudItem xs="12" sm="6">
+                        <OrbitSlider T="int" @bind-Value="Cfg.GhostMode.GhostHearingCultistsPct" Label="Cultists" Unit="%" Min="0" Max="100" Step="1" />
+                    </MudItem>
+                    <MudItem xs="12" sm="6">
+                        <OrbitSlider T="int" @bind-Value="Cfg.GhostMode.GhostHearingRaidersPct" Label="Vanilla raiders and rogues" Unit="%" Min="0" Max="100" Step="1" />
+                    </MudItem>
+                    <MudItem xs="12" sm="6">
+                        <OrbitSlider T="int" @bind-Value="Cfg.GhostMode.GhostHearingBloodhoundsPct" Label="Bloodhounds" Unit="%" Min="0" Max="100" Step="1" />
+                    </MudItem>
+                    <MudItem xs="12" sm="6">
+                        <OrbitSlider T="int" @bind-Value="Cfg.GhostMode.GhostHearingUntarRuafHuntersPct" Label="UNTAR / RUAF hunters" Unit="%" Min="0" Max="100" Step="1" />
+                    </MudItem>
+                    <MudItem xs="12" sm="6">
+                        <OrbitSlider T="int" @bind-Value="Cfg.GhostMode.GhostHearingRoguesVsRaidersPct" Label="Raiders vs Rogues" Unit="%" Min="0" Max="100" Step="1" />
+                    </MudItem>
+                    <MudItem xs="12" sm="6">
+                        <OrbitSlider T="int" @bind-Value="Cfg.GhostMode.GhostHearingArmyOfTwoPct" Label="Rook and Tombstone" Unit="%" Min="0" Max="100" Step="1" />
+                    </MudItem>
+                    <MudItem xs="12" sm="6">
+                        <OrbitSlider T="int" @bind-Value="Cfg.GhostMode.GhostHearingIsbPct" Label="ISB (including White Tusk)" Unit="%" Min="0" Max="100" Step="1" />
+                    </MudItem>
+                    <MudItem xs="12" sm="6">
+                        <OrbitSlider T="int" @bind-Value="Cfg.GhostMode.GhostHearingBlackDivisionPct" Label="Black Division" Unit="%" Min="0" Max="100" Step="1" />
+                    </MudItem>
+                </MudGrid>
+            </details>
         }
     </SettingsCard>
 
