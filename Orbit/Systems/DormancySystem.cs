@@ -363,6 +363,8 @@ public partial class DormancySystem
     public void Update(List<Agent> liveAgents, List<Squad> squads)
     {
         if (!_enabled) return;
+        // Check before scheduled shots/kills: spectators must see live combat after waking.
+        if (UpdateSpectatorMode()) return;
         if (_pendingShots.Count > 0) PumpGhostFightShots();
         if (_activeFights.Count > 0) PumpGhostFights();
         _nativeMoveScratch.Clear();

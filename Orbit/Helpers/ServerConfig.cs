@@ -123,6 +123,7 @@ public static class ServerConfig
 
     public sealed class GhostModeSection
     {
+        [JsonProperty("wake_for_spectators")] public bool WakeForSpectators = true;
         // ON by default (must match the server default) — decided after the 2.0 RC: unanimous
         // community feedback, and the limiter is the release's headline feature.
         [JsonProperty("enabled")] public bool Enabled = true;

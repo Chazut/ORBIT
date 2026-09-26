@@ -36,6 +36,7 @@ public class OrbitServerConfig
 /// </summary>
 public class GhostModeConfig
 {
+    public bool WakeForSpectators { get; set; } = true;
     // ON by default — decided after the 2.0 RC: unanimous community feedback, and the limiter is
     // the release's headline feature. Release notes call it out with where to turn it off.
     public bool Enabled { get; set; } = true;

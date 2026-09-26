@@ -84,6 +84,7 @@ public partial class DormancySystem
     // Fires for every AI-audible sound in the raid: keep it to a type test and a short list walk.
     private void OnAiSoundPlayed(IPlayer player, Vector3 position, float power, AISoundType type)
     {
+        if (_spectatorSuspended) return;
         if (type != AISoundType.gun && type != AISoundType.silencedGun) return;
         try
         {

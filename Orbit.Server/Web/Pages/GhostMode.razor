@@ -26,6 +26,8 @@
     <SettingsCard Title="Limiter" OnReset="ResetLimiter">
         <OrbitSwitch @bind-Value="Cfg.GhostMode.Enabled" Label="Enable Ghost Mode"
                      Tooltip="Sleeps far-away bots while their supported behaviour continues. Covers ORBIT squads and, with native movement enabled, vanilla patrols and supported faction hunts. The type toggles below control who may sleep; the BTR is never touched." />
+        <OrbitSwitch @bind-Value="Cfg.GhostMode.WakeForSpectators" Label="Wake bots for spectating"
+                     Tooltip="ON (default): wakes all sleeping bots and pauses Ghost Mode when the last human player dies or extracts. In co-op, waits until nobody is still playing; the headless host does not count. Ghost Mode resumes if a player returns. Saves apply from the next raid." />
         <OrbitSwitch @bind-Value="Cfg.GhostMode.GhostMovement" Label="Ghost movement"
                      Tooltip="ON: sleeping bots advance along their planned routes. Native bots also need Vanilla / faction movement below. OFF: sleepers hold position." />
         <OrbitSwitch @bind-Value="Cfg.GhostMode.NativeGhostMovement" Label="Vanilla / faction movement"
@@ -217,6 +219,7 @@
     {
         var d = new GhostModeConfig();
         Cfg.GhostMode.Enabled = d.Enabled;
+        Cfg.GhostMode.WakeForSpectators = d.WakeForSpectators;
         Cfg.GhostMode.GhostMovement = d.GhostMovement;
         Cfg.GhostMode.NativeGhostMovement = d.NativeGhostMovement;
         Cfg.GhostMode.GhostLooting = d.GhostLooting;
