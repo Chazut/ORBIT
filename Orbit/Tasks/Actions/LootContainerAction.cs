@@ -95,6 +95,10 @@ public class LootContainerAction(AgentData dataset, WaypointSystem waypointSyste
         // world state matches what an awake bot would have produced.
         if (!_states.TryGetValue(agent.Id, out var state))
         {
+            // The scheduler may retain this action between strategy ticks even after completion.
+            // Only a new loot order may start another session; existing sessions still finish below.
+            if (objective.Status != ObjectiveStatus.Looting) return;
+
             // A running session must observe its result first: our own successful pickup removes the
             // world item before this action gets its next tick. Only reject stale targets for NEW sessions.
             if (waypointSystem.IsUnavailableLooseLoot(location))

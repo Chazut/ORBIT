@@ -72,6 +72,15 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void BumpLootActivity() => _lastLootActivityTime = Time.realtimeSinceStartup;
 
+    internal void ReportInventoryProgress(CancellationToken sessionToken)
+    {
+        // Equipment swaps can transfer many items before returning to the main loot loop.
+        // Only successful work for the current, still-running session resets its watchdog.
+        if (!LootTaskRunning || _cts == null || sessionToken != _cts.Token || sessionToken.IsCancellationRequested)
+            return;
+        BumpLootActivity();
+    }
+
     // Current loot source root (corpse equipment / container fixture / loose item). Set per LootXxxAsync
     // entry; used by the swap evaluator to size the candidate's reachable ammo pool.
     private Item _currentSourceRoot;

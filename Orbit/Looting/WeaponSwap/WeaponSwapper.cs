@@ -498,6 +498,7 @@ public static class WeaponSwapper
                 return false;
             }
             Log.Debug($"WeaponSwap.{label}({nick}): tx DONE (succeeded), settling {PostTransactionSettleMs}ms");
+            bot.GetPlayer?.gameObject?.GetComponent<OrbitLootHandler>()?.ReportInventoryProgress(ct);
             await Task.Delay(PostTransactionSettleMs, ct);
             return true;
         }
