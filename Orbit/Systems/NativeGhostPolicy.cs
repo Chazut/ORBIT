@@ -2,9 +2,15 @@ namespace Orbit.Systems;
 
 internal static class NativeGhostPolicy
 {
+    // BlackDiv also spawns ordinary patrols without a MoreBots hunt manager.
+    // Only its registered roles in native patrol layers use this admission path.
+    internal static bool IsBlackDivisionPatrol(int role, string layer)
+        => role is 848420 or 848421 or 848422 or 848423 or 848424 or 848426
+            && layer is "PatrolAssaultLayer" or "FullMapPatrolLayer" or "FollowerPatrolLayer";
+
     public static bool Supports(string decision, string customLogic, bool customRole, bool huntAdapter,
         string checkpoint = null, bool warband = false, bool partisanTravel = false, bool coverTravel = false, bool isb = false,
-        bool peacefulLay = false, bool peacefulStandBy = false, bool lootTravel = false)
+        bool peacefulLay = false, bool peacefulStandBy = false, bool lootTravel = false, bool blackDivisionPatrol = false)
     {
         if (customLogic != null)
         {
@@ -30,7 +36,7 @@ internal static class NativeGhostPolicy
                 "MoreBotsAPI.Behavior.Actions.SearchForTargetAction";
         }
 
-        if (customRole && !huntAdapter && checkpoint == null && !isb) return false;
+        if (customRole && !huntAdapter && checkpoint == null && !isb && !blackDivisionPatrol) return false;
         if (lootTravel && decision == "goToLootPointNode") return true;
         if (peacefulLay && decision == "lay") return true;
         if (peacefulStandBy && decision == "standBy") return true;

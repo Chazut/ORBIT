@@ -150,7 +150,8 @@ public sealed partial class NativeGhostSystem
                 NativeGhostCover.Supports(bot, decision.Value.ToString()), adapter?.Isb == true,
                 NativeGhostZryachiy.Supports(bot, decision.Value.ToString())
                     || NativeGhostMarksman.SupportsLay(bot, decision.Value),
-                NativeGhostMarksman.SupportsStandBy(bot, decision.Value), NativeGhostLoot.Supports(bot, decision.Value)))
+                NativeGhostMarksman.SupportsStandBy(bot, decision.Value), NativeGhostLoot.Supports(bot, decision.Value),
+                NativeGhostPolicy.IsBlackDivisionPatrol((int)bot.Profile.Info.Settings.Role, NativeGhostPartisan.Layer(bot))))
             {
                 if (_reportedUnsupported.Add(bot.ProfileId + "|" + name))
                     Log.Info($"NATIVE GHOST: {bot.Profile.Nickname} kept awake: unsupported {name} (role={bot.Profile.Info.Settings.Role}, hunt={hunt})");
@@ -226,6 +227,8 @@ public sealed partial class NativeGhostSystem
             Log.Info($"NATIVE GHOST: {bot.Profile.Nickname} adapter=Zryachiy peaceful lay ready; native cover and posture retained");
         if (bot.Profile.Info.Settings.Role == WildSpawnType.marksman)
             Log.Info($"NATIVE GHOST: {bot.Profile.Nickname} adapter=Sniper scav ready; native position and decisions retained ({state.Decision})");
+        if (NativeGhostPolicy.IsBlackDivisionPatrol((int)bot.Profile.Info.Settings.Role, NativeGhostPartisan.Layer(bot)))
+            Log.Info($"NATIVE GHOST: {bot.Profile.Nickname} Black Division native patrol admitted; role={bot.Profile.Info.Settings.Role} layer={NativeGhostPartisan.Layer(bot)} decision={state.Decision}");
         Log.Info($"NATIVE GHOST: {bot.Profile.Nickname} sleeping with original behaviour ({state.Decision}, hunt={state.UpdateHunt != null})");
     }
 
@@ -493,7 +496,8 @@ public sealed partial class NativeGhostSystem
                 NativeGhostCover.Supports(state.Bot, decision.ToString()), state.Adapter?.Isb == true,
                 NativeGhostZryachiy.Supports(state.Bot, decision.ToString())
                     || NativeGhostMarksman.SupportsLay(state.Bot, decision),
-                NativeGhostMarksman.CanKeepStandByDecision(state.Bot, decision), NativeGhostLoot.Supports(state.Bot, decision))
+                NativeGhostMarksman.CanKeepStandByDecision(state.Bot, decision), NativeGhostLoot.Supports(state.Bot, decision),
+                NativeGhostPolicy.IsBlackDivisionPatrol((int)state.Bot.Profile.Info.Settings.Role, NativeGhostPartisan.Layer(state.Bot)))
             || CombatRequiresBody(state.Bot)
             || NeedsBody(state.Bot))
         {
