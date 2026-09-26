@@ -693,7 +693,7 @@
         if (e.Button != 0) return;
         var (wx, wz) = OffsetToWorld(e.OffsetX, e.OffsetY);
 
-        var customHit = HitTestCustom(wx, wz);
+        var (customHit, builtinHit) = HitTestZone(wx, wz);
         if (customHit >= 0)
         {
             _selectedCustom = customHit;
@@ -705,7 +705,6 @@
             return;
         }
 
-        var builtinHit = HitTestBuiltin(wx, wz);
         if (builtinHit != null)
         {
             _selectedBuiltin = builtinHit;
@@ -765,7 +764,7 @@
     private void OnDoubleClick(MouseEventArgs e)
     {
         var (wx, wz) = OffsetToWorld(e.OffsetX, e.OffsetY);
-        if (HitTestCustom(wx, wz) >= 0) return;
+        if (HitTestZone(wx, wz, customOnly: true).Custom >= 0) return;
         var (ax, az) = ClampToWorld(MathF.Round(wx), MathF.Round(wz));
         _zones.CustomZones.Add(new CustomZoneModel { Position = new ZoneVec { X = ax, Y = az }, FloorId = _floorId, BotTypes = _previewBotType == "*" ? null : new[] { _previewBotType } });
         _selectedCustom = _zones.CustomZones.Count - 1;
@@ -804,43 +803,44 @@
         _panY = Math.Clamp(_panY, MathF.Min(0f, freeY), MathF.Max(0f, freeY));
     }
 
-    private int HitTestCustom(float wx, float wz)
+    private (int Custom, string? Builtin) HitTestZone(float wx, float wz, bool customOnly = false)
     {
-        var best = -1;
-        var bestDist = float.MaxValue;
+        (int Custom, string? Builtin) best = (-1, null);
+        var bestPriority = -1;
+        var bestDistSquared = float.MaxValue;
+
+        bool Consider(ZoneScope scope, float x, float z, float radius)
+        {
+            if (!VisibleScope(scope)) return false;
+            var dx = x - wx;
+            var dz = z - wz;
+            var distSquared = dx * dx + dz * dz;
+            if (distSquared > radius * radius) return false;
+
+            // Match the filter emphasis, without letting selection or hover lock the next click.
+            var priority = DrawPriority(PreviewGroup(scope), false);
+            if (priority < bestPriority || (priority == bestPriority && distSquared >= bestDistSquared))
+                return false;
+
+            bestPriority = priority;
+            bestDistSquared = distSquared;
+            return true;
+        }
+
         for (var i = 0; i < _zones.CustomZones.Count; i++)
         {
             var zone = _zones.CustomZones[i];
-            if (!VisibleScope(zone)) continue;
-            var dx = zone.Position.X - wx;
-            var dz = zone.Position.Y - wz;
-            var dist = MathF.Sqrt(dx * dx + dz * dz);
-            if (dist <= MathF.Max(zone.Radius.Max, 12f) && dist < bestDist)
-            {
-                best = i;
-                bestDist = dist;
-            }
+            if (Consider(zone, zone.Position.X, zone.Position.Y, MathF.Max(zone.Radius.Max, 12f)))
+                best = (i, null);
         }
-        return best;
-    }
 
-    private string? HitTestBuiltin(float wx, float wz)
-    {
-        string? best = null;
-        var bestDist = float.MaxValue;
+        if (customOnly) return best;
         foreach (var name in _zones.BuiltinZones.Keys)
         {
             if (!BuiltinZonePositions.TryGet(_mapId, name, out var pos)) continue;
             var bz = _zones.BuiltinZones[name];
-            if (!VisibleScope(bz)) continue;
-            var dx = pos.X - wx;
-            var dz = pos.Z - wz;
-            var dist = MathF.Sqrt(dx * dx + dz * dz);
-            if (dist <= MathF.Max(bz.Radius.Max, 20f) && dist < bestDist)
-            {
-                best = name;
-                bestDist = dist;
-            }
+            if (Consider(bz, pos.X, pos.Z, MathF.Max(bz.Radius.Max, 20f)))
+                best = (-1, name);
         }
         return best;
     }
