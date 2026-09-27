@@ -1406,6 +1406,14 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
         return !profile.WillBeAPlayerScav();
     }
 
+    internal bool HasSpaceForLooseLoot(LootItem loot)
+    {
+        var inventory = _bot.GetPlayer?.InventoryController;
+        return inventory != null && loot?.Item != null
+            && ItemManipulator.QuickFindAppropriatePlace(loot.Item, inventory,
+                new[] { inventory.Inventory.Equipment }, ItemManipulator.EMoveItemOrder.PickUp, true).Succeeded;
+    }
+
     private OperationResult<IItemOperationResult> FindPlace(DrainEntry entry, InventoryController inventoryController, string name, float price)
     {
         var targets = new[] { inventoryController.Inventory.Equipment };

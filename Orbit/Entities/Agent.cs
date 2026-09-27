@@ -158,6 +158,7 @@ public class Agent(int id, BotOwner bot, float[] taskScores) : Entity(id, taskSc
     public string SoloExtractReason;
     public Orbit.Navigation.Waypoint SoloExtractTarget;
     public bool SoloLootThresholdRolled;
+    internal Orbit.Tasks.LootExtractSweep LootExtractSweep;
 
     /// <summary>
     /// HP-trend emergency-extract state. An HP-triggered solo extract can be cancelled if HP recovers (unlike a

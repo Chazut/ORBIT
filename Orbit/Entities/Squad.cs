@@ -85,6 +85,7 @@ public class Squad(int id, float[] taskScores, int targetMembersCount) : Entity(
     /// One-way flag — stays true for the rest of the raid.
     /// </summary>
     public bool ExtractRequested;
+    internal Orbit.Tasks.LootExtractSweep LootExtractSweep;
 
     /// <summary>
     /// Earliest next sleep after a wake, and last sleep entry. Stored on the squad because ids

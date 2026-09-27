@@ -121,6 +121,9 @@ public class LootContainerAction(AgentData dataset, WaypointSystem waypointSyste
 
         if (!state.IsDone) return;
 
+        var squadWasExtracting = agent.Squad?.ExtractRequested == true;
+        var wasSoloExtracting = agent.SoloExtractRequested;
+
         if (state.Success)
         {
             var stats = agent.Player?.gameObject?.GetComponent<OrbitLootHandler>()?.Stats;
@@ -195,6 +198,22 @@ public class LootContainerAction(AgentData dataset, WaypointSystem waypointSyste
                 agent.Squad.Objective.Duration = 0;
                 Log.Debug($"{agent.Squad} wait timer forced to expire after FAILED loot — immediate re-pick");
             }
+        }
+
+        // Keep the departure decision, but finish a bounded collection of nearby valuables first.
+        // Only the pickup which newly armed a loot departure can open this window.
+        var exitSweepContinues = agent.LootExtractSweep != null
+            ? agent.LootExtractSweep.Next(waypointSystem)
+            : state.Success && state.ItemsTaken
+                && ((!squadWasExtracting && agent.Squad?.ExtractRequested == true
+                        && LootExtractSweep.Begin(agent, waypointSystem, squadDeparture: true))
+                    || (!wasSoloExtracting && agent.SoloExtractRequested && !agent.SoloExtractIsEmergency
+                        && LootExtractSweep.Begin(agent, waypointSystem, squadDeparture: false)));
+        if (exitSweepContinues)
+        {
+            waypointSystem.ReleaseClaim(location.Id, agent.Id);
+            _states.Remove(agent.Id);
+            return;
         }
 
         // Scavenge sweep: if a LooseLoot/Corpse is sitting within ~10m of where the bot just finished, chain
@@ -603,12 +622,11 @@ public class LootContainerAction(AgentData dataset, WaypointSystem waypointSyste
 
     private bool TryScavengeSweep(Agent agent, Waypoint justLooted)
     {
-        // ExtractRequested override: once the squad has decided to leave (loot-value or time threshold hit,
-        // or all mains done), chaining to a nearby loot is wrong — the bot should immediately route to exfil
-        // via the next AssignNewObjective.
-        if (agent.Squad != null && agent.Squad.ExtractRequested)
+        // Ordinary sweeps stop once departure is requested. The bounded valuable collection above is
+        // the only exception, so extraction cannot turn into an unlimited chain of nearby loot.
+        if (agent.SoloExtractRequested || agent.Squad?.ExtractRequested == true)
         {
-            Log.Debug($"{agent} scavenge sweep: skipping — squad has ExtractRequested set");
+            Log.Debug($"{agent} scavenge sweep: skipping, departure requested");
             return false;
         }
 

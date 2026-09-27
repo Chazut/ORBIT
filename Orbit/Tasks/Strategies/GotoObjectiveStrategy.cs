@@ -194,6 +194,8 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
 
             CheckTimeExtractTrigger(squad);
 
+            if (TryContinueLootExtractSweep(squad)) continue;
+
             // Extract interrupt: bee-line to the exfil the instant ExtractRequested is set, rather than letting
             // the squad finish (and wait out) its current objective first. Gated on an eligible exfil existing
             // so we don't churn a re-dispatch every tick when none is reachable.
@@ -542,7 +544,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
         var stagnantLow = agent.EmergencyLowSince >= 0f
                           && Time.time - agent.EmergencyLowSince >= EmergencyStagnantLowSeconds;
 
-        if (agent.SoloExtractRequested || (!activeDecline && !stagnantLow)) return;
+        if ((agent.SoloExtractRequested && agent.LootExtractSweep == null) || (!activeDecline && !stagnantLow)) return;
 
         agent.SoloExtractRequested = true;
         agent.SoloExtractIsEmergency = true;
@@ -620,6 +622,13 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
         return max > 0f ? cur / max : 1f;
     }
 
+    private bool TryContinueLootExtractSweep(Squad squad)
+    {
+        if (squad.LootExtractSweep?.Maintain(waypointSystem) != true) return false;
+        UpdateAgents(squad, out _);
+        return true;
+    }
+
     private int UpdateAgents(Squad squad, out int locallyExhaustedLootCount)
     {
         var squadObjective = squad.Objective;
@@ -672,6 +681,11 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
             // Solo / emergency extract: a wounded member peels off to its own exfil, skipping squad alignment +
             // splinter logic so the rest keep playing. The arrival handler flips it to Extracting from there.
             UpdateEmergencyExtract(agent);
+            if (agent.LootExtractSweep?.Maintain(waypointSystem) == true)
+            {
+                if (agent.SoloExtractRequested) finishedCount++;
+                continue;
+            }
             if (agent.SoloExtractRequested)
             {
                 if (agent.SoloExtractTarget != null && squad.CompletedPoiIds.Contains(agent.SoloExtractTarget.Id))
@@ -1444,7 +1458,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
 
     private static void CheckTimeExtractTrigger(Squad squad)
     {
-        if (squad.ExtractRequested) return;
+        if (squad.ExtractRequested && squad.LootExtractSweep == null) return;
         var leaderBot = squad?.Leader?.Bot;
         if (leaderBot?.Profile?.Info?.Settings == null) return;
         var role = leaderBot.Profile.Info.Settings.Role;
