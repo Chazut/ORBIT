@@ -1098,6 +1098,7 @@ public partial class WaypointSystem
                     if (!ok) continue;
                     if (excludeIds != null && excludeIds.Contains(loc.Id)) continue;
                     if (squad != null && squad.CompletedPoiIds.Contains(loc.Id)) continue;
+                    if (HasFailedDoorOnPath(squad, loc)) continue;
                     if (_claims.ContainsKey(loc.Id)) continue;
                     if (IsSquadKnownUnreachable(squad, loc.Id)) continue;
                     // XZ-only distance: the main anchor is Y=0 (CellToWorld / custom zones) while waypoints
@@ -1216,6 +1217,7 @@ public partial class WaypointSystem
                     if (loc.Id == mainObjective.Id) continue;
                     if (excludeIds != null && excludeIds.Contains(loc.Id)) continue;
                     if (squad != null && squad.CompletedPoiIds.Contains(loc.Id)) continue;
+                    if (HasFailedDoorOnPath(squad, loc)) continue;
                     if (_claims.ContainsKey(loc.Id)) continue;
                     if (IsSquadKnownUnreachable(squad, loc.Id)) continue;
                     var distSqr = (loc.Position - mainObjective.Position).sqrMagnitude;
@@ -1534,6 +1536,7 @@ public partial class WaypointSystem
                     // A pooled LootItem (picked up, Item restored to null) is not a sweep target.
                     if (loc.Target is LootItem li && li.Item == null) continue;
                     if (squad != null && squad.CompletedPoiIds.Contains(loc.Id)) continue;
+                    if (HasFailedDoorOnPath(squad, loc)) continue;
                     if (agentSkips != null && agentSkips.Contains(loc.Id)) continue;
                     if (_claims.ContainsKey(loc.Id)) continue;
                     if (IsSquadKnownUnreachable(squad, loc.Id)) continue;
@@ -1893,6 +1896,10 @@ public partial class WaypointSystem
         // (worst with roaming scavs — no main, no home pull, constant RequestFar) until the field blew up.
         var pick = PickFromCell(cell, entity, coords);
         if (pick == null) return null;
+        // A rejected door must reject the assignment before congestion, cooldowns or nearby-loot
+        // dispatch can treat this waypoint as a valid squad anchor.
+        if (entity is Squad unlockSquad && IsSquadPmc(unlockSquad)
+            && !RollForceUnlockForPick(unlockSquad, pick)) return null;
         if (entity is Squad scopedSquad) LogScopedPick(scopedSquad, coords, pick);
 
         cell.Congestion += 1;
@@ -1917,18 +1924,15 @@ public partial class WaypointSystem
             {
                 squad.LastLootCell = coords;
             }
-            // If the picked waypoint sits behind one or more Locked doors, roll for each door whether this
-            // squad is going to force it open on arrival.
-            RollForceUnlockForPick(squad, pick);
         }
         return pick;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void RollForceUnlockForPick(Squad squad, Waypoint pick)
+    private bool RollForceUnlockForPick(Squad squad, Waypoint pick)
     {
         var doors = pick.LockedDoorsOnPath;
-        if (doors == null || doors.Count == 0) return;
+        if (doors == null || doors.Count == 0) return true;
 
         var isMainAnchor = IsWaypointMainAnchorOfSquad(squad, pick);
         var intermediateRaw = squad.Personality != null
@@ -1947,48 +1951,44 @@ public partial class WaypointSystem
             var doorId = door.GetInstanceID();
             if (squad.ForceUnlockDoorIds.Contains(doorId))
             {
-                // Already granted this raid. A combat retreat / re-dispatch may have re-closed the carver via
-                // the hygiene pass — re-open it now that we're heading back behind this door.
-                if (!DoorNavMesh.IsCarverOpened(doorId))
-                {
-                    DoorNavMesh.OpenCarver(door);
-                    if (!squad.OpenCarverDoors.Contains(door)) squad.OpenCarverDoors.Add(door);
-                }
                 continue;
             }
 
             // Already failed this door for this squad — don't re-roll.
             if (squad.FailedDoorUnlockIds.Contains(doorId))
             {
-                squad.CompletedPoiIds.Add(pick.Id);
-                Log.Info($"{squad} pick {pick} skipped — door {door.Id} previously failed for this squad, blacklisting waypoint");
-                return;
+                Tasks.QuestObjectiveRecovery.Retire(squad, pick, "failed locked door");
+                Log.Debug($"{squad} locked-door assignment rejected: {pick}, door {door.Id} previously refused");
+                return false;
             }
 
             var proba = isMainAnchor ? 1f : intermediateProba;
-            if (proba <= 0f) continue;
-            if (proba >= 1f || Random.value < proba)
+            if (proba >= 1f || proba > 0f && Random.value < proba)
             {
                 squad.ForceUnlockDoorIds.Add(doorId);
-                // Open ONLY the navmesh carver, leaving DoorState Locked. A locked door keeps
-                // Carver_Closed.carving=true, cutting the navmesh across the doorway, so the dispatch path
-                // computed right after this pick would otherwise route AROUND the building (bot stops short
-                // through the wall, 3-fail blacklists the POI). The real unlock (key animation) happens only
-                // when a bot reaches the door in MovementSystem.HandleDoors. DoorNavMesh records it so any
-                // arriving PMC unlocks it, not just this squad.
-                DoorRoutingDiag.LogBefore(squad, pick, door);
-                var carverOpened = DoorNavMesh.OpenCarver(door);
-                if (carverOpened && !squad.OpenCarverDoors.Contains(door)) squad.OpenCarverDoors.Add(door);
-                Log.Info($"{squad} granted force-unlock on door {door.Id} (instance {doorId}) for {pick} — {(isMainAnchor ? "MAIN anchor (100%)" : $"intermediate ({proba:F2})")} — {(carverOpened ? "navmesh carver opened, door stays Locked until a bot arrives" : "NO NavMeshDoorLink found — carver not opened, POI may stay unreachable")}");
             }
             else
             {
                 squad.FailedDoorUnlockIds.Add(doorId);
-                squad.CompletedPoiIds.Add(pick.Id);
-                Log.Info($"{squad} FAILED force-unlock roll on door {door.Id} ({proba:P0}) for {pick} — pick blacklisted, door marked failed (future picks behind this door filtered out)");
-                return;
+                Tasks.QuestObjectiveRecovery.Retire(squad, pick, "locked door skipped");
+                Log.Info($"{squad} locked-door assignment rejected: {pick}, FAILED force-unlock roll on door {door.Id} ({proba:P0}); excluded while locked");
+                return false;
             }
         }
+        // Only prepare navigation once every required door is allowed. A later refusal must not
+        // leave an earlier locked door's carver open for an assignment that will never be issued.
+        for (var i = 0; i < doors.Count; i++)
+        {
+            var door = doors[i];
+            if (door == null || door.DoorState != EDoorState.Locked) continue;
+            var doorId = door.GetInstanceID();
+            if (DoorNavMesh.IsCarverOpened(doorId)) continue;
+            DoorRoutingDiag.LogBefore(squad, pick, door);
+            var carverOpened = DoorNavMesh.OpenCarver(door);
+            if (carverOpened && !squad.OpenCarverDoors.Contains(door)) squad.OpenCarverDoors.Add(door);
+            Log.Info($"{squad} granted force-unlock on door {door.Id} (instance {doorId}) for {pick}: {(isMainAnchor ? "MAIN anchor (100%)" : $"intermediate ({intermediateProba:F2})")}; {(carverOpened ? "navmesh carver opened, door stays Locked until a bot arrives" : "NO NavMeshDoorLink found, carver not opened, POI may stay unreachable")}");
+        }
+        return true;
     }
 
     // Waypoint is filtered out if any door on its path is in the squad's FailedDoorUnlockIds AND still in
