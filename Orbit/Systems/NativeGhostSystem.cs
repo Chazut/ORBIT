@@ -644,6 +644,12 @@ public sealed partial class NativeGhostSystem
         mover.PositionOnWayInner = position;
     }
 
+    private static void ResumeGroundPlacement(BotOwner bot)
+    {
+        SyncMover(bot);
+        if (bot.Mover.HasPathAndNoComplete) bot.Mover.RecalcWay();
+    }
+
     public static void ResyncAfterWake(BotOwner bot)
     {
         try
@@ -651,7 +657,9 @@ public sealed partial class NativeGhostSystem
             var player = bot.GetPlayer;
             player.MovementContext?.ResetFlying();
             if (NavMesh.SamplePosition(player.Position, out var hit, 0.75f, NavMesh.AllAreas))
-                player.Teleport(hit.position);
+                BotLandingGuard.Wake(bot, hit.position, () => ResumeGroundPlacement(bot));
+            else
+                BotLandingGuard.Wake(bot, player.Position, () => ResumeGroundPlacement(bot));
             SyncMover(bot);
             ResumeHearingAfterWake(bot);
             if (bot.Mover.HasPathAndNoComplete) bot.Mover.RecalcWay();

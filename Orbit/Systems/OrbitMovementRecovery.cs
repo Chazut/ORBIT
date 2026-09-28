@@ -11,6 +11,7 @@ internal sealed class OrbitMovementRecovery
     internal bool OnMesh { get; private set; }
     internal float OffMeshSince { get; private set; } = -1f;
     private float _anchorAt, _nextCheck;
+    private float _supportedSince = -1f;
     private Vector3 _probeOrigin;
     private int _failedProbes;
     private float _nextProbe;
@@ -48,10 +49,18 @@ internal sealed class OrbitMovementRecovery
         OnMesh = TrySample(position, out var point);
         if (!OnMesh)
         {
+            _supportedSince = -1f;
             if (OffMeshSince < 0f) OffMeshSince = Time.time;
             return true;
         }
         OffMeshSince = -1f;
+        // Grounded state and a physical support check must agree before this can become a return point.
+        // A supported interval prevents the teleport frame from certifying its own destination.
+        if (!BotGroundPlacement.HasSupport(mover._owner?.GetPlayer)
+            || BotLandingGuard.IsRejected(mover._owner, point))
+        { _supportedSince = -1f; return true; }
+        if (_supportedSince < 0f) _supportedSince = Time.time;
+        if (Time.time - _supportedSince < 0.5f) return true;
         HasAnchor = true;
         Anchor = point;
         _anchorAt = Time.time;
@@ -117,12 +126,15 @@ internal sealed class OrbitMovementRecovery
         _failedProbes = 0;
         _nextProbe = Time.time + 5f;
         _nextCheck = 0f;
+        _supportedSince = -1f;
+        HasAnchor = false;
     }
 
     internal void Suspend()
     {
         // Native combat or Ghost movement can relocate the body. Do not reuse the old anchor.
         HasAnchor = false;
+        _supportedSince = -1f;
         OnMesh = false;
         OffMeshSince = -1f;
         _nextCheck = 0f;

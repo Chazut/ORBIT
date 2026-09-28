@@ -133,6 +133,7 @@ public partial class DormancySystem
     public static void ClearStatics()
     {
         NativeGhostSystem.Clear();
+        BotLandingGuard.Clear();
         Api.OrbitTelemetry.ClearGhostFights();
         DormantProfileIds.Clear();
         _throttledBrainAgents.Clear();
@@ -987,16 +988,17 @@ public partial class DormancySystem
             {
                 var snapDist = (hit.position - agent.Position).magnitude;
                 if (snapDist > 0.05f) Log.Debug($"{agent} wake navmesh snap: {snapDist:F2}m");
-                player.Teleport(hit.position);
+                BotLandingGuard.Wake(bot, hit.position, () => _movementSystem.ResumeGroundPlacement(agent));
             }
             else if (TryNearestPathCorner(agent, out var cornerPos))
             {
-                Log.Warning($"{agent} woke OFF-MESH at {agent.Position} — snapping to path corner {cornerPos}");
-                player.Teleport(cornerPos);
+                Log.Warning($"{agent} woke OFF-MESH at {agent.Position}, checking path corner {cornerPos} for a nearby physical landing");
+                BotLandingGuard.Wake(bot, cornerPos, () => _movementSystem.ResumeGroundPlacement(agent));
             }
             else
             {
-                Log.Warning($"{agent} woke OFF-MESH at {agent.Position} with no path corner to snap to — waking in place");
+                BotLandingGuard.Wake(bot, agent.Position, () => _movementSystem.ResumeGroundPlacement(agent));
+                Log.Warning($"{agent} woke OFF-MESH at {agent.Position} with no path corner to snap to");
             }
 
             // Unity forgets Physics.IgnoreCollision pairs while colliders are disabled — re-apply the per-door

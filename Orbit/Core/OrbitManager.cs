@@ -214,6 +214,7 @@ public class OrbitManager
     public void Update()
     {
         PurgeDestroyedAgents();
+        BotLandingGuard.Tick();
         Orbit.Helpers.PerfMonitor.Tick(_liveAgents.Count, DormancySystem.DormantCount);
         StrategyManager.Update();
         ActionManager.Update();

@@ -1485,7 +1485,9 @@ public class MovementSystem
         if (!OrbitMovementRecovery.TrySample(candidate, out point)
             || (point - agent.Position).sqrMagnitude > 45f * 45f
             || Mathf.Abs(point.y - agent.Position.y) > 2f
-            || agent.Stuck.Recovery.RecentlyRescuedAt(point)) return false;
+            || agent.Stuck.Recovery.RecentlyRescuedAt(point)
+            || BotLandingGuard.IsRejected(agent.Bot, point)
+            || !BotGroundPlacement.TryResolve(agent.Player, point, out _, out _)) return false;
         // A hidden source does not guarantee a hidden destination, especially across a wall.
         return IsRescueDestinationHidden(point);
     }
@@ -1503,11 +1505,19 @@ public class MovementSystem
         return true;
     }
 
-    private void CompleteLocalRescue(Agent agent, Vector3 point)
+    private bool CompleteLocalRescue(Agent agent, Vector3 point)
     {
         var from = agent.Position;
-        agent.Player.Teleport(point + Vector3.up * 0.25f);
+        if (!BotLandingGuard.TryPlace(agent.Bot, point, "local-rescue", () => ResumeGroundPlacement(agent))) return false;
         agent.Stuck.Recovery.RecordLocalRescue(from, agent.Position);
+        ResetAfterRescue(agent);
+        return true;
+    }
+
+    internal void ResumeGroundPlacement(Agent agent)
+    {
+        if (agent.Bot == null || agent.Bot.IsDead) return;
+        agent.Stuck.Recovery.Recovered(agent.Position);
         ResetAfterRescue(agent);
     }
 
@@ -1563,11 +1573,11 @@ public class MovementSystem
         }
         recovery.BeginProbe(agent.Position);
         var from = agent.Position;
-        agent.Player.Teleport(point + Vector3.up * 0.25f);
+        if (!BotLandingGuard.TryRecover(agent.Bot, point, "anchor-return", () => ResumeGroundPlacement(agent)))
+        { recovery.ProbeFailed(); return; }
         recovery.Recovered(agent.Position);
-        recovery.Observe(agent.Position, agent.Bot.Mover, force: true);
         ResetAfterRescue(agent);
-        Log.Warning($"{agent} movement recovery: returned to validated NavMesh anchor from={from} to={point}");
+        Log.Warning($"{agent} movement recovery: returned to validated NavMesh anchor from={from} to={agent.Position} surface={point}");
     }
 
     private bool RescueTeleportToConnectedPoint(Agent agent, Vector3 objectivePos, int startRing = 0)
@@ -1589,8 +1599,8 @@ public class MovementSystem
                 if (!NavMesh.CalculatePath(point, objectivePos, NavMesh.AllAreas, _rescuePath)) continue;
                 if (_rescuePath.status != NavMeshPathStatus.PathComplete) continue;
 
-                var dest = point + Vector3.up * 0.25f;
-                CompleteLocalRescue(agent, point);
+                if (!CompleteLocalRescue(agent, point)) continue;
+                var dest = agent.Position;
                 Log.Info($"{agent} idle-island rescue: teleported {Vector3.Distance(pos, dest):F0}m to a navmesh point connected to its objective (stranded {IdleRescueThresholdSeconds:F0}s), bounded local rescue from={pos} to={dest}");
                 return true;
             }
@@ -1628,7 +1638,7 @@ public class MovementSystem
         }
         if (best == null) return false;
 
-        CompleteLocalRescue(agent, bestDest);
+        if (!CompleteLocalRescue(agent, bestDest)) return false;
         Log.Info($"{agent} idle-island rescue: no objective-connected point, teleported {Vector3.Distance(pos, bestDest):F0}m next to squadmate {best} instead (off the stuck chunk), bounded local rescue from={pos} to={agent.Position}");
         return true;
     }
@@ -1713,10 +1723,15 @@ public class MovementSystem
             var p = _humanPlayers[i];
             if (p?.HealthController is { IsAlive: true }) { anchorPos = p.Position; break; }
         }
-        if (TryFindReachableWaypoint(agent, liveAgents, agent.Position, anchorPos, SpawnIslandWaypointSearchRadius, out var wpDest))
+        if (TryFindReachableWaypoint(agent, liveAgents, agent.Position, anchorPos, SpawnIslandWaypointSearchRadius, out var wpDest)
+            && !BotLandingGuard.IsRejected(agent.Bot, wpDest))
         {
             var fromPos = agent.Position;
-            agent.Player.Teleport(wpDest);
+            if (!BotLandingGuard.TryPlace(agent.Bot, wpDest, "spawn-rescue", () => ResumeGroundPlacement(agent)))
+            {
+                stuck.SpawnIslandNextProbeAt = Time.time + SpawnIslandRetryDelay(++stuck.SpawnIslandAttempts);
+                return;
+            }
             ResetAfterRescue(agent, resume: false);
             agent.Stuck.SpawnIslandRescued = true;
             Log.Info($"{agent} spawn-island rescue: teleported {Vector3.Distance(fromPos, wpDest):F0}m to a reachable waypoint (off the disconnected spawn chunk) from={fromPos} to={wpDest}");
@@ -1836,7 +1851,9 @@ public class MovementSystem
             if (!IsRescueDestinationHidden(point)) { visible++; continue; }
             // Test the actual landing, not the loot transform that may be above or beside it.
             if (!_waypointSystem.IsReachableFromPosition(anchorPos, point)) { unreachable++; continue; }
-            dest = point + Vector3.up * .25f;
+            if (BotLandingGuard.IsRejected(agent.Bot, point)
+                || !BotGroundPlacement.TryResolve(agent.Player, point, out _, out _)) { occupied++; continue; }
+            dest = point;
             found = true;
             break;
         }
@@ -2077,8 +2094,8 @@ public class MovementSystem
             var path = agent.Movement.Path;
             var corner = agent.Movement.CurrentCorner;
             if (path == null || corner < 0 || corner >= path.Length
-                || !movementSystem.TryLocalRescuePoint(agent, path[corner], out var teleportPos)) return;
-            movementSystem.CompleteLocalRescue(agent, teleportPos);
+                || !movementSystem.TryLocalRescuePoint(agent, path[corner], out var teleportPos)
+                || !movementSystem.CompleteLocalRescue(agent, teleportPos)) return;
             Log.Debug($"{agent} teleporting to {teleportPos} (validated local path-corner fallback)");
         }
 
