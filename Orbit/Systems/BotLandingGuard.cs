@@ -107,14 +107,14 @@ internal static class BotLandingGuard
         CorrectedUntil[bot] = Time.time + 120f;
     }
 
-    internal static bool TryPlace(BotOwner bot, Vector3 surface, string source, Action repath = null)
+    internal static bool TryPlace(BotOwner bot, Vector3 surface, string source, Action repath = null, bool validateGround = false)
     {
         if (bot == null || bot.IsDead || bot.GetPlayer == null || IsRejected(bot, surface)) return false;
         var player = bot.GetPlayer;
         if (!BotGroundPlacement.Finite(surface)) return false;
         var corrected = Corrected(bot);
         var landing = surface + Vector3.up * (source == "wake" ? 0f : 0.25f);
-        if (corrected && !BotGroundPlacement.TryResolve(player, surface, out landing, out var reason))
+        if ((corrected || validateGround) && !BotGroundPlacement.TryResolve(player, surface, out landing, out var reason))
         {
             Log.Debug($"GROUND PLACEMENT: {bot.Profile.Nickname} rejected source={source} surface={surface} reason={reason}");
             return false;

@@ -195,7 +195,9 @@ public class Stuck
     // separate watchdog tracked on the bot's real position, independent of move-speed and short retries.
     public Vector3 IdleRescueAnchor;
     public float IdleRescueSince = -1f; // -1 = not tracking
-    public float IdleRescueLastMovingAt = -1f;
+    public float IdleRescueLastObservedAt = -1f;
+    public bool IdleRescueIntent;
+    internal readonly Orbit.Systems.LocalEscapeSearch LocalEscape = new();
 
     // Spawn-island rescue: keys off being parked near spawn while unable to path to any other agent, since such a
     // bot still "arrives" at its few on-island waypoints (so the idle-island watchdog above can't catch it).

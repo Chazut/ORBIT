@@ -16,7 +16,7 @@ namespace Orbit.Systems;
 /// path-deviation steering, door handling, sprint gating, and the two-stage stuck-detection / remediation
 /// pipeline (soft = vault/jump, hard = re-path then teleport).
 /// </summary>
-public class MovementSystem
+public partial class MovementSystem
 {
     private const float TargetEps = 1.5f;
     private const float TargetEpsSqr = TargetEps * TargetEps;
@@ -45,6 +45,7 @@ public class MovementSystem
 
     public void Update(List<Agent> liveAgents)
     {
+        _recoveryAgents = liveAgents;
         TickDoorOpenWatches();
         TickGhostPendingDoors();
 
@@ -57,6 +58,8 @@ public class MovementSystem
             if (!agent.IsActive)
             {
                 agent.Stuck.IdleRescueSince = -1f;
+                agent.Stuck.IdleRescueIntent = false;
+                agent.Stuck.LocalEscape.Reset();
                 agent.Stuck.Recovery.Suspend();
                 ResetPath(agent);
                 continue;
@@ -72,6 +75,8 @@ public class MovementSystem
                 if (agent.Squad != null && Time.time < agent.Squad.GhostFightUntil)
                 {
                     agent.Stuck.IdleRescueSince = -1f;
+                    agent.Stuck.IdleRescueIntent = false;
+                    agent.Stuck.LocalEscape.Reset();
                     continue;
                 }
                 // The island rescues run for sleepers too. A ghost that spawned on a disconnected chunk only
@@ -233,6 +238,9 @@ public class MovementSystem
         stuck.GhostInvalidPathStreak = 0;
         if (!stuck.Recovery.ProbeDue(agent.Position)) return;
         var from = agent.Position;
+        var nearby = TryNearbyEscape(agent, job.Target, out var localDest);
+        if (nearby == EscapeResult.Pending) return;
+        if (nearby == EscapeResult.Found) { CompleteNearbyEscape(agent, localDest); return; }
         if (RescueTeleportToConnectedPoint(agent, job.Target) || RescueTeleportNearSquadmate(agent))
             Log.Info($"{agent} ghost rescue: {GhostInvalidPathRescueStreak} invalid paths in a row from {from}, body moved to a connected navmesh point");
         else
@@ -1412,7 +1420,6 @@ public class MovementSystem
 
     private const float IdleRescueNoMoveRadiusSqr = 3f * 3f;
     private const float IdleRescueThresholdSeconds = 25f;
-    private const float IdleRescueMinObjectiveDistSqr = 12f * 12f;
     private static readonly float[] IdleRescueRingRadii = { 4f, 8f, 16f, 28f, 45f };
 
     // ── Spawn-island rescue thresholds ──
@@ -1425,56 +1432,60 @@ public class MovementSystem
     private void TryIdleIslandRescue(Agent agent)
     {
         var stuck = agent.Stuck;
-
-        // Only rescue a bot actively trying to REACH its objective. A guarding bot (Status == Finished) sits
-        // deliberately still, often far from a wide anchor's centre; teleporting it would yank it off its post.
-        if (agent.Objective?.Status != ObjectiveStatus.Moving)
-        {
-            // Fast path failures briefly clear the target or set Failed before dispatch retries.
-            // Preserve the physical stall across those gaps, never across guarding or looting.
-            if (agent.Objective != null
-                && (agent.Objective.Status == ObjectiveStatus.None || agent.Objective.Status == ObjectiveStatus.Failed)
-                && Time.time - stuck.IdleRescueLastMovingAt <= 2f) return;
-            stuck.IdleRescueSince = -1f;
-            return;
-        }
-        if (Time.time - stuck.IdleRescueLastMovingAt > 2f) stuck.IdleRescueSince = -1f;
-        stuck.IdleRescueLastMovingAt = Time.time;
-
-        // Use the agent's own objective, not the squad anchor: a follower holding a splinter position can be
-        // far from the anchor, and gating on the anchor would teleport it mid-guard.
-        var objLoc = agent.Objective?.Location;
-        if (objLoc == null)
+        // Observe the body every active tick, independently of which failing objective is selected.
+        // A gap in these observations means combat, a Ghost fight or inactive control, not travel time.
+        if (stuck.IdleRescueLastObservedAt < 0f || Time.time - stuck.IdleRescueLastObservedAt > 2f)
         {
             stuck.IdleRescueSince = -1f;
+            stuck.IdleRescueIntent = false;
+            stuck.LocalEscape.Reset();
+        }
+        stuck.IdleRescueLastObservedAt = Time.time;
+        var objective = agent.Objective;
+        if (objective?.Status is ObjectiveStatus.Finished or ObjectiveStatus.Looting or ObjectiveStatus.Extracting)
+        {
+            stuck.IdleRescueSince = -1f;
+            stuck.IdleRescueIntent = false;
+            stuck.LocalEscape.Reset();
             return;
         }
-
+        if (objective?.Status == ObjectiveStatus.Moving && objective.Location != null)
+        {
+            stuck.IdleRescueIntent = true;
+        }
+        // A squad that cannot obtain any usable objective still needs a way off its stranded chunk.
+        if (agent.Squad?.ConsecutiveDispatchFailures > 0) stuck.IdleRescueIntent = true;
+        if (!stuck.IdleRescueIntent) return;
         var pos = agent.Position;
-
-        // Already near the objective: it arrived, not islanded.
-        if ((objLoc.Position - pos).sqrMagnitude < IdleRescueMinObjectiveDistSqr)
-        {
-            stuck.IdleRescueSince = -1f;
-            return;
-        }
-
         if (stuck.IdleRescueSince < 0f || (pos - stuck.IdleRescueAnchor).sqrMagnitude > IdleRescueNoMoveRadiusSqr)
         {
             stuck.IdleRescueAnchor = pos;
             stuck.IdleRescueSince = Time.time;
+            stuck.LocalEscape.Reset();
             return;
         }
+        if (Time.time - stuck.IdleRescueSince < IdleRescueThresholdSeconds || !stuck.Recovery.ProbeDue(pos)) return;
 
-        if (Time.time - stuck.IdleRescueSince < IdleRescueThresholdSeconds) return;
-
-        if (stuck.Recovery.ProbeDue(pos))
+        var goal = objective?.Location;
+        Vector3? target = goal == null ? null : goal.ExfilInteriorPosition ?? goal.Position;
+        var nearby = TryNearbyEscape(agent, target, out var landing);
+        if (nearby == EscapeResult.Pending) return;
+        if (nearby == EscapeResult.Found)
         {
-            if (!RescueTeleportToConnectedPoint(agent, objLoc.Position))
-                RescueTeleportNearSquadmate(agent);
+            CompleteNearbyEscape(agent, landing);
+            return;
         }
-
-        // Re-arm either way: on failure, retry after another full window rather than hammering CalculatePath.
+        // All nearby same-floor and supported adjacent-floor candidates were checked before the
+        // older, wider same-floor search is allowed to run. No target is abandoned by either path.
+        if (target.HasValue)
+        {
+            if (!RescueTeleportToConnectedPoint(agent, target.Value)) RescueTeleportNearSquadmate(agent);
+        }
+        else
+        {
+            stuck.Recovery.BeginProbe(pos);
+            stuck.Recovery.ProbeFailed();
+        }
         stuck.IdleRescueSince = Time.time;
         stuck.IdleRescueAnchor = agent.Position;
     }
@@ -1534,7 +1545,9 @@ public class MovementSystem
         agent.Stuck.GhostInvalidPathStreak = 0;
         agent.Stuck.IdleRescueAnchor = agent.Position;
         agent.Stuck.IdleRescueSince = -1f;
-        agent.Stuck.IdleRescueLastMovingAt = -1f;
+        agent.Stuck.IdleRescueLastObservedAt = -1f;
+        agent.Stuck.IdleRescueIntent = false;
+        agent.Stuck.LocalEscape.Reset();
         if (resume) ResumeAfterRescue(agent);
     }
 
@@ -1689,6 +1702,12 @@ public class MovementSystem
         }
         if (!stuck.SpawnProgress.Stalled(Time.time)) return;
         if (Time.time < stuck.SpawnIslandNextProbeAt) return; // scheduled backoff after a failed attempt
+
+        // Continue a budgeted nearby search without repeating every cross-map disconnection probe.
+        // Once it exhausts, refresh those references before permitting the distant fallback.
+        if (stuck.LocalEscape.Active && !stuck.LocalEscape.Complete
+            && (pos - stuck.LocalEscape.Origin).sqrMagnitude <= 9f
+            && Time.time - stuck.LocalEscape.LastUsed <= 10f && ContinueSpawnEscape(agent)) return;
         PerfMonitor.SpawnIslandProbes++;
 
         // Find the nearest live agent we CANNOT reach; reaching ANY of them means we're on the main mesh.
@@ -1735,6 +1754,7 @@ public class MovementSystem
             stuck.SpawnIslandNextProbeAt = Time.time + SpawnIslandRetryDelay(stuck.SpawnIslandAttempts);
             return;
         }
+        if (ContinueSpawnEscape(agent)) return;
         // Anchor reachability on the alive human player (main mesh) if there is one, else the nearest agent.
         var anchorPos = reference.Position;
         for (var i = 0; i < _humanPlayers.Count; i++)
@@ -1769,6 +1789,23 @@ public class MovementSystem
     // How long the squad idles before its first post-relocation dispatch, giving BSG time to re-anchor the
     // teleported bots on the navmesh.
     private const float PostIslandRescueCooldownSeconds = 5f;
+
+    private bool ContinueSpawnEscape(Agent agent)
+    {
+        var goal = agent.Objective?.Location;
+        Vector3? target = goal == null ? null : goal.ExfilInteriorPosition ?? goal.Position;
+        var nearby = TryNearbyEscape(agent, target, out var localDest);
+        if (nearby == EscapeResult.Exhausted) return false;
+        var stuck = agent.Stuck;
+        if (nearby == EscapeResult.Pending) stuck.SpawnIslandNextProbeAt = Time.time + .25f;
+        else if (CompleteNearbyEscape(agent, localDest, resume: false))
+        {
+            stuck.SpawnIslandRescued = true;
+            RefreshSquadAfterIslandRescue(agent, localDest);
+        }
+        else stuck.SpawnIslandNextProbeAt = Time.time + 3f;
+        return true;
+    }
 
     // An islanded squad "maps" the raid from its disconnected chunk before the rescue fires: every
     // reachability verdict lands in the per-squad unreachable cache as PathPartial, quest mains are all
@@ -2096,6 +2133,12 @@ public class MovementSystem
         {
             if (!TeleportSafe(agent, humanPlayers) || !agent.Stuck.Recovery.ProbeDue(agent.Position)) return;
 
+            var objLoc = agent.Objective?.Location;
+            Vector3? target = objLoc == null ? null : objLoc.ExfilInteriorPosition ?? objLoc.Position;
+            var nearby = movementSystem.TryNearbyEscape(agent, target, out var localDest);
+            if (nearby == EscapeResult.Pending) return;
+            if (nearby == EscapeResult.Found) { movementSystem.CompleteNearbyEscape(agent, localDest); return; }
+
             // Escalate on re-stick: teleporting again from ~the same spot means the bot re-wedged, so jump to a
             // farther rescue ring instead of dropping it a few metres away to re-stick.
             var stuck = agent.Stuck.Hard;
@@ -2109,8 +2152,7 @@ public class MovementSystem
             var startRing = stuck.TeleportCount <= 1 ? 0 : stuck.TeleportCount == 2 ? 2 : 3; // rings {4,8,16,28,45}
 
             // Prefer an unsticking teleport (objective-connected point, else a squadmate); path-corner is last resort.
-            var objLoc = agent.Objective?.Location;
-            if (objLoc != null && movementSystem.RescueTeleportToConnectedPoint(agent, objLoc.Position, startRing)) return;
+            if (target.HasValue && movementSystem.RescueTeleportToConnectedPoint(agent, target.Value, startRing)) return;
             if (movementSystem.RescueTeleportNearSquadmate(agent)) return;
 
             var path = agent.Movement.Path;
