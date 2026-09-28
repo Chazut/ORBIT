@@ -13,5 +13,8 @@ public class NativeGhostDecisionPatch : ModulePatch
     [PatchPostfix]
     public static void Postfix(AICoreStrategy<BotLogicDecision> __instance,
         ref AICoreActionResult<BotLogicDecision, CoreActionResultParams>? __result)
-        => NativeGhostSystem.GuardDecision(__instance, ref __result);
+    {
+        NativeGhostSystem.RefreshPeacefulDecision(__instance, ref __result);
+        NativeGhostSystem.GuardDecision(__instance, ref __result);
+    }
 }

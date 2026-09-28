@@ -104,6 +104,24 @@ public sealed partial class NativeGhostSystem
 
     internal static string ActionName(BotLogicDecision decision) => CustomAction(decision) ?? decision.ToString();
 
+    internal static void RefreshPeacefulDecision(AICoreStrategy<BotLogicDecision> strategy,
+        ref AICoreActionResult<BotLogicDecision, CoreActionResultParams>? result)
+    {
+        if (strategy is not BaseBrain brain || !result.HasValue) return;
+        var bot = brain._owner;
+        if (bot == null || bot.IsDead || bot.Memory?.GoalEnemy != null || bot.Memory?.IsUnderFire == true
+            || BodyReason(bot) != null) return;
+        if (NativeGhostPartisan.Layer(bot) is not ("FollowerPatrolLayer" or "PatrolAssaultLayer"
+            or "FullMapPatrolLayer" or "KolontayHoldNearBossLayer" or "HoldNearBossLayer")) return;
+        if (CustomAction(result.Value.Action)?.StartsWith("SAIN.", StringComparison.Ordinal) != true) return;
+        // The native layer can inherit the previous custom result when it does not end that action.
+        // Ask the active layer for its own decision during the normal brain tick, before node execution.
+        var fresh = brain.CurLayerInfo.GetDecision();
+        if ((int)fresh.Action >= 9000) return;
+        result = fresh;
+        Log.Info($"NATIVE GHOST DECISION: {bot.Profile.Nickname} refreshed stale SAIN action in {NativeGhostPartisan.Layer(bot)} to {fresh.Action}");
+    }
+
     internal static bool CanRetainEnemy(BotOwner bot)
         => NativeGhostPartisan.CanRetainEnemy(bot) || NativeGhostIsb.CanRetainEnemy(bot);
 
