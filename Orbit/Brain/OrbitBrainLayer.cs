@@ -236,15 +236,12 @@ public class OrbitBrainLayer : CustomLayer
                     // Release our path/loot pause now, before the new layer starts its action.
                     // Deferred loot cleanup must not unpause a mover subsequently owned by SAIN.
                     mover.Pause = false;
-                    Log.Debug($"{_agent} setting player to navmesh");
-                    _agent.Stuck.Recovery.Observe(_agent.Position, mover, force: true);
-                    if (_agent.Stuck.Recovery.OnMesh)
-                        mover.SetPlayerToNavMesh(_agent.Stuck.Recovery.Anchor);
+                    mover.Stop();
+                    if (_agent.Stuck.Recovery.TryPrepareHandoff(_agent.Position, mover))
+                        Log.Debug($"{_agent} movement handoff: local navigation seeded without teleport");
                     else
                     {
-                        // Do not feed an airborne position into the native repair loop at handoff.
-                        mover.Stop();
-                        Log.Warning($"{_agent} combat handoff outside NavMesh: native route cleared, invalid recovery anchor rejected");
+                        Log.Debug($"{_agent} movement handoff: no supported local navigation point, native route cleared without teleport");
                     }
                 }
             }

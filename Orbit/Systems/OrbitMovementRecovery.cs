@@ -64,6 +64,25 @@ internal sealed class OrbitMovementRecovery
         HasAnchor = true;
         Anchor = point;
         _anchorAt = Time.time;
+        SeedNativePosition(mover, point);
+        return true;
+    }
+
+    internal bool TryPrepareHandoff(Vector3 position, BotMover mover)
+    {
+        // A current navigation point and a stable rescue anchor have different lifetimes.
+        // Invalidate the rescue history as native movement takes control. Never teleport here:
+        // SetPlayerToNavMesh can fall back to old anchors and a 100m search even with a local input.
+        Suspend();
+        if (mover == null || !TrySample(position, out var point)
+            || !BotGroundPlacement.HasSupport(mover._owner?.GetPlayer)
+            || BotLandingGuard.IsRejected(mover._owner, point)) return false;
+        SeedNativePosition(mover, point);
+        return true;
+    }
+
+    private static void SeedNativePosition(BotMover mover, Vector3 point)
+    {
         // Only a successful, local NavMesh sample may advance the native recovery anchors.
         mover._lastGoodCastPoint = point;
         mover._prevSuccessLinkedFrom = point;
@@ -71,7 +90,6 @@ internal sealed class OrbitMovementRecovery
         mover.PositionOnWayInner = point;
         mover._lastGoodCastPointTime = Time.time;
         mover._prevPosLinkedTime = Time.time;
-        return true;
     }
 
     internal bool TryReturnPoint(out Vector3 point)
