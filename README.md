@@ -81,7 +81,7 @@ and PlayerScav squads on the Ghost Mode page. For encounters with awake bots, ch
 whether to put eligible awake bots to sleep or wake the ghosts; combat and
 player proximity protections still apply.
 
-*Fika: the optional `Orbit.Fika` addon syncs ghost fight sounds. Install it
+*Fika: the optional `Orbit.Fika` addon syncs ghost fight sounds and ORBIT door states. Install the same version of it
 on the host (or headless) and all playing clients.*
 
 ### 🎯 Objectives and extraction

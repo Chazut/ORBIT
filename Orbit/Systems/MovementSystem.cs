@@ -429,6 +429,7 @@ public class MovementSystem
         public float Deadline;
         public GhostDoorStage Stage;
         public float StartAngle;
+        public ulong DoorRevision;
     }
 
     private readonly List<GhostPendingDoor> _ghostPendingDoors = new();
@@ -485,6 +486,7 @@ public class MovementSystem
         try
         {
             door.Unlock(); // latch coroutine on the door object: DoorState flips to Shut once the lock handle finishes
+            Orbit.Api.OrbitDoorEvents.Raise(door, Orbit.Api.OrbitDoorEvents.Operation.Unlock);
         }
         catch (Exception e)
         {
@@ -492,7 +494,7 @@ public class MovementSystem
             return;
         }
         _doorInteractCooldown[doorId] = Time.time;
-        _ghostPendingDoors.Add(new GhostPendingDoor { Door = door, Agent = agent, Deadline = Time.time + GhostUnlockTimeoutSeconds, Stage = GhostDoorStage.AwaitUnlock });
+        _ghostPendingDoors.Add(new GhostPendingDoor { Door = door, Agent = agent, Deadline = Time.time + GhostUnlockTimeoutSeconds, Stage = GhostDoorStage.AwaitUnlock, DoorRevision = Orbit.Api.OrbitDoorEvents.Revision(door) });
         Log.Info($"{agent} ghost unlocked door {door.Id} on its route (no key animation, body asleep)");
     }
 
@@ -513,7 +515,8 @@ public class MovementSystem
             SnapDoorOpen(door);
         }
         _doorInteractCooldown[doorId] = Time.time;
-        _ghostPendingDoors.Add(new GhostPendingDoor { Door = door, Agent = agent, Deadline = Time.time + GhostOpenTimeoutSeconds, Stage = GhostDoorStage.AwaitOpen, StartAngle = door.CurrentAngle });
+        _ghostPendingDoors.Add(new GhostPendingDoor { Door = door, Agent = agent, Deadline = Time.time + GhostOpenTimeoutSeconds, Stage = GhostDoorStage.AwaitOpen, StartAngle = door.CurrentAngle, DoorRevision = Orbit.Api.OrbitDoorEvents.Revision(door) });
+        Orbit.Api.OrbitDoorEvents.Raise(door, Orbit.Api.OrbitDoorEvents.Operation.Open);
         Log.Info($"{agent} ghost opened door {door.Id} {why}");
     }
 
@@ -526,6 +529,7 @@ public class MovementSystem
             door.CurrentAngle = door.GetAngle(EDoorState.Open);
             EFT.GlobalEvents.GlobalEventsController.CreateEvent<EFT.GlobalEvents.InteractiveObjectInteractionResultEvent>()
                 .Invoke(door, EDoorState.Open);
+            Orbit.Api.OrbitDoorEvents.Raise(door, Orbit.Api.OrbitDoorEvents.Operation.Finalize);
         }
         catch (Exception e)
         {
@@ -541,7 +545,11 @@ public class MovementSystem
         {
             var pending = _ghostPendingDoors[i];
             var door = pending.Door;
-            if (door == null) { _ghostPendingDoors.RemoveAt(i); continue; }
+            if (door == null || pending.DoorRevision != Orbit.Api.OrbitDoorEvents.Revision(door))
+            {
+                _ghostPendingDoors.RemoveAt(i);
+                continue;
+            }
             var state = door.DoorState;
             switch (pending.Stage)
             {
@@ -784,6 +792,7 @@ public class MovementSystem
         public Vector3 DoorPos;
         public float InitDistance;
         public string Kind;
+        public ulong DoorRevision;
     }
 
     private const float DoorWatchTimeoutSeconds = 3f;
@@ -805,6 +814,7 @@ public class MovementSystem
             DoorPos = doorPos,
             InitDistance = initDist,
             Kind = kind,
+            DoorRevision = Orbit.Api.OrbitDoorEvents.Revision(door),
         };
         Log.Info($"DoorWatch: {agent} initiated {kind} on door Id={door.Id} (state={door.DoorState}, dist={initDist:F1}m)");
     }
@@ -817,7 +827,7 @@ public class MovementSystem
         {
             if (watch.Agent != agent || watch.Door == null) continue;
             // The body animation is already complete (sleep gate). DoorWatch runs outside the body
-            // and still owns finalisation and Fika replication. Retain its remaining hold while asleep.
+            // and still owns local finalisation. Retain its remaining hold while asleep.
             agent.Movement.DoorInteractHoldUntil = Mathf.Max(agent.Movement.DoorInteractHoldUntil,
                 watch.RequestedAtTime + DoorWatchTimeoutSeconds);
             Log.Info($"{agent} door handoff to Ghost: id={watch.Door.Id} existing interaction retained");
@@ -832,7 +842,8 @@ public class MovementSystem
         foreach (var kv in _pendingDoorOpens)
         {
             var watch = kv.Value;
-            if (watch.Door == null || watch.Agent == null)
+            if (watch.Door == null || watch.Agent == null
+                || watch.DoorRevision != Orbit.Api.OrbitDoorEvents.Revision(watch.Door))
             {
                 _doorWatchRemoveBuffer.Add(kv.Key);
                 continue;
@@ -867,21 +878,6 @@ public class MovementSystem
             {
                 try
                 {
-                    // Fika: host-side state writes don't replicate (no door-state streaming) — route the
-                    // open through the bot's FikaPlayer.ExecuteInteraction override so its WorldInteractionPacket
-                    // makes every client replay it locally. Locked-origin doors (Kind=Unlock) go out as
-                    // Breach, the only interaction a client-side Locked door executes without a key.
-                    // ExecuteInteraction first, snap last: its host-side re-execution can transiently bounce the
-                    // state.
-                    if (Orbit.Helpers.FikaDetection.FikaLoaded
-                        && watch.Agent?.Player != null
-                        && watch.Agent.Bot?.HealthController is { IsAlive: true })
-                    {
-                        var netType = watch.Kind == "Unlock" ? EInteractionType.Breach : EInteractionType.Open;
-                        watch.Agent.Player.ExecuteInteraction(watch.Door, new InteractionResult(netType));
-                        Log.Debug($"DoorWatch: replicated {netType} on door Id={watch.Door.Id} to Fika clients via {watch.Agent}");
-                    }
-
                     watch.Door.DoorState = EDoorState.Open;
                     // Physically snap the leaf to its open pose: on headless the BSG open animation never
                     // runs for bot interactions, leaving state Open with a visually shut leaf (and the
@@ -890,6 +886,7 @@ public class MovementSystem
                     watch.Door.CurrentAngle = watch.Door.GetAngle(EDoorState.Open);
                     EFT.GlobalEvents.GlobalEventsController.CreateEvent<EFT.GlobalEvents.InteractiveObjectInteractionResultEvent>()
                         .Invoke(watch.Door, EDoorState.Open);
+                    Orbit.Api.OrbitDoorEvents.Raise(watch.Door, Orbit.Api.OrbitDoorEvents.Operation.Finalize);
                     Log.Debug($"DoorWatch: finalized door Id={watch.Door.Id} Interacting → Open after {watch.Kind} window (bot interactions never finalize door state) — leaf snapped open");
                 }
                 catch (System.Exception e)
@@ -1003,6 +1000,7 @@ public class MovementSystem
                     // interact cooldown so OpenDoor finishes the open before we release path-following.
                     agent.Movement.DoorInteractHoldUntil = Time.time + DoorInteractCooldownSeconds + DoorInteractHoldSeconds;
                     Log.Debug($"{agent} unlocked {door.Id} on arrival (was Locked, ORBIT carver-opened) — holding {DoorInteractCooldownSeconds + DoorInteractHoldSeconds:F1}s for unlock+open, no phase-through");
+                    Orbit.Api.OrbitDoorEvents.Raise(door, Orbit.Api.OrbitDoorEvents.Operation.Unlock);
                     StartDoorWatch(agent, door, "Unlock");
                     continue; // next tick: door is Shut → normal Open path runs
                 }
@@ -1070,6 +1068,7 @@ public class MovementSystem
                 return false;
             }
             player.ExecuteInteraction(door, gstruct.Value);
+            Orbit.Api.OrbitDoorEvents.Raise(door, Orbit.Api.OrbitDoorEvents.Operation.Open);
             // Set collision-pass AFTER ExecuteInteraction so the door's animation can drive the bot's traversal
             // through the swing arc. Order matters: setting it before ExecuteInteraction lets the bot rush the
             // collider before the animation has actually started.
@@ -1215,6 +1214,7 @@ public class MovementSystem
                 {
                     door.DoorState = EDoorState.Shut;
                 }
+                Orbit.Api.OrbitDoorEvents.Raise(door, Orbit.Api.OrbitDoorEvents.Operation.Close);
             }
             catch (System.Exception e)
             {

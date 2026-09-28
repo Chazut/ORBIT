@@ -46,10 +46,8 @@ internal sealed class NativeGhostDoors(BotOwner bot, DoorSystem doors)
                 Started[door] = Time.time;
                 try
                 {
-                    // Fika's override sends WorldInteraction immediately, even with this body inactive.
-                    if (FikaDetection.FikaLoaded)
-                        bot.GetPlayer.ExecuteInteraction(door, new InteractionResult(EInteractionType.Open));
-                    else door.Open();
+                    door.Open();
+                    Orbit.Api.OrbitDoorEvents.Raise(door, Orbit.Api.OrbitDoorEvents.Operation.Open);
                     Log.Info($"NATIVE GHOST: {bot.Profile.Nickname} opening door in Ghost: id={door.Id} native goal retained");
                 }
                 catch (Exception e)

@@ -15,6 +15,10 @@
     </PropertyGroup>
 
     <ItemGroup>
+      <Reference Include="0Harmony">
+        <HintPath>$(SptRoot)\BepInEx\core\0Harmony.dll</HintPath>
+        <Private>false</Private>
+      </Reference>
       <ProjectReference Include="..\Orbit\Orbit.csproj">
         <Private>false</Private>
       </ProjectReference>

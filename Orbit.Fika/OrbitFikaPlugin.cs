@@ -19,7 +19,8 @@ namespace Orbit.Fika;
 /// and broadcasts one packet per fight; each client replays the burst through its own BetterAudio
 /// with its own listener distance, so the whole party hears the off-screen action correctly
 /// positioned and attenuated. Without this DLL the limiter works identically, the sounds are just
-/// host-only. Ships separately from the main RC as the Fika addon.
+/// host-only. DoorSyncBridge also reconciles ORBIT door states independently of bot animations.
+/// Ships separately from the main RC as the Fika addon.
 /// </summary>
 [BepInPlugin(PluginGuid, PluginName, PluginVersion)]
 [BepInDependency("com.fika.core")]
@@ -28,7 +29,8 @@ public class OrbitFikaPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "com.chazut.orbit.fika";
     public const string PluginName = "ORBIT Fika Bridge";
-    public const string PluginVersion = "1.1.0";
+    public const string PluginVersion = "1.2.0";
+    private DoorSyncBridge _doors;
 
     // Mirrors the limiter's own earshot gate, judged here against the LOCAL listener.
     private const float EarshotMeters = 1500f;
@@ -51,6 +53,8 @@ public class OrbitFikaPlugin : BaseUnityPlugin
     private void Awake()
     {
         _log = Logger;
+        try { _doors = new DoorSyncBridge(Logger); }
+        catch (System.Exception e) { Logger.LogError($"Door sync unavailable: {e}"); }
         FikaEventDispatcher.SubscribeEvent<FikaNetworkManagerCreatedEvent>(OnNetworkManagerCreated);
         FikaEventDispatcher.SubscribeEvent<FikaNetworkManagerDestroyedEvent>(OnNetworkManagerDestroyed);
         OrbitEvents.GhostFightSoundsResolved += OnGhostFightResolved;
@@ -223,6 +227,7 @@ public class OrbitFikaPlugin : BaseUnityPlugin
 
     private void Update()
     {
+        _doors?.Tick();
         if (_pending.Count == 0) return;
 
         var gameWorld = Singleton<GameWorld>.Instance;
@@ -261,5 +266,11 @@ public class OrbitFikaPlugin : BaseUnityPlugin
                 // Despawned weapon mid-burst, drop the shot.
             }
         }
+    }
+
+    private void OnDestroy()
+    {
+        _doors?.Dispose();
+        OrbitEvents.GhostFightSoundsResolved -= OnGhostFightResolved;
     }
 }
