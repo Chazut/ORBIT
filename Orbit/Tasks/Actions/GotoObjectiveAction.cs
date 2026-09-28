@@ -217,6 +217,7 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                     }
 
                     var inRadius = false;
+                    var arrivalRefusal = "distance";
                     if (distanceSqr <= objective.Location.RadiusSqr)
                     {
                         // Dormant ghosts skip the LoS gate: the ray fires from a frozen inactive body and
@@ -234,6 +235,7 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                             else
                             {
                                 Log.Debug($"{agent} within {Mathf.Sqrt(distanceSqr):F1}m of {objective.Location} but Physics raycast BLOCKED — wall in between, holding off arrival");
+                                arrivalRefusal = "line-of-sight";
                                 if (TrackLoSBlocked(agent, objective.Location)) continue;
                             }
                         }
@@ -247,21 +249,32 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                              && distanceSqr <= (objective.Location.Category == WaypointCategory.Corpse
                                  ? CorpseNavSnapArrivalRadiusSqr
                                  : NavSnapArrivalRadiusSqr)
-                             && RequiresArrivalLoSCheck(objective.Location.Category)
-                             && HasArrivalLineOfSight(agent, objective.Location.Position))
+                             && RequiresArrivalLoSCheck(objective.Location.Category))
                     {
-                        Log.Debug($"{agent} BSG nav-snap arrival rescue: stopped {Mathf.Sqrt(distanceSqr):F1}m off {objective.Location} but Physics raycast clear → accepting arrival");
-                        inRadius = true;
-                        ClearLoSBlockedTracking(agent);
+                        if (HasArrivalLineOfSight(agent, objective.Location.Position))
+                        {
+                            Log.Debug($"{agent} BSG nav-snap arrival rescue: stopped {Mathf.Sqrt(distanceSqr):F1}m off {objective.Location} but Physics raycast clear, checking target floor");
+                            inRadius = true;
+                            ClearLoSBlockedTracking(agent);
+                        }
+                        else
+                        {
+                            arrivalRefusal = "line-of-sight";
+                            ClearLoSBlockedTracking(agent);
+                        }
                     }
                     else
                     {
                         ClearLoSBlockedTracking(agent);
                     }
                     if (inRadius && !waypointSystem.HasReachedZoneFloor(agent.Squad, objective.Location, agent.Position))
+                    {
                         inRadius = false;
+                        arrivalRefusal = "floor";
+                    }
                     if (inRadius)
                     {
+                        agent.ArrivalFailures.Forget(objective.Location.Id);
                         // If this is a lootable POI and we can grab the claim, chain straight into Looting
                         // state. Otherwise (claim held, or non-lootable category) fall through to Finished —
                         // the squad waits here and another task can run.
@@ -368,7 +381,7 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                              && Time.time - objective.DispatchTime > DispatchGraceSeconds)
                     {
                         objective.Status = ObjectiveStatus.Failed;
-                        Log.Debug($"{agent} stopped outside {objective.Location} arrival radius ({Mathf.Sqrt(distanceSqr):F1}m / {Mathf.Sqrt(objective.Location.RadiusSqr):F1}m) — failing objective to unblock re-dispatch");
+                        Log.Debug($"{agent} stopped outside {objective.Location} arrival radius ({Mathf.Sqrt(distanceSqr):F1}m / {Mathf.Sqrt(objective.Location.RadiusSqr):F1}m), reason={arrivalRefusal} botY={agent.Position.y:F2} targetY={objective.Location.Position.y:F2}: failing objective to unblock re-dispatch");
                         TrackArrivalFailure(agent, objective.Location);
                     }
 
@@ -460,9 +473,6 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
         agent.LoSBlockedSinceTime = -1f;
     }
 
-    // An attempt that ends at least this much closer to the POI than the previous failed one is progress.
-    private const float ArrivalProgressMeters = 20f;
-
     // Per-agent blacklist on repeated arrival failures for the same POI. The squad-level
     // ConsecutiveFailedDispatches only fires when ALL members fail at once; a single member stuck on an
     // unreachable splinter while squadmates loot fine never triggers it. Two failure modes feed in: "stopped
@@ -472,26 +482,10 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
         if (location == null || agent?.Squad == null) return;
         var locId = location.Id;
         var distance = Vector3.Distance(agent.Position, location.Position);
-        if (agent.LastFailedPoiId != locId)
-        {
-            agent.LastFailedPoiId = locId;
-            agent.ConsecutiveSamePoiFailures = 1;
-        }
-        else if (distance < agent.LastFailedPoiDistance - ArrivalProgressMeters)
-        {
-            // The attempt ended clearly closer than the previous one: the bot is walking a chain of partial
-            // paths, each leg as far as the pathfinder could see, and it is getting there. Interchange raid,
-            // sgt_dogwater: 560m, 394m then 261m from NW_Exfil, blacklisted on the third leg while it needed
-            // two more, then the same on SE_Exfil (775m, 605m, 316m) and it never left the raid.
-            Log.Info($"{agent} stopped {distance:F0}m from {location}, {agent.LastFailedPoiDistance - distance:F0}m closer than the previous attempt: progress, arrival strikes reset");
-            agent.ConsecutiveSamePoiFailures = 1;
-        }
-        else
-        {
-            agent.ConsecutiveSamePoiFailures++;
-        }
-        agent.LastFailedPoiDistance = distance;
-        if (agent.ConsecutiveSamePoiFailures >= 3)
+        var strikes = agent.ArrivalFailures.Record(locId, distance, Time.time, out var progress);
+        if (progress >= 20f)
+            Log.Info($"{agent} stopped {distance:F0}m from {location}, {progress:F0}m closer than the previous attempt: progress, arrival strikes reset");
+        if (strikes >= 3)
         {
             // Exfil special case: the squad has already committed to extracting (ExtractRequested set,
             // bee-line in progress). If the bot can't physically enter the trigger volume after 3
@@ -511,8 +505,7 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                     ActivateExfilForBot(exfil, agent);
                     agent.Objective.Status = ObjectiveStatus.Extracting;
                     Log.Info($"{agent} couldn't reach inside of {location} after 3 attempts — forcing extract from current position ({agent.Position}, exfil status={exfil.Status})");
-                    agent.ConsecutiveSamePoiFailures = 0;
-                    agent.LastFailedPoiId = -1;
+                    agent.ArrivalFailures.Forget(locId);
                     return;
                 }
                 if (exfil.Settings?.ExfiltrationType == EExfiltrationType.Individual
@@ -521,7 +514,7 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                     // Keep both solo and squad pins. The position-based watchdog survives these short
                     // retries and can relocate the bot onto a nearby path to this same exit.
                     agent.Objective.Status = ObjectiveStatus.None;
-                    if (agent.ConsecutiveSamePoiFailures == 3)
+                    if (strikes == 3)
                         Log.Info($"{agent} exfil recovery: keeping {location} despite blocked approach ({distance:F0}m remaining), awaiting local unsticking");
                     return;
                 }
@@ -549,13 +542,10 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
             agent.Objective.Location = null;
             agent.Objective.SplinterParent = null;
             agent.Objective.Status = ObjectiveStatus.None;
-            // Record the blacklist firing so the rapid-POI-churn detector can fire the close-doors
-            // remediation when this agent is bouncing across MULTIPLE POIs (the per-POI 3-fail counter
-            // alone never catches that pattern — it resets when the agent switches POIs).
+            // Keep the existing door remediation informed when multiple destinations fail locally.
             movementSystem.RegisterPoiBlacklistAndMaybeCloseDoors(agent);
-            Log.Info($"{agent} blacklisting {location} for {agent.Squad} after 3 consecutive arrival failures (cleared agent + squad target to force re-dispatch)");
-            agent.ConsecutiveSamePoiFailures = 0;
-            agent.LastFailedPoiId = -1;
+            Log.Info($"{agent} blacklisting {location} for {agent.Squad} after 3 arrival failures (cleared agent + squad target to force re-dispatch)");
+            agent.ArrivalFailures.Forget(locId);
         }
     }
 

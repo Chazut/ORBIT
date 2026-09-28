@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using EFT;
 using EFT.InventoryLogic;
+using Orbit.Navigation;
 using UnityEngine;
 
 namespace Orbit.Entities;
@@ -68,34 +69,13 @@ public class Agent(int id, BotOwner bot, float[] taskScores) : Entity(id, taskSc
     public readonly Objective Objective = new();
     public readonly Guard Guard = new();
 
-    /// <summary>
-    /// Id of the POI on which this agent's most recent Goto attempt failed via the "stopped outside arrival
-    /// radius" branch, or -1 if the most recent dispatch ended cleanly. Used by GotoObjectiveAction to detect
-    /// repeated arrival failures on the SAME POI by this agent. Distinct from the squad-level
-    /// <c>ConsecutiveFailedDispatches</c>: that counter targets the SQUAD anchor when it blacklists, so when
-    /// the bot is failing on a SPLINTER whose parent is the squad anchor, the squad blacklists the parent —
-    /// the splinter itself stays a valid candidate for the next pick and the loop continues. The per-agent
-    /// counter blacklists the specific POI the bot is physically failing to reach.
-    /// </summary>
-    public int LastFailedPoiId = -1;
+    public readonly ArrivalFailureHistory ArrivalFailures = new();
 
     /// <summary>
     /// Corpses credited to this agent, kept across combat and normal extraction detours.
     /// Dispatch removes definitive skips/completions and retries temporary claims or path failures.
     /// </summary>
     public readonly List<int> OwnKillCorpseIds = new(4);
-
-    /// <summary>
-    /// Counter incremented every time Goto fails on
-    /// <see cref="LastFailedPoiId"/>. Reset to 1 when the agent fails on a
-    /// DIFFERENT POI. Past the blacklist threshold the POI is added to the squad's <c>CompletedPoiIds</c> so
-    /// future picks skip it.
-    /// </summary>
-    public int ConsecutiveSamePoiFailures;
-
-    /// <summary>Distance to <see cref="LastFailedPoiId"/> when the last arrival failure was recorded. A later
-    /// failure that ends clearly closer is a leg along a chain of partial paths, not a dead end.</summary>
-    public float LastFailedPoiDistance = float.MaxValue;
 
     /// <summary>
     /// POI id this agent is currently failing arrival on because Physics.Raycast LoS is blocked (within the

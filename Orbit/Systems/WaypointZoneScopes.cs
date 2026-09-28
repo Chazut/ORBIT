@@ -28,6 +28,11 @@ public partial class WaypointSystem
     public bool MatchesZoneFloor(string floorId, Vector3 position)
         => FloorCatalog.Matches(_zoneKey, floorId, position.x, position.y, position.z);
 
+    private readonly ZoneFloorArrival _floorArrival = new();
+
+    public bool MatchesZoneFloorAtTarget(string floorId, Vector3 target, Vector3 position)
+        => _floorArrival.Matches(_zoneKey, floorId, target, position);
+
     public bool HasReachedZoneFloor(Squad squad, Waypoint target, Vector3 position)
     {
         if (target == null || target.Category == WaypointCategory.Quest || target.Category == WaypointCategory.Exfil) return true;
@@ -35,7 +40,8 @@ public partial class WaypointSystem
         if (string.IsNullOrEmpty(selection)) return true;
         var targetFloor = FloorCatalog.For(_zoneKey)?.Resolve(target.Position.x, target.Position.y, target.Position.z);
         // Several native floors are allowed for routing, but arrival must reach this target's floor.
-        return targetFloor != null && FloorSelection.Contains(selection, targetFloor) && MatchesZoneFloor(targetFloor, position);
+        return targetFloor != null && FloorSelection.Contains(selection, targetFloor)
+            && MatchesZoneFloorAtTarget(targetFloor, target.Position, position);
     }
 
     private float ZoneStrength(Zone zone, Vector2 coords)

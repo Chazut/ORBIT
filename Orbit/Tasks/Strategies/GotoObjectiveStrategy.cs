@@ -1174,7 +1174,8 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                     for (var i = 0; i < squad.Size; i++)
                     {
                         if (waypointSystem.WorldToCell(squad.Members[i].Position) == main.CellCoords
-                            && waypointSystem.MatchesZoneFloor(main.ZoneFloorId, squad.Members[i].Position))
+                            && !squad.Members[i].Bot.IsDead
+                            && waypointSystem.MatchesZoneFloorAtTarget(main.ZoneFloorId, main.Position, squad.Members[i].Position))
                         {
                             main.KillsRoamStartedAt = now;
                             Log.Info($"{squad} Kills main at {main.CellCoords} entered roam phase (member {i} in cell, {main.KillsRoamTargetDuration:F0}s)");
@@ -1188,7 +1189,8 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                 {
                     var onFloor = false;
                     for (var i = 0; i < squad.Size; i++)
-                        if (!squad.Members[i].Bot.IsDead && waypointSystem.MatchesZoneFloor(main.ZoneFloorId, squad.Members[i].Position))
+                        if (!squad.Members[i].Bot.IsDead
+                            && waypointSystem.MatchesZoneFloorAtTarget(main.ZoneFloorId, main.Position, squad.Members[i].Position))
                             onFloor = true;
                     if (main.KillsRoamStartedAt > 0f && onFloor)
                     {
