@@ -138,8 +138,7 @@ public partial class DormancySystem
         return count;
     }
 
-    // A player is listed before its BotOwner/brain finishes spawning. It cannot sleep yet,
-    // but must not block the plan or wake nearby ghosts during that transient state.
-    private static bool IsActivatedNeighbour(Player player)
-        => player.AIData.BotOwner is { BotState: EBotState.Active };
+    // Ready members of a safe new group also wait briefly for their initializing squadmates.
+    private bool IsActivatedNeighbour(Player player)
+        => player.AIData.BotOwner is { BotState: EBotState.Active } bot && !DeferSpawnProximity(bot);
 }

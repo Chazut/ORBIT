@@ -916,6 +916,7 @@ public partial class DormancySystem
         agent.IsDormant = true;
         _dormantAgents.Add(agent);
         DormantProfileIds.Add(agent.Player.ProfileId);
+        FinishSpawnProtection(bot);
     }
 
     private void RecordWake(GhostWakeCause cause)
@@ -2529,6 +2530,7 @@ public partial class DormancySystem
             _vanillaDormant.Add(bot);
             _vanillaHpBaseline[bot] = VanillaHp(bot);
             DormantProfileIds.Add(bot.GetPlayer.ProfileId);
+            FinishSpawnProtection(bot);
             added++;
         }
         if (added == 0) return;
