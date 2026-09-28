@@ -25,7 +25,7 @@ public class MovementSystem
     private const int RetryLimit = 10;
 
     private readonly NavJobExecutor _navJobExecutor;
-    private readonly Queue<ValueTuple<Agent, NavJob>> _moveJobs;
+    private readonly Queue<(Agent Agent, NavJob Job, int Revision)> _moveJobs;
     private readonly StuckRemediation _stuckRemediation;
     private readonly List<Player> _humanPlayers;
     private readonly WaypointSystem _waypointSystem;
@@ -37,7 +37,7 @@ public class MovementSystem
     {
         _doorSystem = doorSystem;
         _navJobExecutor = navJobExecutor;
-        _moveJobs = new Queue<(Agent, NavJob)>(20);
+        _moveJobs = new Queue<(Agent, NavJob, int)>(20);
         _stuckRemediation = new StuckRemediation(this, humanPlayers);
         _humanPlayers = humanPlayers;
         _waypointSystem = waypointSystem;
@@ -48,26 +48,7 @@ public class MovementSystem
         TickDoorOpenWatches();
         TickGhostPendingDoors();
 
-        if (_moveJobs.Count > 0)
-        {
-            for (var i = 0; i < _moveJobs.Count; i++)
-            {
-                var (agent, job) = _moveJobs.Dequeue();
-
-                if (!job.IsReady)
-                {
-                    _moveJobs.Enqueue((agent, job));
-                    continue;
-                }
-
-                // Discard the move job if the agent is inactive (mod deactivated, bot died, etc).
-                if (!agent.IsActive)
-                    continue;
-
-                StartMovement(agent, job);
-                TrackGhostPathInvalid(agent, job);
-            }
-        }
+        ProcessMoveJobs();
 
         for (var i = 0; i < liveAgents.Count; i++)
         {
@@ -77,8 +58,7 @@ public class MovementSystem
             {
                 agent.Stuck.IdleRescueSince = -1f;
                 agent.Stuck.Recovery.Suspend();
-                if (agent.Movement.HasPath)
-                    ResetPath(agent);
+                ResetPath(agent);
                 continue;
             }
 
@@ -118,6 +98,34 @@ public class MovementSystem
         }
     }
 
+    private void ProcessMoveJobs()
+    {
+        if (_moveJobs.Count > 0)
+        {
+            var pendingCount = _moveJobs.Count;
+            for (var i = 0; i < pendingCount; i++)
+            {
+                var (agent, job, revision) = _moveJobs.Dequeue();
+
+                if (!agent.IsActive) continue;
+                if (revision != agent.Movement.PathRevision)
+                {
+                    Log.Debug($"{agent} path job discarded: obsolete revision={revision} current={agent.Movement.PathRevision} ready={job.IsReady} origin={job.Origin} target={job.Target}");
+                    continue;
+                }
+
+                if (!job.IsReady)
+                {
+                    _moveJobs.Enqueue((agent, job, revision));
+                    continue;
+                }
+
+                StartMovement(agent, job);
+                TrackGhostPathInvalid(agent, job);
+            }
+        }
+    }
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static bool IsMovementTargetCurrent(Agent agent, Vector3 destination)
         => (agent.Movement.Target - destination).sqrMagnitude <= TargetEpsSqr;
@@ -143,9 +151,11 @@ public class MovementSystem
 
         // Set the target up-front so callers' "is the target current?" checks see the new value immediately.
         agent.Movement.Target = destination;
+        // Origin recovery can use a corner of the previous path. Scheduling supersedes older jobs;
+        // clearing the path afterwards must retain the new request's revision.
         ScheduleMoveJob(agent, destination);
+        ResetPath(agent, MovementStatus.Moving, invalidatePending: false);
         ResetGait(agent, pose, speed, prone, sprint, urgency);
-        ResetPath(agent, MovementStatus.Moving);
         agent.Movement.Retry = 0;
     }
 
@@ -198,7 +208,7 @@ public class MovementSystem
         }
 
         var job = _navJobExecutor.Submit(origin, destination);
-        _moveJobs.Enqueue((agent, job));
+        _moveJobs.Enqueue((agent, job, ++agent.Movement.PathRevision));
     }
 
     private const int GhostInvalidPathRescueStreak = 3;
@@ -1308,8 +1318,10 @@ public class MovementSystem
     private const float DoorColliderRayLength = 1.5f;
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static void ResetPath(Agent agent, MovementStatus status = MovementStatus.Stopped)
+    private static void ResetPath(Agent agent, MovementStatus status = MovementStatus.Stopped, bool invalidatePending = true)
     {
+        // A queued result belongs to the old route even if the executor finishes after this reset.
+        if (invalidatePending) agent.Movement.PathRevision++;
         // Explicitly DON'T reset the target — it hasn't changed. Only the path is supposed to be deleted.
         agent.Movement.Path = null;
         agent.Movement.Status = status;
@@ -1475,6 +1487,11 @@ public class MovementSystem
             || Mathf.Abs(point.y - agent.Position.y) > 2f
             || agent.Stuck.Recovery.RecentlyRescuedAt(point)) return false;
         // A hidden source does not guarantee a hidden destination, especially across a wall.
+        return IsRescueDestinationHidden(point);
+    }
+
+    private bool IsRescueDestinationHidden(Vector3 point)
+    {
         foreach (var human in _humanPlayers)
         {
             if (human?.HealthController is not { IsAlive: true }) continue;
@@ -1486,12 +1503,47 @@ public class MovementSystem
         return true;
     }
 
-    private static void CompleteLocalRescue(Agent agent, Vector3 point)
+    private void CompleteLocalRescue(Agent agent, Vector3 point)
     {
         var from = agent.Position;
         agent.Player.Teleport(point + Vector3.up * 0.25f);
         agent.Stuck.Recovery.RecordLocalRescue(from, agent.Position);
+        ResetAfterRescue(agent);
+    }
+
+    private void ResetAfterRescue(Agent agent, bool resume = true)
+    {
         ResetPath(agent);
+        agent.Movement.Retry = 0;
+        agent.Movement.DoorInteractHoldUntil = -1f;
+        agent.Movement.NextGhostDoorCheck = 0f;
+        agent.Stuck.Soft.Reset();
+        agent.Stuck.Hard.Status = HardStuckStatus.None;
+        agent.Stuck.Hard.Timer = 0f;
+        agent.Stuck.Hard.AverageSpeed.Reset();
+        agent.Stuck.Hard.PositionHistory.Reset();
+        agent.Stuck.GhostInvalidPathStreak = 0;
+        agent.Stuck.IdleRescueAnchor = agent.Position;
+        agent.Stuck.IdleRescueSince = -1f;
+        agent.Stuck.IdleRescueLastMovingAt = -1f;
+        if (resume) ResumeAfterRescue(agent);
+    }
+
+    private void ResumeAfterRescue(Agent agent)
+    {
+        var objective = agent.Objective;
+        if (!agent.IsActive || objective?.Location == null
+            || objective.Status is not (ObjectiveStatus.Moving or ObjectiveStatus.Failed or ObjectiveStatus.None)) return;
+        agent.ArrivalFailures.Forget(objective.Location.Id);
+        objective.Status = ObjectiveStatus.Moving;
+        objective.ArrivalPath = null;
+        var movement = agent.Movement;
+        var destination = objective.Location.Category == WaypointCategory.Exfil
+            ? objective.Location.ExfilInteriorPosition ?? objective.Location.Position
+            : objective.Location.Position;
+        MoveToByPath(agent, destination, movement.Pose, movement.Speed,
+            movement.Prone, movement.Sprint, movement.Urgency);
+        Log.Debug($"{agent} movement recovery: new route from landing={agent.Position} target={destination} revision={movement.PathRevision}");
     }
 
     private void TryReturnToValidatedAnchor(Agent agent)
@@ -1514,7 +1566,7 @@ public class MovementSystem
         agent.Player.Teleport(point + Vector3.up * 0.25f);
         recovery.Recovered(agent.Position);
         recovery.Observe(agent.Position, agent.Bot.Mover, force: true);
-        ResetPath(agent);
+        ResetAfterRescue(agent);
         Log.Warning($"{agent} movement recovery: returned to validated NavMesh anchor from={from} to={point}");
     }
 
@@ -1665,9 +1717,9 @@ public class MovementSystem
         {
             var fromPos = agent.Position;
             agent.Player.Teleport(wpDest);
-            ResetPath(agent);
+            ResetAfterRescue(agent, resume: false);
             agent.Stuck.SpawnIslandRescued = true;
-            Log.Info($"{agent} spawn-island rescue: teleported {Vector3.Distance(fromPos, wpDest):F0}m to the nearest reachable waypoint (off the disconnected spawn chunk)");
+            Log.Info($"{agent} spawn-island rescue: teleported {Vector3.Distance(fromPos, wpDest):F0}m to a reachable waypoint (off the disconnected spawn chunk) from={fromPos} to={wpDest}");
             RefreshSquadAfterIslandRescue(agent, wpDest);
             return;
         }
@@ -1692,7 +1744,15 @@ public class MovementSystem
     private void RefreshSquadAfterIslandRescue(Agent agent, Vector3 dest)
     {
         var squad = agent.Squad;
-        if (squad == null) return;
+        if (squad == null) { ResumeAfterRescue(agent); return; }
+
+        // A relocation repairs the approach to an already selected exit, it does not replace that exit.
+        if (squad.ExtractRequested || agent.SoloExtractRequested)
+        {
+            _waypointSystem.ClearSquadUnreachability(squad);
+            ResumeAfterRescue(agent);
+            return;
+        }
 
         // Drop the agent's own (island) objective, same as RescueInterceptPatch after a BSG rescue.
         agent.Objective.Status = ObjectiveStatus.Failed;
@@ -1741,20 +1801,48 @@ public class MovementSystem
                 if ((wp.Position - fromPos).sqrMagnitude <= maxRadSqr) _wpScratch.Add(wp);
             }
         }
-        _wpScratch.Sort((x, y) => (x.Position - fromPos).sqrMagnitude.CompareTo((y.Position - fromPos).sqrMagnitude));
-
-        var cap = Mathf.Min(_wpScratch.Count, 40); // bound the CalculatePath calls
-        for (var i = 0; i < cap; i++)
+        // Keep ordering stable while the bot shuffles on its island. Each retry advances past the
+        // previous batch, so farther usable POIs are not starved by the same 40 nearest failures.
+        var spawn = agent.Stuck.SpawnIslandPos;
+        _wpScratch.Sort((x, y) =>
         {
+            var distanceOrder = (x.Position - spawn).sqrMagnitude.CompareTo((y.Position - spawn).sqrMagnitude);
+            return distanceOrder != 0 ? distanceOrder : x.Id.CompareTo(y.Id);
+        });
+        var count = _wpScratch.Count;
+        var start = count > 0 ? agent.Stuck.SpawnIslandWaypointCursor % count : 0;
+        var end = Mathf.Min(count, start + 40);
+        var mesh = 0;
+        var height = 0;
+        var rangeRejected = 0;
+        var occupied = 0;
+        var visible = 0;
+        var unreachable = 0;
+        var recent = 0;
+        var tested = 0;
+        var found = false;
+        for (var i = start; i < end; i++)
+        {
+            tested++;
+            agent.Stuck.SpawnIslandWaypointCursor = i + 1 < count ? i + 1 : 0;
             var wp = _wpScratch[i];
-            if (!_waypointSystem.IsReachableFromPosition(anchorPos, wp.Position)) continue;
-            if (!NavMesh.SamplePosition(wp.Position, out var hit, 2f, NavMesh.AllAreas)) continue;
-            if (!IsClearOfPlayersAndBots(hit.position, agent, liveAgents)) continue;
-            dest = hit.position;
-            dest.y += 0.25f;
-            return true;
+            if (!NavMesh.SamplePosition(wp.Position, out var hit, 2f, NavMesh.AllAreas)
+                || !OrbitMovementRecovery.TrySample(hit.position, out var point)) { mesh++; continue; }
+            if (Mathf.Abs(point.y - fromPos.y) > 2f) { height++; continue; }
+            if ((point - fromPos).sqrMagnitude > maxRadSqr) { rangeRejected++; continue; }
+            if ((point - fromPos).sqrMagnitude < 9f
+                || agent.Stuck.Recovery.RecentlyRescuedAt(point)) { recent++; continue; }
+            if (!IsClearOfPlayersAndBots(point, agent, liveAgents)) { occupied++; continue; }
+            if (!IsRescueDestinationHidden(point)) { visible++; continue; }
+            // Test the actual landing, not the loot transform that may be above or beside it.
+            if (!_waypointSystem.IsReachableFromPosition(anchorPos, point)) { unreachable++; continue; }
+            dest = point + Vector3.up * .25f;
+            found = true;
+            break;
         }
-        return false;
+        if (count == 0) agent.Stuck.SpawnIslandWaypointCursor = 0;
+        Log.Debug($"{agent} spawn-island candidates: total={count} start={start} tested={tested} next={agent.Stuck.SpawnIslandWaypointCursor} mesh={mesh} height={height} range={rangeRejected} occupied={occupied} visible={visible} unreachable={unreachable} recent={recent} found={found}");
+        return found;
     }
 
     private bool IsPathComplete(Vector3 from, Vector3 to)
@@ -1990,7 +2078,7 @@ public class MovementSystem
             var corner = agent.Movement.CurrentCorner;
             if (path == null || corner < 0 || corner >= path.Length
                 || !movementSystem.TryLocalRescuePoint(agent, path[corner], out var teleportPos)) return;
-            CompleteLocalRescue(agent, teleportPos);
+            movementSystem.CompleteLocalRescue(agent, teleportPos);
             Log.Debug($"{agent} teleporting to {teleportPos} (validated local path-corner fallback)");
         }
 

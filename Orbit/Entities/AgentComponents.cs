@@ -85,6 +85,7 @@ public class Movement
 
     public int CurrentCorner;
     public int Retry;
+    public int PathRevision;
 
     public float Speed = 1f;
     public float Pose = 1f;
@@ -204,6 +205,7 @@ public class Stuck
     public bool SpawnIslandRescued;
     public int SpawnIslandAttempts;
     public float SpawnIslandNextProbeAt;
+    public int SpawnIslandWaypointCursor;
 
     // Ghost rescue: consecutive PathInvalid results while dormant (see MovementSystem.TrackGhostPathInvalid).
     public int GhostInvalidPathStreak;
