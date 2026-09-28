@@ -437,6 +437,12 @@ public sealed partial class NativeGhostSystem
                 RequestWake(state, "native lifecycle changed");
                 return true;
             }
+            if (NativeGhostFollowers.Reconcile(state.Bot))
+            {
+                CancelMoveOrder(state.Mover);
+                state.Mover.ActualPathController.Stop();
+                state.Decision = null;
+            }
             if (NeedsBody(state.Bot))
             {
                 RequestWake(state, "native interaction requires its body");
