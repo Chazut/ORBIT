@@ -1486,8 +1486,7 @@ public class MovementSystem
             || (point - agent.Position).sqrMagnitude > 45f * 45f
             || Mathf.Abs(point.y - agent.Position.y) > 2f
             || agent.Stuck.Recovery.RecentlyRescuedAt(point)
-            || BotLandingGuard.IsRejected(agent.Bot, point)
-            || !BotGroundPlacement.TryResolve(agent.Player, point, out _, out _)) return false;
+            || !BotLandingGuard.Accepts(agent.Bot, point)) return false;
         // A hidden source does not guarantee a hidden destination, especially across a wall.
         return IsRescueDestinationHidden(point);
     }
@@ -1662,6 +1661,12 @@ public class MovementSystem
         if (stuck.SpawnIslandRescued) return; // one-shot; also set once the bot proves it can reach the map
 
         var pos = agent.Position;
+        if (stuck.SpawnProgress.Observe(pos, Time.time))
+        {
+            // Stairs can make nearby candidates valid again without ever leaving the spawn radius.
+            stuck.SpawnIslandWaypointCursor = 0;
+            stuck.SpawnIslandDisconnectedSince = -1f;
+        }
         if (stuck.SpawnIslandSeenAt <= 0f)
         {
             stuck.SpawnIslandPos = pos;
@@ -1677,6 +1682,12 @@ public class MovementSystem
         }
 
         if (Time.time - stuck.SpawnIslandSeenAt < SpawnIslandGraceSeconds) return;
+        if (agent.Objective.Status is ObjectiveStatus.Looting or ObjectiveStatus.Extracting)
+        {
+            stuck.SpawnIslandDisconnectedSince = -1f;
+            return;
+        }
+        if (!stuck.SpawnProgress.Stalled(Time.time)) return;
         if (Time.time < stuck.SpawnIslandNextProbeAt) return; // scheduled backoff after a failed attempt
         PerfMonitor.SpawnIslandProbes++;
 
@@ -1703,9 +1714,17 @@ public class MovementSystem
 
         if (reference == null)
         {
+            stuck.SpawnIslandDisconnectedSince = -1f;
             // No usable far reference right now (transient — bots die/spawn): retry at the current cadence
             // without consuming an attempt.
             stuck.SpawnIslandNextProbeAt = Time.time + SpawnIslandRetryDelay(stuck.SpawnIslandAttempts);
+            return;
+        }
+
+        if (stuck.SpawnIslandDisconnectedSince < 0f) stuck.SpawnIslandDisconnectedSince = Time.time;
+        if (Time.time - stuck.SpawnIslandDisconnectedSince < 6f)
+        {
+            stuck.SpawnIslandNextProbeAt = Time.time + 3f;
             return;
         }
 
@@ -1826,7 +1845,10 @@ public class MovementSystem
         });
         var count = _wpScratch.Count;
         var start = count > 0 ? agent.Stuck.SpawnIslandWaypointCursor % count : 0;
-        var end = Mathf.Min(count, start + 40);
+        // Spend half of a continued search rechecking nearby points before extending farther.
+        // The total remains bounded at forty candidates per probe.
+        var nearCount = start >= 40 ? Mathf.Min(20, count) : 0;
+        var end = Mathf.Min(count, start + 40 - nearCount);
         var mesh = 0;
         var height = 0;
         var rangeRejected = 0;
@@ -1836,10 +1858,11 @@ public class MovementSystem
         var recent = 0;
         var tested = 0;
         var found = false;
-        for (var i = start; i < end; i++)
+        for (var step = 0; step < nearCount + end - start; step++)
         {
+            var i = step < nearCount ? step : start + step - nearCount;
             tested++;
-            agent.Stuck.SpawnIslandWaypointCursor = i + 1 < count ? i + 1 : 0;
+            if (step >= nearCount) agent.Stuck.SpawnIslandWaypointCursor = i + 1 < count ? i + 1 : 0;
             var wp = _wpScratch[i];
             if (!NavMesh.SamplePosition(wp.Position, out var hit, 2f, NavMesh.AllAreas)
                 || !OrbitMovementRecovery.TrySample(hit.position, out var point)) { mesh++; continue; }
@@ -1851,8 +1874,7 @@ public class MovementSystem
             if (!IsRescueDestinationHidden(point)) { visible++; continue; }
             // Test the actual landing, not the loot transform that may be above or beside it.
             if (!_waypointSystem.IsReachableFromPosition(anchorPos, point)) { unreachable++; continue; }
-            if (BotLandingGuard.IsRejected(agent.Bot, point)
-                || !BotGroundPlacement.TryResolve(agent.Player, point, out _, out _)) { occupied++; continue; }
+            if (!BotLandingGuard.Accepts(agent.Bot, point)) { occupied++; continue; }
             dest = point;
             found = true;
             break;

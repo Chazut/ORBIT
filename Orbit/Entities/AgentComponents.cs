@@ -206,6 +206,8 @@ public class Stuck
     public int SpawnIslandAttempts;
     public float SpawnIslandNextProbeAt;
     public int SpawnIslandWaypointCursor;
+    internal readonly Orbit.Systems.SpawnRescueProgress SpawnProgress = new();
+    public float SpawnIslandDisconnectedSince = -1f;
 
     // Ghost rescue: consecutive PathInvalid results while dormant (see MovementSystem.TrackGhostPathInvalid).
     public int GhostInvalidPathStreak;

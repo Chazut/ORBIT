@@ -31,6 +31,7 @@ internal static class BotLandingGuard
 
     private static readonly List<Watch> Watches = new();
     private static readonly List<Rejected> Rejections = new();
+    private static readonly Dictionary<BotOwner, float> CorrectedUntil = new();
     private static readonly NavMeshPath LocalPath = new();
     private static float _nextTick;
     private static float _probeWindow;
@@ -42,6 +43,7 @@ internal static class BotLandingGuard
         Watches.Clear();
         Humans.Clear();
         Rejections.Clear();
+        CorrectedUntil.Clear();
         _nextTick = 0f;
         _probeWindow = 0f;
         _nearbyProbes = 0;
@@ -68,11 +70,51 @@ internal static class BotLandingGuard
         Rejections.Add(new Rejected { Bot = bot, Point = point, Until = Time.time + 120f });
     }
 
+    private static bool Corrected(BotOwner bot)
+    {
+        if (bot == null || !CorrectedUntil.TryGetValue(bot, out var until)) return false;
+        if (Time.time < until) return true;
+        CorrectedUntil.Remove(bot);
+        return false;
+    }
+
+    internal static bool Accepts(BotOwner bot, Vector3 surface)
+        => !IsRejected(bot, surface) && (!Corrected(bot)
+            || BotGroundPlacement.TryResolve(bot.GetPlayer, surface, out _, out _));
+
+    private static bool BelowFloor(BotOwner bot, Vector3 surface)
+    {
+        var player = bot?.GetPlayer;
+        if (player == null || BotGroundPlacement.HasSupport(player)) return false;
+        var delta = player.Position - surface;
+        if (delta.y > -0.6f || delta.x * delta.x + delta.z * delta.z > 9f) return false;
+        var above = new Vector3(player.Position.x, surface.y, player.Position.z);
+        return BotGroundPlacement.TryResolve(player, above, out var expected, out _)
+            && player.Position.y < expected.y - 0.6f;
+    }
+
+    private static void ConfirmFall(BotOwner bot)
+    {
+        // Bounded, short-lived state. Normal solo placements keep their original NavMesh offset.
+        if (CorrectedUntil.Count >= 256 && !CorrectedUntil.ContainsKey(bot))
+        {
+            BotOwner oldest = null;
+            var expires = float.MaxValue;
+            foreach (var entry in CorrectedUntil)
+                if (entry.Value < expires) { oldest = entry.Key; expires = entry.Value; }
+            if (oldest != null) CorrectedUntil.Remove(oldest);
+        }
+        CorrectedUntil[bot] = Time.time + 120f;
+    }
+
     internal static bool TryPlace(BotOwner bot, Vector3 surface, string source, Action repath = null)
     {
         if (bot == null || bot.IsDead || bot.GetPlayer == null || IsRejected(bot, surface)) return false;
         var player = bot.GetPlayer;
-        if (!BotGroundPlacement.TryResolve(player, surface, out var landing, out var reason))
+        if (!BotGroundPlacement.Finite(surface)) return false;
+        var corrected = Corrected(bot);
+        var landing = surface + Vector3.up * (source == "wake" ? 0f : 0.25f);
+        if (corrected && !BotGroundPlacement.TryResolve(player, surface, out landing, out var reason))
         {
             Log.Debug($"GROUND PLACEMENT: {bot.Profile.Nickname} rejected source={source} surface={surface} reason={reason}");
             return false;
@@ -86,7 +128,7 @@ internal static class BotLandingGuard
             Watches.Add(new Watch { Bot = bot, Surface = surface, Landing = landing, Source = source,
                 Started = Time.time, NextRetry = Time.time + 0.5f, Repath = repath });
         }
-        Log.Debug($"GROUND PLACEMENT: {bot.Profile.Nickname} placed source={source} from={from} surface={surface} to={landing} controller={player.CharacterController.GetType().Name} mask={player.MovementContext.GroundMask}");
+        Log.Debug($"GROUND PLACEMENT: {bot.Profile.Nickname} placed source={source} from={from} surface={surface} to={landing} controller={player.CharacterController.GetType().Name} mask={player.MovementContext.GroundMask} corrected={corrected}");
         return true;
     }
 
@@ -102,7 +144,9 @@ internal static class BotLandingGuard
     internal static bool TryRecover(BotOwner bot, Vector3 surface, string source, Action repath = null)
     {
         if (bot == null || bot.IsDead || bot.GetPlayer == null) return false;
+        if (BelowFloor(bot, surface)) ConfirmFall(bot);
         if (TryPlace(bot, surface, source, repath)) return true;
+        if (!Corrected(bot)) return false;
         RefreshHumans();
         var seed = new Watch { Bot = bot, Surface = surface, Landing = bot.GetPlayer.Position };
         if (TryNearby(seed, Humans, out var nearby, out _))
@@ -165,15 +209,14 @@ internal static class BotLandingGuard
         if (age >= 8f)
         {
             // An unsupported landing is never certified just because the watch expired.
-            Reject(bot, watch.Surface);
+            if (Corrected(bot)) Reject(bot, watch.Surface);
             Log.Warning($"GROUND PLACEMENT: {bot.Profile.Nickname} unconfirmed source={watch.Source} at={player.Position}");
             return false;
         }
         if (Time.time < watch.NextRetry || delta.y > -0.6f) return true;
         // Distinguish a body below a nearby solid floor from a legitimate descent off a ledge.
-        var above = new Vector3(player.Position.x, watch.Surface.y, player.Position.z);
-        if (!BotGroundPlacement.TryResolve(player, above, out var expected, out _)
-            || player.Position.y >= expected.y - 0.6f) return true;
+        if (!BelowFloor(bot, watch.Surface)) return true;
+        ConfirmFall(bot);
         Reject(bot, watch.Surface);
         Log.Warning($"GROUND PLACEMENT: {bot.Profile.Nickname} fell after source={watch.Source} landing={watch.Landing} now={player.Position} grounded={player.MovementContext.IsGrounded} controller={player.CharacterController.GetType().Name}");
         watch.NextRetry = Time.time + 1f;
