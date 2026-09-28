@@ -338,6 +338,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                         && squadObjective.Location.Category != WaypointCategory.Exfil)
                     {
                         squad.CompletedPoiIds.Add(squadObjective.Location.Id);
+                        QuestObjectiveRecovery.Retire(squad, squadObjective.Location, "repeated en-route failures");
                         Log.Info($"{squad} blacklisting unreachable {squadObjective.Location} after {UnreachableBlacklistThreshold} consecutive en-route failures (squad memory size={squad.CompletedPoiIds.Count})");
                         squad.ConsecutiveFailedDispatches = 0;
                         AssignNewObjective(squad);

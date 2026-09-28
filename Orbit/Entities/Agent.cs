@@ -70,6 +70,7 @@ public class Agent(int id, BotOwner bot, float[] taskScores) : Entity(id, taskSc
     public readonly Guard Guard = new();
 
     public readonly ArrivalFailureHistory ArrivalFailures = new();
+    internal readonly Systems.QuestArrival QuestArrival = new();
 
     /// <summary>
     /// Corpses credited to this agent, kept across combat and normal extraction detours.

@@ -174,6 +174,7 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                         if (agent.Squad != null && !agent.Squad.CompletedPoiIds.Contains(objective.Location.Id))
                         {
                             agent.Squad.CompletedPoiIds.Add(objective.Location.Id);
+                            QuestObjectiveRecovery.Retire(agent.Squad, objective.Location, "stalled approach");
                         }
                         objective.Status = ObjectiveStatus.Failed;
                         Log.Info($"{agent} stuck en-route to {objective.Location} for {StuckEnRouteThresholdSeconds:F0}s without advancing — blacklisted for {agent.Squad}, rerouting");
@@ -220,12 +221,15 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                     var arrivalRefusal = "distance";
                     if (distanceSqr <= objective.Location.RadiusSqr)
                     {
-                        // Dormant ghosts skip the LoS gate: the ray fires from a frozen inactive body and
-                        // can report a wall that isn't there, and a never-acked arrival wedges the squad's
-                        // "all arrived" gate forever (observed on Quest waypoints in the limiter test raid).
-                        // In-radius is truth enough for a ghost — the LoS check exists to stop REAL bots
-                        // validating loot through walls.
-                        if (RequiresArrivalLoSCheck(objective.Location.Category) && !agent.IsDormant)
+                        // Quest arrival uses simulated feet for both awake and sleeping agents. Loot keeps
+                        // its existing head-based gate, skipped while the physical body is inactive.
+                        if (objective.Location.Category == WaypointCategory.Quest)
+                        {
+                            inRadius = agent.QuestArrival.Check(agent.Position, objective.Location.Position, out arrivalRefusal);
+                            if (inRadius) ClearLoSBlockedTracking(agent);
+                            else if (TrackLoSBlocked(agent, objective.Location, arrivalRefusal)) continue;
+                        }
+                        else if (RequiresArrivalLoSCheck(objective.Location.Category) && !agent.IsDormant)
                         {
                             if (HasArrivalLineOfSight(agent, objective.Location.Position))
                             {
@@ -251,15 +255,18 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                                  : NavSnapArrivalRadiusSqr)
                              && RequiresArrivalLoSCheck(objective.Location.Category))
                     {
-                        if (HasArrivalLineOfSight(agent, objective.Location.Position))
+                        var arrivalClear = objective.Location.Category == WaypointCategory.Quest
+                            ? agent.QuestArrival.Check(agent.Position, objective.Location.Position, out arrivalRefusal)
+                            : HasArrivalLineOfSight(agent, objective.Location.Position);
+                        if (arrivalClear)
                         {
-                            Log.Debug($"{agent} BSG nav-snap arrival rescue: stopped {Mathf.Sqrt(distanceSqr):F1}m off {objective.Location} but Physics raycast clear, checking target floor");
+                            Log.Debug($"{agent} BSG nav-snap arrival rescue: stopped {Mathf.Sqrt(distanceSqr):F1}m off {objective.Location}, approach clear, checking target floor");
                             inRadius = true;
                             ClearLoSBlockedTracking(agent);
                         }
                         else
                         {
-                            arrivalRefusal = "line-of-sight";
+                            if (objective.Location.Category != WaypointCategory.Quest) arrivalRefusal = "line-of-sight";
                             ClearLoSBlockedTracking(agent);
                         }
                     }
@@ -441,7 +448,7 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
     /// pinned target so the next dispatch tick picks a new one. Returns true when the blacklist fired and the
     /// caller should skip the rest of the current arrival-resolution branch.
     /// </summary>
-    private static bool TrackLoSBlocked(Agent agent, Waypoint location)
+    private static bool TrackLoSBlocked(Agent agent, Waypoint location, string reason = "line-of-sight")
     {
         if (agent == null || location == null || agent.Squad == null) return false;
         var locId = location.Id;
@@ -453,6 +460,7 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
         }
         if (Time.time - agent.LoSBlockedSinceTime < LoSBlockedTimeoutSeconds) return false;
         agent.Squad.CompletedPoiIds.Add(locId);
+        QuestObjectiveRecovery.Retire(agent.Squad, location, "blocked arrival");
         if (agent.Squad.Objective.Location != null
             && agent.Squad.Objective.Location.Id == locId)
         {
@@ -461,7 +469,7 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
         agent.Objective.Location = null;
         agent.Objective.SplinterParent = null;
         agent.Objective.Status = ObjectiveStatus.None;
-        Log.Info($"{agent} blacklisting {location} for {agent.Squad} after {LoSBlockedTimeoutSeconds:F0}s of LoS-blocked arrival (target appears to be inside a wall) — cleared agent + squad target to force re-dispatch");
+        Log.Info($"{agent} blacklisting {location} for {agent.Squad} after {LoSBlockedTimeoutSeconds:F0}s of blocked arrival (reason={reason}); cleared agent + squad target to force re-dispatch");
         ClearLoSBlockedTracking(agent);
         return true;
     }
@@ -523,6 +531,7 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
             }
 
             agent.Squad.CompletedPoiIds.Add(locId);
+            QuestObjectiveRecovery.Retire(agent.Squad, location, "repeated arrival failures");
             if (location.Category == WaypointCategory.Exfil)
             {
                 ExfilArrival.Abandon(agent, location);
