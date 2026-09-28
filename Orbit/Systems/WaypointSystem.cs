@@ -2415,6 +2415,7 @@ public partial class WaypointSystem
                     && !HasLineOfSightToCorpse(squad, loc)) continue;
                 if (IsSquadKnownUnreachable(squad, loc.Id)) continue;
                 if (!SquadCanUseWaypoint(squad, squadIsPmc, loc)) continue;
+                if (HasFailedDoorOnPath(squad, loc)) continue;
                 var weight = ScopedWaypointWeight(squad, loc);
                 fallbackCandidates += weight;
                 if (Random.value * fallbackCandidates < weight)

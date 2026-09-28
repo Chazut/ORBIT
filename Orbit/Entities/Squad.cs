@@ -126,6 +126,9 @@ public class Squad(int id, float[] taskScores, int targetMembersCount) : Entity(
     /// objectives.
     /// </summary>
     public int ConsecutiveDispatchFailures;
+    public float NextDispatchAttemptAt;
+    public bool FailedDispatchWasExtract;
+    public Vector3 FailedDispatchPosition;
 
     /// <summary>
     /// How many consecutive times every squad member arrived at the "all members failed their objective

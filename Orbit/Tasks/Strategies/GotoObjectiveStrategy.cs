@@ -290,7 +290,6 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                 {
                     continue;
                 }
-                Log.Debug($"{squad} objective is null, requesting new assignment");
                 AssignNewObjective(squad);
                 continue;
             }
@@ -1556,6 +1555,11 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
 
     private void AssignNewObjective(Squad squad, bool completedCurrent = false)
     {
+        // A null result must not rescan every cell on every strategy tick. Real movement or a new
+        // extraction request can bypass the short backoff; an unchanged failure cannot.
+        if (Time.time < squad.NextDispatchAttemptAt
+            && squad.ExtractRequested == squad.FailedDispatchWasExtract
+            && (squad.Leader.Bot.Position - squad.FailedDispatchPosition).sqrMagnitude < 9f) return;
         var objective = squad.Objective;
 
         // Synthetic POIs get a short-term visit cooldown so the squad doesn't ping-pong on the same
@@ -1634,6 +1638,13 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
         if (newLocation == null)
         {
             squad.ConsecutiveDispatchFailures++;
+            var delay = squad.ConsecutiveDispatchFailures == 1 ? .5f
+                : squad.ConsecutiveDispatchFailures == 2 ? 1f
+                : squad.ConsecutiveDispatchFailures == 3 ? 2f : 5f;
+            squad.NextDispatchAttemptAt = Time.time + delay;
+            squad.FailedDispatchWasExtract = squad.ExtractRequested;
+            squad.FailedDispatchPosition = squad.Leader.Bot.Position;
+            Log.Debug($"{squad} dispatch backoff: no eligible objective, retry in {delay:F1}s");
             Log.Debug($"{squad} received null objective location (consecutive failures: {squad.ConsecutiveDispatchFailures})");
             return;
         }
@@ -1641,6 +1652,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
         // Successful dispatch — reset the islanded counter so we don't pin a squad to its cell forever after
         // one good streak of failures.
         squad.ConsecutiveDispatchFailures = 0;
+        squad.NextDispatchAttemptAt = 0f;
 
         objective.LocationPrevious = objective.Location;
         objective.Location = newLocation;
