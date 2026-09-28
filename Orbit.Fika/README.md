@@ -1,6 +1,6 @@
 # ORBIT Fika addon
 
-Version 1.2 adds door synchronization alongside Ghost fight audio. Use the matching new ORBIT
+Version 1.1 RC2 adds door synchronization alongside Ghost fight audio. Use the matching new ORBIT
 client and addon on the host or headless and every playing client. The server mod is unchanged.
 An older addon cannot receive the new door protocol. A new client requests compatibility once
 per network session and logs a warning if the host does not respond; use matching versions.
