@@ -165,7 +165,7 @@ public sealed partial class NativeGhostSystem
             var adapter = NativeGhostAdapters.Resolve(bot);
             if (!NativeGhostPolicy.Supports(decision.Value.ToString(), CustomAction(decision.Value), IsCustomRole(bot), hunt,
                 adapter?.Checkpoint, adapter?.Warband == true, NativeGhostPartisan.Supports(bot, decision.Value.ToString()),
-                NativeGhostCover.Supports(bot, decision.Value.ToString()), adapter?.Isb == true,
+                NativeGhostCover.Supports(bot, decision.Value.ToString(), adapter), adapter?.Isb == true,
                 NativeGhostZryachiy.Supports(bot, decision.Value.ToString())
                     || NativeGhostMarksman.SupportsLay(bot, decision.Value),
                 NativeGhostMarksman.SupportsStandBy(bot, decision.Value), NativeGhostLoot.Supports(bot, decision.Value),
@@ -517,7 +517,7 @@ public sealed partial class NativeGhostSystem
         }
         if (state.WakeReason != null || !NativeGhostPolicy.Supports(decision.ToString(), CustomAction(decision), state.CustomRole, state.UpdateHunt != null,
                 state.Adapter?.Checkpoint, state.Adapter?.Warband == true, NativeGhostPartisan.Supports(state.Bot, decision.ToString()),
-                NativeGhostCover.Supports(state.Bot, decision.ToString()), state.Adapter?.Isb == true,
+                NativeGhostCover.Supports(state.Bot, decision.ToString(), state.Adapter), state.Adapter?.Isb == true,
                 NativeGhostZryachiy.Supports(state.Bot, decision.ToString())
                     || NativeGhostMarksman.SupportsLay(state.Bot, decision),
                 NativeGhostMarksman.CanKeepStandByDecision(state.Bot, decision), NativeGhostLoot.Supports(state.Bot, decision),
@@ -537,6 +537,10 @@ public sealed partial class NativeGhostSystem
             state.Bot.Mover.ActualPathController.Stop();
             state.Decision = name;
             Log.Debug($"NATIVE GHOST: {state.Bot.Profile.Nickname} original decision {name}");
+            if (NativeGhostCover.SupportsCheckpointTarget(state.Bot, state.Adapter))
+                Log.Debug($"NATIVE GHOST COVER: {state.Bot.Profile.Nickname} RUAF target retained decision={name}"
+                    + $" inCover={state.Bot.Memory.IsInCover} target={state.Bot.Memory.GoalTarget?.HaveMainTarget()}"
+                    + $" firstAid={state.Bot.Medecine?.FirstAid?.Have2Do} surgery={state.Bot.Medecine?.SurgicalKit?.HaveWork}");
         }
     }
 
