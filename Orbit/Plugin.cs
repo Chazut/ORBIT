@@ -107,6 +107,8 @@ public class Plugin : BaseUnityPlugin
         EnableSafe(new DoorUnlockTracePatch());
 
         EnableSafe(new SoftTeleportTracePatch());
+        EnableSafe(new OrbitMoverHandoffFallbackPatch());
+        EnableSafe(new OrbitMoverHandoffLinkedPatch());
         EnableSafe(new HardTeleportTracePatch());
         EnableSafe(new MovementContextHumanizePatch());
         EnableSafe(new BotVaultingPatch());

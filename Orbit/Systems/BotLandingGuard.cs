@@ -164,6 +164,37 @@ internal static class BotLandingGuard
             if (player != null && player.AIData?.IsAI == false) Humans.Add(player);
     }
 
+    internal static bool TryHandoffLanding(BotOwner bot, out Vector3 landing)
+    {
+        landing = default;
+        var player = bot?.GetPlayer;
+        if (player == null || bot.IsDead || !bot.gameObject.activeSelf
+            || GhostBodyTransition.Busy(player) || !BotGroundPlacement.Finite(player.Position)) return false;
+        RefreshHumans();
+        var origin = player.Position;
+        // Native handoff can start off-mesh, so no complete path from that invalid start is required.
+        // Keep the floor, physical clearance and direct segment checks, with a strict 3m limit.
+        for (var probe = 0; probe < 17; probe++)
+        {
+            if (Time.time >= _probeWindow) { _probeWindow = Time.time + 0.2f; _nearbyProbes = 0; }
+            if (_nearbyProbes++ >= 32) return false;
+            var angle = (probe - 1) % 8 * Mathf.PI / 4f;
+            var candidate = probe == 0 ? origin
+                : origin + new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle)) * (probe <= 8 ? 1.25f : 2.5f);
+            if (!NavMesh.SamplePosition(candidate, out var hit, 0.75f, NavMesh.AllAreas)
+                || (hit.position - origin).sqrMagnitude > 9f || Mathf.Abs(hit.position.y - origin.y) > 0.65f
+                || IsRejected(bot, hit.position) || DangerZones.IsInside(hit.position)
+                || !BotGroundPlacement.TryResolve(player, hit.position, out var target, out _)
+                || (target - origin).sqrMagnitude > 9f || !ClearOfOtherBodies(bot, target)
+                || !Hidden(origin, target, Humans)
+                || Physics.Linecast(origin + Vector3.up, target + Vector3.up, player.MovementContext.GroundMask,
+                    QueryTriggerInteraction.Ignore)) continue;
+            landing = target;
+            return true;
+        }
+        return false;
+    }
+
     internal static void Tick()
     {
         if (Watches.Count == 0 || Time.time < _nextTick) return;

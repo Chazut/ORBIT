@@ -223,6 +223,7 @@ public class OrbitBrainLayer : CustomLayer
             var mover = _agent.Bot.Mover;
             if (layerName == LayerName)
             {
+                _agent.Stuck.Recovery.CancelHandoff();
                 Log.Debug($"{_agent} stopping builtin bot mover");
                 mover.Stop();
                 _agent.IsActive = true;
@@ -241,7 +242,7 @@ public class OrbitBrainLayer : CustomLayer
                         Log.Debug($"{_agent} movement handoff: local navigation seeded without teleport");
                     else
                     {
-                        Log.Debug($"{_agent} movement handoff: no supported local navigation point, native route cleared without teleport");
+                        Log.Debug($"{_agent} movement handoff: no supported local navigation point, stale anchors invalidated; local recovery pending");
                     }
                 }
             }
