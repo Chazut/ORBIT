@@ -20,6 +20,8 @@ internal static class BotLandingGuard
         internal float Started, StableSince = -1f, NextRetry;
         internal int Attempts;
         internal Action Repath;
+        internal bool FallConfirmed;
+        internal string DeferredReason;
     }
 
     private struct Rejected
@@ -88,9 +90,7 @@ internal static class BotLandingGuard
         if (player == null || BotGroundPlacement.HasSupport(player)) return false;
         var delta = player.Position - surface;
         if (delta.y > -0.6f || delta.x * delta.x + delta.z * delta.z > 9f) return false;
-        var above = new Vector3(player.Position.x, surface.y, player.Position.z);
-        return BotGroundPlacement.TryResolve(player, above, out var expected, out _)
-            && player.Position.y < expected.y - 0.6f;
+        return BotGroundPlacement.IsBelowFloor(player, surface);
     }
 
     private static void ConfirmFall(BotOwner bot)
@@ -119,6 +119,13 @@ internal static class BotLandingGuard
             Log.Debug($"GROUND PLACEMENT: {bot.Profile.Nickname} rejected source={source} surface={surface} reason={reason}");
             return false;
         }
+        Place(bot, surface, landing, source, repath, corrected);
+        return true;
+    }
+
+    private static void Place(BotOwner bot, Vector3 surface, Vector3 landing, string source, Action repath, bool corrected)
+    {
+        var player = bot.GetPlayer;
         var from = player.Position;
         player.Teleport(landing);
         // Sleeping rescue placements are checked again at wake, when physics resumes.
@@ -129,16 +136,73 @@ internal static class BotLandingGuard
                 Started = Time.time, NextRetry = Time.time + 0.5f, Repath = repath });
         }
         Log.Debug($"GROUND PLACEMENT: {bot.Profile.Nickname} placed source={source} from={from} surface={surface} to={landing} controller={player.CharacterController.GetType().Name} mask={player.MovementContext.GroundMask} corrected={corrected}");
-        return true;
     }
 
     internal static void Wake(BotOwner bot, Vector3 surface, Action repath = null)
     {
         if (bot == null || bot.IsDead || bot.GetPlayer == null) return;
         var from = bot.GetPlayer.Position;
+        if (!BotGroundPlacement.Finite(surface)) surface = from;
         // A stale path corner must not turn a wake adjustment into a long-range teleport.
-        if ((surface - from).sqrMagnitude > 4f || Mathf.Abs(surface.y - from.y) > 0.65f) surface = from;
+        if ((surface - from).sqrMagnitude > 4f) surface = from;
+        if (Mathf.Abs(surface.y - from.y) > 0.65f)
+        {
+            if (BotGroundPlacement.HasSupport(bot.GetPlayer))
+            {
+                TryRecover(bot, from, "wake", repath);
+                return;
+            }
+            RefreshHumans();
+            if (TryWakeLanding(bot, from, surface, out var resolvedSurface, out var landing, out var reason))
+            {
+                Place(bot, resolvedSurface, landing, "wake-validated", repath, Corrected(bot));
+                return;
+            }
+            // Retain the nearby mesh height for fall detection. Replacing it with the unsupported
+            // Ghost height would make the short floor probe miss the very floor we need to detect.
+            Watches.RemoveAll(w => ReferenceEquals(w.Bot, bot));
+            Watches.Add(new Watch { Bot = bot, Surface = surface, Landing = from, Source = "wake-pending",
+                Started = Time.time, NextRetry = Time.time + 0.5f, Repath = repath });
+            Log.Warning($"GROUND PLACEMENT: {bot.Profile.Nickname} wake validation deferred from={from} surface={surface} reason={reason}");
+            return;
+        }
         TryRecover(bot, surface, "wake", repath);
+    }
+
+    private static bool TakeProbe()
+    {
+        if (Time.time >= _probeWindow) { _probeWindow = Time.time + 0.2f; _nearbyProbes = 0; }
+        return _nearbyProbes++ < 32;
+    }
+
+    private static bool TryWakeLanding(BotOwner bot, Vector3 origin, Vector3 mesh,
+        out Vector3 surface, out Vector3 landing, out string reason)
+    {
+        surface = landing = default;
+        reason = "no-local-landing";
+        for (var probe = 0; probe < 9; probe++)
+        {
+            if (!TakeProbe()) { reason = "query-budget"; return false; }
+            var angle = (probe - 1) * Mathf.PI / 4f;
+            var candidate = probe == 0 ? mesh : mesh + new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle)) * 1.25f;
+            if (!NavMesh.SamplePosition(candidate, out var hit, 0.3f, NavMesh.AllAreas)
+                || (hit.position - origin).sqrMagnitude > 4f || Mathf.Abs(hit.position.y - mesh.y) > 0.65f
+                || IsRejected(bot, hit.position) || DangerZones.IsInside(hit.position)) continue;
+            if (probe != 0 && (!NavMesh.CalculatePath(mesh, hit.position, NavMesh.AllAreas, LocalPath)
+                || LocalPath.status != NavMeshPathStatus.PathComplete)) continue;
+            if (!BotGroundPlacement.TryResolve(bot.GetPlayer, hit.position, out landing, out reason)) continue;
+            if ((landing - origin).sqrMagnitude > 4f) { reason = "wake-distance-limit"; continue; }
+            if (!ClearOfOtherBodies(bot, landing)) { reason = "another-body"; continue; }
+            if (!Hidden(origin, landing, Humans)) { reason = "human-visible"; continue; }
+            // Check the short horizontal approach at the verified floor height. A body already
+            // below that floor must be allowed to cross back upward through its support surface.
+            var start = new Vector3(origin.x, hit.position.y + 1f, origin.z);
+            if (Physics.Linecast(start, landing + Vector3.up, bot.GetPlayer.MovementContext.GroundMask,
+                    QueryTriggerInteraction.Ignore)) { reason = "blocked-segment"; continue; }
+            surface = hit.position;
+            return true;
+        }
+        return false;
     }
 
     internal static bool TryRecover(BotOwner bot, Vector3 surface, string source, Action repath = null)
@@ -148,8 +212,8 @@ internal static class BotLandingGuard
         if (TryPlace(bot, surface, source, repath)) return true;
         if (!Corrected(bot)) return false;
         RefreshHumans();
-        var seed = new Watch { Bot = bot, Surface = surface, Landing = bot.GetPlayer.Position };
-        if (TryNearby(seed, Humans, out var nearby, out _))
+        var seed = new Watch { Bot = bot, Surface = surface, Landing = surface };
+        if (TryNearby(seed, Humans, out var nearby, out _, out _))
             return TryPlace(bot, nearby, source + "-nearby", repath);
         // No unverified fallback teleport. The normal mover keeps control when no safe point exists.
         return false;
@@ -176,8 +240,7 @@ internal static class BotLandingGuard
         // Keep the floor, physical clearance and direct segment checks, with a strict 3m limit.
         for (var probe = 0; probe < 17; probe++)
         {
-            if (Time.time >= _probeWindow) { _probeWindow = Time.time + 0.2f; _nearbyProbes = 0; }
-            if (_nearbyProbes++ >= 32) return false;
+            if (!TakeProbe()) return false;
             var angle = (probe - 1) % 8 * Mathf.PI / 4f;
             var candidate = probe == 0 ? origin
                 : origin + new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle)) * (probe <= 8 ? 1.25f : 2.5f);
@@ -220,9 +283,9 @@ internal static class BotLandingGuard
         var bot = watch.Bot;
         if (bot == null || bot.IsDead || !bot.gameObject.activeSelf) return false;
         var player = bot.GetPlayer;
-        if (player == null || GhostBodyTransition.Busy(player)
-            || bot.Memory.IsUnderFire || bot.Memory.GoalEnemy != null) return false;
+        if (player == null) return false;
         var age = Time.time - watch.Started;
+        if (GhostBodyTransition.Busy(player)) return age < 8f;
         var delta = player.Position - watch.Landing;
         // Normal navigation is free to leave the landing. Do not pull a walker back to an old point.
         if (delta.x * delta.x + delta.z * delta.z > 3f * 3f || delta.y > 1f) return false;
@@ -246,49 +309,64 @@ internal static class BotLandingGuard
         }
         if (Time.time < watch.NextRetry || delta.y > -0.6f) return true;
         // Distinguish a body below a nearby solid floor from a legitimate descent off a ledge.
-        if (!BelowFloor(bot, watch.Surface)) return true;
-        ConfirmFall(bot);
-        Reject(bot, watch.Surface);
-        Log.Warning($"GROUND PLACEMENT: {bot.Profile.Nickname} fell after source={watch.Source} landing={watch.Landing} now={player.Position} grounded={player.MovementContext.IsGrounded} controller={player.CharacterController.GetType().Name}");
+        if (!watch.FallConfirmed && !BelowFloor(bot, watch.Surface)) return true;
+        if (!watch.FallConfirmed)
+        {
+            watch.FallConfirmed = true;
+            ConfirmFall(bot);
+            Reject(bot, watch.Landing);
+            Log.Warning($"GROUND PLACEMENT: {bot.Profile.Nickname} fell after source={watch.Source} landing={watch.Landing} now={player.Position} grounded={player.MovementContext.IsGrounded} controller={player.CharacterController.GetType().Name}");
+        }
         watch.NextRetry = Time.time + 1f;
         if (watch.Attempts >= 2) return false;
-        if (!TryNearby(watch, humans, out var surface, out var landing)) return true;
+        if (!TryNearby(watch, humans, out var surface, out var landing, out var reason))
+        {
+            if (watch.DeferredReason != reason)
+                Log.Warning($"GROUND PLACEMENT: {bot.Profile.Nickname} recovery deferred source={watch.Source} reason={reason}");
+            watch.DeferredReason = reason;
+            return true;
+        }
         watch.Attempts++;
         player.Teleport(landing);
+        // Combat's native mover must not pull the rescued body back to an old below-floor anchor.
+        if (bot.Mover != null) OrbitMovementRecovery.InvalidateNativePosition(bot.Mover, landing);
         watch.Surface = surface;
         watch.Landing = landing;
-        watch.Repath?.Invoke();
+        watch.FallConfirmed = false;
+        watch.DeferredReason = null;
+        // The rescue restores the body, but combat keeps its own movement order.
+        if (!bot.Memory.IsUnderFire && bot.Memory.GoalEnemy == null) watch.Repath?.Invoke();
         Log.Info($"GROUND PLACEMENT: {bot.Profile.Nickname} local recovery source={watch.Source} to={landing} attempt={watch.Attempts}");
         return true;
     }
 
-    private static bool TryNearby(Watch watch, List<Player> humans, out Vector3 surface, out Vector3 landing)
+    private static bool TryNearby(Watch watch, List<Player> humans, out Vector3 surface, out Vector3 landing, out string reason)
     {
         surface = landing = default;
+        reason = "no-local-navmesh";
         for (var ring = 1; ring <= 2; ring++)
         for (var direction = 0; direction < 8; direction++)
         {
             // Mass spectator wakes share a query budget, instead of each bot doing a full
             // synchronous search in the same frame. Existing movement/recovery keeps retrying.
-            if (Time.time >= _probeWindow)
-            { _probeWindow = Time.time + 0.2f; _nearbyProbes = 0; }
-            if (_nearbyProbes++ >= 32) return false;
+            if (!TakeProbe()) { reason = "query-budget"; return false; }
             var angle = direction * Mathf.PI / 4f;
             var candidate = watch.Surface + new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle)) * (ring * 1.25f);
             if (!NavMesh.SamplePosition(candidate, out var hit, 0.75f, NavMesh.AllAreas)
                 || Mathf.Abs(hit.position.y - watch.Surface.y) > 0.65f
                 || (hit.position - watch.Surface).sqrMagnitude > 3f * 3f
                 || IsRejected(watch.Bot, hit.position)
-                || DangerZones.IsInside(hit.position)
-                || !NavMesh.CalculatePath(watch.Surface, hit.position, NavMesh.AllAreas, LocalPath)
-                || LocalPath.status != NavMeshPathStatus.PathComplete
-                || !BotGroundPlacement.TryResolve(watch.Bot.GetPlayer, hit.position, out landing, out _)
-                || !ClearOfOtherBodies(watch.Bot, landing)
-                || !Hidden(watch.Bot.GetPlayer.Position, landing, humans)) continue;
+                || DangerZones.IsInside(hit.position)) continue;
+            if (!NavMesh.CalculatePath(watch.Surface, hit.position, NavMesh.AllAreas, LocalPath)
+                || LocalPath.status != NavMeshPathStatus.PathComplete) { reason = "disconnected-navmesh"; continue; }
+            if (!BotGroundPlacement.TryResolve(watch.Bot.GetPlayer, hit.position, out landing, out reason)) continue;
+            if ((landing - watch.Landing).sqrMagnitude > 9f) { reason = "local-distance-limit"; continue; }
+            if (!ClearOfOtherBodies(watch.Bot, landing)) { reason = "another-body"; continue; }
+            if (!Hidden(watch.Bot.GetPlayer.Position, landing, humans)) { reason = "human-visible"; continue; }
             // A short complete route can still go around a wall. Never teleport through that wall.
             var start = watch.Surface + Vector3.up;
             if (Physics.Linecast(start, landing + Vector3.up, watch.Bot.GetPlayer.MovementContext.GroundMask,
-                    QueryTriggerInteraction.Ignore)) continue;
+                    QueryTriggerInteraction.Ignore)) { reason = "blocked-segment"; continue; }
             surface = hit.position;
             return true;
         }

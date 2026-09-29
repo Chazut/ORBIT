@@ -23,7 +23,7 @@ internal sealed class OrbitMovementRecovery
 
     internal void CancelHandoff() => HandoffPending = false;
 
-    private static void InvalidateNativePosition(BotMover mover, Vector3 position)
+    internal static void InvalidateNativePosition(BotMover mover, Vector3 position)
     {
         // These coordinates are a current reference, not a certified NavMesh anchor. Invalidate
         // both link flags and timestamps so the first native tick cannot reuse the old spawn.

@@ -94,6 +94,17 @@ internal static class BotGroundPlacement
     }
 
     // One short ray, only for awake recovery observations or the brief post-placement watch.
+    internal static bool IsBelowFloor(Player player, Vector3 surface)
+    {
+        if (player?.MovementContext == null || !Finite(surface) || !Finite(player.Position)) return false;
+        var mask = player.MovementContext.GroundMask;
+        // Detect a crossed floor independently of capsule clearance at the old landing. A blocked
+        // or steep landing still proves the fall, but cannot itself be used as a rescue destination.
+        var origin = new Vector3(player.Position.x, surface.y + FloorRange, player.Position.z);
+        return mask != 0 && Physics.Raycast(origin, Vector3.down, out var floor, FloorRange * 2f,
+            mask, QueryTriggerInteraction.Ignore) && player.Position.y < floor.point.y - 0.6f;
+    }
+
     internal static bool HasSupport(Player player)
     {
         if (player?.MovementContext?.IsGrounded != true || !TryBody(player, out var body)) return false;
