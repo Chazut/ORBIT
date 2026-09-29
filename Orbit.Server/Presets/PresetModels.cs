@@ -3,6 +3,8 @@ using Orbit.Server.Zones;
 
 namespace Orbit.Server.Presets;
 
+public enum PresetParts { ConfigAndZones, ConfigOnly, ZonesOnly }
+
 public sealed class PresetSnapshot
 {
     public JsonElement Config { get; set; }
@@ -26,7 +28,8 @@ public sealed class PresetLibrary
     public UserPreset? ActiveAddon { get; set; }
 }
 
-public sealed record PresetChoice(string Id, string Name, bool ReadOnly, string Contents, string? Source = null);
+public sealed record PresetChoice(string Id, string Name, bool ReadOnly, string Contents, string? Source = null,
+    bool HasConfig = true, bool HasZones = true);
 
 public sealed class PresetAddon
 {

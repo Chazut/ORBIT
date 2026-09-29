@@ -42,7 +42,8 @@ public sealed class PresetService(ConfigService configs, ZoneStoreService zones,
             {
                 var result = new List<PresetChoice> { new("default", "Default", true, "Settings + all maps") };
                 result.AddRange(_library.Presets.Select(p => new PresetChoice(p.Id, p.Name, false, "Settings + all maps")));
-                result.AddRange(_addons.Select(a => new PresetChoice(a.Id, a.Name, true, a.Contents, a.Source)));
+                result.AddRange(_addons.Select(a => new PresetChoice(a.Id, a.Name, true, a.Contents, a.Source,
+                    a.Config.HasValue, a.Maps.Count > 0)));
                 if (_library.ActiveAddon is { } active && result.All(p => p.Id != active.Id))
                     result.Add(new(active.Id, active.Name, true, "Saved addon snapshot (source unavailable)", "Source unavailable"));
                 return result;
@@ -190,26 +191,47 @@ public sealed class PresetService(ConfigService configs, ZoneStoreService zones,
         Changed?.Invoke();
     }
 
-    public void Switch(string id)
+    public void Switch(string id, PresetParts parts = PresetParts.ConfigAndZones)
     {
         lock (_gate)
         {
             RequireReady();
-            if (id == _library.ActiveId) return;
+            if (!Enum.IsDefined(parts)) throw new InvalidDataException("Choose config, zones or both.");
+            if (id == _library.ActiveId && parts == PresetParts.ConfigAndZones) return;
             RefreshAddonsLocked();
             if (id != "default" && _library.Presets.All(p => p.Id != id) && _addons.All(a => a.Id != id))
                 throw new InvalidDataException("This preset is no longer available.");
+            var addon = _addons.FirstOrDefault(a => a.Id == id);
+            if (addon != null && (parts == PresetParts.ConfigOnly && !addon.Config.HasValue
+                || parts == PresetParts.ZonesOnly && addon.Maps.Count == 0))
+                throw new InvalidDataException("This addon does not contain the selected part.");
             TrackEdits();
             var next = WithSavedEdits();
-            var addon = _addons.FirstOrDefault(a => a.Id == id);
-            if (addon != null)
+            var current = Capture();
+            var target = addon != null ? ApplyAddon(current, addon) : Resolve(next, id);
+            if (parts != PresetParts.ConfigAndZones)
+            {
+                target = Normalize(new PresetSnapshot
+                {
+                    Config = parts == PresetParts.ConfigOnly ? target.Config : current.Config,
+                    Maps = parts == PresetParts.ZonesOnly ? target.Maps : current.Maps,
+                });
+                var custom = NewPreset(UniqueName("Custom"), target);
+                next.Presets.Add(custom);
+                next.ActiveId = custom.Id;
+                next.ActiveAddon = null;
+            }
+            else if (addon != null)
             {
                 next.ActiveAddon = new UserPreset
-                    { Id = id, Name = addon.Name, AddonRevision = addon.Revision, Snapshot = ApplyAddon(Capture(), addon) };
+                    { Id = id, Name = addon.Name, AddonRevision = addon.Revision, Snapshot = target };
+                next.ActiveId = id;
             }
-            else next.ActiveAddon = null;
-            next.ActiveId = id;
-            var target = Resolve(next, id);
+            else
+            {
+                next.ActiveAddon = null;
+                next.ActiveId = id;
+            }
             Persist(next); // save outgoing edits and the new selection in the same transaction
             _library = next;
             _active = target;
@@ -272,13 +294,13 @@ public sealed class PresetService(ConfigService configs, ZoneStoreService zones,
         Changed?.Invoke();
     }
 
-    public string Export()
+    public PresetExport Export(string name, PresetParts parts = PresetParts.ConfigAndZones, string? version = null)
     {
         lock (_gate)
         {
             RequireReady();
-            var snapshot = Capture();
-            return JsonSerializer.Serialize(new { Format = "orbit-preset/1", Name = ActiveName, snapshot.Config, snapshot.Maps }, Json);
+            if (PresetArchive.NameError(name) is { } error) throw new InvalidDataException(error);
+            return PresetArchive.Create(name, Capture(), parts, version);
         }
     }
 

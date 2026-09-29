@@ -1,10 +1,11 @@
 @implements IDisposable
 @inject Orbit.Server.Presets.PresetService Presets
 @inject ISnackbar Snackbar
+@inject IDialogService Dialogs
 
 <div class="ml-4" style="width:220px; min-width:120px; max-width:25vw">
-    <MudSelect @key="Presets.ActiveName" T="string" Value="@Presets.ActiveId" ValueChanged="Switch" Dense="true" Margin="Margin.Dense"
-               Variant="Variant.Outlined" Label="Preset" Style="margin:0" Disabled="@(Presets.Error != null)">
+    <MudSelect @key="_selectionVersion" T="string" Value="@Presets.ActiveId" ValueChanged="Switch" Dense="true" Margin="Margin.Dense"
+               Variant="Variant.Outlined" Label="Preset" Style="margin:0" Disabled="@(Presets.Error != null || _choosing)">
         @foreach (var preset in Presets.Choices)
         {
             <MudSelectItem T="string" Value="@preset.Id">@preset.Name@(preset.Source != null ? " (addon)" : "")</MudSelectItem>
@@ -13,18 +14,27 @@
 </div>
 
 @code {
+    private int _selectionVersion;
+    private bool _choosing;
     protected override void OnInitialized() => Presets.Changed += OnChanged;
-    private void OnChanged() => InvokeAsync(StateHasChanged);
+    private void OnChanged() => InvokeAsync(() => { _selectionVersion++; StateHasChanged(); });
     public void Dispose() => Presets.Changed -= OnChanged;
 
-    private void Switch(string id)
+    private async Task Switch(string id)
     {
+        if (_choosing || id == Presets.ActiveId) return;
+        _choosing = true;
         try
         {
-            Presets.Switch(id);
+            var preset = Presets.Choices.FirstOrDefault(p => p.Id == id)
+                ?? throw new InvalidOperationException("This preset is no longer available.");
+            var parts = await PresetScopeDialog.ChooseSelection(Dialogs, preset);
+            if (parts == null) return;
+            Presets.Switch(id, parts.Value);
             Snackbar.Add($"{Presets.ActiveName} selected. Previous edits saved. Applies next raid; faction takeover and brain lists need a game restart.", Severity.Success);
             if (Presets.MirrorWarning != null) Snackbar.Add(Presets.MirrorWarning, Severity.Warning);
         }
         catch (Exception ex) { Snackbar.Add($"Could not switch preset: {ex.Message}", Severity.Error); }
+        finally { _choosing = false; _selectionVersion++; }
     }
 }

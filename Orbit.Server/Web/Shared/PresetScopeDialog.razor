@@ -1,0 +1,98 @@
+@using Orbit.Server.Presets
+
+<MudDialog>
+    <DialogContent>
+        <MudText Typo="Typo.body2" Class="mb-3">Choose what to @(Exporting ? "export from" : "use from") @SourceName.</MudText>
+        <MudRadioGroup T="PresetParts" @bind-Value="_parts">
+            <div><MudRadio T="PresetParts" Value="PresetParts.ConfigAndZones">Config + zones</MudRadio></div>
+            <div><MudRadio T="PresetParts" Value="PresetParts.ConfigOnly" Disabled="@(!HasConfig)">Config only</MudRadio></div>
+            <div><MudRadio T="PresetParts" Value="PresetParts.ZonesOnly" Disabled="@(!HasZones)">Zones only</MudRadio></div>
+        </MudRadioGroup>
+        @if (Exporting)
+        {
+            <MudTextField T="string" @bind-Value="_name" Label="Preset name" Variant="Variant.Outlined"
+                          Class="mt-3" Immediate="true" Required="true" MaxLength="60"
+                          Validation="@(new Func<string, string?>(PresetArchive.NameError))"
+                          RequiredError="Enter a preset name." HelperText="Required. Used as the folder name inside addon." />
+            <MudTextField T="string" @bind-Value="_version" Label="Version (optional)" Variant="Variant.Outlined"
+                          Class="mt-3" Immediate="true" MaxLength="40" Validation="@(new Func<string, string?>(PresetArchive.VersionError))"
+                          HelperText="Added to the ZIP filename only, for example 1.3.0-RC1." />
+            @if (NameError == null && VersionError == null)
+            {
+                <MudText Typo="Typo.caption" Class="mt-2">ZIP: @(_name.Trim() + (string.IsNullOrWhiteSpace(_version) ? "" : "-" + _version.Trim()) + ".zip")</MudText>
+            }
+            <MudText Typo="Typo.body2" Class="mt-3">
+                Choose a name without numbers, such as Live-Like. Keep exactly the same folder name
+                and JSON filenames for every update, so extracting the new ZIP replaces the existing files.
+                The version above is added to the ZIP filename automatically, for example Live-Like-1.3.zip,
+                and never changes the addon folder name.
+            </MudText>
+            <MudText Typo="Typo.body2" Class="mt-3">
+                The ZIP includes @(_parts == PresetParts.ConfigOnly ? "config.json" : _parts == PresetParts.ZonesOnly ? "zones.json" : "config.json and zones.json")
+                under SPT_Runtime/user/mods/ORBIT/addon/&lt;preset name&gt;/. Extract it into the game folder.
+                A one-part update leaves any other JSON already installed in that addon folder in place.
+            </MudText>
+        }
+        else
+        {
+            <MudText Typo="Typo.body2" Class="mt-3">
+                @(_parts == PresetParts.ConfigAndZones
+                    ? "Use this preset normally. Addon updates continue to apply automatically while it is selected."
+                    : _parts == PresetParts.ConfigOnly
+                        ? "Create a personal Custom copy with this config and your current zones, including unsaved edits."
+                        : "Create a personal Custom copy with these zones and your current config, including unsaved edits.")
+            </MudText>
+            @if (_parts != PresetParts.ConfigAndZones)
+            {
+                <MudText Typo="Typo.body2" Class="mt-2">The source preset stays unchanged. This Custom copy will not receive addon updates.</MudText>
+            }
+            @if (!HasConfig || !HasZones)
+            {
+                <MudText Typo="Typo.body2" Class="mt-2">
+                    This addon only includes @(HasConfig ? "config" : "zones"). Config + zones keeps your current @(HasConfig ? "zones" : "config").
+                </MudText>
+            }
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@(Exporting && (NameError != null || VersionError != null))" OnClick="Confirm">
+            @(Exporting ? "Create ZIP" : _parts == PresetParts.ConfigAndZones ? "Use preset" : "Create Custom copy")
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance Dialog { get; set; } = null!;
+    [Parameter] public bool Exporting { get; set; }
+    [Parameter] public string SourceName { get; set; } = "";
+    [Parameter] public string InitialName { get; set; } = "";
+    [Parameter] public string InitialVersion { get; set; } = "";
+    [Parameter] public bool HasConfig { get; set; } = true;
+    [Parameter] public bool HasZones { get; set; } = true;
+    private PresetParts _parts = PresetParts.ConfigAndZones;
+    private string _name = "";
+    private string _version = "";
+    private string? NameError => PresetArchive.NameError(_name);
+    private string? VersionError => PresetArchive.VersionError(_version);
+    public sealed record Choice(PresetParts Parts, string Name, string Version);
+
+    protected override void OnInitialized() { _name = InitialName; _version = InitialVersion; }
+    private void Cancel() => Dialog.Cancel();
+    private void Confirm()
+    {
+        if (Exporting && (NameError != null || VersionError != null)) return;
+        Dialog.Close(DialogResult.Ok(new Choice(_parts, _name.Trim(), _version.Trim())));
+    }
+
+    public static async Task<PresetParts?> ChooseSelection(IDialogService dialogs, PresetChoice preset)
+    {
+        var dialog = await dialogs.ShowAsync<PresetScopeDialog>("Use preset", new DialogParameters
+        {
+            [nameof(SourceName)] = preset.Name,
+            [nameof(HasConfig)] = preset.HasConfig,
+            [nameof(HasZones)] = preset.HasZones,
+        }, new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = true });
+        return await dialog.Result is { Canceled: false, Data: Choice choice } ? choice.Parts : null;
+    }
+}

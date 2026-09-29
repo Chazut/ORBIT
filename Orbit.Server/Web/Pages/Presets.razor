@@ -1,7 +1,7 @@
 @page "/orbit/presets"
 @layout Orbit.Server.Web.Shared.MainLayout
 @implements IDisposable
-@using System.Text
+@using Orbit.Server.Presets
 @inject Orbit.Server.Presets.PresetService Store
 @inject ISnackbar Snackbar
 @inject IDialogService Dialogs
@@ -11,7 +11,8 @@
 <MudContainer MaxWidth="MaxWidth.Large">
     <MudText Typo="Typo.h5" Class="mb-2">Presets</MudText>
     <MudText Typo="Typo.body2" Class="mb-5" Style="opacity:.7">
-        Switch settings and all your maps together using the selector at the top of any page.
+        Choose config, zones or both when selecting a preset at the top of any page.
+        Selecting just one part creates a personal Custom copy and keeps the other part of your current setup.
         Switching saves your current edits. Save applies the selected preset from the next raid;
         faction takeover and personality brain lists need a game restart.
     </MudText>
@@ -19,18 +20,19 @@
     <SettingsCard Title="@($"Editing: {Store.ActiveName}")"
                   Subtitle="Default and addon sources are protected. Changing any setting or zone creates a personal Custom copy automatically.">
         <div class="d-flex flex-wrap align-center" style="gap:12px">
-            <MudTextField T="string" @bind-Value="_name" Label="Preset name" Variant="Variant.Outlined" Margin="Margin.Dense"
-                          MaxLength="60" Immediate="true" Style="min-width:220px; flex:1" />
-            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="Duplicate" Disabled="@(Store.Error != null)"
+            <MudTextField T="string" @bind-Value="PresetName" Label="Preset name" Variant="Variant.Outlined" Margin="Margin.Dense"
+                          MaxLength="60" Immediate="true"
+                          Style="min-width:220px; flex:1" />
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="Duplicate" Disabled="@(Store.Error != null || string.IsNullOrWhiteSpace(_name))"
                        StartIcon="@Icons.Material.Filled.ContentCopy">Save as new preset</MudButton>
-            <MudButton Variant="Variant.Outlined" OnClick="Rename" Disabled="@(Store.ReadOnly || Store.Error != null)">Rename current</MudButton>
-            <MudButton Variant="Variant.Outlined" OnClick="Export" Disabled="@(Store.Error != null)"
-                       StartIcon="@Icons.Material.Filled.IosShare">Export preset</MudButton>
+            <MudButton Variant="Variant.Outlined" OnClick="Rename" Disabled="@(Store.ReadOnly || Store.Error != null || string.IsNullOrWhiteSpace(_name))">Rename current</MudButton>
+            <MudButton Variant="Variant.Outlined" OnClick="Export" Disabled="@(Store.Error != null || _choosing)"
+                       StartIcon="@Icons.Material.Filled.IosShare">Export preset ZIP</MudButton>
         </div>
         @if (_exportHref != null)
         {
             <MudButton Class="mt-3" Href="@_exportHref" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Download"
-                       UserAttributes="@(new Dictionary<string, object?> { ["download"] = "orbit-preset.json" })">Download preset</MudButton>
+                       UserAttributes="@(new Dictionary<string, object?> { ["download"] = _exportFileName })">Download ZIP</MudButton>
         }
     </SettingsCard>
 
@@ -49,7 +51,7 @@
                 }
                 else
                 {
-                    <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="@(() => Select(preset.Id))" Disabled="@(Store.Error != null)">Use preset</MudButton>
+                    <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="@(() => Select(preset.Id))" Disabled="@(Store.Error != null || _choosing)">Use preset</MudButton>
                 }
                 @if (!preset.ReadOnly)
                 {
@@ -61,13 +63,15 @@
         }
     </SettingsCard>
 
-    <SettingsCard Title="Addons" Subtitle="Drop JSON exports into user/mods/ORBIT/addon. Each subfolder becomes one preset combining all its JSON files; files directly in addon remain separate presets.">
+    <SettingsCard Title="Addons" Subtitle="Extract preset ZIPs into your game folder. Each folder in SPT_Runtime/user/mods/ORBIT/addon becomes one preset.">
         <MudText Typo="Typo.body2" Class="mb-3" Style="opacity:.75">
+            Export config.json, zones.json or both in one ZIP. Existing JSON exports are still supported.
             Accepts global settings, zone packs and complete presets. A partial addon replaces only the settings
             and maps it contains, keeping everything else from the current preset. Its source file stays unchanged.
             Updates to the selected addon apply automatically, including after a server restart.
             Personal edits stay in Custom. A missing or incomplete file keeps the last valid version.
-            Keep the folder name when updating a folder addon; filenames inside may change.
+            Keep the folder name and JSON filenames unchanged when publishing updates. Put version numbers
+            in the ZIP filename only, so users can extract updates into the same game folder and replace the existing files.
         </MudText>
         <MudButton Variant="Variant.Outlined" Size="Size.Small" OnClick="Refresh" StartIcon="@Icons.Material.Filled.Refresh">Refresh addons</MudButton>
         @foreach (var error in Store.AddonErrors)
@@ -79,7 +83,15 @@
 
 @code {
     private string _name = "";
+    private string PresetName
+    {
+        get => _name;
+        set { _name = value; _exportHref = null; }
+    }
+    private bool _choosing;
     private string? _exportHref;
+    private string? _exportFileName;
+    private string _exportVersion = "";
     protected override void OnInitialized() => Store.Changed += OnChanged;
     private void OnChanged() => InvokeAsync(() => { _exportHref = null; StateHasChanged(); });
     public void Dispose() => Store.Changed -= OnChanged;
@@ -95,8 +107,49 @@
     }
     private void Duplicate() => Run(() => { Store.Duplicate(_name); _name = ""; }, "New preset saved and selected.");
     private void Rename() => Run(() => { Store.Rename(_name); _name = ""; }, "Preset renamed.");
-    private void Select(string id) => Run(() => Store.Switch(id), "Preset selected. Previous edits saved. Applies next raid.");
-    private void Export() => Run(() => _exportHref = "data:application/json;base64," + Convert.ToBase64String(Encoding.UTF8.GetBytes(Store.Export())), "Export ready.");
+    private async Task Select(string id)
+    {
+        if (_choosing) return;
+        _choosing = true;
+        try
+        {
+            var preset = Store.Choices.FirstOrDefault(p => p.Id == id)
+                ?? throw new InvalidOperationException("This preset is no longer available.");
+            var parts = await PresetScopeDialog.ChooseSelection(Dialogs, preset);
+            if (parts != null) Run(() => Store.Switch(id, parts.Value), parts == PresetParts.ConfigAndZones
+                ? "Preset selected. Previous edits saved. Applies next raid."
+                : "Custom copy created and selected. The other part of your setup was kept. Applies next raid.");
+        }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+        finally { _choosing = false; }
+    }
+    private async Task Export()
+    {
+        if (_choosing) return;
+        _choosing = true;
+        try
+        {
+            var dialog = await Dialogs.ShowAsync<PresetScopeDialog>("Export preset", new DialogParameters
+            {
+                [nameof(PresetScopeDialog.Exporting)] = true,
+                [nameof(PresetScopeDialog.SourceName)] = Store.ActiveName,
+                [nameof(PresetScopeDialog.InitialName)] = _name,
+                [nameof(PresetScopeDialog.InitialVersion)] = _exportVersion,
+            }, new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = true });
+            if (await dialog.Result is { Canceled: false, Data: PresetScopeDialog.Choice choice })
+                Run(() =>
+                {
+                    _exportHref = null;
+                    var archive = Store.Export(choice.Name, choice.Parts, choice.Version);
+                    _name = choice.Name;
+                    _exportVersion = choice.Version;
+                    _exportFileName = archive.FileName;
+                    _exportHref = "data:application/zip;base64," + Convert.ToBase64String(archive.Bytes);
+                }, "ZIP ready. Extract it into your game folder to install the addon.");
+        }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+        finally { _choosing = false; }
+    }
     private void Refresh() => Run(() => Store.RefreshAddons(force: true), "Addon folder scanned.");
     private async Task Delete(string id, string name)
     {
