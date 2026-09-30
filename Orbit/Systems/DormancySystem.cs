@@ -627,8 +627,16 @@ public partial class DormancySystem
             var loot = agent.LootHandler;
             if (loot != null && loot.LootTaskRunning && !_cfg.GhostLooting)
             { _farBlockedLoot++; return false; }
-            if (bot.Memory != null && (bot.Memory.GoalEnemy != null || bot.Memory.IsUnderFire)) { _farBlockedCombat++; return false; }
-            if (_targetedBy.ContainsKey(agent.Player.ProfileId)) { _farBlockedCombat++; return false; }
+            if (bot.Memory != null && (bot.Memory.GoalEnemy != null || bot.Memory.IsUnderFire))
+            {
+                _farBlockedCombat++;
+                return ReportInitialSleepCombatBlock(bot, bot.Memory.IsUnderFire ? "under-fire" : "goal-enemy");
+            }
+            if (_targetedBy.TryGetValue(agent.Player.ProfileId, out var targeting))
+            {
+                _farBlockedCombat++;
+                return ReportInitialSleepCombatBlock(bot, "targeted", targeting);
+            }
             var bodyReady = loot != null ? loot.CanEnterGhost : !GhostBodyTransition.Busy(agent.Player);
             if (!bodyReady)
             {

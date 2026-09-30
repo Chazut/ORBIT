@@ -25,10 +25,11 @@ public class DormantVisionPatch : ModulePatch
     {
         var person = __instance?.Person;
         if (person == null || !DormancySystem.IsDormantProfile(person.ProfileId)
-            && Singleton<OrbitManager>.Instance?.DormancySystem.DeferSpawnContact(__instance) != true)
+            && Singleton<OrbitManager>.Instance?.DormancySystem.DeferSpawnContact(__instance, firstSight: true, source: "vision") != true)
             return true;
 
         __instance.SetVisible(false);
+        __instance.SetCanShoot(false);
         DormancySystem.VisionBlocks++;
         return false;
     }

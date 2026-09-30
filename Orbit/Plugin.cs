@@ -119,7 +119,10 @@ public class Plugin : BaseUnityPlugin
         // OFF — the dormant set stays empty and the prefix falls through.
         EnableSafe(new DormantVisionPatch());
         EnableSafe(new GhostSpawnRegistrationPatch());
+        EnableSafe(new GhostSpawnActivationPatch());
         EnableSafe(new GhostSpawnContactPatch());
+        EnableSafe(new GhostSpawnFirstSightPatch());
+        EnableSafe(new GhostSpawnSainContactPatch());
         EnableSafe(new DormantBrainThrottlePatch());
         EnableSafe(new NativeGhostDecisionPatch());
         EnableSafe(new NativeGhostSainCleanupPatch());
