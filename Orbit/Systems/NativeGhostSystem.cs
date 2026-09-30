@@ -45,7 +45,8 @@ public sealed partial class NativeGhostSystem
         public NativeGhostRegroup Regroup;
         public HearingDetour Hearing;
         public Func<Vector3, float> HumanDistanceSqr;
-        public float WarningWakeDistanceSqr;
+        public float HumanWakeDistanceSqr;
+        public readonly SimulatedWounds Wounds = new();
     }
 
     private static readonly Dictionary<BotOwner, Sleeper> Sleepers = new();
@@ -69,14 +70,14 @@ public sealed partial class NativeGhostSystem
 
     private readonly DoorSystem _doors;
     private readonly Func<Vector3, float> _humanDistanceSqr;
-    private readonly float _warningWakeDistanceSqr;
+    private readonly float _humanWakeDistanceSqr;
     private readonly HashSet<string> _reportedUnsupported = new();
 
     public NativeGhostSystem(DoorSystem doors, Func<Vector3, float> humanDistanceSqr = null, float wakeDistance = 0f)
     {
         _doors = doors;
         _humanDistanceSqr = humanDistanceSqr;
-        _warningWakeDistanceSqr = wakeDistance * wakeDistance;
+        _humanWakeDistanceSqr = wakeDistance * wakeDistance;
     }
 
     public static void Clear()
@@ -179,7 +180,7 @@ public sealed partial class NativeGhostSystem
                     || NativeGhostMarksman.SupportsLay(bot, decision.Value),
                 NativeGhostMarksman.SupportsStandBy(bot, decision.Value), NativeGhostLoot.Supports(bot, decision.Value),
                 NativeGhostPolicy.IsBlackDivisionPatrol((int)bot.Profile.Info.Settings.Role, NativeGhostPartisan.Layer(bot)),
-                NativeGhostWarning.Supports(bot, decision.Value, _humanDistanceSqr, _warningWakeDistanceSqr)))
+                NativeGhostWarning.Supports(bot, decision.Value, _humanDistanceSqr, _humanWakeDistanceSqr)))
             {
                 if (_reportedUnsupported.Add(bot.ProfileId + "|" + name))
                     Log.Info($"NATIVE GHOST: {bot.Profile.Nickname} kept awake: unsupported {name} (role={bot.Profile.Info.Settings.Role}, hunt={hunt})");
@@ -240,7 +241,7 @@ public sealed partial class NativeGhostSystem
             Adapter = NativeGhostAdapters.Resolve(bot),
             Regroup = NativeGhostRegroup.Resolve(bot),
             HumanDistanceSqr = _humanDistanceSqr,
-            WarningWakeDistanceSqr = _warningWakeDistanceSqr,
+            HumanWakeDistanceSqr = _humanWakeDistanceSqr,
         };
         Sleepers.Add(bot, state);
         Brains.Add(state.Brain, state);
@@ -514,6 +515,11 @@ public sealed partial class NativeGhostSystem
         if (strategy is not BaseBrain brain || brain._owner == null || !Sleepers.TryGetValue(brain._owner, out var state)) return;
         if (!result.HasValue) return;
         var decision = result.Value.Action;
+        if (decision == BotLogicDecision.heal && RetainSimulatedHealing(state))
+        {
+            result = null;
+            return;
+        }
         var customAction = CustomAction(decision);
         // RvR can register the group after it has already gone to sleep. Bind only when its own
         // action becomes active; an absent/invalid blackboard still takes the normal awake fallback.
@@ -534,7 +540,7 @@ public sealed partial class NativeGhostSystem
                     || NativeGhostMarksman.SupportsLay(state.Bot, decision),
                 NativeGhostMarksman.CanKeepStandByDecision(state.Bot, decision), NativeGhostLoot.Supports(state.Bot, decision),
                 NativeGhostPolicy.IsBlackDivisionPatrol((int)state.Bot.Profile.Info.Settings.Role, NativeGhostPartisan.Layer(state.Bot)),
-                NativeGhostWarning.Supports(state.Bot, decision, state.HumanDistanceSqr, state.WarningWakeDistanceSqr))
+                NativeGhostWarning.Supports(state.Bot, decision, state.HumanDistanceSqr, state.HumanWakeDistanceSqr))
             || CombatRequiresBody(state.Bot)
             || NeedsBody(state.Bot)
             || decision == BotLogicDecision.warnPlayer && !RetainsNativeState(state.Bot))

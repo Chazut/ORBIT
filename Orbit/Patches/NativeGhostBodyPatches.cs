@@ -89,6 +89,7 @@ internal static class NativeGhostBodyPatches
                 __originalMethod.Name == "ManualUpdate" ? null : opener._currentDoorLink?.Door,
                 __originalMethod.Name != "ManualUpdate" && opener._currentDoorLink == null, out _);
         var bot = Owners[__originalMethod](__instance);
+        if (__instance is BotFirstAid && NativeGhostSystem.RetainSimulatedFirstAid(bot)) return false;
         if (__instance is BotLay) return !NativeGhostSystem.DeferProne(bot);
         if (__instance is PatrolLootPointsData)
             return __originalMethod.Name == "ComeToLootPoint"

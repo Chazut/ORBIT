@@ -1835,8 +1835,10 @@ public partial class DormancySystem
             if (Random.value > woundChance) continue;
             var bot = unit.VanillaBots[i];
             if (!_vanillaDormant.Contains(bot)) continue; // woke mid-window — no invisible wounds
+            var beforeHp = VanillaHp(bot);
             if (!WoundSurvivor(bot.GetPlayer, perMemberDamage)) continue;
             _vanillaHpBaseline[bot] = VanillaHp(bot);
+            _nativeGhosts.RecordSimulatedWound(bot, beforeHp, _vanillaHpBaseline[bot]);
             _vanillaLastHp[bot] = _vanillaHpBaseline[bot];
             _vanillaHpDropAt[bot] = Time.time;
         }
@@ -1890,8 +1892,10 @@ public partial class DormancySystem
             try
             {
                 if (_vanillaHpDropAt.TryGetValue(bot, out var dropAt) && Time.time - dropAt < GhostHealDelaySeconds) continue;
+                var beforeHp = VanillaHp(bot);
                 if (!HealWeakestPart(bot.GetPlayer, heal)) continue;
                 _vanillaHpBaseline[bot] = VanillaHp(bot);
+                _nativeGhosts.RecordSimulatedHealing(bot, beforeHp, _vanillaHpBaseline[bot]);
                 _vanillaLastHp[bot] = _vanillaHpBaseline[bot];
             }
             catch
