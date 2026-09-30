@@ -285,12 +285,12 @@ public partial class DormancySystem
         _movementSystem = movementSystem;
         _doorSystem = doorSystem;
         _botRoster = botRoster;
-        _nativeGhosts = new NativeGhostSystem(doorSystem);
         _gameWorld = Singleton<GameWorld>.Instance;
 
         // Config is read once per raid: ServerConfig is re-fetched in OrbitInitPatch right before this
         // system is constructed, so a web-UI Save applies on the next raid, and values never move mid-raid.
         var cfg = ServerConfig.GhostMode;
+        _nativeGhosts = new NativeGhostSystem(doorSystem, MinSqrDistanceToHumans, cfg.WakeDistance);
         _cfg = cfg;
         _enabled = cfg.Enabled;
         _fightsMode = (cfg.GhostFightsMode ?? "simulated").ToLowerInvariant() switch

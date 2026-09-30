@@ -10,13 +10,28 @@ internal static class NativeGhostDiagnostics
 {
     private static readonly Dictionary<string, float> NextReport = new();
     private static readonly HashSet<string> ReportedBrainFailures = new();
+    private static readonly Dictionary<string, float> NextWarningReport = new();
     private const int MaxBrainFailureReports = 8;
     public static void Clear()
     {
         NextReport.Clear();
         ReportedBrainFailures.Clear();
+        NextWarningReport.Clear();
     }
-    public static void Forget(BotOwner bot) { if (bot?.ProfileId != null) NextReport.Remove(bot.ProfileId); }
+    public static void Forget(BotOwner bot)
+    {
+        if (bot?.ProfileId == null) return;
+        NextReport.Remove(bot.ProfileId);
+        NextWarningReport.Remove(bot.ProfileId);
+    }
+
+    internal static void WarningCompleted(BotOwner bot, WarnPlayerRequest request, StateWarnPlayer phase)
+    {
+        if (NextWarningReport.TryGetValue(bot.ProfileId, out var next) && Time.time < next) return;
+        NextWarningReport[bot.ProfileId] = Time.time + 30f;
+        Log.Info($"NATIVE GHOST WARNING: {bot.Profile.Nickname} [{bot.ProfileId}] AI warning resolved in Ghost"
+            + $" target={request.playerToWarn.ProfileId} phase={phase} expired={Time.time > request.EndTime}");
+    }
 
     internal static void BrainFailure(BotOwner bot, string decision, Exception exception)
     {
@@ -54,6 +69,7 @@ internal static class NativeGhostDiagnostics
                 + $" human={humanDistance:F1}m group={groupSize} enemy={enemy != null} enemyId={enemy?.Person?.ProfileId ?? "none"} enemyDistance={distance:F1}m visible={enemy?.IsVisible} canShoot={enemy?.CanShoot}"
                 + $" seenAgo={seen:F1}s underFire={bot.Memory?.IsUnderFire} path={bot.Mover?.ActualPathController?.HavePath} position={bot.Position}"
                 + " " + NativeGhostPatrol.Snapshot(bot)
+                + (bot.Brain?.LastDecision == BotLogicDecision.warnPlayer ? " " + NativeGhostWarning.Snapshot(bot) : "")
                 + (bot.Profile?.Info?.Settings?.Role == WildSpawnType.marksman
                     ? $" cover={bot.Memory?.IsInCover} prone={bot.GetPlayer?.MovementContext?.IsInPronePose} pose={bot.GetPlayer?.PoseLevel}"
                     : ""));

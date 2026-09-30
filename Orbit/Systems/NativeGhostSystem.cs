@@ -44,6 +44,8 @@ public sealed partial class NativeGhostSystem
         public NativeGhostAdapters Adapter;
         public NativeGhostRegroup Regroup;
         public HearingDetour Hearing;
+        public Func<Vector3, float> HumanDistanceSqr;
+        public float WarningWakeDistanceSqr;
     }
 
     private static readonly Dictionary<BotOwner, Sleeper> Sleepers = new();
@@ -66,9 +68,16 @@ public sealed partial class NativeGhostSystem
     public static bool HasSleepers => Sleepers.Count > 0;
 
     private readonly DoorSystem _doors;
+    private readonly Func<Vector3, float> _humanDistanceSqr;
+    private readonly float _warningWakeDistanceSqr;
     private readonly HashSet<string> _reportedUnsupported = new();
 
-    public NativeGhostSystem(DoorSystem doors) => _doors = doors;
+    public NativeGhostSystem(DoorSystem doors, Func<Vector3, float> humanDistanceSqr = null, float wakeDistance = 0f)
+    {
+        _doors = doors;
+        _humanDistanceSqr = humanDistanceSqr;
+        _warningWakeDistanceSqr = wakeDistance * wakeDistance;
+    }
 
     public static void Clear()
     {
@@ -169,7 +178,8 @@ public sealed partial class NativeGhostSystem
                 NativeGhostZryachiy.Supports(bot, decision.Value.ToString())
                     || NativeGhostMarksman.SupportsLay(bot, decision.Value),
                 NativeGhostMarksman.SupportsStandBy(bot, decision.Value), NativeGhostLoot.Supports(bot, decision.Value),
-                NativeGhostPolicy.IsBlackDivisionPatrol((int)bot.Profile.Info.Settings.Role, NativeGhostPartisan.Layer(bot))))
+                NativeGhostPolicy.IsBlackDivisionPatrol((int)bot.Profile.Info.Settings.Role, NativeGhostPartisan.Layer(bot)),
+                NativeGhostWarning.Supports(bot, decision.Value, _humanDistanceSqr, _warningWakeDistanceSqr)))
             {
                 if (_reportedUnsupported.Add(bot.ProfileId + "|" + name))
                     Log.Info($"NATIVE GHOST: {bot.Profile.Nickname} kept awake: unsupported {name} (role={bot.Profile.Info.Settings.Role}, hunt={hunt})");
@@ -229,6 +239,8 @@ public sealed partial class NativeGhostSystem
             Navigation = new NativeGhostNavigation(bot, _doors),
             Adapter = NativeGhostAdapters.Resolve(bot),
             Regroup = NativeGhostRegroup.Resolve(bot),
+            HumanDistanceSqr = _humanDistanceSqr,
+            WarningWakeDistanceSqr = _warningWakeDistanceSqr,
         };
         Sleepers.Add(bot, state);
         Brains.Add(state.Brain, state);
@@ -521,16 +533,31 @@ public sealed partial class NativeGhostSystem
                 NativeGhostZryachiy.Supports(state.Bot, decision.ToString())
                     || NativeGhostMarksman.SupportsLay(state.Bot, decision),
                 NativeGhostMarksman.CanKeepStandByDecision(state.Bot, decision), NativeGhostLoot.Supports(state.Bot, decision),
-                NativeGhostPolicy.IsBlackDivisionPatrol((int)state.Bot.Profile.Info.Settings.Role, NativeGhostPartisan.Layer(state.Bot)))
+                NativeGhostPolicy.IsBlackDivisionPatrol((int)state.Bot.Profile.Info.Settings.Role, NativeGhostPartisan.Layer(state.Bot)),
+                NativeGhostWarning.Supports(state.Bot, decision, state.HumanDistanceSqr, state.WarningWakeDistanceSqr))
             || CombatRequiresBody(state.Bot)
-            || NeedsBody(state.Bot))
+            || NeedsBody(state.Bot)
+            || decision == BotLogicDecision.warnPlayer && !RetainsNativeState(state.Bot))
         {
-            RequestWake(state, $"action requires its body: {CustomAction(decision) ?? decision.ToString()}");
+            RequestWake(state, $"action requires its body: {CustomAction(decision) ?? decision.ToString()}"
+                + (decision == BotLogicDecision.warnPlayer ? " " + NativeGhostWarning.Snapshot(state.Bot) : ""));
             result = null; // BigBrain must not start or tick an unsupported action on an inactive body.
             return;
         }
         var name = CustomAction(decision) ?? decision.ToString();
         if (state.Hearing != null) { result = null; return; }
+        if (decision == BotLogicDecision.warnPlayer)
+        {
+            // Never let BigBrain start/tick the physical warning node on an inactive body.
+            // Admission above is read-only: resolve only after the whole group actually sleeps.
+            result = null;
+            CancelMoveOrder(state.Bot.Mover);
+            state.Bot.Mover.ActualPathController.Stop();
+            state.Bot.Mover.IsMoving = false;
+            state.Decision = null;
+            NativeGhostWarning.Complete(state.Bot);
+            return;
+        }
         if (name != state.Decision)
         {
             CancelMoveOrder(state.Bot.Mover);
