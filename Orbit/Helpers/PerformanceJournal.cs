@@ -12,9 +12,11 @@ namespace Orbit.Helpers;
 // frame's delta: keep that frame's work, including engine callbacks after ORBIT.Update.
 internal static class PerformanceJournal
 {
-    private const int MaxHitches = 256, MaxEvents = 2048;
+    internal const int TargetFps = 60;
+    internal const float FrameBudgetSeconds = 1f / TargetFps;
+    private const int MaxHitches = 1024, FlushHitches = 256, MaxEvents = 2048;
     private const float FlushSeconds = 15f;
-    private struct Timing { internal int Calls; internal long Ticks; }
+    internal struct Timing { internal int Calls; internal long Ticks; }
     private sealed class FrameWork
     {
         internal int Frame = -1;
@@ -37,7 +39,32 @@ internal static class PerformanceJournal
         public float? RaidSeconds;
         public bool UpdateMatched;
         public double? OrbitUpdateMs, ExternalActivationMs, DiagnosticBookkeepingMs, UnattributedMs;
-        public PhaseWork[] Phases;
+        // Reuse raw counters on the game thread; JSON expansion happens only in the writer.
+        [JsonProperty("Phases"), JsonConverter(typeof(PhaseTimingsConverter))]
+        internal readonly Timing[] Timings = new Timing[(int)TransitionPhase.Count];
+        internal PhaseWork[] Phases => Snapshot(Timings);
+    }
+    private sealed class PhaseTimingsConverter : JsonConverter
+    {
+        public override bool CanRead => false;
+        public override bool CanConvert(Type type) => type == typeof(Timing[]);
+        public override object ReadJson(JsonReader reader, Type type, object existing, JsonSerializer serializer)
+            => throw new NotSupportedException();
+        public override void WriteJson(JsonWriter writer, object value, JsonSerializer serializer)
+        {
+            writer.WriteStartArray();
+            var timings = (Timing[])value;
+            for (var i = 0; i < timings.Length; i++)
+            {
+                if (timings[i].Calls == 0) continue;
+                writer.WriteStartObject();
+                writer.WritePropertyName("Phase"); writer.WriteValue(PhaseNames[i]);
+                writer.WritePropertyName("Calls"); writer.WriteValue(timings[i].Calls);
+                writer.WritePropertyName("TotalMs"); writer.WriteValue(Milliseconds(timings[i].Ticks));
+                writer.WriteEndObject();
+            }
+            writer.WriteEndArray();
+        }
     }
     internal sealed class JournalEvent
     {
@@ -58,6 +85,13 @@ internal static class PerformanceJournal
     private static float _nextFlush, _raidStartedAt = float.NaN;
     private static int _observedFrame = -1, _gc0, _gc1, _gc2, _totalHitches, _droppedHitches, _droppedEvents, _batch;
     private static Task<string> _writer;
+    private static Hitch[] _buffer, _spareBuffer, _writingBuffer;
+    private static Hitch[] CreateBuffer()
+    {
+        var buffer = new Hitch[MaxHitches];
+        for (var i = 0; i < buffer.Length; i++) buffer[i] = new Hitch();
+        return buffer;
+    }
     internal static bool Enabled => _map != null && Plugin.PerfLogging is { Value: true };
 
     internal static void Reset(string map)
@@ -98,6 +132,8 @@ internal static class PerformanceJournal
         }
         if (!_wasEnabled)
         {
+            _buffer ??= CreateBuffer();
+            if (_spareBuffer == null && _writer == null) _spareBuffer = CreateBuffer();
             foreach (var frame in Frames) frame.Reset(-1);
             _gc0 = GC.CollectionCount(0); _gc1 = GC.CollectionCount(1); _gc2 = GC.CollectionCount(2);
             _observedFrame = -1; _wasEnabled = true;
@@ -115,7 +151,7 @@ internal static class PerformanceJournal
         _observedFrame = observed;
         var gc0 = GC.CollectionCount(0); var gc1 = GC.CollectionCount(1); var gc2 = GC.CollectionCount(2);
         var ms = Time.unscaledDeltaTime * 1000f;
-        if (ms > 100f)
+        if (Time.unscaledDeltaTime > FrameBudgetSeconds)
         {
             _totalHitches++;
             if (Hitches.Count >= MaxHitches) _droppedHitches++;
@@ -124,17 +160,18 @@ internal static class PerformanceJournal
                 var frame = observed - 1;
                 var work = Frames[(frame & int.MaxValue) % Frames.Length];
                 var matched = work.Frame == frame && work.HasUpdate;
-                Hitches.Add(new Hitch
-                {
-                    Frame = frame, ObservedAtFrame = observed, ObservedAt = Time.realtimeSinceStartup,
-                    RaidSeconds = RaidSeconds(Time.realtimeSinceStartup - Time.unscaledDeltaTime), FrameMs = ms,
-                    Gc0 = gc0 - _gc0, Gc1 = gc1 - _gc1, Gc2 = gc2 - _gc2,
-                    UpdateMatched = matched, OrbitUpdateMs = matched ? work.UpdateMs : null,
-                    ExternalActivationMs = matched ? work.ExternalMs : null,
-                    DiagnosticBookkeepingMs = matched ? work.BookkeepingMs : null,
-                    UnattributedMs = matched ? Math.Max(0, ms - work.UpdateMs - work.ExternalMs - work.BookkeepingMs) : null,
-                    Phases = work.Frame == frame ? Snapshot(work.Phases) : Array.Empty<PhaseWork>(),
-                });
+                _buffer ??= CreateBuffer(); // A raid can finish before its first Update.
+                var item = _buffer[Hitches.Count];
+                item.Frame = frame; item.ObservedAtFrame = observed; item.ObservedAt = Time.realtimeSinceStartup;
+                item.RaidSeconds = RaidSeconds(Time.realtimeSinceStartup - Time.unscaledDeltaTime); item.FrameMs = ms;
+                item.Gc0 = gc0 - _gc0; item.Gc1 = gc1 - _gc1; item.Gc2 = gc2 - _gc2;
+                item.UpdateMatched = matched; item.OrbitUpdateMs = matched ? work.UpdateMs : null;
+                item.ExternalActivationMs = matched ? work.ExternalMs : null;
+                item.DiagnosticBookkeepingMs = matched ? work.BookkeepingMs : null;
+                item.UnattributedMs = matched ? Math.Max(0, ms - work.UpdateMs - work.ExternalMs - work.BookkeepingMs) : null;
+                if (work.Frame == frame) Array.Copy(work.Phases, item.Timings, item.Timings.Length);
+                else Array.Clear(item.Timings, 0, item.Timings.Length);
+                Hitches.Add(item);
             }
         }
         _gc0 = gc0; _gc1 = gc1; _gc2 = gc2;
@@ -230,13 +267,14 @@ internal static class PerformanceJournal
 
     internal static void Tick()
     {
-        if (Enabled && Time.realtimeSinceStartup >= _nextFlush) Flush(false);
+        if (Enabled && (Hitches.Count >= FlushHitches || Time.realtimeSinceStartup >= _nextFlush)) Flush(false);
     }
     internal static void RefreshWriter()
     {
         if (_writer?.IsCompleted != true) return;
         Log.Always(_writer.GetAwaiter().GetResult());
         _writer = null;
+        _spareBuffer = _writingBuffer; _writingBuffer = null;
     }
     private static void Flush(bool final, bool force = false)
     {
@@ -249,15 +287,19 @@ internal static class PerformanceJournal
         var frame = Work(Time.frameCount);
         var packet = new
         {
-            Schema = 1, Map = _map, Batch = ++_batch, Final = final, SavedAt = Time.realtimeSinceStartup,
+            Schema = 1, TargetFps, FrameThresholdMs = 1000d / TargetFps, Map = _map, Batch = ++_batch, Final = final, SavedAt = Time.realtimeSinceStartup,
             RaidStartedAt = float.IsNaN(_raidStartedAt) ? (float?)null : _raidStartedAt,
             TotalHitches = _totalHitches, DroppedHitches = _droppedHitches, DroppedEvents = _droppedEvents,
             WakeIntervalMs = ServerConfig.GhostMode.WakeIntervalMs,
-            Notes = "FrameMs is Unity's previous-frame delta. Frame=ObservedAtFrame-1; UpdateMatched=false means no matching Update. RaidSeconds is null until OnGameStarted and may be negative during loading. Phase work is inclusive, never sum nested phases. ExternalActivationMs excludes work inside ORBIT Update. UnattributedMs is an estimate, not evidence that ORBIT is uninvolved. GC counts do not measure pause duration. Events include slow calls >=2ms and every Ghost death. Dropped counters disclose buffer overflow. FinalFrameWork has no observed frame duration yet.",
+            Notes = "Hitches contains every observed frame strictly over the 60 FPS budget, not necessarily a perceptible stutter. FrameMs is Unity's previous-frame delta. Frame=ObservedAtFrame-1; UpdateMatched=false means no matching Update. RaidSeconds is null until OnGameStarted and may be negative during loading. Phase work is inclusive, never sum nested phases. ExternalActivationMs excludes work inside ORBIT Update. UnattributedMs is an estimate, not evidence that ORBIT is uninvolved. GC counts do not measure pause duration. Events include slow calls >=2ms and every Ghost death. Dropped counters disclose buffer overflow. FinalFrameWork has no observed frame duration yet.",
             Hitches = Hitches.ToArray(), Events = Events.ToArray(),
             FinalFrameWork = final ? new { Frame = frame.Frame, frame.UpdateMs, frame.ExternalMs,
                 frame.BookkeepingMs, Phases = Snapshot(frame.Phases) } : null,
         };
+        // The writer owns the detached buffer until it completes. A final batch can queue
+        // behind it; only that uncommon path needs another buffer instead of the spare.
+        _writingBuffer = _buffer;
+        _buffer = _spareBuffer ?? CreateBuffer(); _spareBuffer = null;
         Hitches.Clear(); Events.Clear(); _nextFlush = Time.realtimeSinceStartup + FlushSeconds;
         var path = _path;
         var prior = _writer;
@@ -267,7 +309,12 @@ internal static class PerformanceJournal
             try
             {
                 Directory.CreateDirectory(Path.GetDirectoryName(path));
-                File.AppendAllText(path, JsonConvert.SerializeObject(packet) + Environment.NewLine);
+                using (var stream = File.AppendText(path))
+                using (var json = new JsonTextWriter(stream))
+                {
+                    JsonSerializer.CreateDefault().Serialize(json, packet);
+                    stream.WriteLine();
+                }
                 var result = "PERF JOURNAL saved: " + path + (final ? " (final)" : "");
                 return priorResult != null && priorResult.Contains("failed:") ? priorResult + " | " + result : result;
             }

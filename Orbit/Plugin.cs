@@ -315,7 +315,7 @@ public class Plugin : BaseUnityPlugin
             "Which message levels ORBIT writes (used when Quiet logging is OFF). Default: everything except Debug. Tick Debug for a detailed bug-report log - it works in the release build now, not just debug builds.",
             null, new ConfigurationManagerAttributes { Category = "", Order = 0 }));
         PerfLogging = Config.Bind(essentials, "Performance logging", false, new ConfigDescription(
-            "ON: records frame stalls over 100 ms, slow bot decisions and Ghost transitions, even with Quiet logging. Automatically saves a performance journal in BepInEx/ORBIT/diagnostics during the raid and a final summary when it ends. Larger stalls also save a detailed JSON capture.",
+            "ON: records every frame over the 60 FPS budget (16.67 ms), slow bot decisions and Ghost transitions, even with Quiet logging. Automatically saves a performance journal in BepInEx/ORBIT/diagnostics during the raid and a final summary when it ends. Larger stalls also save a detailed JSON capture.",
             null, new ConfigurationManagerAttributes { Category = "", Order = -1 }));
     }
 

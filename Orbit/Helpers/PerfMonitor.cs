@@ -20,6 +20,7 @@ public static class PerfMonitor
     private static float _maxDt;
     private static int _hitches;
     private static int _bigHitches;
+    private static int _overBudget60;
     private static int _gc0;
 
     // Fix-specific counters, bumped at the instrumented sites; reset every window. Post-raid health checks:
@@ -47,6 +48,7 @@ public static class PerfMonitor
         _maxDt = 0f;
         _hitches = 0;
         _bigHitches = 0;
+        _overBudget60 = 0;
         _gc0 = GC.CollectionCount(0);
         SpawnIslandProbes = 0;
         RallyWaypointsCreated = 0;
@@ -71,6 +73,7 @@ public static class PerfMonitor
         var dt = Time.unscaledDeltaTime;
         _frames++;
         _sumDt += dt;
+        if (dt > PerformanceJournal.FrameBudgetSeconds) _overBudget60++;
         if (dt > _maxDt) _maxDt = dt;
         if (dt > BigHitchThreshold) _bigHitches++;
         else if (dt > HitchThreshold) _hitches++;
@@ -94,7 +97,7 @@ public static class PerfMonitor
         var gc0 = GC.CollectionCount(0) - _gc0;
         // Always-level on purpose: two lines a minute, and it's the one thing every perf bug report needs —
         // Quiet logging (default ON) must not silence it.
-        Log.Always($"PERF: avg={avg:F0}fps worst={worst:F0}fps hitch50={_hitches} hitch100={_bigHitches} gc0={gc0} agents={agentCount} dormant={dormantCount} | islandProbes={SpawnIslandProbes} rallyWp={RallyWaypointsCreated} sweeps={SweepJobsSubmitted}s/{SweepJobsCompleted}c/{SweepJobsDrained}d navQpeak={NavJobsQueuedPeak}");
+        Log.Always($"PERF: avg={avg:F0}fps worst={worst:F0}fps hitch50={_hitches} hitch100={_bigHitches} gc0={gc0} agents={agentCount} dormant={dormantCount} | islandProbes={SpawnIslandProbes} rallyWp={RallyWaypointsCreated} sweeps={SweepJobsSubmitted}s/{SweepJobsCompleted}c/{SweepJobsDrained}d navQpeak={NavJobsQueuedPeak} overBudget60={_overBudget60} frames={_frames}");
         if (final) Log.Always($"PERF FINAL: frames={_frames} lastFrame={Time.frameCount}");
         TransitionPerformance.Flush();
         ResetWindow();
