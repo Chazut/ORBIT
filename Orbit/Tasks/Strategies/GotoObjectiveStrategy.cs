@@ -61,6 +61,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
 
     public override void Deactivate(Entity entity)
     {
+        if (entity is Squad squad) squad.CorpseEscort.End(squad, waypointSystem, "strategy deactivated");
         // Return any assignments before deactivating.
         waypointSystem.Return(entity);
         base.Deactivate(entity);
@@ -94,7 +95,8 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                         squad.CorpseWatchdogLocId = corpseObj.Id;
                         squad.CorpseWatchdogSince = Time.time;
                     }
-                    else if (SquadAnyMemberInCombat(squad) || SquadAnyMemberPursuingCorpse(squad, corpseObj))
+                    else if (squad.CorpseEscort.Active || SquadAnyMemberInCombat(squad)
+                             || SquadAnyMemberPursuingCorpse(squad, corpseObj))
                     {
                         // Pause only while there is genuine progress: SAIN combat / healing, or a member
                         // actively heading to / looting the body (travel + loot time never eat the window). An
@@ -194,6 +196,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
 
             CheckTimeExtractTrigger(squad);
 
+            var escortingCorpse = squad.CorpseEscort.Maintain(squad, waypointSystem, SquadAnyMemberInCombat(squad));
             if (TryContinueLootExtractSweep(squad)) continue;
 
             // Extract interrupt: bee-line to the exfil the instant ExtractRequested is set, rather than letting
@@ -210,6 +213,12 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                 continue;
             }
 
+            if (escortingCorpse)
+            {
+                UpdateAgents(squad, out _);
+                continue; // Pause anchor completion and guard timers for the entire loot detour.
+            }
+
             // Opportunistic corpse interrupt: any squad member who sees an unlooted corpse within
             // DetectCorpseDistance drops the current objective to investigate. Real-Tarkov behaviour — a bot
             // walking past a body always checks it. We gate the scan on:
@@ -219,8 +228,8 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
             // beats opportunistic loot — they've decided to leave)
             //   * pacing throttle elapsed (the raycast loop is non-trivial)
             //
-            // When we DO interrupt, we save the current objective only if it's worth resuming — Synthetic
-            // patrol fillers get cleared so the post-loot flow runs a fresh AssignNewObjective.
+            // Groups keep even their patrol anchor so the corpse escort can return everyone together.
+            // Solo bots retain the existing fresh-selection behavior for synthetic patrol fillers.
             if (!squad.ExtractRequested
                 && squad.CombatCallerMemberIdx < 0
                 && squad.PreInterruptObjectiveLocation == null
@@ -233,7 +242,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                 {
                     var previous = squadObjective.Location;
                     var preInterrupt = previous != null
-                                       && previous.Category != WaypointCategory.Synthetic
+                                       && (previous.Category != WaypointCategory.Synthetic || squad.Size > 1)
                                        ? previous
                                        : null;
                     squad.PreInterruptObjectiveLocation = preInterrupt;
@@ -731,6 +740,8 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                 agent.SoloExtractRequested = false;
                 agent.SoloExtractReason = null;
             }
+
+            if (squad.CorpseEscort.UpdateMember(squad, agent, i, waypointSystem)) continue;
 
             // An agent is "aligned" with the squad if their location IS the squad's main objective, OR if
             // they're working a splinter that was picked around the squad's current main objective. Without

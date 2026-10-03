@@ -239,7 +239,8 @@ public class LootContainerAction(AgentData dataset, WaypointSystem waypointSyste
         // coherent post-combat, and leaving PreInterrupt set would also block all future opportunistic scans
         // for this squad.
         if (location.Category == WaypointCategory.Corpse
-            && agent.Squad?.PreInterruptObjectiveLocation != null)
+            && agent.Squad?.PreInterruptObjectiveLocation != null
+            && !agent.Squad.CorpseEscort.Active)
         {
             var squad = agent.Squad;
             var resume = squad.PreInterruptObjectiveLocation;
@@ -622,6 +623,11 @@ public class LootContainerAction(AgentData dataset, WaypointSystem waypointSyste
 
     private bool TryScavengeSweep(Agent agent, Waypoint justLooted)
     {
+        // A second live session may finish during an escort, but only the shared looter extends
+        // that detour. Everyone else rejoins after releasing their current transfer normally.
+        if (agent.Squad?.CorpseEscort.Active == true && !agent.Squad.CorpseEscort.Owns(agent))
+            return false;
+
         // Ordinary sweeps stop once departure is requested. The bounded valuable collection above is
         // the only exception, so extraction cannot turn into an unlimited chain of nearby loot.
         if (agent.SoloExtractRequested || agent.Squad?.ExtractRequested == true)
@@ -661,7 +667,11 @@ public class LootContainerAction(AgentData dataset, WaypointSystem waypointSyste
         // Hijack the squad objective so UpdateAgents doesn't snap the agent back to the old POI on the next
         // strategy tick. Keep the wait timer long enough that the squad doesn't ask for a fresh objective
         // while we're chaining (60s covers travel + a second loot animation).
-        if (agent.Squad != null)
+        if (agent.Squad?.CorpseEscort.Owns(agent) == true)
+        {
+            agent.Squad.CorpseEscort.ContinueSweep(agent, next);
+        }
+        else if (agent.Squad != null)
         {
             agent.Squad.Objective.LocationPrevious = agent.Squad.Objective.Location;
             agent.Squad.Objective.Location = next;

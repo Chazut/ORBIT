@@ -15,6 +15,7 @@ public class Squad(int id, float[] taskScores, int targetMembersCount) : Entity(
 {
     public readonly List<Agent> Members = new(6);
     public readonly SquadObjective Objective = new();
+    internal readonly Orbit.Systems.CorpseEscort CorpseEscort = new();
     public readonly int TargetMembersCount = targetMembersCount;
 
     /// <summary>

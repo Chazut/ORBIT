@@ -359,7 +359,8 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                             // only stamps squad-level synthetic anchors, so roam splinters never entered the
                             // cooldown map and the splinter picker could hand a just-patrolled point straight
                             // back to the squad.
-                            if (objective.Location.Category == WaypointCategory.Synthetic && agent.Squad != null)
+                            if (objective.Location.Category == WaypointCategory.Synthetic && agent.Squad != null
+                                && !agent.Squad.CorpseEscort.IsEscortWaypoint(objective.Location))
                                 agent.Squad.RecentlyVisitedPoiCooldowns[objective.Location.Id] =
                                     Time.time + ServerConfig.MainObjectives.SyntheticVisitCooldownSeconds;
                             Log.Debug($"{agent} arrived at non-lootable {objective.Location} → Finished");
