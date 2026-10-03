@@ -40,6 +40,8 @@ internal static class NativeGhostBodyPatches
             Bind(harmony, typeof(BotStimulators), "StartApplyToTarget", "TryApply");
             Bind(harmony, typeof(PatrollingData), "ComeToPoint");
             Bind(harmony, typeof(PatrolLootPointsData), "ComeToLootPoint", "UpdateLootState");
+            harmony.Patch(AccessTools.Method(typeof(PatrolLootPointsData), "UpdateLootState", Type.EmptyTypes),
+                postfix: new HarmonyMethod(typeof(NativeGhostBodyPatches), nameof(LootUpdatePostfix)));
             Bind(harmony, typeof(PatrollingAlternative), "UpdateNodeByBrain");
             harmony.Patch(AccessTools.Method(typeof(PatrollingAlternative), "UpdateNodeByBrain"),
                 transpiler: new HarmonyMethod(typeof(NativeGhostBodyPatches), nameof(GuardPatrolUpdate)));
@@ -120,6 +122,11 @@ internal static class NativeGhostBodyPatches
     private static bool DoorInteractPrefix(BotDoorOpener __instance, Door __0, EInteractionType __1)
         => !NativeGhostSystem.HasSleepers
             || !NativeGhostSystem.HandleDoorOperation(__instance, __0, __1 != EInteractionType.Open, out _);
+
+    private static void LootUpdatePostfix(PatrolLootPointsData __instance, MethodBase __originalMethod)
+    {
+        if (NativeGhostSystem.HasSleepers) NativeGhostLoot.AfterUpdate(Owners[__originalMethod](__instance));
+    }
 
     private static bool DoorStatusPrefix(BotDoorOpener __instance, ref DoorInteractionStatus __result)
     {

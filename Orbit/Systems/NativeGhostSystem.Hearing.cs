@@ -27,6 +27,7 @@ public sealed partial class NativeGhostSystem
     internal bool CanInvestigate(BotOwner bot)
         => OwnsInactiveMovement(bot) && !InFight(bot) && !IsInvestigating(bot)
             && !Sleepers[bot].Doors.Pending
+            && !NativeGhostLoot.HasPendingTransfer(bot)
             && !CombatRequiresBody(bot) && !NeedsBody(bot)
             && !(bot.Mover.Pause && bot.Mover.RemainPause > 0f);
 

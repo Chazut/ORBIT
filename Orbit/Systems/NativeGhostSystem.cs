@@ -84,6 +84,7 @@ public sealed partial class NativeGhostSystem
     {
         foreach (var state in Sleepers.Values)
         {
+            NativeGhostLoot.Forget(state.Bot);
             EndHearing(state, "raid cleanup", false);
             RestoreStandBy(state);
             try { state.Navigation.RestorePathReach(); }
@@ -217,7 +218,8 @@ public sealed partial class NativeGhostSystem
         if (loot != null) return loot;
         var inventory = bot.GetPlayer?.InventoryController;
         if (inventory != null)
-            foreach (var operation in inventory.SelectEvents<ItemEventArgs>()) return "inventory-operation";
+            foreach (var operation in inventory.SelectEvents<ItemEventArgs>())
+                if (!NativeGhostLoot.OwnsEvent(bot, operation)) return "inventory-operation";
         return null;
     }
 
@@ -267,6 +269,7 @@ public sealed partial class NativeGhostSystem
     {
         if (ReferenceEquals(bot, null) || !Sleepers.TryGetValue(bot, out var state)) return false;
         PrepareHearingWake(state);
+        NativeGhostLoot.Forget(bot);
         Sleepers.Remove(bot);
         Brains.Remove(state.Brain);
         Movers.Remove(state.Mover);
@@ -300,6 +303,13 @@ public sealed partial class NativeGhostSystem
         if (!RetainsNativeState(bot)) return false;
         RequestWake(Sleepers[bot], "body operation deferred: " + operation);
         return true;
+    }
+
+    internal static bool DeferUnsafeLoot(BotOwner bot)
+    {
+        var reason = BodyReason(bot);
+        if (reason == null && !CombatRequiresBody(bot)) return false;
+        return DeferBodyOperation(bot, reason ?? "native-loot-combat");
     }
 
     internal static bool DeferProne(BotOwner bot)
@@ -474,16 +484,18 @@ public sealed partial class NativeGhostSystem
                 state.Mover.ActualPathController.Stop();
                 state.Decision = null;
             }
-            if (NeedsBody(state.Bot))
+            var bodyReason = BodyReason(state.Bot);
+            if (bodyReason != null)
             {
-                RequestWake(state, "native interaction requires its body");
+                RequestWake(state, "native interaction requires its body: " + bodyReason);
                 return true;
             }
             NativeGhostCover.UpdateVoxel(state.Bot);
             NativeGhostPartisan.UpdateTracking(state.Bot);
-            if (NeedsBody(state.Bot) || CombatRequiresBody(state.Bot))
+            bodyReason = BodyReason(state.Bot);
+            if (bodyReason != null || CombatRequiresBody(state.Bot))
             {
-                RequestWake(state, "native tracking requires its body or combat");
+                RequestWake(state, "native tracking requires its body or combat: " + (bodyReason ?? "combat"));
                 return true;
             }
             if (state.Doors.Pending && WaitForDoor(state)) return true;
@@ -515,6 +527,12 @@ public sealed partial class NativeGhostSystem
         if (strategy is not BaseBrain brain || brain._owner == null || !Sleepers.TryGetValue(brain._owner, out var state)) return;
         if (!result.HasValue) return;
         var decision = result.Value.Action;
+        if (decision != BotLogicDecision.goToLootPointNode && NativeGhostLoot.HasPendingTransfer(state.Bot))
+        {
+            RequestWake(state, "native interaction requires its body: native-loot-decision-change");
+            result = null;
+            return;
+        }
         if (decision == BotLogicDecision.heal && RetainSimulatedHealing(state))
         {
             result = null;
@@ -533,6 +551,7 @@ public sealed partial class NativeGhostSystem
                 Log.Info($"NATIVE GHOST: {state.Bot.Profile.Nickname} adapter=RoguesVRaiders ready after registration; native order retained");
             }
         }
+        var bodyReason = BodyReason(state.Bot);
         if (state.WakeReason != null || !NativeGhostPolicy.Supports(decision.ToString(), CustomAction(decision), state.CustomRole, state.UpdateHunt != null,
                 state.Adapter?.Checkpoint, state.Adapter?.Warband == true, NativeGhostPartisan.Supports(state.Bot, decision.ToString()),
                 NativeGhostCover.Supports(state.Bot, decision.ToString(), state.Adapter), state.Adapter?.Isb == true,
@@ -542,10 +561,11 @@ public sealed partial class NativeGhostSystem
                 NativeGhostPolicy.IsBlackDivisionPatrol((int)state.Bot.Profile.Info.Settings.Role, NativeGhostPartisan.Layer(state.Bot)),
                 NativeGhostWarning.Supports(state.Bot, decision, state.HumanDistanceSqr, state.HumanWakeDistanceSqr))
             || CombatRequiresBody(state.Bot)
-            || NeedsBody(state.Bot)
+            || bodyReason != null
             || decision == BotLogicDecision.warnPlayer && !RetainsNativeState(state.Bot))
         {
             RequestWake(state, $"action requires its body: {CustomAction(decision) ?? decision.ToString()}"
+                + (bodyReason != null ? " bodyReason=" + bodyReason : "")
                 + (decision == BotLogicDecision.warnPlayer ? " " + NativeGhostWarning.Snapshot(state.Bot) : ""));
             result = null; // BigBrain must not start or tick an unsupported action on an inactive body.
             return;
