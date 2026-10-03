@@ -982,7 +982,7 @@ public partial class DormancySystem
         using var timing = TransitionPerformance.Measure(TransitionPhase.WakeGroup);
         for (var i = 0; i < squad.Members.Count; i++)
             // Awake or initializing newcomers already own their body. Never PostActivate them here.
-            if (squad.Members[i].IsDormant) WakeAgent(squad.Members[i]);
+            if (squad.Members[i].IsDormant) WakeAgentWithReason(squad.Members[i], reason);
         squad.DormancySleepAllowedAt = Time.time + reason.CooldownSeconds;
         _windowWakes++;
         RecordWake(reason.Cause);
@@ -990,7 +990,11 @@ public partial class DormancySystem
     }
 
     private void WakeAgent(Agent agent)
+        => WakeAgentWithReason(agent, new(GhostWakeCause.GroupChanged, "ownership changed"));
+
+    private void WakeAgentWithReason(Agent agent, GhostWakeReason reason)
     {
+        if (agent.IsDormant) RecordWakeEvent(agent.Player, reason);
         var bot = agent.Bot;
         var player = agent.Player;
 
@@ -2608,7 +2612,7 @@ public partial class DormancySystem
     {
         using var timing = TransitionPerformance.Measure(TransitionPhase.WakeGroup);
         for (var i = 0; i < group.Count; i++)
-            WakeVanillaBot(group[i]);
+            WakeVanillaBotWithReason(group[i], reason);
         _vanillaSleepAllowedAt[key] = Time.time + reason.CooldownSeconds;
         _windowWakes++;
         RecordWake(reason.Cause);
@@ -2617,7 +2621,13 @@ public partial class DormancySystem
 
     private bool WakeVanillaBot(BotOwner bot)
     {
+        return WakeVanillaBotWithReason(bot, new(GhostWakeCause.GroupChanged, "ownership changed"));
+    }
+
+    private bool WakeVanillaBotWithReason(BotOwner bot, GhostWakeReason reason)
+    {
         if (!_vanillaDormant.Remove(bot)) return false;
+        RecordWakeEvent(bot.GetPlayer, reason);
         var native = _nativeGhosts.Remove(bot);
         UnthrottleBrain(bot);
         DormantProfileIds.Remove(bot.GetPlayer.ProfileId);

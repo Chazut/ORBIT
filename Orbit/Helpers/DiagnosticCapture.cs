@@ -1,0 +1,188 @@
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
+using System.Threading.Tasks;
+using Comfort.Common;
+using EFT;
+using Newtonsoft.Json;
+using Orbit.Api;
+using Orbit.Systems;
+using UnityEngine;
+
+namespace Orbit.Helpers;
+
+/// <summary>Performance logging also captures bounded context around slow frames, without a manual export.</summary>
+internal static class DiagnosticCapture
+{
+    private const float TriggerFrameMs = 250f, StartupGraceSeconds = 10f;
+    private const float ContextAfterSeconds = 5f, CooldownSeconds = 60f;
+    private const int MaxCapturesPerRaid = 10;
+    private static readonly Queue<Sample> Samples = new();
+    private static readonly Queue<OrbitGhostWake> Wakes = new();
+    private static readonly List<Vector3> Humans = new();
+    private static string _map;
+    private static float _nextSample, _startedAt, _frameSum, _frameMax;
+    private static double _orbitSum, _orbitMax;
+    private static int _frames, _hitches, _gc, _saved;
+    private static bool _enabled, _pending;
+    private static float _nextCaptureAt, _saveAt, _triggerAt, _triggerFrameMs;
+    private static Task<string> _writer;
+    internal static bool IsRecording => _enabled && Plugin.PerfLogging is { Value: true };
+    internal static string Status { get; private set; } = "Performance logging is disabled.";
+
+    internal sealed class Sample
+    {
+        public float RecordedAt, AverageFrameMs, MaxFrameMs;
+        public double AverageOrbitUpdateMs, MaxOrbitUpdateMs;
+        public int Frames, HitchesOver100Ms, Gc0, AwakeBots, GhostBots, AwakeWithinWakeDistance;
+    }
+
+    internal static void Reset(string map)
+    {
+        Samples.Clear(); Wakes.Clear(); Humans.Clear();
+        _map = map; _enabled = _pending = false; _saved = 0;
+        Status = "Waiting for Performance logging during a raid.";
+        ClearWindow();
+    }
+
+    private static void ClearWindow()
+    {
+        _nextSample = Time.realtimeSinceStartup + 1f;
+        _frames = _hitches = 0; _frameSum = _frameMax = 0f; _orbitSum = _orbitMax = 0;
+        _gc = GC.CollectionCount(0);
+    }
+
+    internal static long BeginFrame()
+    {
+        RefreshSaveStatus();
+        var enabled = Plugin.PerfLogging is { Value: true } && _map != null;
+        if (enabled != _enabled)
+        {
+            _enabled = enabled;
+            Samples.Clear(); Wakes.Clear(); ClearWindow();
+            _startedAt = Time.realtimeSinceStartup;
+            _nextCaptureAt = _startedAt + StartupGraceSeconds;
+            _pending = false;
+            Status = enabled ? "Automatic performance capture enabled." : "Performance logging is disabled.";
+        }
+        return enabled ? Stopwatch.GetTimestamp() : 0;
+    }
+
+    internal static void RefreshSaveStatus()
+    {
+        if (_writer?.IsCompleted == true)
+        {
+            Status = _writer.Result;
+            Log.Always(Status);
+            _writer = null;
+        }
+    }
+
+    internal static void EndFrame(long start)
+    {
+        if (start == 0) return;
+        var elapsed = (Stopwatch.GetTimestamp() - start) * 1000d / Stopwatch.Frequency;
+        _orbitSum += elapsed; _orbitMax = Math.Max(_orbitMax, elapsed);
+        var frameMs = Time.unscaledDeltaTime * 1000f;
+        _frames++; _frameSum += frameMs; _frameMax = Math.Max(_frameMax, frameMs);
+        if (frameMs > 100f) _hitches++;
+        var now = Time.realtimeSinceStartup;
+        if (!_pending && _saved < MaxCapturesPerRaid && now >= _nextCaptureAt && frameMs >= TriggerFrameMs)
+        {
+            _pending = true;
+            _triggerAt = now; _triggerFrameMs = frameMs;
+            _saveAt = now + ContextAfterSeconds;
+            _nextCaptureAt = now + CooldownSeconds;
+        }
+        if (now < _nextSample) { SavePending(now, frameMs); return; }
+        var sample = new Sample
+        {
+            RecordedAt = now, Frames = _frames, AverageFrameMs = _frameSum / _frames, MaxFrameMs = _frameMax,
+            AverageOrbitUpdateMs = _orbitSum / _frames, MaxOrbitUpdateMs = _orbitMax,
+            HitchesOver100Ms = _hitches, Gc0 = GC.CollectionCount(0) - _gc,
+        };
+        var players = Singleton<GameWorld>.Instance?.AllAlivePlayersList;
+        if (players != null)
+        {
+            Humans.Clear();
+            foreach (var p in players)
+                if (p != null && !p.IsAI && p.HealthController is { IsAlive: true }) Humans.Add(p.Position);
+            var wakeSqr = ServerConfig.GhostMode.WakeDistance * ServerConfig.GhostMode.WakeDistance;
+            foreach (var p in players)
+            {
+                if (p == null || !p.IsAI || p.HealthController is not { IsAlive: true }) continue;
+                if (DormancySystem.IsDormantProfile(p.ProfileId)) { sample.GhostBots++; continue; }
+                sample.AwakeBots++;
+                foreach (var human in Humans)
+                    if ((p.Position - human).sqrMagnitude <= wakeSqr) { sample.AwakeWithinWakeDistance++; break; }
+            }
+        }
+        Samples.Enqueue(sample);
+        Prune(now);
+        ClearWindow();
+        SavePending(now, frameMs);
+    }
+
+    private static void SavePending(float now, float frameMs)
+    {
+        // Collect a little context after the hitch, then prefer a recovered frame for the snapshot.
+        // Bound the extra wait so sustained slow frames still produce a useful capture.
+        if (_pending && now >= _saveAt && (frameMs < 100f || now >= _saveAt + ContextAfterSeconds)) Save();
+    }
+
+    internal static void Wake(OrbitGhostWake wake)
+    {
+        if (!_enabled) return;
+        if (Wakes.Count >= 1024) Wakes.Dequeue();
+        Wakes.Enqueue(wake);
+        Prune(wake.RecordedAt);
+    }
+
+    private static void Prune(float now)
+    {
+        while (Samples.Count > 60 || Samples.Count > 0 && Samples.Peek().RecordedAt < now - 60f) Samples.Dequeue();
+        while (Wakes.Count > 0 && Wakes.Peek().RecordedAt < now - 60f) Wakes.Dequeue();
+    }
+
+    private static void Save()
+    {
+        if (!_enabled || !_pending || Plugin.PerfLogging is not { Value: true } || Samples.Count == 0) return;
+        if (_writer != null && !_writer.IsCompleted) return;
+        if (_saved >= MaxCapturesPerRaid) { _pending = false; return; }
+        RefreshSaveStatus();
+        Prune(Time.realtimeSinceStartup);
+        var data = new
+        {
+            Schema = 1, Map = _map, CapturedUtc = DateTime.UtcNow, CaptureStartedAt = _startedAt,
+            TriggeredAt = _triggerAt, TriggerFrameMs = _triggerFrameMs, SavedAt = Time.realtimeSinceStartup,
+            Notes = "Times use Unity realtime seconds. Samples summarize the preceding interval; bot counts are sampled at its end. ORBIT timing covers OrbitManager.Update only, not every patch or the rest of the game. Correlation does not establish the cause of a hitch.",
+            WakeDistance = ServerConfig.GhostMode.WakeDistance,
+            SleepDistance = ServerConfig.GhostMode.SleepDistance,
+            HostileWakeDistance = ServerConfig.GhostMode.HostileWakeDistance,
+            GhostAwakeBehavior = ServerConfig.GhostMode.GhostAwakeBehavior,
+            Samples = Samples.ToArray(), Wakes = Wakes.ToArray(),
+        };
+        var folder = Path.Combine(BepInEx.Paths.BepInExRootPath, "ORBIT", "diagnostics");
+        var path = Path.Combine(folder, "capture-" + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss-fff") + "-" + Guid.NewGuid().ToString("N") + ".json");
+        _saved++;
+        _pending = false;
+        _nextCaptureAt = Time.realtimeSinceStartup + CooldownSeconds;
+        Status = "Saving diagnostic capture...";
+        Log.Always("ORBIT diagnostics queued: " + path);
+        // Snapshot contains only detached values. Never read Unity objects from the writer thread.
+        _writer = Task.Run(() =>
+        {
+            try { Directory.CreateDirectory(folder); File.WriteAllText(path, JsonConvert.SerializeObject(data, Formatting.Indented)); return "ORBIT diagnostics saved: " + path; }
+            catch (Exception ex) { return "ORBIT diagnostics could not be saved: " + ex.Message; }
+        });
+    }
+
+    internal static void Finish()
+    {
+        // Preserve a pending hitch if the raid ends before its post-hitch window is complete.
+        Save();
+        _map = null; _enabled = _pending = false;
+        Samples.Clear(); Wakes.Clear(); Humans.Clear();
+    }
+}

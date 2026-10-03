@@ -311,8 +311,8 @@ public class Plugin : BaseUnityPlugin
             "Which message levels ORBIT writes (used when Quiet logging is OFF). Default: everything except Debug. Tick Debug for a detailed bug-report log - it works in the release build now, not just debug builds.",
             null, new ConfigurationManagerAttributes { Category = "", Order = 0 }));
         PerfLogging = Config.Bind(essentials, "Performance logging", false, new ConfigDescription(
-            "ON: writes compact PERF summaries every 30s (fps, hitches, GC and transition costs), even with Quiet logging. Transition timings are inclusive and must not be added together. Turn it on before recording a performance report.",
-            null, new ConfigurationManagerAttributes { Category = "", Order = -1, IsAdvanced = true }));
+            "ON: writes compact PERF summaries every 30s, even with Quiet logging. Frames of 250 ms or more also trigger a JSON capture in BepInEx/ORBIT/diagnostics after a short delay (one per minute, at most 10 per raid). Transition timings are inclusive and must not be added together.",
+            null, new ConfigurationManagerAttributes { Category = "", Order = -1 }));
     }
 
     // F12 helper: a real button that opens the server web UI in the default browser. The drawer
