@@ -35,6 +35,7 @@ public static class PerfMonitor
     /// <summary>Fresh window + counters — called at raid start so stale statics don't bleed across raids.</summary>
     public static void Reset()
     {
+        TransitionPerformance.Reset();
         _windowStart = Time.unscaledTime;
         _frames = 0;
         _sumDt = 0f;
@@ -56,6 +57,7 @@ public static class PerfMonitor
         // clean 30s window instead of flushing a stale one.
         if (Plugin.PerfLogging is not { Value: true })
         {
+            if (_windowStart >= 0f) TransitionPerformance.Reset();
             _windowStart = -1f;
             return;
         }
@@ -76,6 +78,7 @@ public static class PerfMonitor
         // Always-level on purpose: two lines a minute, and it's the one thing every perf bug report needs —
         // Quiet logging (default ON) must not silence it.
         Log.Always($"PERF: avg={avg:F0}fps worst={worst:F0}fps hitch50={_hitches} hitch100={_bigHitches} gc0={gc0} agents={agentCount} dormant={dormantCount} | islandProbes={SpawnIslandProbes} rallyWp={RallyWaypointsCreated} sweeps={SweepJobsSubmitted}s/{SweepJobsCompleted}c/{SweepJobsDrained}d navQpeak={NavJobsQueuedPeak}");
+        TransitionPerformance.Flush();
         Reset();
     }
 }

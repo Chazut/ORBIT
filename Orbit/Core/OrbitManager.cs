@@ -124,6 +124,11 @@ public class OrbitManager
     {
         try { _botsController.BotSpawner.OnBotRemoved -= OnBotRemoved; } catch { }
         try { DormancySystem?.Dispose(); } catch { }
+        foreach (var task in ActionManager.Tasks)
+            if (task is System.IDisposable disposable)
+                try { disposable.Dispose(); }
+                catch (System.Exception e) { Log.Warning($"Action cleanup failed: {e}"); }
+        Orbit.Helpers.TransitionPerformance.Flush();
     }
 
     public Agent AddAgent(BotOwner bot)

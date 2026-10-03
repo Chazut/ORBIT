@@ -733,6 +733,7 @@ public sealed partial class NativeGhostSystem
 
     public static void ResyncAfterWake(BotOwner bot)
     {
+        using var timing = Orbit.Helpers.TransitionPerformance.Measure(Orbit.Helpers.TransitionPhase.WakeNavigation);
         try
         {
             var player = bot.GetPlayer;

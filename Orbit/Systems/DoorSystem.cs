@@ -51,8 +51,7 @@ public class DoorSystem
     /// <summary>Registers a bot and syncs its door collision to every door's current state.</summary>
     public void RegisterBot(Collider botCollider, Collider pomCollider)
     {
-        for (var i = 0; i < Doors.Length; i++)
-            SetIgnored(botCollider, pomCollider, Doors[i].Collider, IsPassable(Doors[i].DoorState));
+        ResyncBot(botCollider, pomCollider);
         _bots.Add((botCollider, pomCollider));
     }
 
@@ -62,6 +61,7 @@ public class DoorSystem
     /// </summary>
     public void ResyncBot(Collider botCollider, Collider pomCollider)
     {
+        using var timing = TransitionPerformance.Measure(TransitionPhase.DoorSync);
         for (var i = 0; i < Doors.Length; i++)
             SetIgnored(botCollider, pomCollider, Doors[i].Collider, IsPassable(Doors[i].DoorState));
     }
@@ -94,7 +94,15 @@ public class DoorSystem
     private static void SetIgnored(Collider botCollider, Collider pomCollider, Collider doorCollider, bool ignore)
     {
         if (doorCollider == null) return;
-        if (pomCollider != null) Physics.IgnoreCollision(pomCollider, doorCollider, ignore);
-        if (botCollider != null) PhysicsExtensions.IgnoreCollision(botCollider, doorCollider, ignore);
+        if (pomCollider != null && Physics.GetIgnoreCollision(pomCollider, doorCollider) != ignore)
+            Physics.IgnoreCollision(pomCollider, doorCollider, ignore);
+        if (botCollider == null) return;
+        // Native bookkeeping survives disabled colliders, unlike the physics pair. Check both:
+        // a wake must restore an open door even when the native cache already says "ignored".
+        // Avoid the native helper for unchanged pairs: even a redundant false can allocate sets.
+        if (PhysicsExtensions.GetIgnoreCollision(botCollider, doorCollider) != ignore)
+            PhysicsExtensions.IgnoreCollision(botCollider, doorCollider, ignore);
+        else if (Physics.GetIgnoreCollision(botCollider, doorCollider) != ignore)
+            Physics.IgnoreCollision(botCollider, doorCollider, ignore);
     }
 }
