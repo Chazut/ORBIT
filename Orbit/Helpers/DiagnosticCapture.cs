@@ -85,6 +85,7 @@ internal static class DiagnosticCapture
     {
         Samples.Clear(); Wakes.Clear(); WakeDecisions.Clear(); WakeActivations.Clear(); Humans.Clear();
         _map = map; _enabled = _pending = false; _saved = 0;
+        PerformanceJournal.Reset(map);
         Status = "Waiting for Performance logging during a raid.";
         ClearWindow();
     }
@@ -101,6 +102,8 @@ internal static class DiagnosticCapture
 
     internal static long BeginFrame()
     {
+        var bookkeeping = PerformanceJournal.Enabled ? Stopwatch.GetTimestamp() : 0;
+        PerformanceJournal.BeginFrame();
         RefreshSaveStatus();
         var enabled = Plugin.PerfLogging is { Value: true } && _map != null;
         if (enabled != _enabled)
@@ -114,6 +117,7 @@ internal static class DiagnosticCapture
         }
         if (!enabled) return 0;
         TransitionPerformance.BeginCaptureFrame();
+        PerformanceJournal.Bookkeeping(Stopwatch.GetTimestamp() - bookkeeping);
         return Stopwatch.GetTimestamp();
     }
 
@@ -131,59 +135,70 @@ internal static class DiagnosticCapture
     {
         if (start == 0) return;
         var elapsed = (Stopwatch.GetTimestamp() - start) * 1000d / Stopwatch.Frequency;
-        TransitionPerformance.EndCaptureFrame(elapsed);
-        var frame = Time.frameCount;
-        if (_frames == 0) _firstUpdateFrame = frame;
-        _orbitSum += elapsed;
-        if (_frames == 0 || elapsed > _orbitMax)
+        PerformanceJournal.EndUpdate(elapsed);
+        var bookkeeping = Stopwatch.GetTimestamp();
+        try
         {
-            _orbitMax = elapsed; _maxOrbitUpdateFrame = frame;
-            _maxOrbitUpdateRecordedAt = Time.realtimeSinceStartup;
-        }
-        var frameMs = Time.unscaledDeltaTime * 1000f;
-        if (_frames == 0 || frameMs > _frameMax) { _frameMax = frameMs; _maxFrameObservedAtFrame = frame; }
-        _frames++; _frameSum += frameMs;
-        if (frameMs > 100f) _hitches++;
-        var now = Time.realtimeSinceStartup;
-        if (!_pending && _saved < MaxCapturesPerRaid && now >= _nextCaptureAt && frameMs >= TriggerFrameMs)
-        {
-            _pending = true;
-            _triggerAt = now; _triggerFrameMs = frameMs;
-            _saveAt = now + ContextAfterSeconds;
-            _nextCaptureAt = now + CooldownSeconds;
-        }
-        if (now < _nextSample) { SavePending(now, frameMs); return; }
-        var sample = new Sample
-        {
-            RecordedAt = now, Frames = _frames, AverageFrameMs = _frameSum / _frames, MaxFrameMs = _frameMax,
-            AverageOrbitUpdateMs = _orbitSum / _frames, MaxOrbitUpdateMs = _orbitMax,
-            FirstUpdateFrame = _firstUpdateFrame, LastUpdateFrame = frame,
-            MaxFrameObservedAtFrame = _maxFrameObservedAtFrame, MaxOrbitUpdateFrame = _maxOrbitUpdateFrame,
-            MaxOrbitUpdateRecordedAt = _maxOrbitUpdateRecordedAt,
-            PhaseTimings = TransitionPerformance.SnapshotInterval(),
-            SlowestOrbitUpdatePhases = TransitionPerformance.SnapshotPeakUpdate(),
-            HitchesOver100Ms = _hitches, Gc0 = GC.CollectionCount(0) - _gc,
-        };
-        var players = Singleton<GameWorld>.Instance?.AllAlivePlayersList;
-        if (players != null)
-        {
-            Humans.Clear();
-            foreach (var p in players)
-                if (p != null && !p.IsAI && p.HealthController is { IsAlive: true }) Humans.Add(p.Position);
-            var wakeSqr = ServerConfig.GhostMode.WakeDistance * ServerConfig.GhostMode.WakeDistance;
-            foreach (var p in players)
+            TransitionPerformance.EndCaptureFrame(elapsed);
+            var frame = Time.frameCount;
+            if (_frames == 0) _firstUpdateFrame = frame;
+            _orbitSum += elapsed;
+            if (_frames == 0 || elapsed > _orbitMax)
             {
-                if (p == null || !p.IsAI || p.HealthController is not { IsAlive: true }) continue;
-                if (DormancySystem.IsDormantProfile(p.ProfileId)) { sample.GhostBots++; continue; }
-                sample.AwakeBots++;
-                foreach (var human in Humans)
-                    if ((p.Position - human).sqrMagnitude <= wakeSqr) { sample.AwakeWithinWakeDistance++; break; }
+                _orbitMax = elapsed; _maxOrbitUpdateFrame = frame;
+                _maxOrbitUpdateRecordedAt = Time.realtimeSinceStartup;
             }
+            var frameMs = Time.unscaledDeltaTime * 1000f;
+            if (_frames == 0 || frameMs > _frameMax) { _frameMax = frameMs; _maxFrameObservedAtFrame = frame; }
+            _frames++; _frameSum += frameMs;
+            if (frameMs > 100f) _hitches++;
+            var now = Time.realtimeSinceStartup;
+            if (!_pending && _saved < MaxCapturesPerRaid && now >= _nextCaptureAt && frameMs >= TriggerFrameMs)
+            {
+                _pending = true;
+                _triggerAt = now; _triggerFrameMs = frameMs;
+                _saveAt = now + ContextAfterSeconds;
+                _nextCaptureAt = now + CooldownSeconds;
+            }
+            if (now < _nextSample) { SavePending(now, frameMs); return; }
+            var sample = new Sample
+            {
+                RecordedAt = now, Frames = _frames, AverageFrameMs = _frameSum / _frames, MaxFrameMs = _frameMax,
+                AverageOrbitUpdateMs = _orbitSum / _frames, MaxOrbitUpdateMs = _orbitMax,
+                FirstUpdateFrame = _firstUpdateFrame, LastUpdateFrame = frame,
+                MaxFrameObservedAtFrame = _maxFrameObservedAtFrame, MaxOrbitUpdateFrame = _maxOrbitUpdateFrame,
+                MaxOrbitUpdateRecordedAt = _maxOrbitUpdateRecordedAt,
+                PhaseTimings = TransitionPerformance.SnapshotInterval(),
+                SlowestOrbitUpdatePhases = TransitionPerformance.SnapshotPeakUpdate(),
+                HitchesOver100Ms = _hitches, Gc0 = GC.CollectionCount(0) - _gc,
+            };
+            var players = Singleton<GameWorld>.Instance?.AllAlivePlayersList;
+            if (players != null)
+            {
+                Humans.Clear();
+                foreach (var p in players)
+                    if (p != null && !p.IsAI && p.HealthController is { IsAlive: true }) Humans.Add(p.Position);
+                var wakeSqr = ServerConfig.GhostMode.WakeDistance * ServerConfig.GhostMode.WakeDistance;
+                foreach (var p in players)
+                {
+                    if (p == null || !p.IsAI || p.HealthController is not { IsAlive: true }) continue;
+                    if (DormancySystem.IsDormantProfile(p.ProfileId)) { sample.GhostBots++; continue; }
+                    sample.AwakeBots++;
+                    foreach (var human in Humans)
+                        if ((p.Position - human).sqrMagnitude <= wakeSqr) { sample.AwakeWithinWakeDistance++; break; }
+                }
+            }
+            PerformanceJournal.Population(sample.AwakeBots, sample.GhostBots, sample.AwakeWithinWakeDistance);
+            Samples.Enqueue(sample);
+            Prune(now);
+            ClearWindow();
+            SavePending(now, frameMs);
         }
-        Samples.Enqueue(sample);
-        Prune(now);
-        ClearWindow();
-        SavePending(now, frameMs);
+        finally
+        {
+            PerformanceJournal.Tick();
+            PerformanceJournal.Bookkeeping(Stopwatch.GetTimestamp() - bookkeeping);
+        }
     }
 
     private static void SavePending(float now, float frameMs)
@@ -198,6 +213,7 @@ internal static class DiagnosticCapture
         if (!_enabled) return;
         if (Wakes.Count >= 1024) Wakes.Dequeue();
         Wakes.Enqueue(wake);
+        PerformanceJournal.Event("wake", wake.ProfileId, wake.Cause);
         Prune(wake.RecordedAt);
     }
 
@@ -247,6 +263,7 @@ internal static class DiagnosticCapture
     {
         // Preserve a pending hitch if the raid ends before its post-hitch window is complete.
         Save();
+        PerformanceJournal.Finish();
         _map = null; _enabled = _pending = false;
         Samples.Clear(); Wakes.Clear(); WakeDecisions.Clear(); WakeActivations.Clear(); Humans.Clear();
         TransitionPerformance.ResetCaptureWindow();

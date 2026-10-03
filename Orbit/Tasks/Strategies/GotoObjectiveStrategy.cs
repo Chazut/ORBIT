@@ -72,6 +72,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
         for (var i = 0; i < ActiveEntities.Count; i++)
         {
             var squad = ActiveEntities[i];
+            using var timing = PerformanceJournal.Measure(TransitionPhase.StrategySquad, "strategy-squad", this, squad.Id);
             var squadObjective = squad.Objective;
 
             // Deferred SAIN personality resolution. PMC squads spawn before SAIN attaches its BotComponent
@@ -640,6 +641,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
 
     private int UpdateAgents(Squad squad, out int locallyExhaustedLootCount)
     {
+        using var timing = PerformanceJournal.Measure(TransitionPhase.StrategyDispatch, "strategy-operation", "UpdateAgents", squad.Id);
         var squadObjective = squad.Objective;
         var finishedCount = 0;
         locallyExhaustedLootCount = 0;
@@ -1152,6 +1154,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
     // ExtractRequested so the next dispatch bee- lines to the nearest eligible exfil.
     private void TickMainObjectives(Squad squad)
     {
+        using var timing = PerformanceJournal.Measure(TransitionPhase.StrategyObjectives, "strategy-operation", "TickMainObjectives", squad.Id);
         if (squad.MainObjectives == null || squad.MainObjectives.Count == 0) return;
         var allDone = true;
         var now = Time.time;
@@ -1174,6 +1177,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
 
     private void CheckMainCompletion(Squad squad, MainObjective main, float now)
     {
+        using var timing = PerformanceJournal.Measure(TransitionPhase.StrategyObjectives, "strategy-operation", "CheckMainCompletion", squad.Id);
         switch (main.Type)
         {
             case MainObjectiveType.Kills:
@@ -1344,6 +1348,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
 
     private void RefreshUnreachabilityAroundLeader(Squad squad)
     {
+        using var timing = PerformanceJournal.Measure(TransitionPhase.StrategyReachability, "strategy-operation", "RefreshUnreachabilityAroundLeader", squad.Id);
         var leader = squad.Leader?.Bot;
         if (leader == null) return;
 
@@ -1566,6 +1571,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
 
     private void AssignNewObjective(Squad squad, bool completedCurrent = false)
     {
+        using var timing = PerformanceJournal.Measure(TransitionPhase.StrategySelection, "strategy-operation", "AssignNewObjective", squad.Id);
         // A null result must not rescan every cell on every strategy tick. Real movement or a new
         // extraction request can bypass the short backoff; an unchanged failure cannot.
         if (Time.time < squad.NextDispatchAttemptAt

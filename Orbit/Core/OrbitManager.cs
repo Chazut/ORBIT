@@ -130,7 +130,7 @@ public class OrbitManager
             if (task is System.IDisposable disposable)
                 try { disposable.Dispose(); }
                 catch (System.Exception e) { Log.Warning($"Action cleanup failed: {e}"); }
-        Orbit.Helpers.TransitionPerformance.Flush();
+        Orbit.Helpers.PerfMonitor.Finish(_liveAgents.Count, DormancySystem.DormantCount);
         Orbit.Helpers.DiagnosticCapture.Finish();
     }
 
@@ -223,30 +223,33 @@ public class OrbitManager
     public void Update()
     {
         var captureStart = Orbit.Helpers.DiagnosticCapture.BeginFrame();
-        using (TransitionPerformance.Measure(TransitionPhase.UpdatePurge))
-            PurgeDestroyedAgents();
-        using (TransitionPerformance.Measure(TransitionPhase.UpdateLanding))
-            BotLandingGuard.Tick();
-        using (TransitionPerformance.Measure(TransitionPhase.UpdateTelemetry))
-            Orbit.Helpers.PerfMonitor.Tick(_liveAgents.Count, DormancySystem.DormantCount);
-        using (TransitionPerformance.Measure(TransitionPhase.UpdateStrategy))
-            StrategyManager.Update();
-        using (TransitionPerformance.Measure(TransitionPhase.UpdateActions))
-            ActionManager.Update();
-        using (TransitionPerformance.Measure(TransitionPhase.UpdateExtract))
-            TickEmergencyExtractWatchdog();
-        // Sleep/wake decisions before movement so this frame's mover tick sees fresh dormancy state.
-        using (TransitionPerformance.Measure(TransitionPhase.UpdateDormancy))
-            DormancySystem.Update(_liveAgents, _liveSquads);
-        using (TransitionPerformance.Measure(TransitionPhase.UpdateMovement))
-            MovementSystem.Update(_liveAgents);
-        using (TransitionPerformance.Measure(TransitionPhase.UpdateLook))
-            LookSystem.Update(_liveAgents);
-        using (TransitionPerformance.Measure(TransitionPhase.UpdateWaypoints))
-            WaypointSystem.Update();
-        using (TransitionPerformance.Measure(TransitionPhase.UpdateNavigation))
-            NavJobExecutor.Update();
-        Orbit.Helpers.DiagnosticCapture.EndFrame(captureStart);
+        try
+        {
+            using (TransitionPerformance.Measure(TransitionPhase.UpdatePurge))
+                PurgeDestroyedAgents();
+            using (TransitionPerformance.Measure(TransitionPhase.UpdateLanding))
+                BotLandingGuard.Tick();
+            using (TransitionPerformance.Measure(TransitionPhase.UpdateTelemetry))
+                Orbit.Helpers.PerfMonitor.Tick(_liveAgents.Count, DormancySystem.DormantCount);
+            using (TransitionPerformance.Measure(TransitionPhase.UpdateStrategy))
+                StrategyManager.Update();
+            using (TransitionPerformance.Measure(TransitionPhase.UpdateActions))
+                ActionManager.Update();
+            using (TransitionPerformance.Measure(TransitionPhase.UpdateExtract))
+                TickEmergencyExtractWatchdog();
+            // Sleep/wake decisions before movement so this frame's mover tick sees fresh dormancy state.
+            using (TransitionPerformance.Measure(TransitionPhase.UpdateDormancy))
+                DormancySystem.Update(_liveAgents, _liveSquads);
+            using (TransitionPerformance.Measure(TransitionPhase.UpdateMovement))
+                MovementSystem.Update(_liveAgents);
+            using (TransitionPerformance.Measure(TransitionPhase.UpdateLook))
+                LookSystem.Update(_liveAgents);
+            using (TransitionPerformance.Measure(TransitionPhase.UpdateWaypoints))
+                WaypointSystem.Update();
+            using (TransitionPerformance.Measure(TransitionPhase.UpdateNavigation))
+                NavJobExecutor.Update();
+        }
+        finally { Orbit.Helpers.DiagnosticCapture.EndFrame(captureStart); }
     }
 
     // Force-despawn (= extract) an emergency extracter sat still at its exfil, out of combat, past the timeout.

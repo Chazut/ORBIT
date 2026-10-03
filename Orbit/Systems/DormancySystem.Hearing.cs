@@ -209,6 +209,7 @@ public partial class DormancySystem
     private static bool TryGetNoiseSource(NoiseEvent noise, Vector3 listener, (float Loud, float Suppressed) hearing,
         out Vector3 position, out float range, out float distance)
     {
+        using var timing = TransitionPerformance.Measure(TransitionPhase.HearingSource);
         position = noise.Position;
         range = 0f;
         distance = 0f;
@@ -338,6 +339,7 @@ public partial class DormancySystem
     private static void RecordGhostHearing(Squad squad, NoiseEvent noise, Vector3 sourcePosition, float sourceRange, Vector3 listener,
         float distance, float chance, bool investigate, string category)
     {
+        using var timing = TransitionPerformance.Measure(TransitionPhase.HearingTelemetry);
         var members = new string[squad.Members.Count];
         for (var i = 0; i < members.Length; i++)
             members[i] = squad.Members[i].Player?.ProfileId;
@@ -421,12 +423,14 @@ public partial class DormancySystem
 
     private void PollNativeGhostHearing(float now)
     {
+        using var timing = TransitionPerformance.Measure(TransitionPhase.HearingNative);
         foreach (var entry in _vanillaGroups)
         {
             var group = entry.Value;
             if (!NativeHearingGroup(group, out var category) || _nativeNoiseReactionAt.ContainsKey(entry.Key)) continue;
             var available = true;
-            for (var i = 0; i < group.Count; i++) available &= _nativeGhosts.CanInvestigate(group[i]);
+            using (TransitionPerformance.Measure(TransitionPhase.HearingAvailability))
+                for (var i = 0; i < group.Count; i++) available &= _nativeGhosts.CanInvestigate(group[i]);
             if (!available) continue;
             var lead = group[0];
             var listener = lead.Position;
@@ -443,7 +447,9 @@ public partial class DormancySystem
                 var chance = CategoryCuriosity(category) * Mathf.Lerp(1f, 0.5f, distance / range);
                 var rolled = Random.value <= chance;
                 noise.RolledNativeGroups.Add(entry.Key);
-                var started = rolled && _nativeGhosts.Investigate(group, source);
+                bool started;
+                using (TransitionPerformance.Measure(TransitionPhase.HearingInvestigate))
+                    started = rolled && _nativeGhosts.Investigate(group, source);
                 RecordNativeHearing(group, category, noise, source, range, listener, distance, chance, started);
                 if (!started)
                 {
@@ -461,6 +467,7 @@ public partial class DormancySystem
     private static void RecordNativeHearing(List<BotOwner> group, GhostHearingCategory category, NoiseEvent noise,
         Vector3 source, float range, Vector3 listener, float distance, float chance, bool investigate)
     {
+        using var timing = TransitionPerformance.Measure(TransitionPhase.HearingTelemetry);
         var members = new string[group.Count];
         for (var i = 0; i < group.Count; i++) members[i] = group[i].ProfileId;
         Api.OrbitTelemetry.PushGhostHearing(new Api.OrbitGhostHearing

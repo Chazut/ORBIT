@@ -77,12 +77,25 @@ public static class PerfMonitor
 
         if (Time.unscaledTime - _windowStart < WindowSeconds || _sumDt <= 0f) return;
 
-        var avg = _frames / _sumDt;
+        Flush(agentCount, dormantCount, false);
+    }
+
+    internal static void Finish(int agentCount, int dormantCount)
+    {
+        if (Plugin.PerfLogging is { Value: true } && _windowStart >= 0 && _frames > 0)
+            Flush(agentCount, dormantCount, true);
+        else TransitionPerformance.Flush();
+    }
+
+    private static void Flush(int agentCount, int dormantCount, bool final)
+    {
+        var avg = _sumDt > 0 ? _frames / _sumDt : 0;
         var worst = _maxDt > 0f ? 1f / _maxDt : avg;
         var gc0 = GC.CollectionCount(0) - _gc0;
         // Always-level on purpose: two lines a minute, and it's the one thing every perf bug report needs —
         // Quiet logging (default ON) must not silence it.
         Log.Always($"PERF: avg={avg:F0}fps worst={worst:F0}fps hitch50={_hitches} hitch100={_bigHitches} gc0={gc0} agents={agentCount} dormant={dormantCount} | islandProbes={SpawnIslandProbes} rallyWp={RallyWaypointsCreated} sweeps={SweepJobsSubmitted}s/{SweepJobsCompleted}c/{SweepJobsDrained}d navQpeak={NavJobsQueuedPeak}");
+        if (final) Log.Always($"PERF FINAL: frames={_frames} lastFrame={Time.frameCount}");
         TransitionPerformance.Flush();
         ResetWindow();
     }

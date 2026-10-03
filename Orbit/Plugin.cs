@@ -64,6 +64,8 @@ public class Plugin : BaseUnityPlugin
     private const string IsbPluginGuid = "samc137.ISBinfo";
     private const string CombineSoldiersPluginGuid = "com.manimal.combinesoldiers";
 
+    private void Update() => PerformanceJournal.RefreshWriter();
+
     private void Awake()
     {
         LogSource = Logger;
@@ -313,7 +315,7 @@ public class Plugin : BaseUnityPlugin
             "Which message levels ORBIT writes (used when Quiet logging is OFF). Default: everything except Debug. Tick Debug for a detailed bug-report log - it works in the release build now, not just debug builds.",
             null, new ConfigurationManagerAttributes { Category = "", Order = 0 }));
         PerfLogging = Config.Bind(essentials, "Performance logging", false, new ConfigDescription(
-            "ON: writes compact PERF summaries with subsystem and Ghost transition timings every 30s, even with Quiet logging. Frames of 250 ms or more also trigger a JSON capture in BepInEx/ORBIT/diagnostics after a short delay (one per minute, at most 10 per raid), including the phases of the slowest ORBIT Update in each sample. Nested timings are inclusive and must not be added together.",
+            "ON: records frame stalls over 100 ms, slow bot decisions and Ghost transitions, even with Quiet logging. Automatically saves a performance journal in BepInEx/ORBIT/diagnostics during the raid and a final summary when it ends. Larger stalls also save a detailed JSON capture.",
             null, new ConfigurationManagerAttributes { Category = "", Order = -1 }));
     }
 

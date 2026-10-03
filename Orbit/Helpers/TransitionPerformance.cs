@@ -19,6 +19,9 @@ internal enum TransitionPhase
     GhostHealthDamage, GhostHealthKill, GhostOnDead, GhostAggressor, GhostCorpse, GhostCorpseImpulse,
     GhostDeathSound, GhostPlayerDeadCallbacks, GhostGlobalDeadCallbacks, GhostUnspawnCallbacks,
     GhostIPlayerUnspawnCallbacks, GhostExfilCallback, GhostInteractionCallback, GhostCorpseRegistration,
+    StrategyScores, StrategyPick, StrategyTasks, StrategySquad,
+    StrategyObjectives, StrategyDispatch, StrategySelection, StrategyReachability,
+    HearingCategory, HearingTypeLookup, HearingCompile, HearingComponentRead, HearingNative, HearingAvailability, HearingInvestigate, HearingTelemetry, HearingSource,
     Count
 }
 
@@ -66,6 +69,8 @@ internal static class TransitionPerformance
         {
             if (_start == 0) return;
             var elapsed = Stopwatch.GetTimestamp() - _start;
+            if (_generation == TransitionPerformance._generation && _frame == Time.frameCount)
+                PerformanceJournal.RecordPhase(_phase, elapsed, _frame);
             if (_generation == TransitionPerformance._generation)
                 Record(Samples, _phase, elapsed, _frame);
             // The periodic log flush can reset its window during UpdateTelemetry. Capture windows
@@ -94,7 +99,9 @@ internal static class TransitionPerformance
     // its detached capture events carry explicit frames without polluting Update-only snapshots.
     internal static void RecordExternal(TransitionPhase phase, long ticks, int frame)
     {
-        if (Plugin.PerfLogging is { Value: true }) Record(Samples, phase, ticks, frame);
+        if (Plugin.PerfLogging is not { Value: true }) return;
+        Record(Samples, phase, ticks, frame);
+        PerformanceJournal.RecordPhase(phase, ticks, frame, external: true);
     }
 
     internal static void BeginCaptureFrame()

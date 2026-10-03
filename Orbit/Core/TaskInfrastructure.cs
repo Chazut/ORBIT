@@ -56,19 +56,29 @@ public class BaseTaskManager<TEntity>(Task<TEntity>[] tasks) where TEntity : Ent
     protected void UpdateScores()
     {
         for (var i = 0; i < Tasks.Length; i++)
+        {
+            using var timing = typeof(TEntity) == typeof(Squad)
+                ? PerformanceJournal.Measure(TransitionPhase.StrategyScores, "strategy-score", Tasks[i]) : default;
             Tasks[i].UpdateScore(i);
+        }
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     protected void UpdateTasks()
     {
         for (var i = 0; i < Tasks.Length; i++)
+        {
+            using var timing = typeof(TEntity) == typeof(Squad)
+                ? PerformanceJournal.Measure(TransitionPhase.StrategyTasks, "strategy-update", Tasks[i]) : default;
             Tasks[i].Update();
+        }
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     protected void PickTask(TEntity entity)
     {
+        using var timing = typeof(TEntity) == typeof(Squad)
+            ? PerformanceJournal.Measure(TransitionPhase.StrategyPick, "strategy-pick", entity.TaskAssignment.Task, entity.Id) : default;
         var assignment = entity.TaskAssignment;
 
         var highestScore = 0f;

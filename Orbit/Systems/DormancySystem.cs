@@ -975,6 +975,7 @@ public partial class DormancySystem
         agent.IsDormant = true;
         _dormantAgents.Add(agent);
         DormantProfileIds.Add(agent.Player.ProfileId);
+        PerformanceJournal.Event("sleep", agent.Player.ProfileId, squadId: agent.Squad?.Id ?? -1);
         FinishSpawnProtection(bot);
     }
 
@@ -2393,7 +2394,8 @@ public partial class DormancySystem
     /// registration, RemoveAgent (which also finalises our dormancy bookkeeping via OnAgentRemoved).</summary>
     private void KillGhostAgent(Agent victim, Player killer)
     {
-        using var timing = TransitionPerformance.Measure(TransitionPhase.GhostDeath);
+        using var timing = PerformanceJournal.Measure(TransitionPhase.GhostDeath, "ghost-death",
+            profile: victim.Player?.ProfileId, always: true, details: true);
         using (TransitionPerformance.Measure(TransitionPhase.GhostDeathPrepare))
         {
             victim.IsDormant = false;
@@ -2422,7 +2424,8 @@ public partial class DormancySystem
 
     private void KillGhostVanilla(BotOwner victim, Player killer)
     {
-        using var timing = TransitionPerformance.Measure(TransitionPhase.GhostDeath);
+        using var timing = PerformanceJournal.Measure(TransitionPhase.GhostDeath, "ghost-death",
+            profile: victim.ProfileId, always: true, details: true);
         bool native;
         using (TransitionPerformance.Measure(TransitionPhase.GhostDeathPrepare))
         {
@@ -2657,6 +2660,7 @@ public partial class DormancySystem
             _vanillaDormant.Add(bot);
             _vanillaHpBaseline[bot] = VanillaHp(bot);
             DormantProfileIds.Add(bot.GetPlayer.ProfileId);
+            PerformanceJournal.Event("sleep", bot.ProfileId);
             FinishSpawnProtection(bot);
             added++;
         }

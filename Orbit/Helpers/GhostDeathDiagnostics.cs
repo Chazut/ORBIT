@@ -59,6 +59,8 @@ internal static class GhostDeathDiagnostics
     private static void Prefix(object __instance, MethodBase __originalMethod, out TransitionPerformance.Scope __state)
     {
         __state = default;
+        if (PerformanceJournal.Enabled && Phases[__originalMethod] == TransitionPhase.GhostOnDead && __instance is Player player)
+            PerformanceJournal.Event("death", player.ProfileId);
         if (_victim == null || Plugin.PerfLogging is not { Value: true }) return;
         if (ReferenceEquals(__instance, _victim) || ReferenceEquals(__instance, _victim.ActiveHealthController))
             __state = TransitionPerformance.Measure(Phases[__originalMethod]);
