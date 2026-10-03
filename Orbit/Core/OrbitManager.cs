@@ -111,6 +111,7 @@ public class OrbitManager
         RegisterComponents();
         var actions = RegisterActions();
         var strategies = RegisterStrategies();
+        Orbit.Patches.AirdropLandedPatch.OnAirdropLanded += WaypointSystem.RegisterAmbushAirdrop;
 
         ActionManager = new ActionManager(AgentData, actions);
         StrategyManager = new StrategyManager(SquadData, strategies);
@@ -124,6 +125,7 @@ public class OrbitManager
 
     public void Dispose()
     {
+        Orbit.Patches.AirdropLandedPatch.OnAirdropLanded -= WaypointSystem.RegisterAmbushAirdrop;
         Orbit.Helpers.DiagnosticCapture.Finish();
         try { _botsController.BotSpawner.OnBotRemoved -= OnBotRemoved; } catch { }
         try { DormancySystem?.Dispose(); } catch { }

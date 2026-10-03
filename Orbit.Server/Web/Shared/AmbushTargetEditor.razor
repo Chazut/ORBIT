@@ -1,0 +1,17 @@
+<OrbitSwitch @bind-Value="Cfg.Enabled" Label="Enabled" />
+<OrbitSlider T="float" @bind-Value="Cfg.Chance" Label="Chance per opportunity check" Fmt="P0" Min="0" Max="1" Step="0.05f"
+             Tooltip="0% disables this target type. A successful roll still needs an available target and suitable positions for the whole squad." />
+<OrbitSlider T="float" Value="Cfg.DurationMin" ValueChanged="SetDurationMin" Label="Minimum hold time" Unit="s" Min="10" Max="600" Step="5" />
+<OrbitSlider T="float" @bind-Value="Cfg.DurationMax" Label="Maximum hold time" Unit="s" Min="Cfg.DurationMin" Max="600" Step="5"
+             Tooltip="Rolled once per camp. The hold starts when the first member arrives; travel also has its own timeout." />
+<OrbitSlider T="float" Value="Cfg.DistanceMin" ValueChanged="SetDistanceMin" Label="Minimum distance from target" Unit="m" Min="5" Max="80" Step="1" />
+<OrbitSlider T="float" @bind-Value="Cfg.DistanceMax" Label="Maximum distance from target" Unit="m" Min="Cfg.DistanceMin" Max="80" Step="1" />
+<OrbitSlider T="float" @bind-Value="Cfg.SearchRadius" Label="Look for targets within" Unit="m" Min="25" Max="400" Step="5" />
+<OrbitSlider T="int" @bind-Value="Cfg.MaxSquads" Label="Maximum squads around one target" Min="1" Max="4" Step="1"
+             Tooltip="Targets less than 50 m apart share this limit, preventing overlapping camps." />
+
+@code {
+    [Parameter, EditorRequired] public Orbit.Settings.CampSiteSettings Cfg { get; set; } = default!;
+    private void SetDurationMin(float value) { Cfg.DurationMin = value; Cfg.DurationMax = Math.Max(value, Cfg.DurationMax); }
+    private void SetDistanceMin(float value) { Cfg.DistanceMin = value; Cfg.DistanceMax = Math.Max(value, Cfg.DistanceMax); }
+}

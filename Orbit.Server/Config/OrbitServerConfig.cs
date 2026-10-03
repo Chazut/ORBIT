@@ -13,6 +13,7 @@ namespace Orbit.Server.Config;
 /// </summary>
 public class OrbitServerConfig
 {
+    public Orbit.Settings.AmbushSettings Ambush { get; set; } = new();
     public int ConfigVersion { get; set; } = 2;
     public Orbit.Settings.MovementSettings Movement { get; set; } = new();
     public Dictionary<string, Orbit.Settings.MapBehaviorOverride> MapOverrides { get; set; } = new();

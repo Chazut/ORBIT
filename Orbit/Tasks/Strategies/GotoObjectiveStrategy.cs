@@ -25,6 +25,7 @@ namespace Orbit.Tasks.Strategies;
 /// </summary>
 public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointSystem, float hysteresis) : Task<Squad>(hysteresis)
 {
+    private readonly AmbushDirector _ambush = new(waypointSystem);
     private static Range _moveTimeout = new(400, 600);
     private Range _guardDuration = new(ServerConfig.PoiGuard.GuardDuration.x, ServerConfig.PoiGuard.GuardDuration.y);
     private Range _guardDurationCut = new(ServerConfig.PoiGuard.GuardDurationCut.x, ServerConfig.PoiGuard.GuardDurationCut.y);
@@ -61,6 +62,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
 
     public override void Deactivate(Entity entity)
     {
+        if (entity is Squad campingSquad) campingSquad.Camp.End(campingSquad, "strategy deactivated");
         if (entity is Squad squad) squad.CorpseEscort.End(squad, waypointSystem, "strategy deactivated");
         // Return any assignments before deactivating.
         waypointSystem.Return(entity);
@@ -69,10 +71,21 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
 
     public override void Update()
     {
+        _ambush.Prune(squadData.Entities.Values);
         for (var i = 0; i < ActiveEntities.Count; i++)
         {
             var squad = ActiveEntities[i];
             var squadObjective = squad.Objective;
+
+            if (squad.Camp.Active)
+            {
+                CheckTimeExtractTrigger(squad);
+                if (squad.Camp.Tick(squad, waypointSystem))
+                {
+                    UpdateAgents(squad, out _); // Emergency extraction still takes priority for each member.
+                    continue;
+                }
+            }
 
             // Deferred SAIN personality resolution. PMC squads spawn before SAIN attaches its BotComponent
             // (1-2s delay), so SquadRegistry deferred the lookup + the main-objective roll. Retry here every
@@ -217,6 +230,12 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
             {
                 UpdateAgents(squad, out _);
                 continue; // Pause anchor completion and guard timers for the entire loot detour.
+            }
+
+            if (_ambush.TryStart(squad))
+            {
+                UpdateAgents(squad, out _);
+                continue;
             }
 
             // Opportunistic corpse interrupt: any squad member who sees an unlooted corpse within
@@ -742,6 +761,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
             }
 
             if (squad.CorpseEscort.UpdateMember(squad, agent, i, waypointSystem)) continue;
+            if (squad.Camp.Owns(agent)) continue;
 
             // An agent is "aligned" with the squad if their location IS the squad's main objective, OR if
             // they're working a splinter that was picked around the squad's current main objective. Without

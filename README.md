@@ -92,6 +92,12 @@ The leader takes the anchor, the others splinter to nearby loot and cover. They 
 real reasons - enough roubles, goals completed, or the raid clock - and
 they coordinate on shared exfils like the car.
 
+PMC and PlayerScav squads can also take a temporary detour to set up an
+ambush around a hotspot, an available extract or a landed airdrop. Members
+take separate watch positions, hold for a limited time, then resume their
+objectives. **Ambush & camping** in the web UI controls chances, hold times,
+distances, cover requirements and squad limits for each target type.
+
 ### 🎒 Looting that feels human
 
 ORBIT-controlled bots use a custom loot engine built on BSG's pickup APIs.
@@ -221,9 +227,9 @@ first). Then come say hi on the [ORBIT thread](https://discord.com/channels/8756
 
 ## Roadmap highlights
 
-No ETA, no promises: camp & ambush decisions, post-combat self-heal,
+No ETA, no promises: post-combat self-heal,
 squad splitting with radio comms, boss hunting and faction rivalries
-(Firefly's idea), airdrop ambushes, a "rally flare" item that pulls the
+(Firefly's idea), a "rally flare" item that pulls the
 whole map onto a point, multi-step objectives (Kiba alarm, ULTRA power,
 Reserve D-2...), switch-gated and Red-Rebel-style exfils, cross-raid
 player heatmaps feeding bot routing (Fiodor's idea), per-map ORBIT

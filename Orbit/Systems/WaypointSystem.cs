@@ -321,6 +321,7 @@ public partial class WaypointSystem
 
     public void CalculateAdvectionZones()
     {
+        InvalidateAmbushHotspots();
         _zones.Clear();
         var nativeFloors = CollectNativeZoneFloors();
 

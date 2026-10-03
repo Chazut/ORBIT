@@ -158,6 +158,7 @@ public static class OrbitTelemetry
 
         var loc = obj.Location;
         var category = loc != null ? loc.Category.ToString() : "";
+        if (agent.Squad?.Camp.Owns(agent) == true) category = "Ambush" + agent.Squad.Camp.Site.Kind;
         var x = loc?.Position.x ?? 0f;
         var y = loc?.Position.y ?? 0f;
         var z = loc?.Position.z ?? 0f;

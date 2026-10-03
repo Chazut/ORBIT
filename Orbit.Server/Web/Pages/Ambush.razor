@@ -1,0 +1,56 @@
+@page "/orbit/ambush"
+@layout Orbit.Server.Web.Shared.MainLayout
+@inherits Orbit.Server.Web.OrbitConfigPage
+
+<PageTitle>ORBIT: Ambush &amp; camping</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.Medium">
+    <PageHeader Title="Ambush &amp; camping" OnReset="ResetPage"
+                Description="Squads can take a temporary detour to watch a hotspot, an active extract or a landed airdrop. They spread out, wait, then resume their objectives. Save to apply next raid." />
+    <SettingsCard Title="Who can camp" OnReset="ResetParticipants"
+                  Subtitle="Only bots directed by ORBIT outside combat can start a camp. Combat, extraction and failed routes end the detour.">
+        <OrbitSwitch @bind-Value="Cfg.Ambush.Enabled" Label="Enable ambushes and camping" />
+        <OrbitSwitch @bind-Value="Cfg.Ambush.Pmc" Label="PMCs" />
+        <OrbitSwitch @bind-Value="Cfg.Ambush.PlayerScav" Label="PlayerScavs" />
+        <OrbitSwitch @bind-Value="Cfg.Ambush.RequireCover" Label="Require cover"
+                     Tooltip="If no reachable, spaced cover with a sightline toward the target is found, the squad keeps its current objective. OFF also allows open watch positions." />
+    </SettingsCard>
+    <SettingsCard Title="Frequency and limits" OnReset="ResetLimits">
+        <OrbitSlider T="float" @bind-Value="Cfg.Ambush.CheckInterval" Label="Check for an opportunity every" Unit="s" Min="15" Max="600" Step="15"
+                     Tooltip="Checks are staggered between squads. Each enabled target type gets one chance roll per check, regardless of the number of nearby targets." />
+        <OrbitSlider T="float" @bind-Value="Cfg.Ambush.Cooldown" Label="Cooldown after a camp" Unit="s" Min="30" Max="1800" Step="30" />
+        <OrbitSlider T="float" @bind-Value="Cfg.Ambush.TravelTimeout" Label="Maximum time to reach camp" Unit="s" Min="15" Max="300" Step="15" />
+        <OrbitSlider T="int" @bind-Value="Cfg.Ambush.MaxActiveSquads" Label="Maximum camping squads on the map" Min="1" Max="12" Step="1" />
+        <OrbitSlider T="int" @bind-Value="Cfg.Ambush.MaxCampsPerSquad" Label="Maximum camps per squad per raid" Min="1" Max="10" Step="1" />
+        <OrbitSlider T="float" @bind-Value="Cfg.Ambush.MemberSpacing" Label="Minimum spacing between campers" Unit="m" Min="3" Max="12" Step="1" />
+    </SettingsCard>
+    <SettingsCard Title="Hotspots" OnReset="@(() => Cfg.Ambush.Hotspots = new())"
+                  Subtitle="Positive-force zones from the selected preset, including its bot-type and floor filters. Player convergence is not used to place camps.">
+        <AmbushTargetEditor Cfg="Cfg.Ambush.Hotspots" />
+    </SettingsCard>
+    <SettingsCard Title="Extracts" OnReset="@(() => Cfg.Ambush.Extracts = new Orbit.Settings.AmbushSettings().Extracts)"
+                  Subtitle="Available exits can attract campers even when the squad cannot use that exit itself. Camping does not trigger extraction.">
+        <AmbushTargetEditor Cfg="Cfg.Ambush.Extracts" />
+    </SettingsCard>
+    <SettingsCard Title="Airdrops" OnReset="@(() => Cfg.Ambush.Airdrops = new Orbit.Settings.AmbushSettings().Airdrops)"
+                  Subtitle="After landing, a drop can attract campers for up to 20 minutes. Campers watch the area from a distance.">
+        <AmbushTargetEditor Cfg="Cfg.Ambush.Airdrops" />
+    </SettingsCard>
+</MudContainer>
+
+@code {
+    private void ResetPage() => Cfg.Ambush = new();
+    private void ResetParticipants()
+    {
+        var d = new Orbit.Settings.AmbushSettings();
+        Cfg.Ambush.Enabled = d.Enabled; Cfg.Ambush.Pmc = d.Pmc;
+        Cfg.Ambush.PlayerScav = d.PlayerScav; Cfg.Ambush.RequireCover = d.RequireCover;
+    }
+    private void ResetLimits()
+    {
+        var d = new Orbit.Settings.AmbushSettings();
+        Cfg.Ambush.CheckInterval = d.CheckInterval; Cfg.Ambush.Cooldown = d.Cooldown;
+        Cfg.Ambush.TravelTimeout = d.TravelTimeout; Cfg.Ambush.MaxActiveSquads = d.MaxActiveSquads;
+        Cfg.Ambush.MaxCampsPerSquad = d.MaxCampsPerSquad; Cfg.Ambush.MemberSpacing = d.MemberSpacing;
+    }
+}

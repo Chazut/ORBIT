@@ -180,6 +180,16 @@ public class GuardAction(AgentData dataset, MovementSystem movementSystem, float
                 case GuardStatus.Watch:
                     // Dormant: no gaze to fake (Steering sleeps with the GameObject).
                     if (agent.IsDormant) continue;
+                    if (agent.Squad?.Camp.Owns(agent) == true)
+                    {
+                        if (guard.WatchTimeout <= Time.time)
+                        {
+                            var toward = agent.Squad.Camp.Site.Position + Vector3.up - agent.Player.PlayerBones.Head.position;
+                            LookSystem.LookToDirection(agent, LookSystem.RandomDirectionInEllipse(toward.normalized, 20f, 5f), 90f);
+                            guard.WatchTimeout = Time.time + Random.Range(3f, 8f);
+                        }
+                        continue;
+                    }
                     if (guard.WatchDirections.Count == 0 || guard.WatchTimeout > Time.time)
                         continue;
 
