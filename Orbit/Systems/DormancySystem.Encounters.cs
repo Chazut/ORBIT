@@ -90,8 +90,8 @@ public partial class DormancySystem
             if (Time.time - squad.DormancySleptAt < SleepGraceSeconds) continue;
             foreach (var agent in squad.Members)
             {
-                if (!AnyAwakeBotNear(agent.Position, squad)) continue;
-                WakeSquad(squad, new(GhostWakeCause.BotProximity, $"awake bot near {agent}"));
+                if (FindAwakeBotNear(agent.Position, squad) is not { } neighbour) continue;
+                WakeSquad(squad, NeighbourWake(agent.Player, neighbour));
                 break;
             }
         }
@@ -110,8 +110,8 @@ public partial class DormancySystem
                 && Time.time - sleptAt < SleepGraceSeconds) continue;
             foreach (var bot in kv.Value)
             {
-                if (!AnyAwakeBotNear(bot.Position, null)) continue;
-                WakeVanillaGroup(kv.Key, kv.Value, new(GhostWakeCause.BotProximity, $"awake bot near {bot.GetPlayer.Profile?.Nickname}"));
+                if (FindAwakeBotNear(bot.Position, null) is not { } neighbour) continue;
+                WakeVanillaGroup(kv.Key, kv.Value, NeighbourWake(bot.GetPlayer, neighbour));
                 break;
             }
         }

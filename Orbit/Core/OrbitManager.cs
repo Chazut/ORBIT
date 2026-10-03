@@ -78,6 +78,7 @@ public class OrbitManager
         MapVariant = Orbit.Helpers.MapVariants.Detect(MapId);
         ZoneKey = Orbit.Helpers.MapVariants.ZoneKey(MapId, MapVariant);
         Orbit.Helpers.ServerConfig.ApplyMap(MapId, ZoneKey);
+        Orbit.Helpers.DiagnosticCapture.Reset(ZoneKey);
         if (MapVariant.Length > 0)
             Log.Always($"Map variant '{MapVariant}' detected on {MapId}: zones and geometry come from '{ZoneKey}' (base map as fallback)");
         Waypoints = new WaypointConfig();
@@ -123,6 +124,7 @@ public class OrbitManager
 
     public void Dispose()
     {
+        Orbit.Helpers.DiagnosticCapture.Finish();
         try { _botsController.BotSpawner.OnBotRemoved -= OnBotRemoved; } catch { }
         try { DormancySystem?.Dispose(); } catch { }
     }
@@ -214,6 +216,7 @@ public class OrbitManager
 
     public void Update()
     {
+        var captureStart = Orbit.Helpers.DiagnosticCapture.BeginFrame();
         PurgeDestroyedAgents();
         BotLandingGuard.Tick();
         Orbit.Helpers.PerfMonitor.Tick(_liveAgents.Count, DormancySystem.DormantCount);
@@ -226,6 +229,7 @@ public class OrbitManager
         LookSystem.Update(_liveAgents);
         WaypointSystem.Update();
         NavJobExecutor.Update();
+        Orbit.Helpers.DiagnosticCapture.EndFrame(captureStart);
     }
 
     // Force-despawn (= extract) an emergency extracter sat still at its exfil, out of combat, past the timeout.

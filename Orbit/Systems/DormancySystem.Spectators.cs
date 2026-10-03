@@ -59,14 +59,14 @@ public partial class DormancySystem
         }
         for (var i = _dormantAgents.Count - 1; i >= 0; i--)
         {
-            try { WakeAgent(_dormantAgents[i]); }
+            try { WakeAgentWithReason(_dormantAgents[i], new(GhostWakeCause.Spectator, "no active human players")); }
             catch (Exception e) { ReportSpectatorWakeError(e); }
         }
         _nativeMoveScratch.Clear();
         _nativeMoveScratch.AddRange(_vanillaDormant);
         for (var i = 0; i < _nativeMoveScratch.Count; i++)
         {
-            try { WakeVanillaBot(_nativeMoveScratch[i]); }
+            try { WakeVanillaBotWithReason(_nativeMoveScratch[i], new(GhostWakeCause.Spectator, "no active human players")); }
             catch (Exception e) { ReportSpectatorWakeError(e); }
         }
         return true;

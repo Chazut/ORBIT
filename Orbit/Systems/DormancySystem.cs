@@ -744,7 +744,7 @@ public partial class DormancySystem
                     agent.SoloExtractIsEmergency ? $"{agent} emergency solo extract" : $"{agent} solo extract near exfil");
             }
             if (_targetedBy.TryGetValue(agent.Player.ProfileId, out var targetingPlayer))
-                return new(GhostWakeCause.Targeted, $"{agent} targeted by {targetingPlayer.Profile?.Nickname} [{targetingPlayer.ProfileId}]");
+                return new(GhostWakeCause.Targeted, $"{agent} targeted by {targetingPlayer.Profile?.Nickname} [{targetingPlayer.ProfileId}]", targetingPlayer, agent.Player.ProfileId, Vector3.Distance(agent.Position, targetingPlayer.Position));
             // Position-based damage (border minefields at least) lands on inactive bodies, and a sleeper
             // can neither react nor heal — hand it back to SAIN immediately.
             var hp = TotalHp(agent);
@@ -756,7 +756,7 @@ public partial class DormancySystem
             var humanSqr = MinSqrDistanceToHumans(agent.Position);
             if (humanSqr <= _wakeDistanceSqr) reason ??= new GhostWakeReason(GhostWakeCause.HumanProximity, $"human at {Mathf.Sqrt(humanSqr):F0}m");
             if (!reason.HasValue && InScopedView(agent.Position, out var scopeDist)) reason = new(GhostWakeCause.ScopedView, $"in scoped view at {scopeDist:F0}m");
-            if (!reason.HasValue && proximity && awakeBotTriggerArmed && AnyAwakeBotNear(agent.Position, squad)) reason = new(GhostWakeCause.BotProximity, $"awake bot near {agent}");
+            if (!reason.HasValue && proximity && awakeBotTriggerArmed && FindAwakeBotNear(agent.Position, squad) is { } neighbour) reason = NeighbourWake(agent.Player, neighbour);
         }
         return reason;
     }
@@ -792,6 +792,11 @@ public partial class DormancySystem
     /// </summary>
     private bool AnyAwakeBotNear(Vector3 position, Squad ownSquad, bool excludeCandidates = false)
     {
+        return FindAwakeBotNear(position, ownSquad, excludeCandidates) != null;
+    }
+
+    private Player FindAwakeBotNear(Vector3 position, Squad ownSquad, bool excludeCandidates = false)
+    {
         var players = _gameWorld.AllAlivePlayersList;
         for (var i = 0; i < players.Count; i++)
         {
@@ -807,9 +812,9 @@ public partial class DormancySystem
             if (!IsActivatedNeighbour(player)) continue;
             if (owner != null && ownSquad != null && IsMemberBot(ownSquad, owner)) continue;
             if (excludeCandidates && owner != null && IsCandidateBot(owner)) continue;
-            return true;
+            return player;
         }
-        return false;
+        return null;
     }
 
     private static bool IsMemberBot(Squad squad, BotOwner owner)
@@ -943,7 +948,7 @@ public partial class DormancySystem
     private void WakeSquad(Squad squad, GhostWakeReason reason)
     {
         for (var i = 0; i < squad.Members.Count; i++)
-            WakeAgent(squad.Members[i]);
+            WakeAgentWithReason(squad.Members[i], reason);
         squad.DormancySleepAllowedAt = Time.time + reason.CooldownSeconds;
         _windowWakes++;
         RecordWake(reason.Cause);
@@ -951,7 +956,11 @@ public partial class DormancySystem
     }
 
     private void WakeAgent(Agent agent)
+        => WakeAgentWithReason(agent, new(GhostWakeCause.GroupChanged, "ownership changed"));
+
+    private void WakeAgentWithReason(Agent agent, GhostWakeReason reason)
     {
+        if (agent.IsDormant) RecordWakeEvent(agent.Player, reason);
         var bot = agent.Bot;
         var player = agent.Player;
 
@@ -2493,7 +2502,7 @@ public partial class DormancySystem
             var nativeReason = _nativeGhosts.WakeReason(bot);
             if (nativeReason != null) return new(GhostWakeCause.NativeFallback, nativeReason);
             if (_targetedBy.TryGetValue(player.ProfileId, out var targetingPlayer))
-                return new(GhostWakeCause.Targeted, $"{player.Profile?.Nickname} targeted by {targetingPlayer.Profile?.Nickname} [{targetingPlayer.ProfileId}]");
+                return new(GhostWakeCause.Targeted, $"{player.Profile?.Nickname} targeted by {targetingPlayer.Profile?.Nickname} [{targetingPlayer.ProfileId}]", targetingPlayer, player.ProfileId, Vector3.Distance(player.Position, targetingPlayer.Position));
             var hp = VanillaHp(bot);
             if (_vanillaHpBaseline.TryGetValue(bot, out var baseline) && hp < baseline - 1f)
             {
@@ -2503,7 +2512,7 @@ public partial class DormancySystem
             var humanSqr = MinSqrDistanceToHumans(player.Position);
             if (humanSqr <= _wakeDistanceSqr) reason ??= new GhostWakeReason(GhostWakeCause.HumanProximity, $"human at {Mathf.Sqrt(humanSqr):F0}m");
             if (!reason.HasValue && InScopedView(player.Position, out var scopeDist)) reason = new(GhostWakeCause.ScopedView, $"in scoped view at {scopeDist:F0}m");
-            if (!reason.HasValue && proximity && awakeBotTriggerArmed && AnyAwakeBotNear(player.Position, null)) reason = new(GhostWakeCause.BotProximity, $"awake bot near {player.Profile?.Nickname}");
+            if (!reason.HasValue && proximity && awakeBotTriggerArmed && FindAwakeBotNear(player.Position, null) is { } neighbour) reason = NeighbourWake(player, neighbour);
         }
         return reason;
     }
@@ -2559,7 +2568,7 @@ public partial class DormancySystem
     private void WakeVanillaGroup(object key, List<BotOwner> group, GhostWakeReason reason)
     {
         for (var i = 0; i < group.Count; i++)
-            WakeVanillaBot(group[i]);
+            WakeVanillaBotWithReason(group[i], reason);
         _vanillaSleepAllowedAt[key] = Time.time + reason.CooldownSeconds;
         _windowWakes++;
         RecordWake(reason.Cause);
@@ -2568,7 +2577,13 @@ public partial class DormancySystem
 
     private bool WakeVanillaBot(BotOwner bot)
     {
+        return WakeVanillaBotWithReason(bot, new(GhostWakeCause.GroupChanged, "ownership changed"));
+    }
+
+    private bool WakeVanillaBotWithReason(BotOwner bot, GhostWakeReason reason)
+    {
         if (!_vanillaDormant.Remove(bot)) return false;
+        RecordWakeEvent(bot.GetPlayer, reason);
         var native = _nativeGhosts.Remove(bot);
         UnthrottleBrain(bot);
         DormantProfileIds.Remove(bot.GetPlayer.ProfileId);

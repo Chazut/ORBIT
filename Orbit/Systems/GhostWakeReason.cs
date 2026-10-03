@@ -11,17 +11,27 @@ internal enum GhostWakeCause
     Damage,
     Targeted,
     RealFight,
+    Spectator,
 }
 
 internal readonly struct GhostWakeReason
 {
     public readonly GhostWakeCause Cause;
     public readonly string Message;
+    public readonly string TriggerProfileId;
+    public readonly string TriggerName;
+    public readonly string MemberProfileId;
+    public readonly float Distance;
 
-    public GhostWakeReason(GhostWakeCause cause, string message)
+    public GhostWakeReason(GhostWakeCause cause, string message, EFT.Player trigger = null,
+        string memberProfileId = null, float distance = -1f)
     {
         Cause = cause;
         Message = message;
+        TriggerProfileId = trigger?.ProfileId;
+        TriggerName = trigger?.Profile?.Nickname;
+        MemberProfileId = memberProfileId;
+        Distance = distance;
     }
 
     // Brief visibility/encounter wakes only need transition stability. Damage, targeting,

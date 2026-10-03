@@ -52,6 +52,7 @@ public class Plugin : BaseUnityPlugin
     public static ConfigEntry<bool> QuietLogging;
     public static ConfigEntry<OrbitLogLevel> LogLevels;
     public static ConfigEntry<bool> PerfLogging;
+    public static ConfigEntry<bool> DiagnosticsEnabled;
 
     // Faction-mod plugin GUIDs — same Chainloader detection raid-review uses.
     private const string UntarPluginGuid = "com.untargh.tacticaltoaster";
@@ -313,6 +314,19 @@ public class Plugin : BaseUnityPlugin
         PerfLogging = Config.Bind(essentials, "Performance logging", false, new ConfigDescription(
             "ON: writes a one-line 'PERF' summary (fps, hitches, GC, ORBIT activity counters) to the log every 30s, regardless of the other logging settings. Turn it on before recording a raid for a performance report.",
             null, new ConfigurationManagerAttributes { Category = "", Order = -1, IsAdvanced = true }));
+        DiagnosticsEnabled = Config.Bind(essentials, "Diagnostic capture", false, new ConfigDescription(
+            "Keep the latest 60 seconds of frame timing, ORBIT Update timing, bot counts and Ghost wake causes in memory. Quiet logging can stay ON. Use Save diagnostic capture just after the problem, before leaving the raid. No continuous log writes.",
+            null, new ConfigurationManagerAttributes { Category = "", Order = -2 }));
+        Config.Bind(essentials, "Save diagnostic capture", string.Empty, new ConfigDescription(
+            "Save the captured window to BepInEx/ORBIT/diagnostics. At most 10 files per raid; send the JSON with the report.",
+            null, new ConfigurationManagerAttributes { Category = "", Order = -3, HideDefaultButton = true, CustomDrawer = DrawDiagnosticCapture }));
+    }
+
+    private static void DrawDiagnosticCapture(ConfigEntryBase entry)
+    {
+        Helpers.DiagnosticCapture.RefreshSaveStatus();
+        if (GUILayout.Button("Save last 60 seconds", GUILayout.ExpandWidth(true))) Helpers.DiagnosticCapture.Save();
+        GUILayout.Label(Helpers.DiagnosticCapture.Status);
     }
 
     // F12 helper: a real button that opens the server web UI in the default browser. The drawer

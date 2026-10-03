@@ -63,6 +63,31 @@ public static class OrbitTelemetry
     {
         lock (PendingGhostFights) PendingGhostFights.Clear();
         lock (PendingGhostHearing) PendingGhostHearing.Clear();
+        lock (PendingGhostWakes) PendingGhostWakes.Clear();
+    }
+
+    private static readonly Queue<OrbitGhostWake> PendingGhostWakes = new();
+
+    internal static void PushGhostWake(OrbitGhostWake wake)
+    {
+        lock (PendingGhostWakes)
+        {
+            if (PendingGhostWakes.Count >= 1024) PendingGhostWakes.Dequeue();
+            PendingGhostWakes.Enqueue(wake);
+        }
+        Helpers.DiagnosticCapture.Wake(wake);
+    }
+
+    /// <summary>Actual wakes since the previous poll; bounded to the latest 1024 if no consumer polls.</summary>
+    public static List<OrbitGhostWake> DrainGhostWakes()
+    {
+        lock (PendingGhostWakes)
+        {
+            if (PendingGhostWakes.Count == 0) return null;
+            var result = new List<OrbitGhostWake>(PendingGhostWakes);
+            PendingGhostWakes.Clear();
+            return result;
+        }
     }
 
     private static readonly List<OrbitGhostHearing> PendingGhostHearing = new();
