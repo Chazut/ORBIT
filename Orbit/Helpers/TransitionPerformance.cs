@@ -9,7 +9,7 @@ namespace Orbit.Helpers;
 internal enum TransitionPhase
 {
     SleepGroup, WakeGroup, SleepBody, WakeBody, WakeNavigation, DoorSync,
-    GuardSchedule, GuardComplete, GhostDeath,
+    GuardSchedule, GuardComplete, GhostDeath, WakeQueue,
     Count
 }
 

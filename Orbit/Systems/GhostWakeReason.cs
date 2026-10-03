@@ -12,6 +12,7 @@ internal enum GhostWakeCause
     Targeted,
     RealFight,
     Spectator,
+    PreWake,
 }
 
 internal readonly struct GhostWakeReason
@@ -38,5 +39,5 @@ internal readonly struct GhostWakeReason
     // deliberate real fights and native fallbacks retain time for the physical AI to act.
     // Expiry never bypasses the independent combat, health, hands or player-distance gates.
     public float CooldownSeconds => Cause is GhostWakeCause.HumanProximity or GhostWakeCause.ScopedView
-        or GhostWakeCause.BotProximity or GhostWakeCause.Extraction or GhostWakeCause.GroupChanged ? 5f : 30f;
+        or GhostWakeCause.BotProximity or GhostWakeCause.Extraction or GhostWakeCause.GroupChanged or GhostWakeCause.PreWake ? 5f : 30f;
 }

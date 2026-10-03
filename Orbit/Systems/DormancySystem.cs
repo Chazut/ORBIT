@@ -372,7 +372,8 @@ public partial class DormancySystem
     {
         if (!_enabled) return;
         // Check before scheduled shots/kills: spectators must see live combat after waking.
-        if (UpdateSpectatorMode()) return;
+        if (UpdateSpectatorMode()) { ClearStagedWakes(); return; }
+        PumpStagedWakes();
         if (_pendingShots.Count > 0) PumpGhostFightShots();
         if (_activeFights.Count > 0) PumpGhostFights();
         _nativeMoveScratch.Clear();
@@ -490,6 +491,7 @@ public partial class DormancySystem
     /// corpse or despawned bot is never left as an invisible inactive GameObject.</summary>
     public void OnAgentRemoved(Agent agent)
     {
+        ForgetStagedBot(agent.Bot);
         NativeAwakeGrenadeDiagnostics.Forget(agent.Bot);
         if (!agent.IsDormant) return;
         agent.IsDormant = false;
@@ -539,6 +541,7 @@ public partial class DormancySystem
 
     private void ScanWorld()
     {
+        BeginWakeHumanScan();
         _humanPositions.Clear();
         _targetedBy.Clear();
 
@@ -554,6 +557,7 @@ public partial class DormancySystem
                 if (!player.AIData.IsAI)
                 {
                     _humanPositions.Add(player.Position);
+                    TrackWakeHuman(player);
                     continue;
                 }
 
@@ -620,6 +624,7 @@ public partial class DormancySystem
 
     private bool CanSleep(Squad squad, bool joining = false)
     {
+        if (IsWaking(squad)) return false;
         // Distance gate first: a squad near a human is simply "in play", not diagnostic. Everything
         // counted below answers the verification question "why does a FAR squad stay awake?".
         // Default-dormant types (per-type toggles) use the tighter ring.
@@ -783,7 +788,7 @@ public partial class DormancySystem
             if (!reason.HasValue && InScopedView(agent.Position, out var scopeDist)) reason = new(GhostWakeCause.ScopedView, $"in scoped view at {scopeDist:F0}m");
             if (!reason.HasValue && proximity && awakeBotTriggerArmed && FindAwakeBotNear(agent.Position, squad) is { } neighbour) reason = NeighbourWake(agent.Player, neighbour);
         }
-        return reason;
+        return reason ?? PreWakeReason(squad);
     }
 
     private float MinSqrDistanceToHumans(Vector3 position)
@@ -915,6 +920,7 @@ public partial class DormancySystem
 
     private void SleepSquad(Squad squad)
     {
+        if (IsWaking(squad)) return;
         using var timing = TransitionPerformance.Measure(TransitionPhase.SleepGroup);
         var joining = SquadDormantCount(squad) > 0;
         var added = 0;
@@ -973,6 +979,7 @@ public partial class DormancySystem
     {
         switch (cause)
         {
+            case GhostWakeCause.PreWake:
             case GhostWakeCause.HumanProximity: _wakeByHuman++; break;
             case GhostWakeCause.ScopedView: _wakeByScope++; break;
             case GhostWakeCause.BotProximity: _wakeByAwakeBot++; break;
@@ -984,6 +991,9 @@ public partial class DormancySystem
 
     private void WakeSquad(Squad squad, GhostWakeReason reason)
     {
+        if (TryStageWake(squad, reason)) return;
+        CancelStagedWake(squad);
+        _wakeFrameBudget.Urgent(Time.frameCount);
         using var timing = TransitionPerformance.Measure(TransitionPhase.WakeGroup);
         for (var i = 0; i < squad.Members.Count; i++)
             // Awake or initializing newcomers already own their body. Never PostActivate them here.
@@ -1399,7 +1409,7 @@ public partial class DormancySystem
         for (var i = 0; i < squads.Count; i++)
         {
             var squad = squads[i];
-            if (squad == null || squad.Members.Count == 0 || !IsSquadDormant(squad)) continue;
+            if (squad == null || squad.Members.Count == 0 || !IsSquadDormant(squad) || IsWaking(squad)) continue;
             var lead = squad.Members[0];
             var unit = new GhostUnit
             {
@@ -1423,6 +1433,7 @@ public partial class DormancySystem
 
         foreach (var kv in _vanillaGroups)
         {
+            if (IsWaking(kv.Key)) continue;
             var group = kv.Value;
             if (group.Count == 0 || !_vanillaDormant.Contains(group[0])) continue;
             var lead = group[0].GetPlayer;
@@ -2473,6 +2484,12 @@ public partial class DormancySystem
         foreach (var kv in _vanillaGroups)
         {
             var group = kv.Value;
+            if (IsWaking(kv.Key))
+            {
+                var pendingReason = VanillaWakeReason(kv.Key, group, proximity: false);
+                if (pendingReason.HasValue) WakeVanillaGroup(kv.Key, group, pendingReason.Value);
+                continue;
+            }
             var dormant = 0;
             for (var i = 0; i < group.Count; i++)
                 if (_vanillaDormant.Contains(group[i])) dormant++;
@@ -2501,6 +2518,7 @@ public partial class DormancySystem
 
     private bool CanVanillaSleep(object key, List<BotOwner> group, bool joining = false)
     {
+        if (IsWaking(key)) return false;
         if (_vanillaSleepAllowedAt.TryGetValue(key, out var allowedAt) && Time.time < allowedAt)
             return NativeGhostDiagnostics.Refuse(group[0], "wake-cooldown", groupSize: group.Count);
 
@@ -2560,11 +2578,12 @@ public partial class DormancySystem
             if (!reason.HasValue && InScopedView(player.Position, out var scopeDist)) reason = new(GhostWakeCause.ScopedView, $"in scoped view at {scopeDist:F0}m");
             if (!reason.HasValue && proximity && awakeBotTriggerArmed && FindAwakeBotNear(player.Position, null) is { } neighbour) reason = NeighbourWake(player, neighbour);
         }
-        return reason;
+        return reason ?? PreWakeReason(key, group);
     }
 
     private void SleepVanillaGroup(object key, List<BotOwner> group)
     {
+        if (IsWaking(key)) return;
         using var timing = TransitionPerformance.Measure(TransitionPhase.SleepGroup);
         var native = _cfg.NativeGhostMovement && GhostMovementEnabled;
         var joining = VanillaDormantCount(group) > 0;
@@ -2615,6 +2634,9 @@ public partial class DormancySystem
 
     private void WakeVanillaGroup(object key, List<BotOwner> group, GhostWakeReason reason)
     {
+        if (TryStageWake(key, group, reason)) return;
+        CancelStagedWake(key);
+        _wakeFrameBudget.Urgent(Time.frameCount);
         using var timing = TransitionPerformance.Measure(TransitionPhase.WakeGroup);
         for (var i = 0; i < group.Count; i++)
             WakeVanillaBotWithReason(group[i], reason);
@@ -2663,6 +2685,7 @@ public partial class DormancySystem
 
     public void OnVanillaRemoved(BotOwner bot)
     {
+        ForgetStagedBot(bot);
         NativePatrolDiagnostics.Forget(bot);
         var dormant = _vanillaDormant.Remove(bot);
         _nativeGhosts.Remove(bot);
