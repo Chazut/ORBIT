@@ -25,6 +25,8 @@ internal static class DiagnosticCapture
     private static float _nextSample, _startedAt, _frameSum, _frameMax;
     private static double _orbitSum, _orbitMax;
     private static int _frames, _hitches, _gc, _saved;
+    private static int _firstUpdateFrame, _maxFrameObservedAtFrame, _maxOrbitUpdateFrame;
+    private static float _maxOrbitUpdateRecordedAt;
     private static bool _enabled, _pending;
     private static float _nextCaptureAt, _saveAt, _triggerAt, _triggerFrameMs;
     private static Task<string> _writer;
@@ -36,6 +38,9 @@ internal static class DiagnosticCapture
         public float RecordedAt, AverageFrameMs, MaxFrameMs;
         public double AverageOrbitUpdateMs, MaxOrbitUpdateMs;
         public int Frames, HitchesOver100Ms, Gc0, AwakeBots, GhostBots, AwakeWithinWakeDistance;
+        public int FirstUpdateFrame, LastUpdateFrame, MaxFrameObservedAtFrame, MaxOrbitUpdateFrame;
+        public float MaxOrbitUpdateRecordedAt;
+        public TransitionPerformance.PhaseSample[] PhaseTimings, SlowestOrbitUpdatePhases;
     }
 
     internal static void Reset(string map)
@@ -50,6 +55,9 @@ internal static class DiagnosticCapture
     {
         _nextSample = Time.realtimeSinceStartup + 1f;
         _frames = _hitches = 0; _frameSum = _frameMax = 0f; _orbitSum = _orbitMax = 0;
+        _firstUpdateFrame = _maxFrameObservedAtFrame = _maxOrbitUpdateFrame = -1;
+        _maxOrbitUpdateRecordedAt = 0;
+        TransitionPerformance.ResetCaptureWindow();
         _gc = GC.CollectionCount(0);
     }
 
@@ -66,7 +74,9 @@ internal static class DiagnosticCapture
             _pending = false;
             Status = enabled ? "Automatic performance capture enabled." : "Performance logging is disabled.";
         }
-        return enabled ? Stopwatch.GetTimestamp() : 0;
+        if (!enabled) return 0;
+        TransitionPerformance.BeginCaptureFrame();
+        return Stopwatch.GetTimestamp();
     }
 
     internal static void RefreshSaveStatus()
@@ -83,9 +93,18 @@ internal static class DiagnosticCapture
     {
         if (start == 0) return;
         var elapsed = (Stopwatch.GetTimestamp() - start) * 1000d / Stopwatch.Frequency;
-        _orbitSum += elapsed; _orbitMax = Math.Max(_orbitMax, elapsed);
+        TransitionPerformance.EndCaptureFrame(elapsed);
+        var frame = Time.frameCount;
+        if (_frames == 0) _firstUpdateFrame = frame;
+        _orbitSum += elapsed;
+        if (_frames == 0 || elapsed > _orbitMax)
+        {
+            _orbitMax = elapsed; _maxOrbitUpdateFrame = frame;
+            _maxOrbitUpdateRecordedAt = Time.realtimeSinceStartup;
+        }
         var frameMs = Time.unscaledDeltaTime * 1000f;
-        _frames++; _frameSum += frameMs; _frameMax = Math.Max(_frameMax, frameMs);
+        if (_frames == 0 || frameMs > _frameMax) { _frameMax = frameMs; _maxFrameObservedAtFrame = frame; }
+        _frames++; _frameSum += frameMs;
         if (frameMs > 100f) _hitches++;
         var now = Time.realtimeSinceStartup;
         if (!_pending && _saved < MaxCapturesPerRaid && now >= _nextCaptureAt && frameMs >= TriggerFrameMs)
@@ -100,6 +119,11 @@ internal static class DiagnosticCapture
         {
             RecordedAt = now, Frames = _frames, AverageFrameMs = _frameSum / _frames, MaxFrameMs = _frameMax,
             AverageOrbitUpdateMs = _orbitSum / _frames, MaxOrbitUpdateMs = _orbitMax,
+            FirstUpdateFrame = _firstUpdateFrame, LastUpdateFrame = frame,
+            MaxFrameObservedAtFrame = _maxFrameObservedAtFrame, MaxOrbitUpdateFrame = _maxOrbitUpdateFrame,
+            MaxOrbitUpdateRecordedAt = _maxOrbitUpdateRecordedAt,
+            PhaseTimings = TransitionPerformance.SnapshotInterval(),
+            SlowestOrbitUpdatePhases = TransitionPerformance.SnapshotPeakUpdate(),
             HitchesOver100Ms = _hitches, Gc0 = GC.CollectionCount(0) - _gc,
         };
         var players = Singleton<GameWorld>.Instance?.AllAlivePlayersList;
@@ -154,9 +178,9 @@ internal static class DiagnosticCapture
         Prune(Time.realtimeSinceStartup);
         var data = new
         {
-            Schema = 1, Map = _map, CapturedUtc = DateTime.UtcNow, CaptureStartedAt = _startedAt,
+            Schema = 2, Map = _map, CapturedUtc = DateTime.UtcNow, CaptureStartedAt = _startedAt,
             TriggeredAt = _triggerAt, TriggerFrameMs = _triggerFrameMs, SavedAt = Time.realtimeSinceStartup,
-            Notes = "Times use Unity realtime seconds. Samples summarize the preceding interval; bot counts are sampled at its end. ORBIT timing covers OrbitManager.Update only, not every patch or the rest of the game. Correlation does not establish the cause of a hitch.",
+            Notes = "Times use Unity realtime seconds. Samples summarize the preceding interval; bot counts are sampled at its end. Frame duration uses Unity's previous-frame delta, observed at MaxFrameObservedAtFrame; current Update timing uses MaxOrbitUpdateFrame and MaxOrbitUpdateRecordedAt. PhaseTimings cover all measured calls within Update in the interval. SlowestOrbitUpdatePhases cover only MaxOrbitUpdateFrame. Nested phases are inclusive and must not be added together. Update timing excludes capture bookkeeping, other patches and the rest of the game. Correlation does not establish the cause of a hitch.",
             WakeDistance = ServerConfig.GhostMode.WakeDistance,
             SleepDistance = ServerConfig.GhostMode.SleepDistance,
             HostileWakeDistance = ServerConfig.GhostMode.HostileWakeDistance,
@@ -184,5 +208,6 @@ internal static class DiagnosticCapture
         Save();
         _map = null; _enabled = _pending = false;
         Samples.Clear(); Wakes.Clear(); Humans.Clear();
+        TransitionPerformance.ResetCaptureWindow();
     }
 }

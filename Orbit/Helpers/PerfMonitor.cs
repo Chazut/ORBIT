@@ -36,6 +36,11 @@ public static class PerfMonitor
     public static void Reset()
     {
         TransitionPerformance.Reset();
+        ResetWindow();
+    }
+
+    private static void ResetWindow()
+    {
         _windowStart = Time.unscaledTime;
         _frames = 0;
         _sumDt = 0f;
@@ -79,6 +84,6 @@ public static class PerfMonitor
         // Quiet logging (default ON) must not silence it.
         Log.Always($"PERF: avg={avg:F0}fps worst={worst:F0}fps hitch50={_hitches} hitch100={_bigHitches} gc0={gc0} agents={agentCount} dormant={dormantCount} | islandProbes={SpawnIslandProbes} rallyWp={RallyWaypointsCreated} sweeps={SweepJobsSubmitted}s/{SweepJobsCompleted}c/{SweepJobsDrained}d navQpeak={NavJobsQueuedPeak}");
         TransitionPerformance.Flush();
-        Reset();
+        ResetWindow();
     }
 }

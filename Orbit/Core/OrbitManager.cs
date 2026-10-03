@@ -4,6 +4,7 @@ using Comfort.Common;
 using EFT;
 using Orbit.Config;
 using Orbit.Entities;
+using Orbit.Helpers;
 using Orbit.Navigation;
 using Orbit.Systems;
 using Orbit.Tasks;
@@ -203,6 +204,7 @@ public class OrbitManager
 
     public void RemoveAgent(Agent agent)
     {
+        using var timing = TransitionPerformance.Measure(TransitionPhase.AgentRemove);
         // Death can fire RemoveAgent once per brain layer wired for this bot (each layer's OnPlayerDead survives
         // brain swaps), but the teardown below is not idempotent (id slots get recycled). Bail unless this agent
         // is still the live registration; the first pass nulls the roster slot and later passes no-op.
@@ -221,18 +223,29 @@ public class OrbitManager
     public void Update()
     {
         var captureStart = Orbit.Helpers.DiagnosticCapture.BeginFrame();
-        PurgeDestroyedAgents();
-        BotLandingGuard.Tick();
-        Orbit.Helpers.PerfMonitor.Tick(_liveAgents.Count, DormancySystem.DormantCount);
-        StrategyManager.Update();
-        ActionManager.Update();
-        TickEmergencyExtractWatchdog();
+        using (TransitionPerformance.Measure(TransitionPhase.UpdatePurge))
+            PurgeDestroyedAgents();
+        using (TransitionPerformance.Measure(TransitionPhase.UpdateLanding))
+            BotLandingGuard.Tick();
+        using (TransitionPerformance.Measure(TransitionPhase.UpdateTelemetry))
+            Orbit.Helpers.PerfMonitor.Tick(_liveAgents.Count, DormancySystem.DormantCount);
+        using (TransitionPerformance.Measure(TransitionPhase.UpdateStrategy))
+            StrategyManager.Update();
+        using (TransitionPerformance.Measure(TransitionPhase.UpdateActions))
+            ActionManager.Update();
+        using (TransitionPerformance.Measure(TransitionPhase.UpdateExtract))
+            TickEmergencyExtractWatchdog();
         // Sleep/wake decisions before movement so this frame's mover tick sees fresh dormancy state.
-        DormancySystem.Update(_liveAgents, _liveSquads);
-        MovementSystem.Update(_liveAgents);
-        LookSystem.Update(_liveAgents);
-        WaypointSystem.Update();
-        NavJobExecutor.Update();
+        using (TransitionPerformance.Measure(TransitionPhase.UpdateDormancy))
+            DormancySystem.Update(_liveAgents, _liveSquads);
+        using (TransitionPerformance.Measure(TransitionPhase.UpdateMovement))
+            MovementSystem.Update(_liveAgents);
+        using (TransitionPerformance.Measure(TransitionPhase.UpdateLook))
+            LookSystem.Update(_liveAgents);
+        using (TransitionPerformance.Measure(TransitionPhase.UpdateWaypoints))
+            WaypointSystem.Update();
+        using (TransitionPerformance.Measure(TransitionPhase.UpdateNavigation))
+            NavJobExecutor.Update();
         Orbit.Helpers.DiagnosticCapture.EndFrame(captureStart);
     }
 

@@ -2330,6 +2330,8 @@ public partial class DormancySystem
     /// </summary>
     private void KillWithAttribution(Player victim, Player killer)
     {
+        // Includes synchronous engine and mod death callbacks, not only ORBIT's own work.
+        using var timing = TransitionPerformance.Measure(TransitionPhase.GhostDeathDamage);
         var damageInfo = new EFT.Ballistics.DamageInfo
         {
             DamageType = EDamageType.Bullet,
@@ -2363,17 +2365,23 @@ public partial class DormancySystem
     private void KillGhostAgent(Agent victim, Player killer)
     {
         using var timing = TransitionPerformance.Measure(TransitionPhase.GhostDeath);
-        victim.IsDormant = false;
-        _dormantAgents.Remove(victim);
-        DormantProfileIds.Remove(victim.Player.ProfileId);
+        using (TransitionPerformance.Measure(TransitionPhase.GhostDeathPrepare))
+        {
+            victim.IsDormant = false;
+            _dormantAgents.Remove(victim);
+            DormantProfileIds.Remove(victim.Player.ProfileId);
+        }
         try
         {
-            var bot = victim.Bot;
-            UnthrottleBrain(bot);
-            using (TransitionPerformance.Measure(TransitionPhase.WakeBody))
-                bot.gameObject.SetActive(true);
-            bot.PatrollingData.Unpause();
-            bot.PostActivate();
+            using (TransitionPerformance.Measure(TransitionPhase.GhostDeathRestore))
+            {
+                var bot = victim.Bot;
+                UnthrottleBrain(bot);
+                using (TransitionPerformance.Measure(TransitionPhase.WakeBody))
+                    bot.gameObject.SetActive(true);
+                bot.PatrollingData.Unpause();
+                bot.PostActivate();
+            }
             Log.Info($"GHOST SKIRMISH: {victim} killed in action by {killer?.Profile?.Nickname ?? "?"}");
             KillWithAttribution(victim.Player, killer);
         }
@@ -2386,17 +2394,24 @@ public partial class DormancySystem
     private void KillGhostVanilla(BotOwner victim, Player killer)
     {
         using var timing = TransitionPerformance.Measure(TransitionPhase.GhostDeath);
-        var native = _nativeGhosts.Remove(victim);
-        _vanillaDormant.Remove(victim);
-        UnthrottleBrain(victim);
-        DormantProfileIds.Remove(victim.GetPlayer?.ProfileId);
+        bool native;
+        using (TransitionPerformance.Measure(TransitionPhase.GhostDeathPrepare))
+        {
+            native = _nativeGhosts.Remove(victim);
+            _vanillaDormant.Remove(victim);
+            UnthrottleBrain(victim);
+            DormantProfileIds.Remove(victim.GetPlayer?.ProfileId);
+        }
         try
         {
-            using (TransitionPerformance.Measure(TransitionPhase.WakeBody))
-                victim.gameObject.SetActive(true);
-            if (!native) victim.PatrollingData.Unpause();
-            victim.PostActivate();
-            if (native) NativeGhostSystem.ResyncAfterWake(victim);
+            using (TransitionPerformance.Measure(TransitionPhase.GhostDeathRestore))
+            {
+                using (TransitionPerformance.Measure(TransitionPhase.WakeBody))
+                    victim.gameObject.SetActive(true);
+                if (!native) victim.PatrollingData.Unpause();
+                victim.PostActivate();
+                if (native) NativeGhostSystem.ResyncAfterWake(victim);
+            }
             Log.Info($"GHOST SKIRMISH: vanilla {victim.GetPlayer?.Profile?.Nickname} killed in action by {killer?.Profile?.Nickname ?? "?"}");
             KillWithAttribution(victim.GetPlayer, killer);
         }
