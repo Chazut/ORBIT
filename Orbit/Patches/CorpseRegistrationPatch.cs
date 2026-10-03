@@ -30,6 +30,7 @@ public class CorpseRegistrationPatch : ModulePatch
     [PatchPostfix]
     public static void Postfix(Player __instance, Corpse __result)
     {
+        using var timing = GhostDeathDiagnostics.Measure(TransitionPhase.GhostCorpseRegistration);
         if (__result == null)
         {
             Log.Debug($"CorpseRegistration: NULL __result for {__instance?.Profile?.Info?.Nickname ?? "?"} — no waypoint created");

@@ -178,6 +178,7 @@ public static class ServerConfig
         [JsonProperty("sleep_distance")] public float SleepDistance = 250f;
         [JsonProperty("wake_distance")] public float WakeDistance = 200f;
         [JsonProperty("hostile_wake_distance")] public float HostileWakeDistance = 75f;
+        [JsonProperty("wake_interval_ms")] public float WakeIntervalMs = 50f;
         [JsonProperty("scoped_wake")] public bool ScopedWake = true;
         [JsonProperty("scoped_wake_max_distance")] public float ScopedWakeMaxDistance = 800f;
     }

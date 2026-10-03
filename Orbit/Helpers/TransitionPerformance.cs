@@ -13,6 +13,12 @@ internal enum TransitionPhase
     UpdatePurge, UpdateLanding, UpdateTelemetry, UpdateStrategy, UpdateActions,
     UpdateExtract, UpdateDormancy, UpdateMovement, UpdateLook, UpdateWaypoints, UpdateNavigation,
     GhostDeathPrepare, GhostDeathRestore, GhostDeathDamage, AgentRemove,
+    GhostActivation, GhostSpectator, GhostShots, GhostAudioPlay, GhostAudioTail, GhostFights, GhostNativeMove,
+    GhostScan, GhostScope, GhostAdmission, GhostContacts, GhostHearing, GhostHealing,
+    GhostDeathInfo, GhostDeathChest, GhostDeathHead, GhostDeathFallback,
+    GhostHealthDamage, GhostHealthKill, GhostOnDead, GhostAggressor, GhostCorpse, GhostCorpseImpulse,
+    GhostDeathSound, GhostPlayerDeadCallbacks, GhostGlobalDeadCallbacks, GhostUnspawnCallbacks,
+    GhostIPlayerUnspawnCallbacks, GhostExfilCallback, GhostInteractionCallback, GhostCorpseRegistration,
     Count
 }
 
@@ -83,6 +89,13 @@ internal static class TransitionPerformance
 
     internal static Scope Measure(TransitionPhase phase)
         => Plugin.PerfLogging is { Value: true } ? new Scope(phase) : default;
+
+    // Engine activation runs outside OrbitManager.Update. Include it in the log summary only;
+    // its detached capture events carry explicit frames without polluting Update-only snapshots.
+    internal static void RecordExternal(TransitionPhase phase, long ticks, int frame)
+    {
+        if (Plugin.PerfLogging is { Value: true }) Record(Samples, phase, ticks, frame);
+    }
 
     internal static void BeginCaptureFrame()
     {

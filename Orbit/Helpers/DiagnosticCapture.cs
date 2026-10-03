@@ -20,6 +20,8 @@ internal static class DiagnosticCapture
     private const int MaxCapturesPerRaid = 10;
     private static readonly Queue<Sample> Samples = new();
     private static readonly Queue<OrbitGhostWake> Wakes = new();
+    private static readonly Queue<WakeDecisionSample> WakeDecisions = new();
+    private static readonly Queue<WakeActivationSample> WakeActivations = new();
     private static readonly List<Vector3> Humans = new();
     private static string _map;
     private static float _nextSample, _startedAt, _frameSum, _frameMax;
@@ -43,9 +45,45 @@ internal static class DiagnosticCapture
         public TransitionPerformance.PhaseSample[] PhaseTimings, SlowestOrbitUpdatePhases;
     }
 
+    internal sealed class WakeDecisionSample
+    {
+        public string Mode, Cause, Detail, ProfileId;
+        public int Frame, PendingGroups;
+        public float RecordedAt, WaitedMs;
+    }
+
+    internal sealed class WakeActivationSample
+    {
+        public string ProfileId, State;
+        public int Calls, PeakFrame, CompletedFrame;
+        public float RecordedAt;
+        public double TotalMs, MaxMs, LatencyMs;
+    }
+
+    internal static void WakeActivation(string profileId, string state, int calls, double totalMs, double maxMs, int peakFrame, double latencyMs)
+    {
+        if (!IsRecording) return;
+        if (WakeActivations.Count >= 256) WakeActivations.Dequeue();
+        WakeActivations.Enqueue(new WakeActivationSample { ProfileId = profileId, State = state, Calls = calls,
+            TotalMs = totalMs, MaxMs = maxMs, PeakFrame = peakFrame, LatencyMs = latencyMs,
+            RecordedAt = Time.realtimeSinceStartup, CompletedFrame = Time.frameCount });
+        Log.Always(FormattableString.Invariant($"PERF WAKE READY: member={profileId} state={state} calls={calls} totalMs={totalMs:F3} maxMs={maxMs:F3} peakFrame={peakFrame} latencyMs={latencyMs:F1}"));
+    }
+
+    internal static void WakeDecision(string mode, string cause, string detail, string profileId, int pendingGroups, float waitedMs)
+    {
+        if (!IsRecording) return;
+        var sample = new WakeDecisionSample { Mode = mode, Cause = cause, Detail = detail,
+            ProfileId = profileId, Frame = Time.frameCount, RecordedAt = Time.realtimeSinceStartup,
+            PendingGroups = pendingGroups, WaitedMs = waitedMs };
+        if (WakeDecisions.Count >= 512) WakeDecisions.Dequeue();
+        WakeDecisions.Enqueue(sample);
+        Log.Always(FormattableString.Invariant($"PERF WAKE: mode={mode} cause={cause} detail={detail} member={profileId} pending={pendingGroups} waitedMs={waitedMs:F1}"));
+    }
+
     internal static void Reset(string map)
     {
-        Samples.Clear(); Wakes.Clear(); Humans.Clear();
+        Samples.Clear(); Wakes.Clear(); WakeDecisions.Clear(); WakeActivations.Clear(); Humans.Clear();
         _map = map; _enabled = _pending = false; _saved = 0;
         Status = "Waiting for Performance logging during a raid.";
         ClearWindow();
@@ -68,7 +106,7 @@ internal static class DiagnosticCapture
         if (enabled != _enabled)
         {
             _enabled = enabled;
-            Samples.Clear(); Wakes.Clear(); ClearWindow();
+            Samples.Clear(); Wakes.Clear(); WakeDecisions.Clear(); WakeActivations.Clear(); ClearWindow();
             _startedAt = Time.realtimeSinceStartup;
             _nextCaptureAt = _startedAt + StartupGraceSeconds;
             _pending = false;
@@ -167,6 +205,8 @@ internal static class DiagnosticCapture
     {
         while (Samples.Count > 60 || Samples.Count > 0 && Samples.Peek().RecordedAt < now - 60f) Samples.Dequeue();
         while (Wakes.Count > 0 && Wakes.Peek().RecordedAt < now - 60f) Wakes.Dequeue();
+        while (WakeDecisions.Count > 0 && WakeDecisions.Peek().RecordedAt < now - 60f) WakeDecisions.Dequeue();
+        while (WakeActivations.Count > 0 && WakeActivations.Peek().RecordedAt < now - 60f) WakeActivations.Dequeue();
     }
 
     private static void Save()
@@ -178,14 +218,15 @@ internal static class DiagnosticCapture
         Prune(Time.realtimeSinceStartup);
         var data = new
         {
-            Schema = 2, Map = _map, CapturedUtc = DateTime.UtcNow, CaptureStartedAt = _startedAt,
+            Schema = 3, Map = _map, CapturedUtc = DateTime.UtcNow, CaptureStartedAt = _startedAt,
             TriggeredAt = _triggerAt, TriggerFrameMs = _triggerFrameMs, SavedAt = Time.realtimeSinceStartup,
-            Notes = "Times use Unity realtime seconds. Samples summarize the preceding interval; bot counts are sampled at its end. Frame duration uses Unity's previous-frame delta, observed at MaxFrameObservedAtFrame; current Update timing uses MaxOrbitUpdateFrame and MaxOrbitUpdateRecordedAt. PhaseTimings cover all measured calls within Update in the interval. SlowestOrbitUpdatePhases cover only MaxOrbitUpdateFrame. Nested phases are inclusive and must not be added together. Update timing excludes capture bookkeeping, other patches and the rest of the game. Correlation does not establish the cause of a hitch.",
+            Notes = "Times use Unity realtime seconds. Samples summarize the preceding interval; bot counts are sampled at its end. Frame duration uses Unity's previous-frame delta, observed at MaxFrameObservedAtFrame; current Update timing uses MaxOrbitUpdateFrame and MaxOrbitUpdateRecordedAt. PhaseTimings cover measured calls in the interval. SlowestOrbitUpdatePhases cover only MaxOrbitUpdateFrame. Nested phases and death callback groups are inclusive and must not be added together. Update timing excludes capture bookkeeping and the rest of the game. WakeActivations separately measure the engine's deferred PreActive ticks, outside ORBIT Update: TotalMs/MaxMs measure work; LatencyMs also includes waiting between ticks. Correlation does not establish the cause of a hitch.",
             WakeDistance = ServerConfig.GhostMode.WakeDistance,
             SleepDistance = ServerConfig.GhostMode.SleepDistance,
             HostileWakeDistance = ServerConfig.GhostMode.HostileWakeDistance,
             GhostAwakeBehavior = ServerConfig.GhostMode.GhostAwakeBehavior,
-            Samples = Samples.ToArray(), Wakes = Wakes.ToArray(),
+            WakeIntervalMs = ServerConfig.GhostMode.WakeIntervalMs,
+            Samples = Samples.ToArray(), Wakes = Wakes.ToArray(), WakeDecisions = WakeDecisions.ToArray(), WakeActivations = WakeActivations.ToArray(),
         };
         var folder = Path.Combine(BepInEx.Paths.BepInExRootPath, "ORBIT", "diagnostics");
         var path = Path.Combine(folder, "capture-" + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss-fff") + "-" + Guid.NewGuid().ToString("N") + ".json");
@@ -207,7 +248,7 @@ internal static class DiagnosticCapture
         // Preserve a pending hitch if the raid ends before its post-hitch window is complete.
         Save();
         _map = null; _enabled = _pending = false;
-        Samples.Clear(); Wakes.Clear(); Humans.Clear();
+        Samples.Clear(); Wakes.Clear(); WakeDecisions.Clear(); WakeActivations.Clear(); Humans.Clear();
         TransitionPerformance.ResetCaptureWindow();
     }
 }

@@ -148,6 +148,8 @@ public class Plugin : BaseUnityPlugin
         EnableSafe(new InventoryChangePatch());
         EnableSafe(new LootItemKilledPatch());
         EnableSafe(new CorpseRegistrationPatch());
+        GhostDeathDiagnostics.Enable();
+        GhostWakeActivationDiagnostics.Enable();
         EnableSafe(new RescueInterceptPatch());
 
         // BSG layer bypasses
