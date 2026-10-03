@@ -155,7 +155,8 @@ public static class AddonDiscovery
     private static void Merge(JsonObject target, JsonObject source)
     {
         foreach (var (key, value) in source)
-            if (target[key] is JsonObject child && value is JsonObject other) Merge(child, other);
+            if (key == "map_overrides") target[key] = value?.DeepClone();
+            else if (target[key] is JsonObject child && value is JsonObject other) Merge(child, other);
             else target[key] = value?.DeepClone();
     }
 }

@@ -1,0 +1,24 @@
+<div class="mb-4">
+    <OrbitSwitch Value="Value.HasValue" ValueChanged="Toggle" Label="@($"Override {Label}")" />
+    @if (Value.HasValue)
+    {
+        <OrbitSlider T="float" Label="@Label" Value="Value.Value" ValueChanged="Change" Min="Min" Max="Max" Step="Step" Unit="@Unit" Fmt="0.#" />
+    }
+    else
+    {
+        <MudText Typo="Typo.body2" Color="Color.Secondary">@Label: @Inherited.ToString("0.#") @Unit (inherited)</MudText>
+    }
+</div>
+
+@code {
+    [Parameter] public string Label { get; set; } = "";
+    [Parameter] public string? Unit { get; set; }
+    [Parameter] public float? Value { get; set; }
+    [Parameter] public EventCallback<float?> ValueChanged { get; set; }
+    [Parameter] public float Inherited { get; set; }
+    [Parameter] public float Min { get; set; }
+    [Parameter] public float Max { get; set; }
+    [Parameter] public float Step { get; set; } = 1;
+    private Task Toggle(bool on) => ValueChanged.InvokeAsync(on ? Math.Clamp(Inherited, Min, Max) : null);
+    private Task Change(float value) => ValueChanged.InvokeAsync(value);
+}

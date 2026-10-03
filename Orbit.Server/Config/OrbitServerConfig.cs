@@ -14,6 +14,8 @@ namespace Orbit.Server.Config;
 public class OrbitServerConfig
 {
     public int ConfigVersion { get; set; } = 2;
+    public Orbit.Settings.MovementSettings Movement { get; set; } = new();
+    public Dictionary<string, Orbit.Settings.MapBehaviorOverride> MapOverrides { get; set; } = new();
     public FactionsConfig Factions { get; set; } = new();
     public GeneralConfig General { get; set; } = new();
     public LootConfig Loot { get; set; } = new();
@@ -183,6 +185,9 @@ public class PlayerScavConfig
 /// <summary>F12 "08. Main objectives" global knobs (per-archetype values live in Personalities).</summary>
 public class MainObjectivesConfig
 {
+    public float QuestWeightScale { get; set; } = 1f;
+    public float KillsWeightScale { get; set; } = 1f;
+    public float LootWeightScale { get; set; } = 1f;
     public bool Enabled { get; set; } = true;
     public bool EnabledForPmc { get; set; } = true;
     public bool ExtractOnAllCompleted { get; set; } = true;

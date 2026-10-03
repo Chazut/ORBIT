@@ -95,6 +95,9 @@ public static class MainObjectiveBuilder
             wKills = Mathf.Max(0f, ServerConfig.PlayerScav.MainMixKills);
             wLootValue = Mathf.Max(0f, ServerConfig.PlayerScav.MainMixLootValue);
         }
+        wQuest *= ServerConfig.MainObjectives.QuestWeightScale;
+        wKills *= ServerConfig.MainObjectives.KillsWeightScale;
+        wLootValue *= ServerConfig.MainObjectives.LootWeightScale;
         var wSum = wQuest + wKills + wLootValue;
         if (wSum < 0.0001f) { wLootValue = 1f; wSum = 1f; } // degenerate: default LootValue
         var thQuest = wQuest / wSum;

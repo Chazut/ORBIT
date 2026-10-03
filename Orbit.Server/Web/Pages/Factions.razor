@@ -48,11 +48,21 @@
         <OrbitSlider T="int" @bind-Value="Cfg.Factions.BloodhoundAreaRoamingPct" Label="Bloodhounds" Unit="%" Min="0" Max="100" Step="5"
                      Tooltip="Share of Bloodhound squads allowed to roam map-wide." />
     </SettingsCard>
+    <SettingsCard Title="Sprint outside combat" OnReset="ResetSprint"
+                  Subtitle="Applies only while ORBIT directs movement. 0% means walking; higher propensity means more sprinting on travel legs, not a guaranteed percentage of raid time. PMC sprint remains on the Personalities page. Vanilla and SAIN combat movement are unchanged.">
+        @foreach (var type in Orbit.Settings.MovementSettings.Defaults().Keys)
+        {
+            <OrbitSlider T="float" Label="@type" Value="Cfg.Movement.For(type)"
+                         ValueChanged="@((float v) => Cfg.Movement.SprintByType[type] = v)"
+                         Min="0f" Max="1f" Step="0.05f" Fmt="P0" />
+        }
+    </SettingsCard>
 </MudContainer>
 
 @code {
     // Every FactionsConfig field lives on this page, so a fresh instance is the page's defaults.
-    private void ResetPage() => Cfg.Factions = new FactionsConfig();
+    private void ResetPage() { Cfg.Factions = new FactionsConfig(); ResetSprint(); }
+    private void ResetSprint() => Cfg.Movement = new Orbit.Settings.MovementSettings();
 
     // Explain the native movement option when retaining vanilla behaviour.
     // Cancel leaves the toggle untouched.

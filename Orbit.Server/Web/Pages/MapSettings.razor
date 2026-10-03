@@ -1,0 +1,70 @@
+@page "/orbit/map-settings"
+@layout Orbit.Server.Web.Shared.MainLayout
+@inherits Orbit.Server.Web.OrbitConfigPage
+@using Orbit.Settings
+@using Orbit.Server.Zones
+
+<PageTitle>ORBIT: Map settings</PageTitle>
+<MudContainer MaxWidth="MaxWidth.Medium">
+    <PageHeader Title="Map settings" OnReset="ResetMap"
+                Description="Override only the values you want for this map. Other values follow global settings. Rework maps inherit their base map first. Included in preset configs; Save applies next raid." />
+    <MudSelect T="string" Label="Map" @bind-Value="_map" Variant="Variant.Outlined" Class="mb-4">
+        @foreach (var map in ZoneStoreService.MapIds)
+        {
+            <MudSelectItem T="string" Value="@map">@ZoneStoreService.MapLabels[map]</MudSelectItem>
+        }
+    </MudSelect>
+    <MudText Class="mb-4" Typo="Typo.body2">Inherited values come from @InheritanceLabel. Reset restores inheritance for this map.</MudText>
+    @if (ValidationError is { } error)
+    {
+        <MudAlert Severity="Severity.Warning" Class="mb-4">@error</MudAlert>
+    }
+    <SettingsCard Title="Ghost distances" Subtitle="Distances do not override combat safety. Bots controlled by SAIN can remain awake even outside these distances, especially on small maps.">
+        @foreach (var field in Fields.Take(4)) { @Editor(field) }
+    </SettingsCard>
+    <SettingsCard Title="Guard durations" Subtitle="Minimum and maximum durations in seconds, for visited points and synthetic patrol points.">
+        @foreach (var field in Fields.Skip(4).Take(4)) { @Editor(field) }
+    </SettingsCard>
+    <SettingsCard Title="Objective mix multipliers" Subtitle="Multiply the personality or Player Scav objective weights before normalization. 1 preserves the mix; 0 removes that type. If every effective weight is zero, the fallback is a loot objective.">
+        @foreach (var field in Fields.Skip(8)) { @Editor(field) }
+    </SettingsCard>
+</MudContainer>
+
+@code {
+    private string _map = "bigmap";
+    private string InheritanceLabel => _map.Contains('@') ? ZoneStoreService.MapLabels[ZoneStoreService.BaseMapId(_map)] + ", then global settings" : "global settings";
+    private MapBehaviorOverride Current => Cfg.MapOverrides.TryGetValue(_map, out var value) ? value : new();
+    private MapBehaviorOverride Inherited => _map.Contains('@')
+        ? MapBehaviorOverride.Resolve(Cfg.MapOverrides, ZoneStoreService.BaseMapId(_map), ZoneStoreService.BaseMapId(_map), BehaviorValidation.Global(Cfg))
+        : BehaviorValidation.Global(Cfg);
+    private string? ValidationError
+    {
+        get { try { BehaviorValidation.Validate(Cfg); return null; } catch (Exception ex) { return ex.Message; } }
+    }
+    private sealed record Field(string Name, string Label, float Min, float Max, float Step, string? Unit);
+    private static readonly Field[] Fields = [
+        new(nameof(MapBehaviorOverride.SleepDistance), "Sleep distance", 50, 1500, 10, "m"),
+        new(nameof(MapBehaviorOverride.WakeDistance), "Wake distance", 25, 1500, 5, "m"),
+        new(nameof(MapBehaviorOverride.HostileWakeDistance), "Hostile wake distance", 0, 150, 5, "m"),
+        new(nameof(MapBehaviorOverride.ScopedWakeMaxDistance), "Scoped wake distance", 200, 1500, 50, "m"),
+        new(nameof(MapBehaviorOverride.GuardDurationMin), "Guard minimum", 0, 1800, 1, "s"),
+        new(nameof(MapBehaviorOverride.GuardDurationMax), "Guard maximum", 0, 1800, 1, "s"),
+        new(nameof(MapBehaviorOverride.SyntheticGuardDurationMin), "Patrol guard minimum", 0, 1800, .5f, "s"),
+        new(nameof(MapBehaviorOverride.SyntheticGuardDurationMax), "Patrol guard maximum", 0, 1800, .5f, "s"),
+        new(nameof(MapBehaviorOverride.QuestWeightScale), "Quest weight", 0, 5, .1f, null),
+        new(nameof(MapBehaviorOverride.KillsWeightScale), "Kills weight", 0, 5, .1f, null),
+        new(nameof(MapBehaviorOverride.LootWeightScale), "Loot weight", 0, 5, .1f, null),
+    ];
+    private RenderFragment Editor(Field field) => @<MapOverrideSlider @key="@($"{_map}.{field.Name}")"
+        Label="@field.Label" Value="Read(Current, field)" ValueChanged="@((float? value) => Set(field, value))"
+        Inherited="@(Read(Inherited, field) ?? 1f)" Min="field.Min" Max="field.Max" Step="field.Step" Unit="@field.Unit" />;
+    private static float? Read(MapBehaviorOverride value, Field field) => (float?)typeof(MapBehaviorOverride).GetProperty(field.Name)!.GetValue(value);
+    private void Set(Field field, float? value)
+    {
+        var current = Current;
+        typeof(MapBehaviorOverride).GetProperty(field.Name)!.SetValue(current, value);
+        if (Fields.All(f => Read(current, f) == null)) Cfg.MapOverrides.Remove(_map);
+        else Cfg.MapOverrides[_map] = current;
+    }
+    private void ResetMap() => Cfg.MapOverrides.Remove(_map);
+}

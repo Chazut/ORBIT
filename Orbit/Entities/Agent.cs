@@ -59,6 +59,7 @@ public class Agent(int id, BotOwner bot, float[] taskScores) : Entity(id, taskSc
     /// keeps dropping gets its negative effects stripped so the bleed gate can clear and it can sleep.</summary>
     public float LastGhostPatchUpAt = -999f;
 
+    public readonly string BotCategory = Orbit.Helpers.ZoneBotType.For(bot);
     public readonly BotOwner Bot = bot;
     public readonly Player Player = bot.Mover._player;
 

@@ -42,7 +42,7 @@ public class ConfigService(ISptLogger<ConfigService> logger)
         {
             if (File.Exists(ConfigPath))
             {
-                var parsed = JsonSerializer.Deserialize<OrbitServerConfig>(File.ReadAllText(ConfigPath), _jsonOptions);
+                var parsed = JsonSerializer.Deserialize<OrbitServerConfig>(NormalizeJson(File.ReadAllText(ConfigPath)), _jsonOptions);
                 if (parsed != null)
                 {
                     Config = parsed;
@@ -64,6 +64,7 @@ public class ConfigService(ISptLogger<ConfigService> logger)
 
     public void Save()
     {
+        BehaviorValidation.Validate(Config);
         var json = JsonSerializer.Serialize(Config, _jsonOptions);
         File.WriteAllText(ConfigPath, json);
         _savedJson = json;
@@ -84,9 +85,18 @@ public class ConfigService(ISptLogger<ConfigService> logger)
             ?? throw new InvalidDataException("The config must be a JSON object.");
         if (supplied["config_version"] is { } version && version.GetValue<int>() > new OrbitServerConfig().ConfigVersion)
             throw new InvalidDataException("This config requires a newer ORBIT version.");
+        // Map ids are dynamic keys; their nullable leaves explicitly mean inheritance.
+        if (supplied.TryGetPropertyValue("map_overrides", out var maps))
+        {
+            if (maps is not System.Text.Json.Nodes.JsonObject)
+                throw new InvalidDataException("Map overrides must be an object.");
+            defaults["map_overrides"] = maps.DeepClone();
+            supplied.Remove("map_overrides");
+        }
         Merge(defaults, supplied);
         var parsed = JsonSerializer.Deserialize<OrbitServerConfig>(defaults.ToJsonString(), _jsonOptions)
             ?? throw new InvalidDataException("Empty config.");
+        BehaviorValidation.Validate(parsed);
         parsed.ConfigVersion = new OrbitServerConfig().ConfigVersion;
         return JsonSerializer.Serialize(parsed, _jsonOptions);
 
@@ -187,6 +197,9 @@ public class ConfigService(ISptLogger<ConfigService> logger)
                 else
                     result.Add((childPath, "", Render(prop.Value)));
             }
+            foreach (var prop in a.EnumerateObject())
+                if (!b.TryGetProperty(prop.Name, out _))
+                    result.Add((path.Length == 0 ? prop.Name : $"{path}.{prop.Name}", Render(prop.Value), "inherited"));
             return;
         }
         if (a.GetRawText() != b.GetRawText())

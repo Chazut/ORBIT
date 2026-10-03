@@ -15,6 +15,13 @@
                      Tooltip="OFF: PMC squads skip the goal system." />
     </SettingsCard>
 
+    <SettingsCard Title="Objective mix multipliers" OnReset="@(() => { Cfg.MainObjectives.QuestWeightScale = 1; Cfg.MainObjectives.KillsWeightScale = 1; Cfg.MainObjectives.LootWeightScale = 1; })"
+                  Subtitle="Multiply each personality or Player Scav objective weight before normalization. 1 keeps its balance, 0 removes that type. If all effective weights are zero, the existing fallback is a loot objective. Individual maps can override these multipliers.">
+        <OrbitSlider T="float" @bind-Value="Cfg.MainObjectives.QuestWeightScale" Label="Quest weight" Min="0f" Max="5f" Step="0.1f" Fmt="0.#" />
+        <OrbitSlider T="float" @bind-Value="Cfg.MainObjectives.KillsWeightScale" Label="Kills weight" Min="0f" Max="5f" Step="0.1f" Fmt="0.#" />
+        <OrbitSlider T="float" @bind-Value="Cfg.MainObjectives.LootWeightScale" Label="Loot weight" Min="0f" Max="5f" Step="0.1f" Fmt="0.#" />
+    </SettingsCard>
+
     <SettingsCard Title="Pull strengths" OnReset="ResetPulls">
         <OrbitSlider T="float" @bind-Value="Cfg.MainObjectives.AttractionMagnitude" Label="Main pull strength"
                      Min="0f" Max="20f" Step="0.5f" Fmt="0.#"

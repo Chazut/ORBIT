@@ -89,6 +89,9 @@ public static class ServerConfig
 
     public sealed class MainObjectivesSection
     {
+        [JsonProperty("quest_weight_scale")] public float QuestWeightScale = 1f;
+        [JsonProperty("kills_weight_scale")] public float KillsWeightScale = 1f;
+        [JsonProperty("loot_weight_scale")] public float LootWeightScale = 1f;
         [JsonProperty("enabled")] public bool Enabled = true;
         [JsonProperty("enabled_for_pmc")] public bool EnabledForPmc = true;
         [JsonProperty("extract_on_all_completed")] public bool ExtractOnAllCompleted = true;
@@ -285,9 +288,42 @@ public static class ServerConfig
         };
     }
 
+    private static readonly JsonSerializerSettings BehaviorJson = new JsonSerializerSettings
+    {
+        ContractResolver = new Newtonsoft.Json.Serialization.DefaultContractResolver
+        {
+            NamingStrategy = new Newtonsoft.Json.Serialization.SnakeCaseNamingStrategy { ProcessDictionaryKeys = false }
+        }
+    };
+    private static Root _baseConfig = new Root();
+    public static Orbit.Settings.MovementSettings Movement { get; private set; } = new Orbit.Settings.MovementSettings();
+
+    public static void ApplyMap(string mapId, string variantKey)
+    {
+        // Work on detached sections so a second raid or failed fetch cannot inherit the previous map.
+        GhostMode = JsonConvert.DeserializeObject<GhostModeSection>(JsonConvert.SerializeObject(_baseConfig.GhostMode));
+        PoiGuard = JsonConvert.DeserializeObject<PoiGuardSection>(JsonConvert.SerializeObject(_baseConfig.PoiGuard));
+        MainObjectives = JsonConvert.DeserializeObject<MainObjectivesSection>(JsonConvert.SerializeObject(_baseConfig.MainObjectives));
+        var effective = Orbit.Settings.MapBehaviorOverride.Resolve(_baseConfig.MapOverrides, mapId, variantKey,
+            new Orbit.Settings.MapBehaviorOverride());
+        GhostMode.SleepDistance = effective.SleepDistance ?? GhostMode.SleepDistance;
+        GhostMode.WakeDistance = effective.WakeDistance ?? GhostMode.WakeDistance;
+        GhostMode.HostileWakeDistance = effective.HostileWakeDistance ?? GhostMode.HostileWakeDistance;
+        GhostMode.ScopedWakeMaxDistance = effective.ScopedWakeMaxDistance ?? GhostMode.ScopedWakeMaxDistance;
+        PoiGuard.GuardDurationMin = effective.GuardDurationMin ?? PoiGuard.GuardDurationMin;
+        PoiGuard.GuardDurationMax = effective.GuardDurationMax ?? PoiGuard.GuardDurationMax;
+        PoiGuard.SyntheticGuardDurationMin = effective.SyntheticGuardDurationMin ?? PoiGuard.SyntheticGuardDurationMin;
+        PoiGuard.SyntheticGuardDurationMax = effective.SyntheticGuardDurationMax ?? PoiGuard.SyntheticGuardDurationMax;
+        MainObjectives.QuestWeightScale = effective.QuestWeightScale ?? MainObjectives.QuestWeightScale;
+        MainObjectives.KillsWeightScale = effective.KillsWeightScale ?? MainObjectives.KillsWeightScale;
+        MainObjectives.LootWeightScale = effective.LootWeightScale ?? MainObjectives.LootWeightScale;
+    }
+
     private sealed class Root
     {
         [JsonProperty("config_version")] public int ConfigVersion = 0;
+        [JsonProperty("movement")] public Orbit.Settings.MovementSettings Movement = new Orbit.Settings.MovementSettings();
+        [JsonProperty("map_overrides")] public Dictionary<string, Orbit.Settings.MapBehaviorOverride> MapOverrides = new Dictionary<string, Orbit.Settings.MapBehaviorOverride>();
         [JsonProperty("factions")] public FactionsSection Factions = new FactionsSection();
         [JsonProperty("general")] public GeneralSection General = new GeneralSection();
         [JsonProperty("loot")] public LootSection Loot = new LootSection();
@@ -320,9 +356,11 @@ public static class ServerConfig
         try
         {
             var json = RequestHandler.GetJson("/orbit/config");
-            var root = JsonConvert.DeserializeObject<Root>(json);
+            var root = JsonConvert.DeserializeObject<Root>(json, BehaviorJson);
             if (root != null)
             {
+                _baseConfig = root;
+                Movement = root.Movement ?? new Orbit.Settings.MovementSettings();
                 Factions = root.Factions ?? Factions;
                 General = root.General ?? General;
                 Loot = root.Loot ?? Loot;

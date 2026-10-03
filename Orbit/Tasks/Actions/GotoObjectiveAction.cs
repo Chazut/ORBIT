@@ -184,7 +184,7 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                     // Stop sprinting once inside the 50m "scan" radius so the bot has time to spot enemies on
                     // the final approach. Personality override: agents with sprint propensity ~1.0 (e.g.
                     // VeryAggressive GigaChad) keep sprinting all the way in.
-                    var sprintPropensity = agent.Squad?.Personality?.SprintPropensity ?? 0.5f;
+                    var sprintPropensity = SprintGate.Propensity(agent);
                     if (agent.Movement.Sprint
                         && distanceSqr < WalkApproachDistanceSqr
                         && sprintPropensity < 0.999f)
@@ -426,7 +426,7 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
     private static bool ShouldSprintToObjective(Agent agent, float startDistSqr)
     {
         if (!SprintGate.IsAllowedByFaction(agent)) return false;
-        var propensity = agent.Squad?.Personality?.SprintPropensity ?? 0.5f;
+        var propensity = SprintGate.Propensity(agent);
         if (propensity >= 0.999f) return true;
         var walkApproachScale = 1.5f - propensity;
         var effectiveWalkSqr = WalkApproachDistanceSqr * walkApproachScale * walkApproachScale;

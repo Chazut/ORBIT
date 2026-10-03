@@ -77,6 +77,7 @@ public class OrbitManager
         MapId = gameWorld.LocationId;
         MapVariant = Orbit.Helpers.MapVariants.Detect(MapId);
         ZoneKey = Orbit.Helpers.MapVariants.ZoneKey(MapId, MapVariant);
+        Orbit.Helpers.ServerConfig.ApplyMap(MapId, ZoneKey);
         if (MapVariant.Length > 0)
             Log.Always($"Map variant '{MapVariant}' detected on {MapId}: zones and geometry come from '{ZoneKey}' (base map as fallback)");
         Waypoints = new WaypointConfig();

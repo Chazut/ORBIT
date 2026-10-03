@@ -3,16 +3,14 @@ using Orbit.Entities;
 namespace Orbit.Helpers;
 
 /// <summary>
-/// Faction- and personality-level sprint eligibility. Scavs never sprint; PMCs with near-zero
-/// SprintPropensity (Timmy) never sprint. Distance-based ramp-up is handled at the call site.
+/// ORBIT movement sprint propensity. PMC personalities remain authoritative for PMCs.
+/// Other categories use server settings; combat movement stays with its owning brain.
 /// </summary>
 public static class SprintGate
 {
-    public static bool IsAllowedByFaction(Agent agent)
-    {
-        var role = agent.Bot?.Profile?.Info?.Settings?.Role;
-        if (role.HasValue && role.Value.IsScav()) return false;
-        var propensity = agent.Squad?.Personality?.SprintPropensity ?? 0.5f;
-        return propensity > 0.001f;
-    }
+    public static float Propensity(Agent agent)
+        => agent.BotCategory == "PMC" ? agent.Squad?.Personality?.SprintPropensity ?? 0.5f
+            : ServerConfig.Movement.For(agent.BotCategory);
+
+    public static bool IsAllowedByFaction(Agent agent) => Propensity(agent) > 0.001f;
 }
