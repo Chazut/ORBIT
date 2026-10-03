@@ -1,4 +1,5 @@
 using System;
+using Orbit.Helpers;
 using System.Linq.Expressions;
 using EFT;
 using HarmonyLib;
@@ -39,7 +40,7 @@ internal sealed class NativeGhostRegroup
         if (!_resolved)
         {
             _resolved = true;
-            _type = AccessTools.TypeByName("MoreBotsAPI.Components.BotHuntManager");
+            _type = OptionalModTypes.Find("MoreBotsAPI.Components.BotHuntManager");
             if (_type != null)
             {
                 try

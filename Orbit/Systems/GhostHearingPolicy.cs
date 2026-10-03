@@ -26,7 +26,7 @@ internal static class GhostHearingPolicy
         {
             _unknown = unknown;
             using (PerformanceJournal.Measure(TransitionPhase.HearingTypeLookup, "hearing-type-lookup", typeName, always: true))
-                _type = AccessTools.TypeByName(typeName);
+                _type = OptionalModTypes.Find(typeName);
             if (_type == null) return;
             try
             {

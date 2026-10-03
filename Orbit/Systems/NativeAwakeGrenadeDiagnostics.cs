@@ -1,4 +1,5 @@
 using System;
+using Orbit.Helpers;
 using System.Collections;
 using System.Collections.Generic;
 using System.Globalization;
@@ -75,7 +76,7 @@ internal static class NativeAwakeGrenadeDiagnostics
         if (!_resolved)
         {
             _resolved = true;
-            _managerType = AccessTools.TypeByName("SAIN.Components.BotManagerComponent");
+            _managerType = OptionalModTypes.Find("SAIN.Components.BotManagerComponent");
         }
         if (_managerType == null) return "sain=unavailable reason=manager-type";
         var world = Singleton<GameWorld>.Instance;

@@ -1,4 +1,5 @@
 using System;
+using Orbit.Helpers;
 using System.Collections;
 using System.Linq.Expressions;
 using System.Reflection;
@@ -23,7 +24,7 @@ internal sealed class NativeGhostAdapters
 
         internal CheckpointBinding(string typeName)
         {
-            Type = AccessTools.TypeByName(typeName);
+            Type = OptionalModTypes.Find(typeName);
             if (Type == null) return;
             var available = AccessTools.Method(Type, "CanDoCheckpointActions", Type.EmptyTypes);
             var point = AccessTools.Field(Type, "guardPoint");
@@ -80,6 +81,7 @@ internal sealed class NativeGhostAdapters
     {
         if (_resolved) return;
         _resolved = true;
+        using var timing = PerformanceJournal.Measure(TransitionPhase.NativeBindings, "native-bindings", "NativeGhostAdapters", always: true);
         // These managers have no per-bot Update loop. Their original BigBrain actions advance them.
         try { _untar = new CheckpointBinding("TacticalToasterUNTARGH.Components.BotUntarManager"); }
         catch (Exception e) { Log.Warning($"NATIVE GHOST: UNTAR checkpoint binding unavailable: {e.Message}"); }
@@ -89,8 +91,8 @@ internal sealed class NativeGhostAdapters
         catch (Exception e) { Log.Warning($"NATIVE GHOST: ISB checkpoint binding unavailable: {e.Message}"); }
         try
         {
-            var registry = AccessTools.TypeByName("RoguesVRaiders.SquadRegistry");
-            var controller = AccessTools.TypeByName("RoguesVRaiders.Objective.RvRObjectiveController");
+            var registry = OptionalModTypes.Find("RoguesVRaiders.SquadRegistry");
+            var controller = OptionalModTypes.Find("RoguesVRaiders.Objective.RvRObjectiveController");
             if (registry == null || controller == null) return;
             var member = AccessTools.Method(registry, "IsRvRSquadMember", new[] { typeof(BotOwner) });
             var board = AccessTools.Method(controller, "GetBlackboard", new[] { typeof(BotsGroup) });

@@ -22,6 +22,7 @@ internal enum TransitionPhase
     StrategyScores, StrategyPick, StrategyTasks, StrategySquad,
     StrategyObjectives, StrategyDispatch, StrategySelection, StrategyReachability,
     HearingCategory, HearingTypeLookup, HearingCompile, HearingComponentRead, HearingNative, HearingAvailability, HearingInvestigate, HearingTelemetry, HearingSource,
+    OptionalTypeLookup, NativeBindings, ExfilSearch, ExfilPath, WaypointSearch, WaypointPath,
     Count
 }
 
