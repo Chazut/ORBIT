@@ -74,6 +74,8 @@ public partial class DormancySystem
 
     public void Dispose()
     {
+        ClearStagedWakes();
+        _wakeHumans.Clear(); _previousWakeHumans.Clear();
         NativeGhostSystem.Clear();
         if (!_soundHooked) return;
         try { Singleton<GlobalEventDispatcher>.Instance.OnSoundPlayed -= OnAiSoundPlayed; } catch { }

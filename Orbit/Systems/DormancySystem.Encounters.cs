@@ -102,7 +102,7 @@ public partial class DormancySystem
         }
         foreach (var kv in _vanillaGroups)
         {
-            if (VanillaDormantCount(kv.Value) == 0) continue;
+            if (IsWaking(kv.Key) || VanillaDormantCount(kv.Value) == 0) continue;
             // An activated newcomer that could not join the plan still needs the group's
             // bodies. PreActive/NonActive spawns wait for initialization instead.
             if (NativeAwakeCount(kv.Value) > 0)
@@ -138,7 +138,7 @@ public partial class DormancySystem
     {
         foreach (var squad in squads)
         {
-            if (squad == null) continue;
+            if (squad == null || IsWaking(squad)) continue;
             var dormant = SquadDormantCount(squad);
             if (dormant > 0 && dormant < squad.Members.Count)
                 WakeSquad(squad, new(GhostWakeCause.GroupChanged, "new squad members cannot enter Ghost"));
