@@ -12,9 +12,12 @@ using UnityEngine;
 
 namespace Orbit.Helpers;
 
-/// <summary>Opt-in, bounded 60-second capture. No per-frame allocations or log writes.</summary>
+/// <summary>Performance logging also captures bounded context around slow frames, without a manual export.</summary>
 internal static class DiagnosticCapture
 {
+    private const float TriggerFrameMs = 250f, StartupGraceSeconds = 10f;
+    private const float ContextAfterSeconds = 5f, CooldownSeconds = 60f;
+    private const int MaxCapturesPerRaid = 10;
     private static readonly Queue<Sample> Samples = new();
     private static readonly Queue<OrbitGhostWake> Wakes = new();
     private static readonly List<Vector3> Humans = new();
@@ -22,9 +25,11 @@ internal static class DiagnosticCapture
     private static float _nextSample, _startedAt, _frameSum, _frameMax;
     private static double _orbitSum, _orbitMax;
     private static int _frames, _hitches, _gc, _saved;
-    private static bool _enabled;
+    private static bool _enabled, _pending;
+    private static float _nextCaptureAt, _saveAt, _triggerAt, _triggerFrameMs;
     private static Task<string> _writer;
-    internal static string Status { get; private set; } = "Enable capture during a raid.";
+    internal static bool IsRecording => _enabled && Plugin.PerfLogging is { Value: true };
+    internal static string Status { get; private set; } = "Performance logging is disabled.";
 
     internal sealed class Sample
     {
@@ -36,8 +41,8 @@ internal static class DiagnosticCapture
     internal static void Reset(string map)
     {
         Samples.Clear(); Wakes.Clear(); Humans.Clear();
-        _map = map; _enabled = false; _saved = 0;
-        Status = "Enable capture during a raid.";
+        _map = map; _enabled = _pending = false; _saved = 0;
+        Status = "Waiting for Performance logging during a raid.";
         ClearWindow();
     }
 
@@ -51,13 +56,15 @@ internal static class DiagnosticCapture
     internal static long BeginFrame()
     {
         RefreshSaveStatus();
-        var enabled = Plugin.DiagnosticsEnabled is { Value: true } && _map != null;
+        var enabled = Plugin.PerfLogging is { Value: true } && _map != null;
         if (enabled != _enabled)
         {
             _enabled = enabled;
             Samples.Clear(); Wakes.Clear(); ClearWindow();
             _startedAt = Time.realtimeSinceStartup;
-            Status = enabled ? "Capturing the latest 60 seconds." : "Capture disabled.";
+            _nextCaptureAt = _startedAt + StartupGraceSeconds;
+            _pending = false;
+            Status = enabled ? "Automatic performance capture enabled." : "Performance logging is disabled.";
         }
         return enabled ? Stopwatch.GetTimestamp() : 0;
     }
@@ -81,7 +88,14 @@ internal static class DiagnosticCapture
         _frames++; _frameSum += frameMs; _frameMax = Math.Max(_frameMax, frameMs);
         if (frameMs > 100f) _hitches++;
         var now = Time.realtimeSinceStartup;
-        if (now < _nextSample) return;
+        if (!_pending && _saved < MaxCapturesPerRaid && now >= _nextCaptureAt && frameMs >= TriggerFrameMs)
+        {
+            _pending = true;
+            _triggerAt = now; _triggerFrameMs = frameMs;
+            _saveAt = now + ContextAfterSeconds;
+            _nextCaptureAt = now + CooldownSeconds;
+        }
+        if (now < _nextSample) { SavePending(now, frameMs); return; }
         var sample = new Sample
         {
             RecordedAt = now, Frames = _frames, AverageFrameMs = _frameSum / _frames, MaxFrameMs = _frameMax,
@@ -107,6 +121,14 @@ internal static class DiagnosticCapture
         Samples.Enqueue(sample);
         Prune(now);
         ClearWindow();
+        SavePending(now, frameMs);
+    }
+
+    private static void SavePending(float now, float frameMs)
+    {
+        // Collect a little context after the hitch, then prefer a recovered frame for the snapshot.
+        // Bound the extra wait so sustained slow frames still produce a useful capture.
+        if (_pending && now >= _saveAt && (frameMs < 100f || now >= _saveAt + ContextAfterSeconds)) Save();
     }
 
     internal static void Wake(OrbitGhostWake wake)
@@ -123,15 +145,17 @@ internal static class DiagnosticCapture
         while (Wakes.Count > 0 && Wakes.Peek().RecordedAt < now - 60f) Wakes.Dequeue();
     }
 
-    internal static void Save()
+    private static void Save()
     {
-        if (!_enabled || Samples.Count == 0) { Status = "Enable capture and wait at least one second in a raid."; return; }
-        if (_writer != null && !_writer.IsCompleted) { Status = "A capture is already being saved."; return; }
-        if (_saved >= 10) { Status = "Capture limit reached (10 files per raid)."; return; }
+        if (!_enabled || !_pending || Plugin.PerfLogging is not { Value: true } || Samples.Count == 0) return;
+        if (_writer != null && !_writer.IsCompleted) return;
+        if (_saved >= MaxCapturesPerRaid) { _pending = false; return; }
+        RefreshSaveStatus();
         Prune(Time.realtimeSinceStartup);
         var data = new
         {
             Schema = 1, Map = _map, CapturedUtc = DateTime.UtcNow, CaptureStartedAt = _startedAt,
+            TriggeredAt = _triggerAt, TriggerFrameMs = _triggerFrameMs, SavedAt = Time.realtimeSinceStartup,
             Notes = "Times use Unity realtime seconds. Samples summarize the preceding interval; bot counts are sampled at its end. ORBIT timing covers OrbitManager.Update only, not every patch or the rest of the game. Correlation does not establish the cause of a hitch.",
             WakeDistance = ServerConfig.GhostMode.WakeDistance,
             SleepDistance = ServerConfig.GhostMode.SleepDistance,
@@ -140,9 +164,12 @@ internal static class DiagnosticCapture
             Samples = Samples.ToArray(), Wakes = Wakes.ToArray(),
         };
         var folder = Path.Combine(BepInEx.Paths.BepInExRootPath, "ORBIT", "diagnostics");
-        var path = Path.Combine(folder, "capture-" + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss-fff") + ".json");
+        var path = Path.Combine(folder, "capture-" + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss-fff") + "-" + Guid.NewGuid().ToString("N") + ".json");
         _saved++;
+        _pending = false;
+        _nextCaptureAt = Time.realtimeSinceStartup + CooldownSeconds;
         Status = "Saving diagnostic capture...";
+        Log.Always("ORBIT diagnostics queued: " + path);
         // Snapshot contains only detached values. Never read Unity objects from the writer thread.
         _writer = Task.Run(() =>
         {
@@ -153,7 +180,9 @@ internal static class DiagnosticCapture
 
     internal static void Finish()
     {
-        _map = null; _enabled = false;
+        // Preserve a pending hitch if the raid ends before its post-hitch window is complete.
+        Save();
+        _map = null; _enabled = _pending = false;
         Samples.Clear(); Wakes.Clear(); Humans.Clear();
     }
 }

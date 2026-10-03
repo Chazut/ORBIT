@@ -52,7 +52,6 @@ public class Plugin : BaseUnityPlugin
     public static ConfigEntry<bool> QuietLogging;
     public static ConfigEntry<OrbitLogLevel> LogLevels;
     public static ConfigEntry<bool> PerfLogging;
-    public static ConfigEntry<bool> DiagnosticsEnabled;
 
     // Faction-mod plugin GUIDs — same Chainloader detection raid-review uses.
     private const string UntarPluginGuid = "com.untargh.tacticaltoaster";
@@ -312,21 +311,8 @@ public class Plugin : BaseUnityPlugin
             "Which message levels ORBIT writes (used when Quiet logging is OFF). Default: everything except Debug. Tick Debug for a detailed bug-report log - it works in the release build now, not just debug builds.",
             null, new ConfigurationManagerAttributes { Category = "", Order = 0 }));
         PerfLogging = Config.Bind(essentials, "Performance logging", false, new ConfigDescription(
-            "ON: writes compact PERF summaries every 30s (fps, hitches, GC and transition costs), even with Quiet logging. Transition timings are inclusive and must not be added together. Turn it on before recording a performance report.",
-            null, new ConfigurationManagerAttributes { Category = "", Order = -1, IsAdvanced = true }));
-        DiagnosticsEnabled = Config.Bind(essentials, "Diagnostic capture", false, new ConfigDescription(
-            "Keep the latest 60 seconds of frame timing, ORBIT Update timing, bot counts and Ghost wake causes in memory. Quiet logging can stay ON. Use Save diagnostic capture just after the problem, before leaving the raid. No continuous log writes.",
-            null, new ConfigurationManagerAttributes { Category = "", Order = -2 }));
-        Config.Bind(essentials, "Save diagnostic capture", string.Empty, new ConfigDescription(
-            "Save the captured window to BepInEx/ORBIT/diagnostics. At most 10 files per raid; send the JSON with the report.",
-            null, new ConfigurationManagerAttributes { Category = "", Order = -3, HideDefaultButton = true, CustomDrawer = DrawDiagnosticCapture }));
-    }
-
-    private static void DrawDiagnosticCapture(ConfigEntryBase entry)
-    {
-        Helpers.DiagnosticCapture.RefreshSaveStatus();
-        if (GUILayout.Button("Save last 60 seconds", GUILayout.ExpandWidth(true))) Helpers.DiagnosticCapture.Save();
-        GUILayout.Label(Helpers.DiagnosticCapture.Status);
+            "ON: writes compact PERF summaries every 30s, even with Quiet logging. Frames of 250 ms or more also trigger a JSON capture in BepInEx/ORBIT/diagnostics after a short delay (one per minute, at most 10 per raid). Transition timings are inclusive and must not be added together.",
+            null, new ConfigurationManagerAttributes { Category = "", Order = -1 }));
     }
 
     // F12 helper: a real button that opens the server web UI in the default browser. The drawer
