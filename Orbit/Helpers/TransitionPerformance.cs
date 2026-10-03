@@ -23,6 +23,9 @@ internal enum TransitionPhase
     StrategyObjectives, StrategyDispatch, StrategySelection, StrategyReachability,
     HearingCategory, HearingTypeLookup, HearingCompile, HearingComponentRead, HearingNative, HearingAvailability, HearingInvestigate, HearingTelemetry, HearingSource,
     OptionalTypeLookup, NativeBindings, ExfilSearch, ExfilPath, WaypointSearch, WaypointPath,
+    SpawnEntryScan, SpawnEntryResolve, ExfilEligibility, ExfilDiagnostics,
+    MovementDoorWatch, MovementPendingDoors, MovementJobs, MovementJob, MovementAgent,
+    MovementRecovery, MovementIdleRescue, MovementSpawnRescue, MovementGhost, MovementGhostDoors, MovementAwake,
     Count
 }
 

@@ -48,6 +48,7 @@ public partial class WaypointSystem
     private readonly Dictionary<Entity, Vector2Int> _assignments;
 
     private readonly BotsController _botsController;
+    private readonly SpawnEntryPoints _spawnEntryPoints;
     private readonly ConfigBundle<WaypointConfig.MapZone> _zoneConfig;
     private readonly List<Zone> _zones;
     private readonly Vector2[,] _advectionField;
@@ -122,6 +123,7 @@ public partial class WaypointSystem
             || (zoneKey != mapId && ServerConfig.TryGetZoneOverride(mapId, out serverZones)))
             _zoneConfig.ApplyOverride(serverZones);
         _botsController = botsController;
+        _spawnEntryPoints = SpawnEntryPoints.Capture();
         _humanPlayers = humanPlayers;
 
         // _cellSize must be set before WaypointGatherer is constructed — the gatherer scales synthetic/exfil
@@ -1274,18 +1276,21 @@ public partial class WaypointSystem
             LogEligibleExfilsForSquad(squad, squadIsPmc);
         }
 
-        _exfilSearch.Clear();
-        for (var cx = 0; cx < _gridSize.x; cx++)
-        for (var cy = 0; cy < _gridSize.y; cy++)
+        using (PerformanceJournal.Measure(TransitionPhase.ExfilEligibility, "exfil-eligibility", squad: squad.Id))
         {
-            var locs = _cells[cx, cy].Waypoints;
-            for (var i = 0; i < locs.Count; i++)
+            _exfilSearch.Clear();
+            for (var cx = 0; cx < _gridSize.x; cx++)
+            for (var cy = 0; cy < _gridSize.y; cy++)
             {
-                var loc = locs[i];
-                if (loc.Category != WaypointCategory.Exfil || squad.CompletedPoiIds.Contains(loc.Id)) continue;
-                var entryEligible = SquadCanUseWaypoint(squad, squadIsPmc, loc);
-                if (!entryEligible && !SquadCanUseWaypointIgnoringEntry(squad, squadIsPmc, loc)) continue;
-                _exfilSearch.Add(loc, (loc.Position - leaderPos).sqrMagnitude, entryEligible);
+                var locs = _cells[cx, cy].Waypoints;
+                for (var i = 0; i < locs.Count; i++)
+                {
+                    var loc = locs[i];
+                    if (loc.Category != WaypointCategory.Exfil || squad.CompletedPoiIds.Contains(loc.Id)) continue;
+                    var entryEligible = SquadCanUseWaypoint(squad, squadIsPmc, loc);
+                    if (!entryEligible && !SquadCanUseWaypointIgnoringEntry(squad, squadIsPmc, loc)) continue;
+                    _exfilSearch.Add(loc, (loc.Position - leaderPos).sqrMagnitude, entryEligible);
+                }
             }
         }
         _exfilSearchOrigin = leaderPos; _exfilSearchSquad = squad.Id;
@@ -1314,6 +1319,8 @@ public partial class WaypointSystem
 
     private void LogEligibleExfilsForSquad(Squad squad, bool? squadIsPmc)
     {
+        if (!Log.DebugEnabled) return;
+        using var timing = PerformanceJournal.Measure(TransitionPhase.ExfilDiagnostics, "exfil-diagnostics", squad: squad.Id);
         var leaderPos = squad.Leader?.Bot?.Position ?? Vector3.zero;
         var entry = squad.Leader?.Bot?.Profile?.Info?.EntryPoint;
         if (string.IsNullOrEmpty(entry))
@@ -2715,7 +2722,7 @@ public partial class WaypointSystem
         return squadIsPmc.Value;
     }
 
-    private static bool MatchesBotSpawnEntry(Squad squad, ExfiltrationPoint exfil)
+    private bool MatchesBotSpawnEntry(Squad squad, ExfiltrationPoint exfil)
     {
         var leader = squad?.Leader?.Bot;
         if (leader == null) return true;
@@ -2750,7 +2757,7 @@ public partial class WaypointSystem
         return false;
     }
 
-    private static string ResolveDerivedEntryPoint(Squad squad)
+    private string ResolveDerivedEntryPoint(Squad squad)
     {
         if (squad == null) return null;
         if (squad.DerivedEntryPoint != null) return squad.DerivedEntryPoint;
@@ -2762,24 +2769,9 @@ public partial class WaypointSystem
             return string.Empty;
         }
 
-        EFT.Game.Spawning.SpawnPointMarker bestMarker = null;
-        var bestDistSqr = float.MaxValue;
-        var markers = UnityEngine.Object.FindObjectsOfType<EFT.Game.Spawning.SpawnPointMarker>();
-        for (var i = 0; i < markers.Length; i++)
-        {
-            var m = markers[i];
-            if (m == null || m.SpawnPoint == null) continue;
-            var infiltration = m.SpawnPoint.Infiltration;
-            if (string.IsNullOrEmpty(infiltration)) continue;
-            var distSqr = (m.Position - spawnPos).sqrMagnitude;
-            if (distSqr < bestDistSqr)
-            {
-                bestDistSqr = distSqr;
-                bestMarker = m;
-            }
-        }
-
-        var derived = bestMarker?.SpawnPoint?.Infiltration ?? string.Empty;
+        using var timing = PerformanceJournal.Measure(TransitionPhase.SpawnEntryResolve,
+            "spawn-entry-resolve", squad: squad.Id, always: true);
+        var derived = _spawnEntryPoints.FindNearest(spawnPos, out var bestDistSqr);
         squad.DerivedEntryPoint = derived;
         Log.Debug($"{squad} derived EntryPoint='{derived}' from spawn pos {spawnPos} (closest SpawnPointMarker {Mathf.Sqrt(bestDistSqr):F1}m away)");
         return derived;
