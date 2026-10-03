@@ -5,7 +5,6 @@ using Orbit.Entities;
 using Orbit.Helpers;
 using Orbit.Navigation;
 using Orbit.Systems;
-using Unity.Collections;
 using UnityEngine;
 using Random = UnityEngine.Random;
 
@@ -16,7 +15,7 @@ namespace Orbit.Tasks.Actions;
 /// nearby directions for the longest sightlines, then cycle the bot's gaze across them while holding the
 /// position. Activates once the bot has arrived at a POI and there's nothing to loot or path away to.
 /// </summary>
-public class GuardAction(AgentData dataset, MovementSystem movementSystem, float hysteresis) : Task<Agent>(hysteresis)
+public class GuardAction(AgentData dataset, MovementSystem movementSystem, float hysteresis) : Task<Agent>(hysteresis), IDisposable
 {
     private const float UtilityBoost = 0.45f;
 
@@ -26,10 +25,12 @@ public class GuardAction(AgentData dataset, MovementSystem movementSystem, float
     private const float UtilityBase = 0.2f;
     private const float InnerRadiusRatio = 0.95f * 0.95f;
     private const float SweepAngle = 45f;
-    private const int MaxWatchCandidateCount = 25;
+    private const int MaxWatchCandidateCount = AreaSweepPool.MaxCandidates;
 
     private readonly List<Vector3> _candidateBuffer = [];
     private readonly List<ValueTuple<float, Vector3>> _sortBuffer = [];
+    private readonly AreaSweepPool _sweepPool = new();
+    private bool _disposed;
 
     public override void UpdateScore(int ordinal)
     {
@@ -73,6 +74,8 @@ public class GuardAction(AgentData dataset, MovementSystem movementSystem, float
 
     public override void Update()
     {
+        if (_disposed) return;
+        _sweepPool.Poll();
         for (var i = 0; i < ActiveEntities.Count; i++)
         {
             var agent = ActiveEntities[i];
@@ -80,8 +83,7 @@ public class GuardAction(AgentData dataset, MovementSystem movementSystem, float
 
             if (agent.Objective.Location == null || guard.CoverPoint == null)
             {
-                // Don't leave a scheduled sweep parked while the objective is gone — a pending job's TempJob
-                // arrays trip Unity's 4-frame JobTempAlloc watchdog, and leak outright if we deactivate later.
+                // Retire an orphaned sweep without waiting for the physics job.
                 if (guard.AreaSweepJob != null)
                 {
                     DrainAreaSweepJob(guard);
@@ -166,14 +168,15 @@ public class GuardAction(AgentData dataset, MovementSystem movementSystem, float
                     if (agent.Movement.Pose > 0.3f && (coverPoint.Level != CoverLevel.Stay || Random.value > 0.5f))
                         MovementSystem.ResetGait(agent, pose: 0.25f);
 
-                    SubmitAreaSweepJob(agent, coverPoint);
+                    if (!SubmitAreaSweepJob(agent, coverPoint)) continue;
                     guard.Status = GuardStatus.Sweep;
                     Log.Debug($"{agent} guarding: submitted area sweep job");
                     break;
                 case GuardStatus.Sweep:
                     if (guard.AreaSweepJob == null) continue;
+                    if (!guard.AreaSweepJob.Handle.IsCompleted) continue;
 
-                    CompleteAreaSweepJob(guard, guard.AreaSweepJob.Value);
+                    CompleteAreaSweepJob(guard, guard.AreaSweepJob);
                     guard.Status = GuardStatus.Watch;
                     Log.Debug($"{agent} guarding: completed area sweep job");
                     break;
@@ -203,6 +206,7 @@ public class GuardAction(AgentData dataset, MovementSystem movementSystem, float
                     throw new ArgumentOutOfRangeException();
             }
         }
+        _sweepPool.FlushScheduled();
     }
 
     protected override void Deactivate(Agent entity)
@@ -210,8 +214,7 @@ public class GuardAction(AgentData dataset, MovementSystem movementSystem, float
         var guard = entity.Guard;
 
         guard.Status = GuardStatus.None;
-        // Complete+Dispose, never just drop: nulling a pending job leaked its two TempJob NativeArrays for
-        // good (Unity's "JobTempAlloc > 4 frames" warning) every time combat preempted an agent mid-sweep.
+        // The pool retains unfinished jobs until completion, including after death or combat takeover.
         DrainAreaSweepJob(guard);
         guard.WatchDirections.Clear();
         guard.WatchTimeout = 0f;
@@ -219,7 +222,7 @@ public class GuardAction(AgentData dataset, MovementSystem movementSystem, float
         entity.Look.Target = null;
     }
 
-    private void SubmitAreaSweepJob(Agent agent, CoverPoint coverPoint)
+    private bool SubmitAreaSweepJob(Agent agent, CoverPoint coverPoint)
     {
         var origin = agent.Player.PlayerBones.Head.position;
 
@@ -294,46 +297,29 @@ public class GuardAction(AgentData dataset, MovementSystem movementSystem, float
             _candidateBuffer.Add(direction);
         }
 
-        var commands = new NativeArray<RaycastCommand>(_candidateBuffer.Count, Allocator.TempJob);
-        var results = new NativeArray<RaycastHit>(_candidateBuffer.Count, Allocator.TempJob);
-
-        for (var i = 0; i < _candidateBuffer.Count; i++)
-        {
-            var direction = _candidateBuffer[i];
-            var parameters = new QueryParameters { layerMask = EFT.Ballistics.BallisticsCalculatorConstants.HitMask };
-            commands[i] = new RaycastCommand(origin, direction, parameters, 100);
-        }
-
+        var job = _sweepPool.Submit(origin, _candidateBuffer, EFT.Ballistics.BallisticsCalculatorConstants.HitMask);
+        if (job == null) return false;
+        agent.Guard.AreaSweepJob = job;
         Log.Debug($"{agent} found {_candidateBuffer.Count} watch candidates");
-
-        agent.Guard.AreaSweepJob = new AreaSweepJob
-        {
-            Handle = RaycastCommand.ScheduleBatch(commands, results, 1),
-            Commands = commands,
-            Hits = results,
-        };
-        Orbit.Helpers.PerfMonitor.SweepJobsSubmitted++;
+        return true;
     }
 
-    // Completes and disposes a scheduled-but-unconsumed sweep, discarding its results.
-    private static void DrainAreaSweepJob(Guard guard)
+    // Detach immediately; polling also runs when no agent is currently guarding.
+    private void DrainAreaSweepJob(Guard guard)
     {
         if (guard.AreaSweepJob == null) return;
-        var job = guard.AreaSweepJob.Value;
-        job.Handle.Complete();
-        job.Commands.Dispose();
-        job.Hits.Dispose();
+        _sweepPool.Retire(guard.AreaSweepJob);
         guard.AreaSweepJob = null;
-        Orbit.Helpers.PerfMonitor.SweepJobsDrained++;
     }
 
     private void CompleteAreaSweepJob(Guard guard, AreaSweepJob job)
     {
+        using var timing = TransitionPerformance.Measure(TransitionPhase.GuardComplete);
         job.Handle.Complete();
 
         _sortBuffer.Clear();
 
-        for (var i = 0; i < job.Hits.Length; i++)
+        for (var i = 0; i < job.Count; i++)
         {
             var cmd = job.Commands[i];
             var hit = job.Hits[i];
@@ -342,10 +328,9 @@ public class GuardAction(AgentData dataset, MovementSystem movementSystem, float
             _sortBuffer.Add(new(distance, cmd.direction));
         }
 
-        job.Commands.Dispose();
-        job.Hits.Dispose();
-        // Clear the slot so a later Deactivate drain can't double-Dispose the arrays just released.
+        // Drop the lease before making these buffers available to another guard.
         guard.AreaSweepJob = null;
+        _sweepPool.Release(job);
         Orbit.Helpers.PerfMonitor.SweepJobsCompleted++;
 
         _sortBuffer.Sort(Comparer.Instance);
@@ -355,6 +340,14 @@ public class GuardAction(AgentData dataset, MovementSystem movementSystem, float
 
         for (var i = 1; i < limit; i++)
             guard.WatchDirections.Add(_sortBuffer[^i].Item2);
+    }
+
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        foreach (var agent in dataset.Entities.Values) agent.Guard.AreaSweepJob = null;
+        _sweepPool.Dispose();
     }
 
     public sealed class Comparer : Comparer<ValueTuple<float, Vector3>>

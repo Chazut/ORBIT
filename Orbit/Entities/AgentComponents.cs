@@ -16,11 +16,13 @@ namespace Orbit.Entities;
 
 // ── Guard ─────────────────────────────────────────────────────────────
 
-public struct AreaSweepJob
+public sealed class AreaSweepJob
 {
     public JobHandle Handle;
     public NativeArray<RaycastCommand> Commands;
     public NativeArray<RaycastHit> Hits;
+    internal int Count;
+    internal bool InUse, Retired;
 }
 
 public enum GuardStatus
@@ -35,7 +37,7 @@ public class Guard
 {
     public GuardStatus Status;
     public CoverPoint? CoverPoint;
-    public AreaSweepJob? AreaSweepJob;
+    public AreaSweepJob AreaSweepJob;
     public float WatchTimeout;
     public readonly List<Vector3> WatchDirections = [];
 

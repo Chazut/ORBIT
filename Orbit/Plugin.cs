@@ -312,7 +312,7 @@ public class Plugin : BaseUnityPlugin
             "Which message levels ORBIT writes (used when Quiet logging is OFF). Default: everything except Debug. Tick Debug for a detailed bug-report log - it works in the release build now, not just debug builds.",
             null, new ConfigurationManagerAttributes { Category = "", Order = 0 }));
         PerfLogging = Config.Bind(essentials, "Performance logging", false, new ConfigDescription(
-            "ON: writes a one-line 'PERF' summary (fps, hitches, GC, ORBIT activity counters) to the log every 30s, regardless of the other logging settings. Turn it on before recording a raid for a performance report.",
+            "ON: writes compact PERF summaries every 30s (fps, hitches, GC and transition costs), even with Quiet logging. Transition timings are inclusive and must not be added together. Turn it on before recording a performance report.",
             null, new ConfigurationManagerAttributes { Category = "", Order = -1, IsAdvanced = true }));
         DiagnosticsEnabled = Config.Bind(essentials, "Diagnostic capture", false, new ConfigDescription(
             "Keep the latest 60 seconds of frame timing, ORBIT Update timing, bot counts and Ghost wake causes in memory. Quiet logging can stay ON. Use Save diagnostic capture just after the problem, before leaving the raid. No continuous log writes.",

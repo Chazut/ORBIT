@@ -915,6 +915,7 @@ public partial class DormancySystem
 
     private void SleepSquad(Squad squad)
     {
+        using var timing = TransitionPerformance.Measure(TransitionPhase.SleepGroup);
         var joining = SquadDormantCount(squad) > 0;
         var added = 0;
         var minHumanSqr = float.MaxValue;
@@ -950,7 +951,8 @@ public partial class DormancySystem
             bot.DecisionQueue.Clear();
             bot.Memory.GoalEnemy = null;
             bot.PatrollingData.Pause();
-            bot.gameObject.SetActive(false);
+            using (TransitionPerformance.Measure(TransitionPhase.SleepBody))
+                bot.gameObject.SetActive(false);
             ThrottleBrain(bot);
         }
         catch (System.Exception e)
@@ -982,6 +984,7 @@ public partial class DormancySystem
 
     private void WakeSquad(Squad squad, GhostWakeReason reason)
     {
+        using var timing = TransitionPerformance.Measure(TransitionPhase.WakeGroup);
         for (var i = 0; i < squad.Members.Count; i++)
             // Awake or initializing newcomers already own their body. Never PostActivate them here.
             if (squad.Members[i].IsDormant) WakeAgentWithReason(squad.Members[i], reason);
@@ -1012,7 +1015,8 @@ public partial class DormancySystem
         {
             // Questing Bots' proven recipe: PostActivate is mandatory, deactivation leaves BotState=NonActive.
             UnthrottleBrain(bot);
-            bot.gameObject.SetActive(true);
+            using (TransitionPerformance.Measure(TransitionPhase.WakeBody))
+                bot.gameObject.SetActive(true);
             bot.PatrollingData.Unpause();
             bot.PostActivate();
             // Ground and fall bookkeeping were frozen while dormant (DormantGroundCollisionPatch): restart
@@ -1034,6 +1038,8 @@ public partial class DormancySystem
                 agent.GhostHandsResync = false;
                 Orbit.Looting.WeaponSwap.WeaponSwapper.ResyncHandsAfterWake(bot, agent.ToString());
             }
+
+            using var navigationTiming = TransitionPerformance.Measure(TransitionPhase.WakeNavigation);
 
             // Ghost movement can leave the body marginally off-mesh (or squarely off it when the wake
             // lands mid-segment on a slope); snap back before the mover resumes. Path corners are
@@ -2350,6 +2356,7 @@ public partial class DormancySystem
     /// registration, RemoveAgent (which also finalises our dormancy bookkeeping via OnAgentRemoved).</summary>
     private void KillGhostAgent(Agent victim, Player killer)
     {
+        using var timing = TransitionPerformance.Measure(TransitionPhase.GhostDeath);
         victim.IsDormant = false;
         _dormantAgents.Remove(victim);
         DormantProfileIds.Remove(victim.Player.ProfileId);
@@ -2357,7 +2364,8 @@ public partial class DormancySystem
         {
             var bot = victim.Bot;
             UnthrottleBrain(bot);
-            bot.gameObject.SetActive(true);
+            using (TransitionPerformance.Measure(TransitionPhase.WakeBody))
+                bot.gameObject.SetActive(true);
             bot.PatrollingData.Unpause();
             bot.PostActivate();
             Log.Info($"GHOST SKIRMISH: {victim} killed in action by {killer?.Profile?.Nickname ?? "?"}");
@@ -2371,13 +2379,15 @@ public partial class DormancySystem
 
     private void KillGhostVanilla(BotOwner victim, Player killer)
     {
+        using var timing = TransitionPerformance.Measure(TransitionPhase.GhostDeath);
         var native = _nativeGhosts.Remove(victim);
         _vanillaDormant.Remove(victim);
         UnthrottleBrain(victim);
         DormantProfileIds.Remove(victim.GetPlayer?.ProfileId);
         try
         {
-            victim.gameObject.SetActive(true);
+            using (TransitionPerformance.Measure(TransitionPhase.WakeBody))
+                victim.gameObject.SetActive(true);
             if (!native) victim.PatrollingData.Unpause();
             victim.PostActivate();
             if (native) NativeGhostSystem.ResyncAfterWake(victim);
@@ -2555,6 +2565,7 @@ public partial class DormancySystem
 
     private void SleepVanillaGroup(object key, List<BotOwner> group)
     {
+        using var timing = TransitionPerformance.Measure(TransitionPhase.SleepGroup);
         var native = _cfg.NativeGhostMovement && GhostMovementEnabled;
         var joining = VanillaDormantCount(group) > 0;
         var added = 0;
@@ -2573,7 +2584,8 @@ public partial class DormancySystem
                     bot.Memory.GoalEnemy = null;
                     bot.PatrollingData.Pause();
                 }
-                bot.gameObject.SetActive(false);
+                using (TransitionPerformance.Measure(TransitionPhase.SleepBody))
+                    bot.gameObject.SetActive(false);
             }
             catch (System.Exception e)
             {
@@ -2603,6 +2615,7 @@ public partial class DormancySystem
 
     private void WakeVanillaGroup(object key, List<BotOwner> group, GhostWakeReason reason)
     {
+        using var timing = TransitionPerformance.Measure(TransitionPhase.WakeGroup);
         for (var i = 0; i < group.Count; i++)
             WakeVanillaBotWithReason(group[i], reason);
         _vanillaSleepAllowedAt[key] = Time.time + reason.CooldownSeconds;
@@ -2628,7 +2641,8 @@ public partial class DormancySystem
         if (bot.IsDead) { bot.gameObject.SetActive(true); return true; }
         try
         {
-            bot.gameObject.SetActive(true);
+            using (TransitionPerformance.Measure(TransitionPhase.WakeBody))
+                bot.gameObject.SetActive(true);
             if (!native) bot.PatrollingData.Unpause();
             bot.PostActivate();
             if (native) NativeGhostSystem.ResyncAfterWake(bot);
