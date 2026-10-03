@@ -15,7 +15,7 @@ public partial class DormancySystem
         // Damage, targeting, player proximity, scope and native fallbacks always take precedence.
         foreach (var squad in squads)
         {
-            if (squad == null || squad.Members.Count == 0 || !IsSquadDormant(squad)) continue;
+            if (squad == null || SquadDormantCount(squad) == 0) continue;
             var reason = WakeReason(squad, proximity: false);
             if (reason != null) WakeSquad(squad, reason.Value);
         }
@@ -42,18 +42,20 @@ public partial class DormancySystem
         _encounterPlan.Clear();
         foreach (var squad in squads)
         {
-            if (squad == null || squad.Members.Count == 0 || IsSquadDormant(squad)) continue;
+            if (squad == null || squad.Members.Count == 0) continue;
+            var dormant = SquadDormantCount(squad);
+            if (dormant == squad.Members.Count) continue;
             UpdateHpTracking(squad);
-            if (!CanSleep(squad)) continue;
+            if (!CanSleep(squad, joining: dormant > 0)) continue;
             var scoped = false;
             foreach (var agent in squad.Members)
                 if (InScopedView(agent.Position, out _)) { scoped = true; break; }
             if (scoped) continue;
-            var standard = !IsDefaultDormantSquad(squad);
-            if (standard && awakeStandard - squad.Members.Count < floor) { _blockedFloor++; continue; }
+            var standard = SquadAwakeStandardCount(squad);
+            if (standard > 0 && awakeStandard - standard < floor) { _blockedFloor++; continue; }
             var unit = _encounterPlan.Add(squad);
             foreach (var agent in squad.Members) _encounterPlan.Member(unit, agent.Bot, agent.Position);
-            if (standard) awakeStandard -= squad.Members.Count;
+            awakeStandard -= standard;
         }
         foreach (var kv in _vanillaGroups)
         {
@@ -82,6 +84,9 @@ public partial class DormancySystem
             if (unit.Key is Squad squad) SleepSquad(squad);
             else SleepVanillaGroup(unit.Key, _vanillaGroups[unit.Key]);
         }
+
+        // A newcomer rejected by any safety, population or neighbour gate needs the squad awake.
+        WakeIncompleteSquads(squads);
 
         // An ineligible awake neighbour retains the existing wake behaviour and sleep grace.
         foreach (var squad in squads)
@@ -127,6 +132,17 @@ public partial class DormancySystem
         var count = 0;
         foreach (var bot in bots) if (_vanillaDormant.Contains(bot)) count++;
         return count;
+    }
+
+    private void WakeIncompleteSquads(List<Squad> squads)
+    {
+        foreach (var squad in squads)
+        {
+            if (squad == null) continue;
+            var dormant = SquadDormantCount(squad);
+            if (dormant > 0 && dormant < squad.Members.Count)
+                WakeSquad(squad, new(GhostWakeCause.GroupChanged, "new squad members cannot enter Ghost"));
+        }
     }
 
     private int NativeAwakeCount(List<BotOwner> bots, bool standardOnly = false)

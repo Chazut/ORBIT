@@ -428,19 +428,21 @@ public partial class DormancySystem
             var squad = squads[i];
             if (squad == null || squad.Members.Count == 0) continue;
 
-            if (IsSquadDormant(squad))
+            var dormant = SquadDormantCount(squad);
+            if (dormant > 0)
             {
                 var reason = WakeReason(squad);
                 if (reason != null)
                 {
                     _wakeQueue.Add(squad);
                     _wakeReasons.Add(reason.Value);
+                    continue;
                 }
             }
-            else
+            if (dormant < squad.Members.Count)
             {
                 UpdateHpTracking(squad);
-                if (CanSleep(squad)) _sleepCandidates.Add(squad);
+                if (CanSleep(squad, joining: dormant > 0)) _sleepCandidates.Add(squad);
             }
         }
 
@@ -467,15 +469,20 @@ public partial class DormancySystem
         for (var i = 0; i < _sleepCandidates.Count; i++)
         {
             var squad = _sleepCandidates[i];
-            var defaultDormant = IsDefaultDormantSquad(squad);
-            if (!defaultDormant && awakeStandard - squad.Members.Count < floor) { _blockedFloor++; continue; }
+            var standard = SquadAwakeStandardCount(squad);
+            if (standard > 0 && awakeStandard - standard < floor) { _blockedFloor++; continue; }
             if (AnyRemainingAwakeBotNear(squad)) { _blockedProximity++; continue; }
 
             SleepSquad(squad);
-            if (!defaultDormant) awakeStandard -= squad.Members.Count;
+            awakeStandard -= standard;
         }
+        WakeIncompleteSquads(squads);
         UpdateVanilla(ref awakeStandard, floor);
-        _lastAwakeStandard = awakeStandard;
+        _lastAwakeStandard = 0;
+        foreach (var agent in liveAgents)
+            if (agent != null && !agent.IsDormant && !IsDefaultDormant(agent.Bot)) _lastAwakeStandard++;
+        var nativeTotal = 0;
+        CountNativeStandard(ref nativeTotal, ref _lastAwakeStandard);
 
     }
 
@@ -571,8 +578,23 @@ public partial class DormancySystem
 
     private static bool IsSquadDormant(Squad squad)
     {
-        // Atomic by construction (squads sleep and wake whole), so the first member's flag is the squad's.
-        return squad.Members.Count > 0 && squad.Members[0].IsDormant;
+        // Registration is staggered: a late member can temporarily join an already sleeping squad.
+        return squad.Members.Count > 0 && SquadDormantCount(squad) == squad.Members.Count;
+    }
+
+    private static int SquadDormantCount(Squad squad)
+    {
+        var count = 0;
+        foreach (var agent in squad.Members) if (agent.IsDormant) count++;
+        return count;
+    }
+
+    private int SquadAwakeStandardCount(Squad squad)
+    {
+        var count = 0;
+        foreach (var agent in squad.Members)
+            if (!agent.IsDormant && !IsDefaultDormant(agent.Bot)) count++;
+        return count;
     }
 
     private bool IsDefaultDormantSquad(Squad squad)
@@ -596,7 +618,7 @@ public partial class DormancySystem
         }
     }
 
-    private bool CanSleep(Squad squad)
+    private bool CanSleep(Squad squad, bool joining = false)
     {
         // Distance gate first: a squad near a human is simply "in play", not diagnostic. Everything
         // counted below answers the verification question "why does a FAR squad stay awake?".
@@ -620,6 +642,9 @@ public partial class DormancySystem
         for (var i = 0; i < squad.Members.Count; i++)
         {
             var agent = squad.Members[i];
+            // Existing sleepers were checked by WakeReason before admission. Their inactive bodies
+            // must not block a newcomer or have their inventory/HP baseline initialized again.
+            if (joining && agent.IsDormant) continue;
             var bot = agent.Bot;
             if (bot == null || bot.IsDead || bot.BotState != EBotState.Active) { _farBlockedState++; return false; }
             if (!bot.gameObject.activeSelf) { _farBlockedState++; return false; } // someone else owns the GameObject — never fight over it
@@ -748,7 +773,7 @@ public partial class DormancySystem
             // Position-based damage (border minefields at least) lands on inactive bodies, and a sleeper
             // can neither react nor heal — hand it back to SAIN immediately.
             var hp = TotalHp(agent);
-            if (hp < agent.DormantHpBaseline - 1f)
+            if (agent.IsDormant && hp < agent.DormantHpBaseline - 1f)
             {
                 return new(GhostWakeCause.Damage, $"{agent} took {agent.DormantHpBaseline - hp:F0} damage while dormant at {agent.Position}" +
                        (DangerZones.IsInside(agent.Position) ? " (inside a border/minefield zone)" : ""));
@@ -885,17 +910,27 @@ public partial class DormancySystem
 
     private void SleepSquad(Squad squad)
     {
+        var joining = SquadDormantCount(squad) > 0;
+        var added = 0;
         var minHumanSqr = float.MaxValue;
         for (var i = 0; i < squad.Members.Count; i++)
         {
-            SleepAgent(squad.Members[i]);
+            if (!squad.Members[i].IsDormant)
+            {
+                SleepAgent(squad.Members[i]);
+                added++;
+            }
             var d = MinSqrDistanceToHumans(squad.Members[i].Position);
             if (d < minHumanSqr) minHumanSqr = d;
         }
-        squad.DormancySleptAt = Time.time;
+        if (added == 0) return;
+        if (!joining) squad.DormancySleptAt = Time.time;
         _windowSleeps++;
         var humanDist = minHumanSqr < float.MaxValue ? $"{Mathf.Sqrt(minHumanSqr):F0}m" : "none";
-        Log.Info($"{squad} dormant (nearest human {humanDist}, {squad.Members.Count} bots asleep, {_dormantAgents.Count} total dormant)");
+        if (joining)
+            Log.Info($"{squad} Ghost membership reconciled: {added} new members asleep ({squad.Members.Count} total, nearest human {humanDist})");
+        else
+            Log.Info($"{squad} dormant (nearest human {humanDist}, {squad.Members.Count} bots asleep, {_dormantAgents.Count} total dormant)");
     }
 
     private void SleepAgent(Agent agent)
@@ -943,7 +978,8 @@ public partial class DormancySystem
     private void WakeSquad(Squad squad, GhostWakeReason reason)
     {
         for (var i = 0; i < squad.Members.Count; i++)
-            WakeAgent(squad.Members[i]);
+            // Awake or initializing newcomers already own their body. Never PostActivate them here.
+            if (squad.Members[i].IsDormant) WakeAgent(squad.Members[i]);
         squad.DormancySleepAllowedAt = Time.time + reason.CooldownSeconds;
         _windowWakes++;
         RecordWake(reason.Cause);
