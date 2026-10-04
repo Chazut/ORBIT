@@ -68,6 +68,7 @@ public class Agent(int id, BotOwner bot, float[] taskScores) : Entity(id, taskSc
     public readonly Look Look = new();
 
     public readonly Objective Objective = new();
+    internal float NextAirdropScanAt;
     public readonly Guard Guard = new();
 
     public readonly ArrivalFailureHistory ArrivalFailures = new();

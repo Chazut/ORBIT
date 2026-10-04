@@ -26,6 +26,8 @@ internal sealed class OperationDefinition
 {
     internal string Id, Name;
     internal bool Extraction;
+    internal bool RequiresCredential;
+    internal bool AllowsCategory(string category) => category != "PlayerScav" || !RequiresCredential;
     internal Switch Power;
     internal readonly List<OperationStep> Steps = new();
 }
@@ -112,7 +114,9 @@ internal sealed class MultiStepCatalog
         if (!_objects.TryGetValue(power, out var source) || source is not Switch sw) return;
         foreach (var step in steps)
             if (step == null) { Log.Warning($"MULTISTEP: unavailable operation={id}: required scene object missing"); return; }
-        var definition = new OperationDefinition { Id = id, Name = name, Extraction = extraction, Power = sw };
+        var definition = new OperationDefinition { Id = id, Name = name, Extraction = extraction, Power = sw,
+            RequiresCredential = id is "kiba" or "ultra" or "object21ws" or "saferoom-loot"
+                or "object14" or "saferoom-extract" or "zb013" };
         definition.Steps.AddRange(steps);
         Operations.Add(definition);
         foreach (var step in steps)

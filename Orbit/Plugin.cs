@@ -155,6 +155,7 @@ public class Plugin : BaseUnityPlugin
 
         // Inventory subsystem patches
         EnableSafe(new AirdropLandedPatch());
+        EnableSafe(new AirdropReleasedPatch());
         EnableSafe(new InventoryChangePatch());
         EnableSafe(new LootItemKilledPatch());
         EnableSafe(new CorpseRegistrationPatch());

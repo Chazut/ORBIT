@@ -182,7 +182,7 @@ public class Dataset<T, TE>(TE entities) where TE : EntityArray<T> where T : Ent
             _components[i].Add(entity.Id);
     }
 
-    public void RemoveEntity(T entity)
+    public virtual void RemoveEntity(T entity)
     {
         Entities.Remove(entity);
         for (var i = 0; i < _components.Count; i++)
@@ -205,9 +205,21 @@ public class Dataset<T, TE>(TE entities) where TE : EntityArray<T> where T : Ent
 
 public class AgentData() : Dataset<Agent, AgentArray>(new AgentArray())
 {
+    private readonly Dictionary<string, Agent> _byProfile = new(StringComparer.Ordinal);
+    public Agent GetByProfileId(string profileId)
+        => profileId != null && _byProfile.TryGetValue(profileId, out var agent) ? agent : null;
+
+    public override void RemoveEntity(Agent agent)
+    {
+        var profileId = agent.Player?.ProfileId;
+        if (profileId != null && GetByProfileId(profileId) == agent) _byProfile.Remove(profileId);
+        base.RemoveEntity(agent);
+    }
+
     public Agent AddEntity(BotOwner bot, int taskCount)
     {
         var agent = Entities.Add(bot, taskCount);
+        if (agent.Player?.ProfileId != null) _byProfile[agent.Player.ProfileId] = agent;
         AddEntityComponents(agent);
         return agent;
     }

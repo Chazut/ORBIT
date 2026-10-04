@@ -49,6 +49,7 @@ public class Waypoint(
     /// Quest / Synthetic it's null.
     /// </summary>
     public readonly MonoBehaviour Target = target;
+    internal bool IsAirdrop;
 
     /// <summary>
     /// Locked doors detected on the natural navmesh route to this POI. Populated lazily the first time a PMC

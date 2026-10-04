@@ -92,11 +92,26 @@ The leader takes the anchor, the others splinter to nearby loot and cover. They 
 real reasons - enough roubles, goals completed, or the raid clock - and
 they coordinate on shared exfils like the car.
 
-PMC and PlayerScav squads can also take a temporary detour to set up an
-ambush around a hotspot, an available extract or a landed airdrop. Members
-take separate watch positions, hold for a limited time, then resume their
-objectives. **Ambush & camping** in the web UI controls chances, hold times,
-distances, cover requirements and squad limits for each target type.
+PMC and PlayerScav squads can hold cover within a Kill main or receive an
+extract-camping main. Airdrops create temporary detours: eligible nearby squads
+roll as soon as the plane releases the crate, approach its estimated landing area,
+then hold cover. Once the hold is over and the crate has landed, one member loots
+while the others cover, before the squad resumes its objectives. Several squads
+can choose the same target. If no cover formation is possible, the squad approaches
+the drop and loots as soon as it lands, without an ambush hold; other members guard nearby.
+**Ambush & camping** controls personality chances,
+hold times, distances and cover requirements. Later airdrop checks let squads
+reconsider a drop after entering range or leaving combat.
+
+PMCs can also roll multi-step objectives that activate power and interact with
+switches, doors or card readers before looting or extracting. Long or partially
+reachable approaches are retried through connected intermediate points, with a
+bounded step timeout. PlayerScavs never select chains requiring keys or keycards.
+
+The **Extraction** page can allow no-backpack exits when the bag is empty or the
+bot is making a wounded emergency extraction. The bot drops the real bag at the
+entrance, leaving its contents lootable, and must enter the exit without it.
+A squad only chooses such an exit when each member staying with the squad qualifies.
 
 ### 🎒 Looting that feels human
 

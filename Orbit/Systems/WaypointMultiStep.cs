@@ -53,7 +53,7 @@ public partial class WaypointSystem
         OperationDefinition chosen = null;
         foreach (var definition in _operations.Operations)
         {
-            if (definition.Extraction != extraction) continue;
+            if (definition.Extraction != extraction || !definition.AllowsCategory(squad.Leader?.BotCategory)) continue;
             if (extraction && squad.FailedOperationExits.Contains(definition.Id)) continue;
             var used = false;
             if (!extraction && squad.MainObjectives != null)
@@ -81,6 +81,11 @@ public partial class WaypointSystem
 
     internal bool TickOperation(Squad squad, bool combat)
     {
+        // Shared world prerequisites can change while another operation owns
+        // the squad. Keep pending targets current for selection and telemetry.
+        if (squad.MainObjectives != null)
+            foreach (var main in squad.MainObjectives)
+                main.Operation?.RefreshPending(this);
         if (squad.Operation != null)
         {
             if (squad.Operation.Tick(squad, this, combat)) return true;
@@ -116,7 +121,6 @@ public partial class WaypointSystem
             foreach (var main in squad.MainObjectives)
             {
                 if (main.Completed) continue;
-                main.Operation?.RefreshPending(this);
                 var d = (main.Position - squad.Leader.Position).sqrMagnitude;
                 if (d < distance) { nearest = main; distance = d; }
             }
@@ -128,7 +132,8 @@ public partial class WaypointSystem
         return squad.Operation.Tick(squad, this, combat);
     }
 
-    internal bool TryOperationPoint(Agent actor, OperationStep step, out Vector3 point)
+    internal bool TryOperationPoint(Agent actor, OperationStep step, OperationRouteSearch search,
+        out Vector3 point, out bool final)
     {
         var target = step.Position;
         if (step.Kind == OperationStepKind.Access && step.Object is KeycardDoor card
@@ -136,18 +141,7 @@ public partial class WaypointSystem
             target = card.Proxies[0].transform.position; // 11SR reader is upstairs, far from its door.
         else if (step.Kind is OperationStepKind.Access or OperationStepKind.Switch)
             target = step.Object.GetInteractionParameters(actor.Position).InteractionPosition;
-        // Switch pivots are mounted above the floor. Sample locally, never another storey.
-        for (var i = 0; i < 4; i++)
-        {
-            var sample = target + Vector3.down * (i * .6f);
-            if (!NavMesh.SamplePosition(sample, out var hit, 1.25f, NavMesh.AllAreas)) continue;
-            if (Mathf.Abs(hit.position.y - target.y) > 2.5f) continue;
-            if (NavMesh.CalculatePath(actor.Position, hit.position, NavMesh.AllAreas, _operationPath)
-                && _operationPath.status == NavMeshPathStatus.PathComplete)
-            { point = hit.position; return true; }
-        }
-        point = default;
-        return false;
+        return search.Find(actor.Position, target, out point, out final);
     }
 
     internal Waypoint OperationLoot(Agent agent, Vector3 center, HashSet<int> attempted, out bool exhausted)

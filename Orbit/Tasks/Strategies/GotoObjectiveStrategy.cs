@@ -26,6 +26,7 @@ namespace Orbit.Tasks.Strategies;
 public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointSystem, float hysteresis) : Task<Squad>(hysteresis)
 {
     private readonly AmbushDirector _ambush = new(waypointSystem);
+    internal void OnAirdropReleased(AmbushSite site) => _ambush.OnAirdropReleased(site, squadData.Entities.Values);
     private static Range _moveTimeout = new(400, 600);
     private Range _guardDuration = new(ServerConfig.PoiGuard.GuardDuration.x, ServerConfig.PoiGuard.GuardDuration.y);
     private Range _guardDurationCut = new(ServerConfig.PoiGuard.GuardDurationCut.x, ServerConfig.PoiGuard.GuardDurationCut.y);
@@ -86,6 +87,16 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                 if (squad.Camp.Tick(squad, waypointSystem))
                 {
                     UpdateAgents(squad, out _); // Emergency extraction still takes priority for each member.
+                    continue;
+                }
+            }
+
+            if (squad.Camp.PendingAirdrop != null)
+            {
+                CheckTimeExtractTrigger(squad);
+                if (_ambush.TryStartPending(squad))
+                {
+                    UpdateAgents(squad, out _);
                     continue;
                 }
             }
@@ -735,7 +746,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                     ExfilArrival.Abandon(agent, agent.SoloExtractTarget);
                 }
                 if (agent.SoloExtractTarget == null)
-                    agent.SoloExtractTarget = waypointSystem.FindNearestEligibleExfil(squad);
+                    agent.SoloExtractTarget = waypointSystem.FindNearestEligibleExfil(squad, agent);
                 if (agent.SoloExtractTarget != null)
                 {
                     // Re-arm the move order rather than issuing it once: a SAIN-combat detour drops the
@@ -771,7 +782,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
             }
 
             if (squad.CorpseEscort.UpdateMember(squad, agent, i, waypointSystem)) continue;
-            if (squad.Camp.Owns(agent)) continue;
+            if (squad.Camp.PendingAirdrop != null || squad.Camp.Owns(agent)) continue;
             if (squad.Operation?.Owns(agent) == true) continue;
 
             // An agent is "aligned" with the squad if their location IS the squad's main objective, OR if
@@ -817,7 +828,9 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
             if (agentObjective.Status == ObjectiveStatus.Looting || agent.LootHandler?.LootTaskRunning == true)
                 continue;
             var ownKillReroute = waypointSystem.TryGetNextOwnKillCorpseForAgent(squad, agent);
+            var visibleAirdrop = ownKillReroute == null ? waypointSystem.TryFindOpportunisticAirdrop(agent) : null;
             var aligned = !splinterAlreadyDone && !leaderFinishedAnchorInRoam
+                          && visibleAirdrop == null
                           && (ownKillReroute == null || agentObjective.Location == ownKillReroute)
                           && (agentObjective.Location == squadObjective.Location
                               || (agentObjective.SplinterParent != null
@@ -877,6 +890,13 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                     splinterParent = squadObjective.Location;
                     tookOwnKillCorpse = true;
                     Log.Debug($"{agent} own-kill re-route to its corpse {targetLoc} (reactivated after a combat / heal / extract detour)");
+                }
+                else if (visibleAirdrop != null)
+                {
+                    targetLoc = visibleAirdrop;
+                    splinterParent = squadObjective.Location;
+                    _splinterScratch.Add(targetLoc.Id);
+                    Log.Info($"AIRDROP LOOT: {agent} spotted {targetLoc} at {targetLoc.Position}");
                 }
                 else if (i == 0
                          && !anchorReservedForOwnKill

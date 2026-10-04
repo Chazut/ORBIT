@@ -95,6 +95,20 @@ public class ExtractAction(AgentData dataset, float hysteresis) : Task<Agent>(hy
             return;
         }
 
+        if (NoBackpackExfil.RequiresDrop(exfil))
+        {
+            var preparation = NoBackpackExfil.Prepare(agent, loc);
+            if (preparation == NoBackpackExfil.Preparation.Rejected)
+            { _footExtractStartTime.Remove(agent.Id); ExfilArrival.Abandon(agent, loc); return; }
+            if (preparation != NoBackpackExfil.Preparation.Ready || !NoBackpackExfil.CanFinish(agent, loc))
+            {
+                _footExtractStartTime.Remove(agent.Id);
+                agent.Objective.Status = ObjectiveStatus.None;
+                agent.Objective.DispatchTime = Time.time;
+                return;
+            }
+        }
+
         if (exfil.Settings != null
             && exfil.Settings.ExfiltrationType == EExfiltrationType.SharedTimer)
         {
@@ -328,6 +342,13 @@ public class ExtractAction(AgentData dataset, float hysteresis) : Task<Agent>(hy
 
     private static void DespawnAgent(Agent agent)
     {
+        // Also protects emergency watchdog and arrival-fallback callers from bypassing backpack requirements.
+        if (!NoBackpackExfil.CanFinish(agent, agent.Objective.Location))
+        {
+            agent.Objective.Status = ObjectiveStatus.None;
+            agent.Objective.DispatchTime = Time.time;
+            return;
+        }
         // BotOwner already torn down on BSG's side (died / despawned / left while we were counting down):
         // there is nothing left to remove from the map — drop our agent instead of NRE-retrying every cycle
         // until raid end.

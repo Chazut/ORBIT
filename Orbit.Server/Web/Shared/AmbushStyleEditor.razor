@@ -5,7 +5,7 @@
 <OrbitSlider T="float" Value="Cfg.ExtractDurationMin" ValueChanged="SetExtractMin" Label="Extract hold minimum" Unit="s" Min="10" Max="1800" Step="5" />
 <OrbitSlider T="float" @bind-Value="Cfg.ExtractDurationMax" Label="Extract hold maximum" Unit="s" Min="Cfg.ExtractDurationMin" Max="1800" Step="5" />
 <OrbitSlider T="float" @bind-Value="Cfg.AirdropChance" Label="Airdrop ambush chance per opportunity" Fmt="P0" Min="0" Max="1" Step="0.01f"
-             Tooltip="One roll per check with nearby landed drops, regardless of drop count. After holding, one member attempts to loot the crate while the others cover." />
+             Tooltip="Nearby eligible squads roll at release, with later rolls on periodic checks. After holding and landing, one member attempts to loot the crate while the others cover." />
 <OrbitSlider T="float" Value="Cfg.AirdropDurationMin" ValueChanged="SetAirdropMin" Label="Airdrop hold minimum" Unit="s" Min="10" Max="1800" Step="5" />
 <OrbitSlider T="float" @bind-Value="Cfg.AirdropDurationMax" Label="Airdrop hold maximum" Unit="s" Min="Cfg.AirdropDurationMin" Max="1800" Step="5" />
 

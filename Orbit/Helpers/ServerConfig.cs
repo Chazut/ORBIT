@@ -58,6 +58,7 @@ public static class ServerConfig
 
         [JsonProperty("extract_pmc")] public bool ExtractPmc = true;
         [JsonProperty("extract_player_scav")] public bool ExtractPlayerScav = true;
+        [JsonProperty("allow_no_backpack_exfils")] public bool AllowNoBackpackExfils = true;
         [JsonProperty("solo_loot_extract_chance_pct")] public int SoloLootExtractChancePct = 50;
         [JsonProperty("scav_loot_chance_pct")] public int ScavLootChancePct = 30;
 

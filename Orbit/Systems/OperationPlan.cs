@@ -32,6 +32,8 @@ internal sealed class OperationPlan
     private Vector3 _anchor;
     private Waypoint _loot;
     private Waypoint _regroup;
+    private readonly OperationRouteSearch _route = new();
+    private bool _approachOnly;
 
     internal OperationPlan(OperationDefinition definition, bool alarm)
     {
@@ -51,17 +53,21 @@ internal sealed class OperationPlan
     {
         if (Active || Main?.Completed == true) return;
         var previous = Index;
+        // Timed power (for example Hermetic) may expire before this plan starts.
+        if (Index > 0 && Definition.Power != null && Definition.Power.DoorState == EDoorState.Shut) Index = 0;
         while (Index + 1 < Count && Current.Kind is OperationStepKind.Switch or OperationStepKind.Access && Satisfied(Current)) Index++;
+        var targetChanged = false;
         if (Main != null)
         {
+            targetChanged = Main.Position != Current.Position;
             Main.Position = Current.Position;
             Main.CellCoords = waypoints.WorldToCell(Main.Position);
         }
-        if (Index != previous) Orbit.Api.OrbitTelemetry.MainObjectivesRevision++;
+        if (Index != previous || targetChanged) Orbit.Api.OrbitTelemetry.MainObjectivesRevision++;
     }
 
-    internal bool Owns(Agent agent) => Active && !_paused && _orders.TryGetValue(agent, out var point)
-        && agent.Objective.Location == point;
+    internal bool Owns(Agent agent) => Active && !_paused
+        && (!_orders.TryGetValue(agent, out var point) || agent.Objective.Location == point);
 
     internal bool Tick(Squad squad, WaypointSystem waypoints, bool combat)
     {
@@ -69,7 +75,8 @@ internal sealed class OperationPlan
         var now = Time.time;
         var delta = Mathf.Clamp(now - _lastTick, 0, 1);
         _lastTick = now;
-        if (!ServerConfig.MultiStep.Allows(squad.Leader?.BotCategory) || ServerConfig.MultiStep.Weight(Definition.Id) <= 0
+        if (!ServerConfig.MultiStep.Allows(squad.Leader?.BotCategory) || !Definition.AllowsCategory(squad.Leader?.BotCategory)
+            || ServerConfig.MultiStep.Weight(Definition.Id) <= 0
             || (!Definition.Extraction && squad.ExtractRequested)) return End(squad, waypoints, "cancelled");
         // Paused orders may be replaced by the combat rally. Rebuild from current positions on resume.
         if (combat || now < squad.GhostFightUntil)
@@ -78,7 +85,7 @@ internal sealed class OperationPlan
             if (!_paused) { ReleaseOrders(squad, waypoints); _paused = true; Status = "paused"; LogStep(squad); }
             return false;
         }
-        if (_paused) { _paused = false; _actor = null; Status = "approach"; LogStep(squad); }
+        if (_paused) { _paused = false; _actor = null; _route.Reset(); Status = "approach"; LogStep(squad); }
         _elapsed += delta;
         PauseOtherMains(squad, delta);
         if (_elapsed >= ServerConfig.MultiStep.StepTimeout
@@ -104,20 +111,29 @@ internal sealed class OperationPlan
         {
             ReleaseOrders(squad, waypoints);
             _actor = null;
+            _route.Reset();
             foreach (var member in squad.Members)
                 if (member.IsActive && !member.SoloExtractRequested && !CorpseEscort.InFlight(member)) { _actor = member; break; }
             if (_actor == null) return End(squad, waypoints, "no available operator");
-            if (!waypoints.TryOperationPoint(_actor, step, out _anchor))
+        }
+        if (!_orders.ContainsKey(_actor))
+        {
+            if (!waypoints.TryOperationPoint(_actor, step, _route, out _anchor, out var final))
             {
+                if (_route.Pending) return true;
+                Log.Info($"MULTISTEP ROUTE: {squad} operation={Definition.Id} step={step.Label} from={_actor.Position} target={step.Position} samples={_route.Samples} partial={_route.PartialPaths} invalid={_route.InvalidPaths} attempt={_retries + 1}");
                 _actor = null;
                 _nextWork = now + 3f;
                 if (++_retries >= 3) return End(squad, waypoints, "unreachable step");
                 return true;
             }
+            _approachOnly = !final;
+            if (_approachOnly)
+                Log.Info($"MULTISTEP ROUTE: {squad} operation={Definition.Id} step={step.Label} approach={_anchor} target={step.Position}");
             waypoints.CollectCorpseEscortCover(_anchor, _covers);
             _occupied.Clear();
             SetOrder(_actor, Point(waypoints, _anchor, step.Label), waypoints);
-            if (Main != null) { Main.Position = _anchor; Main.CellCoords = waypoints.WorldToCell(_anchor); }
+            if (Main != null) { Main.Position = step.Position; Main.CellCoords = waypoints.WorldToCell(step.Position); }
             squad.Objective.Location = _orders[_actor];
             squad.Objective.Status = SquadObjectiveState.Active;
         }
@@ -144,6 +160,17 @@ internal sealed class OperationPlan
             if (++_retries >= 3) return End(squad, waypoints, "operator route failed");
             return true;
         }
+        if (_approachOnly)
+        {
+            if ((_actor.Position - _anchor).sqrMagnitude <= 4f)
+            {
+                ReleaseOrders(squad, waypoints);
+                _actor = null;
+                _retries = 0;
+                _route.Reset();
+            }
+            return true;
+        }
         if (step.Kind == OperationStepKind.Loot) return TickLoot(squad, waypoints);
         if (step.Kind == OperationStepKind.Extract) return TickExtract(squad, waypoints);
         if (step.Kind == OperationStepKind.Wait)
@@ -161,7 +188,7 @@ internal sealed class OperationPlan
                         || End(squad, waypoints, "regroup timeout");
             return Advance(squad, waypoints);
         }
-        if ((_actor.Position - _anchor).sqrMagnitude > 4f) return true;
+        if ((_actor.Position - _anchor).sqrMagnitude > 1f) return true;
         if (_interactionPending && now - _interactionAt < 5f) return true;
         if (step.Object.DoorState == EDoorState.Interacting || step.Object.InteractingPlayer != null)
             return true;
@@ -251,6 +278,7 @@ internal sealed class OperationPlan
         ReleaseOrders(squad, waypoints);
         Index = index;
         _actor = null; _loot = null; _elapsed = 0; _regroupAt = -1; _retries = 0; _interactionPending = false;
+        _route.Reset(); _approachOnly = false;
         _attemptedLoot.Clear();
         Status = "approach";
         if (Main != null) { Main.Position = Current.Position; Main.CellCoords = waypoints.WorldToCell(Current.Position); }

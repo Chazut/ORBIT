@@ -9,7 +9,7 @@ public sealed class MultiStepSettings
     public bool Enabled { get; set; } = true;
     public bool Pmc { get; set; } = true;
     public bool PlayerScav { get; set; } = true;
-    public float StepTimeout { get; set; } = 240;
+    public float StepTimeout { get; set; } = 600;
     public float LootDuration { get; set; } = 90;
     public float RegroupTimeout { get; set; } = 45;
     public MultiStepStyle Timmy { get; set; } = new(.15f, .25f, .8f);

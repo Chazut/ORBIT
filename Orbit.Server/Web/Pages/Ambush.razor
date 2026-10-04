@@ -6,7 +6,7 @@
 
 <MudContainer MaxWidth="MaxWidth.Medium">
     <PageHeader Title="Ambush &amp; camping" OnReset="ResetPage"
-                Description="Kill mains can use ambush mode, extract camping is a main objective, and landed airdrops create opportunities during the raid. Multiple squads can target the same location. Save to apply next raid." />
+                Description="Kill mains can use ambush mode, extract camping is a main objective, and airdrops create opportunities as soon as the plane releases the crate. Multiple squads can target the same location. Save to apply next raid." />
     <SettingsCard Title="Who can camp" OnReset="ResetParticipants"
                   Subtitle="Only bots directed by ORBIT outside combat can start a camp. Combat interrupts the formation. Main objectives keep their remaining hold time for a later attempt.">
         <OrbitSwitch @bind-Value="Cfg.Ambush.Enabled" Label="Enable ambushes and camping" />
@@ -16,8 +16,8 @@
                      Tooltip="If no reachable, spaced cover with a sightline toward the target is found, the squad retries later. Kill ambushes never turn into roaming timers. OFF also allows open watch positions." />
     </SettingsCard>
     <SettingsCard Title="Planning and airdrop checks" OnReset="ResetLimits">
-        <OrbitSlider T="float" @bind-Value="Cfg.Ambush.CheckInterval" Label="Check for an airdrop every" Unit="s" Min="15" Max="600" Step="15"
-                     Tooltip="Only airdrops use these periodic chance rolls. Main objectives and Kill ambush mode are rolled when the squad receives its goals." />
+        <OrbitSlider T="float" @bind-Value="Cfg.Ambush.CheckInterval" Label="Recheck nearby airdrops every" Unit="s" Min="15" Max="600" Step="15"
+                     Tooltip="Eligible nearby squads roll immediately at release. These later checks let other squads reconsider a drop after entering range or leaving combat. Main objectives and Kill ambush mode are rolled when the squad receives its goals." />
         <OrbitSlider T="float" @bind-Value="Cfg.Ambush.Cooldown" Label="Cooldown after an airdrop ambush" Unit="s" Min="30" Max="1800" Step="30" />
         <OrbitSlider T="float" @bind-Value="Cfg.Ambush.TravelTimeout" Label="Maximum time to reach camp" Unit="s" Min="15" Max="300" Step="15" />
         <OrbitSlider T="float" @bind-Value="Cfg.Ambush.MemberSpacing" Label="Minimum spacing within a squad" Unit="m" Min="3" Max="12" Step="1" />
@@ -31,27 +31,41 @@
         <AmbushTargetEditor Cfg="Cfg.Ambush.Extracts" />
     </SettingsCard>
     <SettingsCard Title="Airdrops" OnReset="@(() => Cfg.Ambush.Airdrops = new Orbit.Settings.AmbushSettings().Airdrops)"
-                  Subtitle="Nearby landed drops can attract several squads for up to 20 minutes. After holding, one member attempts to loot while the others cover. Each squad camps a given drop at most once.">
+                  Subtitle="Squads can approach the estimated landing area from release onward. After holding, they wait for the crate to land before one member loots while the others cover. Several squads can target the same drop for up to 20 minutes.">
         <AmbushTargetEditor Cfg="Cfg.Ambush.Airdrops" />
     </SettingsCard>
-    <SettingsCard Title="Timmy" OnReset="@(() => Cfg.Ambush.Timmy = new Orbit.Settings.AmbushSettings().Timmy)" Subtitle="Occasional short ambushes.">
-        <AmbushStyleEditor Cfg="Cfg.Ambush.Timmy" />
-    </SettingsCard>
-    <SettingsCard Title="Cautious (Rat, Coward, SnappingTurtle)" OnReset="@(() => Cfg.Ambush.Cautious = new Orbit.Settings.AmbushSettings().Cautious)" Subtitle="Frequent ambushes and longer extract / airdrop holds.">
-        <AmbushStyleEditor Cfg="Cfg.Ambush.Cautious" />
-    </SettingsCard>
-    <SettingsCard Title="Average (Normal)" OnReset="@(() => Cfg.Ambush.Average = new Orbit.Settings.AmbushSettings().Average)" Subtitle="Also used by PMCs when personality adaptation is disabled.">
-        <AmbushStyleEditor Cfg="Cfg.Ambush.Average" />
-    </SettingsCard>
-    <SettingsCard Title="Aggressive (Chad, Wreckless)" OnReset="@(() => Cfg.Ambush.Aggressive = new Orbit.Settings.AmbushSettings().Aggressive)" Subtitle="Fewer ambushes, shorter extract / airdrop holds.">
-        <AmbushStyleEditor Cfg="Cfg.Ambush.Aggressive" />
-    </SettingsCard>
-    <SettingsCard Title="VeryAggressive (GigaChad)" OnReset="@(() => Cfg.Ambush.VeryAggressive = new Orbit.Settings.AmbushSettings().VeryAggressive)" Subtitle="Rare ambushes and brief extract / airdrop holds.">
-        <AmbushStyleEditor Cfg="Cfg.Ambush.VeryAggressive" />
-    </SettingsCard>
-    <SettingsCard Title="PlayerScav" OnReset="@(() => Cfg.Ambush.PlayerScavStyle = new Orbit.Settings.AmbushSettings().PlayerScavStyle)" Subtitle="Separate settings; PlayerScavs have no SAIN personality profile.">
-        <AmbushStyleEditor Cfg="Cfg.Ambush.PlayerScavStyle" />
-    </SettingsCard>
+    <MudTabs Elevation="0" Rounded="true" ApplyEffectsToContainer="true" PanelClass="pt-4" Color="Color.Primary">
+        <MudTabPanel Text="Timmy">
+            <SettingsCard Title="Timmy" OnReset="@(() => Cfg.Ambush.Timmy = new Orbit.Settings.AmbushSettings().Timmy)" Subtitle="Occasional short ambushes.">
+                <AmbushStyleEditor Cfg="Cfg.Ambush.Timmy" />
+            </SettingsCard>
+        </MudTabPanel>
+        <MudTabPanel Text="Cautious">
+            <SettingsCard Title="Cautious (Rat, Coward, SnappingTurtle)" OnReset="@(() => Cfg.Ambush.Cautious = new Orbit.Settings.AmbushSettings().Cautious)" Subtitle="Frequent ambushes and longer extract / airdrop holds.">
+                <AmbushStyleEditor Cfg="Cfg.Ambush.Cautious" />
+            </SettingsCard>
+        </MudTabPanel>
+        <MudTabPanel Text="Average">
+            <SettingsCard Title="Average (Normal)" OnReset="@(() => Cfg.Ambush.Average = new Orbit.Settings.AmbushSettings().Average)" Subtitle="Also used by PMCs when personality adaptation is disabled.">
+                <AmbushStyleEditor Cfg="Cfg.Ambush.Average" />
+            </SettingsCard>
+        </MudTabPanel>
+        <MudTabPanel Text="Aggressive">
+            <SettingsCard Title="Aggressive (Chad, Wreckless)" OnReset="@(() => Cfg.Ambush.Aggressive = new Orbit.Settings.AmbushSettings().Aggressive)" Subtitle="Fewer ambushes, shorter extract / airdrop holds.">
+                <AmbushStyleEditor Cfg="Cfg.Ambush.Aggressive" />
+            </SettingsCard>
+        </MudTabPanel>
+        <MudTabPanel Text="Very aggressive">
+            <SettingsCard Title="VeryAggressive (GigaChad)" OnReset="@(() => Cfg.Ambush.VeryAggressive = new Orbit.Settings.AmbushSettings().VeryAggressive)" Subtitle="Rare ambushes and brief extract / airdrop holds.">
+                <AmbushStyleEditor Cfg="Cfg.Ambush.VeryAggressive" />
+            </SettingsCard>
+        </MudTabPanel>
+        <MudTabPanel Text="PlayerScav">
+            <SettingsCard Title="PlayerScav" OnReset="@(() => Cfg.Ambush.PlayerScavStyle = new Orbit.Settings.AmbushSettings().PlayerScavStyle)" Subtitle="Separate settings; PlayerScavs have no SAIN personality profile.">
+                <AmbushStyleEditor Cfg="Cfg.Ambush.PlayerScavStyle" />
+            </SettingsCard>
+        </MudTabPanel>
+    </MudTabs>
 </MudContainer>
 
 @code {

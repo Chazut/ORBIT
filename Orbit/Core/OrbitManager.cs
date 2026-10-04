@@ -112,7 +112,8 @@ public class OrbitManager
         RegisterComponents();
         var actions = RegisterActions();
         var strategies = RegisterStrategies();
-        Orbit.Patches.AirdropLandedPatch.OnAirdropLanded += WaypointSystem.RegisterAmbushAirdrop;
+        Orbit.Patches.AirdropLandedPatch.OnAirdropLanded += WaypointSystem.RegisterLandedAirdrop;
+        Orbit.Patches.AirdropReleasedPatch.OnAirdropReleased += OnAirdropReleased;
 
         ActionManager = new ActionManager(AgentData, actions);
         StrategyManager = new StrategyManager(SquadData, strategies);
@@ -126,7 +127,8 @@ public class OrbitManager
 
     public void Dispose()
     {
-        Orbit.Patches.AirdropLandedPatch.OnAirdropLanded -= WaypointSystem.RegisterAmbushAirdrop;
+        Orbit.Patches.AirdropLandedPatch.OnAirdropLanded -= WaypointSystem.RegisterLandedAirdrop;
+        Orbit.Patches.AirdropReleasedPatch.OnAirdropReleased -= OnAirdropReleased;
         try { _botsController.BotSpawner.OnBotRemoved -= OnBotRemoved; } catch { }
         try { DormancySystem?.Dispose(); } catch { }
         foreach (var task in ActionManager.Tasks)
@@ -135,6 +137,14 @@ public class OrbitManager
                 catch (System.Exception e) { Log.Warning($"Action cleanup failed: {e}"); }
         Orbit.Helpers.PerfMonitor.Finish(_liveAgents.Count, DormancySystem.DormantCount);
         Orbit.Helpers.DiagnosticCapture.Finish();
+    }
+
+    private void OnAirdropReleased(EFT.Interactive.LootableContainer container, UnityEngine.Vector3 ground)
+    {
+        var site = WaypointSystem.RegisterReleasedAirdrop(container, ground);
+        if (site == null) return;
+        foreach (var task in StrategyManager.Tasks)
+            if (task is GotoObjectiveStrategy strategy) strategy.OnAirdropReleased(site);
     }
 
     public Agent AddAgent(BotOwner bot)

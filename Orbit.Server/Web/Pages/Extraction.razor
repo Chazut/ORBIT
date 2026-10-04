@@ -11,6 +11,8 @@
                   Subtitle="Gates every extract: the squad loot and time triggers, the solo loot-threshold extract and the wounded emergency extract. Only PMCs and PlayerScavs have extract logic.">
         <OrbitSwitch @bind-Value="Cfg.Loot.ExtractPmc" Label="PMCs may extract" />
         <OrbitSwitch @bind-Value="Cfg.Loot.ExtractPlayerScav" Label="PlayerScavs may extract" />
+        <OrbitSwitch @bind-Value="Cfg.Loot.AllowNoBackpackExfils" Label="Allow no-backpack exits with an empty bag or in an emergency"
+                     Tooltip="The bot drops its backpack at the exit entrance before extracting. A full bag is kept unless the bot is making a wounded emergency extraction; the dropped bag and its contents remain in the world. All squad members must qualify for a squad extraction." />
     </SettingsCard>
 
     <SettingsCard Title="Extract triggers" OnReset="ResetTriggers">
@@ -60,6 +62,7 @@
         var d = new LootConfig();
         Cfg.Loot.ExtractPmc = d.ExtractPmc;
         Cfg.Loot.ExtractPlayerScav = d.ExtractPlayerScav;
+        Cfg.Loot.AllowNoBackpackExfils = d.AllowNoBackpackExfils;
     }
 
     private void ResetTriggers()

@@ -36,15 +36,54 @@ internal sealed class AmbushDirector(WaypointSystem waypoints)
         {
             var squad = _active[i];
             if (!squads.Contains(squad)) squad.Camp.End(squad, "group removed");
-            if (!squad.Camp.Active) _active.RemoveAt(i);
+            if (!squad.Camp.Active && squad.Camp.PendingAirdrop == null) _active.RemoveAt(i);
         }
     }
 
     internal static AmbushStyleSettings Style(Squad squad)
         => ServerConfig.Ambush.Style(squad.Personality?.Archetype.ToString(), squad.Leader?.BotCategory == "PlayerScav");
 
+    internal void OnAirdropReleased(AmbushSite site, IList<Squad> squads)
+    {
+        var cfg = ServerConfig.Ambush;
+        if (site == null || !cfg.Airdrops.Enabled) return;
+        // Decide at the release event. Expensive cover/path work remains paced by TryStartPending.
+        foreach (var squad in squads)
+        {
+            if (squad.Camp.Active || squad.Camp.PendingAirdrop != null || !cfg.Allows(squad.Leader?.BotCategory)
+                || !Available(squad) || Time.time < squad.Camp.AirdropCooldownUntil
+                || squad.Camp.VisitedAirdrops.Contains(site)) continue;
+            var delta = squad.Leader.Position - site.Position;
+            if (delta.x * delta.x + delta.z * delta.z > cfg.Airdrops.SearchRadius * cfg.Airdrops.SearchRadius) continue;
+            if (Random.value >= Style(squad).AirdropChance) continue;
+            squad.Camp.SelectAirdrop(squad, site);
+            if (!_active.Contains(squad)) _active.Add(squad);
+        }
+    }
+
+    internal bool TryStartPending(Squad squad)
+    {
+        var site = squad.Camp.PendingAirdrop;
+        if (site == null) return false;
+        squad.Camp.PauseMission(squad);
+        if (!ServerConfig.Ambush.Allows(squad.Leader?.BotCategory) || !ServerConfig.Ambush.Airdrops.Enabled
+            || !Available(squad) || !waypoints.IsAmbushSiteAvailable(site, squad.Leader?.BotCategory)
+            || Time.time - squad.Camp.PendingSince >= ServerConfig.Ambush.TravelTimeout)
+        {
+            squad.Camp.End(squad, "unavailable or formation timeout");
+            return false;
+        }
+        if (Time.time < _nextPlan || Time.time < squad.Camp.FormationRetryAt) return true;
+        _nextPlan = Time.time + .5f;
+        squad.Camp.FormationRetryAt = Time.time + 5f;
+        if (!TryFormation(squad, site, null) && squad.Camp.PendingAirdrop != null)
+            Log.Debug($"AMBUSH: {squad} released airdrop waiting for reachable cover at {site.Position}");
+        return squad.Camp.Active || squad.Camp.PendingAirdrop != null;
+    }
+
     internal bool TryStart(Squad squad)
     {
+        if (squad.Camp.PendingAirdrop != null) return TryStartPending(squad);
         var cfg = ServerConfig.Ambush;
         if (squad.Camp.Active || !cfg.Allows(squad.Leader?.BotCategory) || !Available(squad)) return false;
         if (Time.time < _nextPlan) return false;
@@ -73,7 +112,7 @@ internal sealed class AmbushDirector(WaypointSystem waypoints)
             return false;
         }
 
-        // Only landed airdrops are opportunistic detours. Main camps ignore this cooldown.
+        // Later opportunities still use periodic checks, including squads entering range after release.
         if (!cfg.Airdrops.Enabled) return false;
         if (squad.Camp.NextCheck == 0)
         {
@@ -104,9 +143,44 @@ internal sealed class AmbushDirector(WaypointSystem waypoints)
             _positions.Add(member, cover);
             _occupied.Add(cover.Position);
         }
-        if (_positions.Count != squad.Size) return false;
+        if (_positions.Count != squad.Size)
+        {
+            if (site.Kind != CampSiteKind.Airdrop) return false;
+            return TryDirectAirdrop(squad, site);
+        }
+        // Even when cover is optional, an entirely uncovered airdrop formation should just loot.
+        if (site.Kind == CampSiteKind.Airdrop)
+        {
+            var hasCover = false;
+            foreach (var position in _positions.Values) hasCover |= position.Category != CoverCategory.None;
+            if (!hasCover) return TryDirectAirdrop(squad, site);
+        }
         squad.Camp.Begin(squad, site, _positions, waypoints, main);
         if (!_active.Contains(squad)) _active.Add(squad);
         return true;
+    }
+
+    private bool TryDirectAirdrop(Squad squad, AmbushSite site)
+    {
+        _positions.Clear();
+        _occupied.Clear();
+        var pathBudget = 24;
+        var canApproach = false;
+        foreach (var member in squad.Members)
+        {
+            // Approach the landing area without requiring an ambush sightline or cover.
+            if (waypoints.TryPickAirdropApproach(member, site, _occupied, ref pathBudget, out var position))
+                canApproach = true;
+            else
+                position = new CoverPoint(member.Position, (site.Position - member.Position).normalized,
+                    CoverCategory.None, CoverLevel.Stay);
+            _positions.Add(member, position);
+            _occupied.Add(position.Position);
+        }
+        if (!canApproach) return false;
+        squad.Camp.Begin(squad, site, _positions, waypoints, directLoot: true);
+        if (!_active.Contains(squad)) _active.Add(squad);
+        // A landed crate can be claimed immediately, while the other members approach.
+        return squad.Camp.Tick(squad, waypoints);
     }
 }

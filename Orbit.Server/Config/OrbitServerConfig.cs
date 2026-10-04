@@ -167,6 +167,7 @@ public class LootConfig
 
     public bool ExtractPmc { get; set; } = true;
     public bool ExtractPlayerScav { get; set; } = true;
+    public bool AllowNoBackpackExfils { get; set; } = true;
     public int SoloLootExtractChancePct { get; set; } = 50;
     public int ScavLootChancePct { get; set; } = 30;
 }

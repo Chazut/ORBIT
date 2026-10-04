@@ -9,24 +9,38 @@
     <SettingsCard Title="Participants and timing">
         <OrbitSwitch @bind-Value="Cfg.MultiStep.Enabled" Label="Enable multi-step objectives" />
         <OrbitSwitch @bind-Value="Cfg.MultiStep.Pmc" Label="PMCs" />
-        <OrbitSwitch @bind-Value="Cfg.MultiStep.PlayerScav" Label="PlayerScavs (loot operations)" />
+        <OrbitSwitch @bind-Value="Cfg.MultiStep.PlayerScav" Label="PlayerScavs (keyless loot operations only)" Tooltip="PlayerScavs never receive a chain requiring a key or keycard, even when its door has already been opened. None of the current loot chains qualifies." />
         <OrbitSlider T="float" @bind-Value="Cfg.MultiStep.StepTimeout" Label="Travel timeout per step" Unit="s" Min="30" Max="900" Step="30" />
         <OrbitSlider T="float" @bind-Value="Cfg.MultiStep.LootDuration" Label="Maximum time looting the destination" Unit="s" Min="10" Max="600" Step="10" />
         <OrbitSlider T="float" @bind-Value="Cfg.MultiStep.RegroupTimeout" Label="Wait for squad inside Saferoom" Unit="s" Min="10" Max="180" Step="5" />
     </SettingsCard>
-    <SettingsCard Title="Operations" Subtitle="Relative selection weights within the available loot or extraction pool. Zero disables that chain. Keys and cards are simulated; bots must still reach the real reader or door and activate the power. Labs and Labyrinth are excluded.">
+    <SettingsCard Title="Operations" Subtitle="Relative selection weights within the available loot or extraction pool. Zero disables that chain. For PMCs, keys and cards are simulated; PlayerScavs cannot select chains that require them. Bots must still reach the real reader or door and activate the power. Labs and Labyrinth are excluded.">
         @foreach (var item in Operations)
         {
             <OrbitSlider T="float" Value="Cfg.MultiStep.Weight(item.Key)" ValueChanged="@(value => Cfg.MultiStep.Weights[item.Key] = value)"
                          Label="@item.Value" Min="0" Max="10" Step="0.5f" />
         }
     </SettingsCard>
-    <SettingsCard Title="Timmy"><MultiStepStyleEditor Cfg="Cfg.MultiStep.Timmy" /></SettingsCard>
-    <SettingsCard Title="Cautious"><MultiStepStyleEditor Cfg="Cfg.MultiStep.Cautious" /></SettingsCard>
-    <SettingsCard Title="Average"><MultiStepStyleEditor Cfg="Cfg.MultiStep.Average" /></SettingsCard>
-    <SettingsCard Title="Aggressive"><MultiStepStyleEditor Cfg="Cfg.MultiStep.Aggressive" /></SettingsCard>
-    <SettingsCard Title="Very aggressive"><MultiStepStyleEditor Cfg="Cfg.MultiStep.VeryAggressive" /></SettingsCard>
-    <SettingsCard Title="PlayerScav"><MultiStepStyleEditor Cfg="Cfg.MultiStep.PlayerScavStyle" /></SettingsCard>
+    <MudTabs Elevation="0" Rounded="true" ApplyEffectsToContainer="true" PanelClass="pt-4" Color="Color.Primary">
+        <MudTabPanel Text="Timmy">
+            <SettingsCard Title="Timmy"><MultiStepStyleEditor Cfg="Cfg.MultiStep.Timmy" /></SettingsCard>
+        </MudTabPanel>
+        <MudTabPanel Text="Cautious">
+            <SettingsCard Title="Cautious"><MultiStepStyleEditor Cfg="Cfg.MultiStep.Cautious" /></SettingsCard>
+        </MudTabPanel>
+        <MudTabPanel Text="Average">
+            <SettingsCard Title="Average"><MultiStepStyleEditor Cfg="Cfg.MultiStep.Average" /></SettingsCard>
+        </MudTabPanel>
+        <MudTabPanel Text="Aggressive">
+            <SettingsCard Title="Aggressive"><MultiStepStyleEditor Cfg="Cfg.MultiStep.Aggressive" /></SettingsCard>
+        </MudTabPanel>
+        <MudTabPanel Text="Very aggressive">
+            <SettingsCard Title="Very aggressive"><MultiStepStyleEditor Cfg="Cfg.MultiStep.VeryAggressive" /></SettingsCard>
+        </MudTabPanel>
+        <MudTabPanel Text="PlayerScav">
+            <SettingsCard Title="PlayerScav"><MultiStepStyleEditor Cfg="Cfg.MultiStep.PlayerScavStyle" /></SettingsCard>
+        </MudTabPanel>
+    </MudTabs>
 </MudContainer>
 
 @code {

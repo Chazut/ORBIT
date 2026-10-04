@@ -38,10 +38,8 @@ public static class OrbitTelemetry
         var manager = Singleton<OrbitManager>.Instance;
         if (manager?.DormancySystem == null || manager.AgentData == null || string.IsNullOrEmpty(profileId))
             return null;
-        var agents = manager.AgentData.Entities.Values;
-        for (var i = 0; i < agents.Count; i++)
-            if (agents[i]?.Player?.ProfileId == profileId)
-                return manager.DormancySystem.GetGhostHearingState(agents[i]);
+        var agent = manager.AgentData.GetByProfileId(profileId);
+        if (agent != null) return manager.DormancySystem.GetGhostHearingState(agent);
         return manager.DormancySystem.GetNativeGhostHearingState(profileId);
     }
 
@@ -131,8 +129,7 @@ public static class OrbitTelemetry
 
     /// <summary>
     /// Resolve a bot's current objective by profile id. Returns null when no ORBIT-managed agent matches, the
-    /// agent is inactive, or it has no objective. Lookup is O(N) over the live agent list — fine at the
-    /// pacing raid-review uses but caller may want to batch.
+    /// agent is inactive, or it has no objective. Lookup uses the live dataset profile index in O(1).
     /// </summary>
     public static OrbitBotObjective GetBotObjective(string profileId)
     {
@@ -140,17 +137,7 @@ public static class OrbitTelemetry
         var manager = Singleton<OrbitManager>.Instance;
         if (manager?.AgentData == null) return null;
 
-        Agent agent = null;
-        var agents = manager.AgentData.Entities.Values;
-        for (var i = 0; i < agents.Count; i++)
-        {
-            var a = agents[i];
-            if (a?.Player != null && a.Player.ProfileId == profileId)
-            {
-                agent = a;
-                break;
-            }
-        }
+        var agent = manager.AgentData.GetByProfileId(profileId);
         if (agent == null || !agent.IsActive) return null;
 
         var obj = agent.Objective;
@@ -158,6 +145,7 @@ public static class OrbitTelemetry
 
         var loc = obj.Location;
         var category = loc != null ? loc.Category.ToString() : "";
+        if (loc?.IsAirdrop == true) category = "AirdropLoot";
         if (agent.Squad?.Camp.Owns(agent) == true)
             category = agent.Squad.Camp.Looter == agent ? "AirdropLoot" : "Ambush" + agent.Squad.Camp.Site.Kind;
         if (agent.Squad?.Operation?.Owns(agent) == true)
@@ -267,7 +255,10 @@ public static class OrbitTelemetry
         for (var i = 0; i < squads.Count; i++)
         {
             var squad = squads[i];
-            if (squad?.MainObjectives == null || squad.MainObjectives.Count == 0) continue;
+            if (squad == null) continue;
+            var airdrop = squad.Camp.GetAirdropObjective();
+            var mainCount = squad.MainObjectives?.Count ?? 0;
+            if (mainCount == 0 && airdrop == null) continue;
 
             var memberIds = new List<string>(squad.Members.Count);
             for (var m = 0; m < squad.Members.Count; m++)
@@ -276,8 +267,8 @@ public static class OrbitTelemetry
                 if (!string.IsNullOrEmpty(pid)) memberIds.Add(pid);
             }
 
-            var mains = new List<OrbitMainObjective>(squad.MainObjectives.Count);
-            for (var mi = 0; mi < squad.MainObjectives.Count; mi++)
+            var mains = new List<OrbitMainObjective>(mainCount + (airdrop == null ? 0 : 1));
+            for (var mi = 0; mi < mainCount; mi++)
             {
                 var m = squad.MainObjectives[mi];
                 mains.Add(new OrbitMainObjective
@@ -309,6 +300,9 @@ public static class OrbitTelemetry
                     QuestTitle = m.QuestTitle,
                 });
             }
+
+            // Display-only detour, never inserted into the squad's strategic goals or completion checks.
+            if (airdrop != null) mains.Add(airdrop);
 
             result.Add(new OrbitSquadMainObjectives
             {
@@ -370,6 +364,9 @@ public class OrbitSquadMainObjectives
 
 public class OrbitMainObjective
 {
+    public string AirdropStage;
+    public string AirdropId;
+    public bool AirdropLanded;
     public string OperationId;
     public string OperationName;
     public string OperationStep;

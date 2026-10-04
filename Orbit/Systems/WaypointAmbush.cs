@@ -21,6 +21,7 @@ internal sealed class AmbushSite
     internal float ZoneRadius;
     internal Waypoint Exfil;
     internal LootableContainer Drop;
+    internal bool Landed;
     internal Waypoint LootWaypoint;
     internal float ExpiresAt;
     internal int Generation;
@@ -46,26 +47,47 @@ public partial class WaypointSystem
     internal void RegisterAmbushAirdrop(LootableContainer container)
     {
         if (container == null || !ServerConfig.Ambush.Enabled) return;
-        foreach (var site in _campSites) if (site.Drop == container) return;
+        foreach (var site in _campSites)
+            if (site.Drop == container)
+            {
+                if (site.Landed) return;
+                site.Landed = true;
+                site.Position = container.transform.position;
+                site.Covers.Clear();
+                site.CoversReady = false;
+                Orbit.Api.OrbitTelemetry.MainObjectivesRevision++;
+                Log.Info($"AMBUSH: airdrop landed at {site.Position}");
+                return;
+            }
         // Landing callbacks, never a per-bot scene scan. Limit stale drops to this raid's recent events.
         _campSites.RemoveAll(site => site.Kind == CampSiteKind.Airdrop && (site.Drop == null || Time.time >= site.ExpiresAt));
         if (_campSites.Count > 512) return;
         _campSites.Add(new AmbushSite { Kind = CampSiteKind.Airdrop, Position = container.transform.position,
-            Drop = container, ExpiresAt = Time.time + 1200f });
+            Drop = container, Landed = true, ExpiresAt = Time.time + 1200f });
         Log.Info($"AMBUSH: airdrop landed at {container.transform.position}");
+    }
+
+    internal AmbushSite RegisterReleasedAirdrop(LootableContainer container, Vector3 ground)
+    {
+        if (container == null || !ServerConfig.Ambush.Enabled || !ServerConfig.Ambush.Airdrops.Enabled) return null;
+        foreach (var site in _campSites) if (site.Drop == container) return null;
+        _campSites.RemoveAll(site => site.Kind == CampSiteKind.Airdrop && (site.Drop == null || Time.time >= site.ExpiresAt));
+        if (_campSites.Count > 512) return null;
+        var released = new AmbushSite { Kind = CampSiteKind.Airdrop, Position = ground,
+            Drop = container, ExpiresAt = Time.time + 1200f };
+        _campSites.Add(released);
+        Log.Info($"AMBUSH: airdrop released, estimated landing at {ground}");
+        return released;
     }
 
     internal bool TryGetAmbushLoot(Agent agent, AmbushSite site, out Waypoint point)
     {
         point = null;
-        if (site?.Kind != CampSiteKind.Airdrop || !IsAmbushSiteAvailable(site, agent.BotCategory)) return false;
+        if (site?.Kind != CampSiteKind.Airdrop || !site.Landed || !IsAmbushSiteAvailable(site, agent.BotCategory)) return false;
         if (site.LootWaypoint == null)
         {
-            if (!NavMesh.SamplePosition(site.Drop.transform.position, out var hit, 2f, NavMesh.AllAreas)) return false;
-            var waypoint = new Waypoint(NewRuntimeWaypointId(), WaypointCategory.ContainerLoot,
-                "Airdrop", hit.position, 1f, new(), new(), site.Drop);
-            if (!AddRuntimeWaypoint(waypoint)) return false;
-            site.LootWaypoint = waypoint;
+            site.LootWaypoint = AirdropPoint(site.Drop);
+            if (site.LootWaypoint == null) return false;
         }
         var target = site.LootWaypoint;
         if (agent.Squad.CompletedPoiIds.Contains(target.Id) || agent.ValueSkippedPoiIds.Contains(target.Id)
@@ -208,6 +230,34 @@ public partial class WaypointSystem
                 { chosen = new CoverPoint(position, (site.Position - position).normalized, CoverCategory.None, CoverLevel.Stay); return true; }
             }
         chosen = default;
+        return false;
+    }
+
+    internal bool TryPickAirdropApproach(Agent agent, AmbushSite site, List<Vector3> occupied,
+        ref int budget, out CoverPoint chosen)
+    {
+        chosen = default;
+        if (site.Kind != CampSiteKind.Airdrop) return false;
+        var spacing = ServerConfig.Ambush.MemberSpacing;
+        for (var i = 0; i <= 8 && budget > 0; i++)
+        {
+            var angle = i * Mathf.PI / 4f;
+            // The landing point itself may be the only reachable point on a narrow platform.
+            var radius = i == 8 ? 0 : Mathf.Max(6f, spacing * 2f);
+            var sample = site.Position + new Vector3(Mathf.Cos(angle), 0, Mathf.Sin(angle)) * radius;
+            budget--;
+            if (!NavMesh.SamplePosition(sample, out var hit, 3f, NavMesh.AllAreas)
+                || Mathf.Abs(hit.position.y - site.Position.y) > 3f) continue;
+            var crowded = false;
+            foreach (var used in occupied)
+                if ((used - hit.position).sqrMagnitude < spacing * spacing) { crowded = true; break; }
+            if (crowded) continue;
+            if (!NavMesh.CalculatePath(agent.Position, hit.position, NavMesh.AllAreas, _campPath)
+                || _campPath.status != NavMeshPathStatus.PathComplete
+                || PathHelper.TotalLength(_campPath.corners) > ServerConfig.Ambush.Airdrops.SearchRadius * 1.5f + 50f) continue;
+            chosen = new CoverPoint(hit.position, (site.Position - hit.position).normalized, CoverCategory.None, CoverLevel.Stay);
+            return true;
+        }
         return false;
     }
 

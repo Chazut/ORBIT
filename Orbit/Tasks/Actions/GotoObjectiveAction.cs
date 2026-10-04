@@ -307,6 +307,14 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                         else if (objective.Location.Category == WaypointCategory.Exfil
                                  && objective.Location.Target is ExfiltrationPoint exfil)
                         {
+                            if (NoBackpackExfil.RequiresDrop(exfil))
+                            {
+                                var preparation = NoBackpackExfil.Prepare(agent, objective.Location);
+                                if (preparation == NoBackpackExfil.Preparation.Rejected)
+                                { ExfilArrival.Abandon(agent, objective.Location); break; }
+                                // Keep the real approach active while waiting to reach the entrance or finish the throw.
+                                if (preparation == NoBackpackExfil.Preparation.Waiting) break;
+                            }
                             if (Orbit.Systems.MultiStepAccess.IsConditional(exfil)
                                 && !Orbit.Systems.MultiStepAccess.ExitActive(exfil))
                             { objective.Status = ObjectiveStatus.Failed; break; }
@@ -331,7 +339,7 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                                 }
                                 else if (outsideWait >= ExfilOutsideTriggerForceExtractSeconds)
                                 {
-                                    if (Orbit.Systems.MultiStepAccess.IsConditional(exfil))
+                                    if (Orbit.Systems.MultiStepAccess.IsConditional(exfil) || NoBackpackExfil.RequiresDrop(exfil))
                                     { objective.Status = ObjectiveStatus.Failed; break; }
                                     if (ExfilArrival.IsSharedTimer(exfil))
                                     {
@@ -515,6 +523,7 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                 // whether the exit is reachable from a nearby NavMesh point.
                 if (!ExfilArrival.IsSharedTimer(exfil)
                     && !Orbit.Systems.MultiStepAccess.IsConditional(exfil)
+                    && !NoBackpackExfil.RequiresDrop(exfil)
                     && (agent.Position - location.Position).sqrMagnitude <= ExfilForceDespawnProximitySqr)
                 {
                     ActivateExfilForBot(exfil, agent);
@@ -525,6 +534,7 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                 }
                 if (exfil.Settings?.ExfiltrationType == EExfiltrationType.Individual
                     && !Orbit.Systems.MultiStepAccess.IsConditional(exfil)
+                    && !NoBackpackExfil.RequiresDrop(exfil)
                     && exfil.Status != EExfiltrationStatus.NotPresent && exfil.Status != EExfiltrationStatus.Hidden)
                 {
                     // Keep both solo and squad pins. The position-based watchdog survives these short
@@ -571,7 +581,7 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
     // bot leave. OnItemTransferred starts the V-Ex car countdown.
     private static void ActivateExfilForBot(ExfiltrationPoint exfil, Agent agent)
     {
-        if (Orbit.Systems.MultiStepAccess.IsConditional(exfil)) return;
+        if (Orbit.Systems.MultiStepAccess.IsConditional(exfil) || NoBackpackExfil.RequiresDrop(exfil)) return;
         try
         {
             // ProfileId overload — the IPlayer overload pulls in IDissonancePlayer which Orbit's csproj

@@ -1260,18 +1260,19 @@ public partial class WaypointSystem
     private Vector3 _exfilSearchOrigin;
     private int _exfilSearchSquad;
 
-    public Waypoint FindNearestEligibleExfil(Squad squad)
+    public Waypoint FindNearestEligibleExfil(Squad squad, Agent solo = null)
     {
         if (squad?.Leader?.Bot == null) return null;
-        if (Time.time - squad.NearestExfilCachedAt < NearestExfilCacheTtlSeconds
+        if (solo == null && Time.time - squad.NearestExfilCachedAt < NearestExfilCacheTtlSeconds
             && (squad.NearestExfilCached == null || !squad.CompletedPoiIds.Contains(squad.NearestExfilCached.Id)))
             return squad.NearestExfilCached;
 
         using var timing = PerformanceJournal.Measure(TransitionPhase.ExfilSearch, "exfil-search", squad: squad.Id);
         bool? squadIsPmc = null;
-        var role = squad.Leader.Bot.Profile?.Info?.Settings?.Role;
+        var searchAgent = solo ?? squad.Leader;
+        var role = searchAgent.Bot.Profile?.Info?.Settings?.Role;
         if (role.HasValue) squadIsPmc = role.Value.IsPMC();
-        var leaderPos = squad.Leader.Bot.Position;
+        var leaderPos = searchAgent.Bot.Position;
         if (!squad.ExfilEligibilityLogged)
         {
             squad.ExfilEligibilityLogged = true;
@@ -1289,8 +1290,8 @@ public partial class WaypointSystem
                 {
                     var loc = locs[i];
                     if (loc.Category != WaypointCategory.Exfil || squad.CompletedPoiIds.Contains(loc.Id)) continue;
-                    var entryEligible = SquadCanUseWaypoint(squad, squadIsPmc, loc);
-                    if (!entryEligible && !SquadCanUseWaypointIgnoringEntry(squad, squadIsPmc, loc)) continue;
+                    var entryEligible = SquadCanUseWaypoint(squad, squadIsPmc, loc, solo);
+                    if (!entryEligible && !SquadCanUseWaypointIgnoringEntry(squad, squadIsPmc, loc, solo)) continue;
                     _exfilSearch.Add(loc, (loc.Position - leaderPos).sqrMagnitude, entryEligible);
                 }
             }
@@ -1302,8 +1303,11 @@ public partial class WaypointSystem
             Log.Warning($"{squad} no spawn-side eligible exfil, falling back to nearest reachable faction-allowed exfil {best} (entry derivation may have failed)");
         else if (partial)
             Log.Info($"{squad} no fully reachable exfil, committing to partial-path exfil {best} (will walk as far as the mesh allows)");
-        squad.NearestExfilCached = best;
-        squad.NearestExfilCachedAt = Time.time;
+        if (solo == null)
+        {
+            squad.NearestExfilCached = best;
+            squad.NearestExfilCachedAt = Time.time;
+        }
         return best;
     }
 
@@ -2586,7 +2590,7 @@ public partial class WaypointSystem
     /// Non-Exfil waypoints always pass.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private bool SquadCanUseWaypoint(Squad squad, bool? squadIsPmc, Waypoint loc)
+    private bool SquadCanUseWaypoint(Squad squad, bool? squadIsPmc, Waypoint loc, Agent solo = null)
     {
         // Loot categories (corpse / container / loose) are off-limits for Goons / bosses / cultists /
         // raiders / bloodhounds. They don't have a loot routine that knows what to do with the dispatch
@@ -2624,12 +2628,11 @@ public partial class WaypointSystem
         }
         else if (!allowedFactions.IsBotEnabled(role.Value)) return false;
 
-        // Reserve blanket-block: every exfil on this map is conditional (D-2 power+key, Hermetic Door
-        // power+key, Train timed, Sewer Manhole, Cliff Descent w/ Paracord+Red Rebel...). Bots can't satisfy
-        // any of them.
+        // Reserve permits active multi-step exits and the validated no-backpack route.
+        // Other conditional exits still require mechanics the dispatcher cannot satisfy.
         if (MultiStepAccess.IsConditional(exfil))
             return squadIsPmc == true && MultiStepAccess.ExitActive(exfil) && MatchesBotSpawnEntry(squad, exfil);
-        if (string.Equals(_mapId, "RezervBase", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(_mapId, "RezervBase", StringComparison.OrdinalIgnoreCase) && !NoBackpackExfil.RequiresDrop(exfil))
             return false;
 
         // Live availability check.
@@ -2642,11 +2645,11 @@ public partial class WaypointSystem
         // extract routine has a dedicated wait+countdown flow for them) AND for some requirement- gated
         // exfils. Allow it only when the type is SharedTimer.
         if (exfil.Status == EExfiltrationStatus.UncompleteRequirements
-            && exfil.Settings.ExfiltrationType != EExfiltrationType.SharedTimer)
+            && exfil.Settings.ExfiltrationType != EExfiltrationType.SharedTimer && !NoBackpackExfil.RequiresDrop(exfil))
             return false;
 
         // Skip co-op extracts and other requirements bots can't satisfy.
-        if (HasBotUnreachableRequirement(exfil))
+        if (HasBotUnreachableRequirement(exfil, squad, solo))
             return false;
 
         // Mirror BSG's player-side extract filter: an exfil only matches an agent whose spawn EntryPoint is
@@ -2667,17 +2670,22 @@ public partial class WaypointSystem
 
     /// <summary>
     /// True if the exfil carries any <see cref="ERequirementState"/> that a bot can't satisfy autonomously
-    /// (item handover, world-event switch, keycard, train, co-op). Backpack-state requirements (Empty /
-    /// NotEmpty / EmptyOrSize) are tolerated — trivial gates a bot might satisfy by accident.
+    /// (world-event switch, keycard, train, co-op). Empty / EmptyOrSize backpack requirements
+    /// require an eligible empty bag or emergency; other equipment conditions remain blocked.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static bool HasBotUnreachableRequirement(ExfiltrationPoint exfil)
+    private static bool HasBotUnreachableRequirement(ExfiltrationPoint exfil, Squad squad, Agent solo = null)
     {
         var reqs = exfil.Requirements;
         if (reqs == null) return false;
         for (var i = 0; i < reqs.Length; i++)
         {
             if (reqs[i] == null) continue;
+            if (NoBackpackExfil.IsBackpackRequirement(reqs[i]))
+            {
+                if (!NoBackpackExfil.CanPlan(squad, solo)) return true;
+                continue;
+            }
             switch (reqs[i].Requirement)
             {
                 case ERequirementState.ScavCooperation:
@@ -2701,7 +2709,7 @@ public partial class WaypointSystem
     // Pass 2 fallback when the full spawn-side filter returned no exfil — better to extract on the wrong side
     // than stay stuck forever.
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private bool SquadCanUseWaypointIgnoringEntry(Squad squad, bool? squadIsPmc, Waypoint loc)
+    private bool SquadCanUseWaypointIgnoringEntry(Squad squad, bool? squadIsPmc, Waypoint loc, Agent solo = null)
     {
         if (loc.Category != WaypointCategory.Exfil) return true;
         if (loc.Target is not ExfiltrationPoint exfil) return true;
@@ -2717,13 +2725,13 @@ public partial class WaypointSystem
         else if (!allowedFactions.IsBotEnabled(role.Value)) return false;
         if (MultiStepAccess.IsConditional(exfil))
             return squadIsPmc == true && MultiStepAccess.ExitActive(exfil) && MatchesBotSpawnEntry(squad, exfil);
-        if (string.Equals(_mapId, "RezervBase", StringComparison.OrdinalIgnoreCase)) return false;
+        if (string.Equals(_mapId, "RezervBase", StringComparison.OrdinalIgnoreCase) && !NoBackpackExfil.RequiresDrop(exfil)) return false;
         if (exfil.Status == EExfiltrationStatus.NotPresent
             || exfil.Status == EExfiltrationStatus.Hidden
             || exfil.Status == EExfiltrationStatus.AwaitsManualActivation) return false;
         if (exfil.Status == EExfiltrationStatus.UncompleteRequirements
-            && exfil.Settings.ExfiltrationType != EExfiltrationType.SharedTimer) return false;
-        if (HasBotUnreachableRequirement(exfil)) return false;
+            && exfil.Settings.ExfiltrationType != EExfiltrationType.SharedTimer && !NoBackpackExfil.RequiresDrop(exfil)) return false;
+        if (HasBotUnreachableRequirement(exfil, squad, solo)) return false;
         if (!squadIsPmc.HasValue) return false;
         if (exfil is SharedExfiltrationPoint) return true;
         if (exfil is ScavExfiltrationPoint) return !squadIsPmc.Value;
