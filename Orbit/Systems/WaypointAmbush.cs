@@ -17,8 +17,11 @@ internal sealed class AmbushSite
     internal CampSiteKind Kind;
     internal Vector3 Position;
     internal ZoneScope Scope;
+    internal Vector3 ZoneCenter;
+    internal float ZoneRadius;
     internal Waypoint Exfil;
     internal LootableContainer Drop;
+    internal Waypoint LootWaypoint;
     internal float ExpiresAt;
     internal int Generation;
     internal readonly List<CoverPoint> Covers = new();
@@ -52,6 +55,28 @@ public partial class WaypointSystem
         Log.Info($"AMBUSH: airdrop landed at {container.transform.position}");
     }
 
+    internal bool TryGetAmbushLoot(Agent agent, AmbushSite site, out Waypoint point)
+    {
+        point = null;
+        if (site?.Kind != CampSiteKind.Airdrop || !IsAmbushSiteAvailable(site, agent.BotCategory)) return false;
+        if (site.LootWaypoint == null)
+        {
+            if (!NavMesh.SamplePosition(site.Drop.transform.position, out var hit, 2f, NavMesh.AllAreas)) return false;
+            var waypoint = new Waypoint(NewRuntimeWaypointId(), WaypointCategory.ContainerLoot,
+                "Airdrop", hit.position, 1f, new(), new(), site.Drop);
+            if (!AddRuntimeWaypoint(waypoint)) return false;
+            site.LootWaypoint = waypoint;
+        }
+        var target = site.LootWaypoint;
+        if (agent.Squad.CompletedPoiIds.Contains(target.Id) || agent.ValueSkippedPoiIds.Contains(target.Id)
+            || IsClaimedByOther(target.Id, agent.Id)
+            || !Orbit.Tasks.Actions.GotoObjectiveAction.IsLootableForAgent(agent, target)
+            || !NavMesh.CalculatePath(agent.Position, target.Position, NavMesh.AllAreas, _campPath)
+            || _campPath.status != NavMeshPathStatus.PathComplete) return false;
+        point = target;
+        return true;
+    }
+
     private void BuildAmbushCatalog()
     {
         if (_campCatalogReady) return;
@@ -65,29 +90,56 @@ public partial class WaypointSystem
                     foreach (var site in _campSites) if (site.Exfil == point) { known = true; break; }
                     if (!known) _campSites.Add(new AmbushSite { Kind = CampSiteKind.Extract, Position = point.Position, Exfil = point });
                 }
-        foreach (var zone in _zones)
+    }
+
+    internal MainObjective RollExtractCampMain(Squad squad, AmbushStyleSettings style)
+    {
+        BuildAmbushCatalog();
+        if (_campSites.Count == 0) return null;
+        var start = UnityEngine.Random.Range(0, _campSites.Count);
+        var paths = 0;
+        for (var i = 0; i < _campSites.Count; i++)
         {
-            if (zone.Force <= 0 || ServerConfig.Zones.ZoneForceScale <= 0) continue;
-            // Use a real point on the zone's selected floor, rather than sampling a 2D center at Y=0.
-            var center = WorldToCell(zone.WorldPosition);
-            var radius = Mathf.Min(150f, zone.Radius * ServerConfig.Zones.ZoneRadiusScale);
-            var window = Mathf.CeilToInt(radius / _cellSize);
-            Waypoint nearest = null;
-            var best = radius * radius;
-            for (var x = Math.Max(0, center.x - window); x <= Math.Min(_gridSize.x - 1, center.x + window); x++)
-            for (var y = Math.Max(0, center.y - window); y <= Math.Min(_gridSize.y - 1, center.y + window); y++)
-                foreach (var point in _cells[x, y].Waypoints)
-                {
-                    if (point.Category is WaypointCategory.Exfil or WaypointCategory.Corpse) continue;
-                    if (!MatchesZoneFloor(zone.Scope?.FloorId, point.Position)) continue;
-                    var distance = XzDistanceSqr(point.Position, zone.WorldPosition);
-                    if (distance >= best) continue;
-                    best = distance;
-                    nearest = point;
-                }
-            if (nearest != null) _campSites.Add(new AmbushSite { Kind = CampSiteKind.Hotspot, Position = nearest.Position,
-                Scope = zone.Scope, Generation = _campGeneration });
+            var site = _campSites[(start + i) % _campSites.Count];
+            if (site.Kind != CampSiteKind.Extract || !IsAmbushSiteAvailable(site, squad.Leader.BotCategory)) continue;
+            if (++paths > 8) break;
+            if (!IsReachableFromPosition(squad.SpawnPosition, site.Position)) continue;
+            return new MainObjective
+            {
+                Type = MainObjectiveType.ExtractCamp, Position = site.Position, CellCoords = WorldToCell(site.Position),
+                CampSite = site, CampTargetDuration = UnityEngine.Random.Range(style.ExtractDurationMin, style.ExtractDurationMax)
+            };
         }
+        return null;
+    }
+
+    internal AmbushSite CreateKillMainCampSite(MainObjective main)
+    {
+        if (main.Type != MainObjectiveType.Kills || !main.KillAmbush || main.KillZoneRadius <= 0) return null;
+        // Unscoped main anchors may have Y=0. Use a real POI inside THIS main's zone and on its floor.
+        var center = WorldToCell(main.KillZoneCenter);
+        var window = Mathf.CeilToInt(main.KillZoneRadius / _cellSize);
+        Waypoint nearest = null;
+        var best = float.MaxValue;
+        for (var x = Math.Max(0, center.x - window); x <= Math.Min(_gridSize.x - 1, center.x + window); x++)
+        for (var y = Math.Max(0, center.y - window); y <= Math.Min(_gridSize.y - 1, center.y + window); y++)
+            foreach (var point in _cells[x, y].Waypoints)
+            {
+                if (point.Category is WaypointCategory.Exfil or WaypointCategory.Corpse
+                    || !MatchesZoneFloor(main.ZoneFloorId, point.Position)
+                    || XzDistanceSqr(point.Position, main.KillZoneCenter) > main.KillZoneRadius * main.KillZoneRadius) continue;
+                var distance = XzDistanceSqr(point.Position, main.Position);
+                if (distance >= best) continue;
+                best = distance;
+                nearest = point;
+            }
+        if (nearest == null) return null;
+        return new AmbushSite
+        {
+            Kind = CampSiteKind.Hotspot, Position = nearest.Position,
+            Scope = new ZoneScope { FloorId = main.ZoneFloorId }, Generation = _campGeneration,
+            ZoneCenter = main.KillZoneCenter, ZoneRadius = main.KillZoneRadius
+        };
     }
 
     internal bool IsAmbushSiteAvailable(AmbushSite site, string botType)
@@ -137,10 +189,11 @@ public partial class WaypointSystem
                     if (!site.Covers.Contains(cover) && site.Covers.Count < 128) site.Covers.Add(cover);
             }
         }
+        var firstCover = site.Covers.Count > 0 ? UnityEngine.Random.Range(0, site.Covers.Count) : 0;
         for (var category = CoverCategory.Hard; category <= CoverCategory.Soft; category++)
             for (var i = 0; i < site.Covers.Count && pathBudget > 0; i++)
             {
-                var cover = site.Covers[i];
+                var cover = site.Covers[(firstCover + i) % site.Covers.Count];
                 if (cover.Category != category) continue;
                 if (ValidateAmbushPosition(agent, site, rule, cover.Position, occupied, ref pathBudget, out var position))
                 { chosen = new CoverPoint(position, cover.Direction, cover.Category, cover.Level); return true; }
@@ -162,6 +215,8 @@ public partial class WaypointSystem
         List<Vector3> occupied, ref int budget, out Vector3 position)
     {
         position = candidate;
+        if (site.Kind == CampSiteKind.Hotspot
+            && XzDistanceSqr(candidate, site.ZoneCenter) > site.ZoneRadius * site.ZoneRadius) return false;
         var delta = candidate - site.Position;
         if (Mathf.Abs(delta.y) > 2f || delta.sqrMagnitude < rule.DistanceMin * rule.DistanceMin
             || delta.sqrMagnitude > rule.DistanceMax * rule.DistanceMax || !MatchesZoneFloor(site.Scope?.FloorId, candidate)) return false;
@@ -170,6 +225,8 @@ public partial class WaypointSystem
         budget--;
         if (!NavMesh.SamplePosition(candidate, out var hit, .75f, NavMesh.AllAreas)
             || (hit.position - candidate).sqrMagnitude > .25f) return false;
+        if (site.Kind == CampSiteKind.Hotspot
+            && XzDistanceSqr(hit.position, site.ZoneCenter) > site.ZoneRadius * site.ZoneRadius) return false;
         delta = hit.position - site.Position;
         if (Mathf.Abs(delta.y) > 2f || delta.sqrMagnitude < rule.DistanceMin * rule.DistanceMin
             || delta.sqrMagnitude > rule.DistanceMax * rule.DistanceMax || !MatchesZoneFloor(site.Scope?.FloorId, hit.position)) return false;

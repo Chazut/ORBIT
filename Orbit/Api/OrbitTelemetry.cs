@@ -158,7 +158,8 @@ public static class OrbitTelemetry
 
         var loc = obj.Location;
         var category = loc != null ? loc.Category.ToString() : "";
-        if (agent.Squad?.Camp.Owns(agent) == true) category = "Ambush" + agent.Squad.Camp.Site.Kind;
+        if (agent.Squad?.Camp.Owns(agent) == true)
+            category = agent.Squad.Camp.Looter == agent ? "AirdropLoot" : "Ambush" + agent.Squad.Camp.Site.Kind;
         var x = loc?.Position.x ?? 0f;
         var y = loc?.Position.y ?? 0f;
         var z = loc?.Position.z ?? 0f;
@@ -283,6 +284,11 @@ public static class OrbitTelemetry
                     Y = m.Position.y,
                     Z = m.Position.z,
                     Completed = m.Completed,
+                    KillAmbush = m.KillAmbush,
+                    CampStartedAt = m.CampStartedAt,
+                    CampElapsed = m.CampElapsed,
+                    CampTargetDuration = m.KillAmbush ? m.KillsRoamTargetDuration : m.CampTargetDuration,
+                    CampHolding = squad.Camp.Main == m && squad.Camp.Holding,
                     KillsRoamStartedAt = m.KillsRoamStartedAt,
                     KillsRoamTargetDuration = m.KillsRoamTargetDuration,
                     LootValueEnteredAt = m.LootValueEnteredAt,
@@ -353,7 +359,7 @@ public class OrbitSquadMainObjectives
 
 public class OrbitMainObjective
 {
-    /// <summary>"Kills" | "LootValue" | "Quest".</summary>
+    /// <summary>"Kills" | "LootValue" | "Quest" | "ExtractCamp".</summary>
     public string Type;
     public int CellX;
     public int CellY;
@@ -361,6 +367,11 @@ public class OrbitMainObjective
     public float Y;
     public float Z;
     public bool Completed;
+    public bool KillAmbush;
+    public float CampStartedAt;
+    public float CampElapsed;
+    public float CampTargetDuration;
+    public bool CampHolding;
     public float KillsRoamStartedAt;
     public float KillsRoamTargetDuration;
     public float LootValueEnteredAt;

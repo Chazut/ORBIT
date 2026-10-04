@@ -1712,7 +1712,7 @@ public partial class WaypointSystem
         {
             var m = squad.MainObjectives[i];
             if (m == null || m.Completed) continue;
-            if (m.Type == MainObjectiveType.Kills && m.KillsRoamStartedAt > 0f) return true;
+            if (m.Type == MainObjectiveType.Kills && !m.KillAmbush && m.KillsRoamStartedAt > 0f) return true;
         }
         return false;
     }

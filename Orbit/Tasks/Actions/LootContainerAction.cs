@@ -623,6 +623,7 @@ public class LootContainerAction(AgentData dataset, WaypointSystem waypointSyste
 
     private bool TryScavengeSweep(Agent agent, Waypoint justLooted)
     {
+        if (agent.Squad?.Camp.Active == true) return false;
         // A second live session may finish during an escort, but only the shared looter extends
         // that detour. Everyone else rejoins after releasing their current transfer normally.
         if (agent.Squad?.CorpseEscort.Active == true && !agent.Squad.CorpseEscort.Owns(agent))

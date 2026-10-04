@@ -20,6 +20,8 @@ public enum MainObjectiveType
     /// quest's TriggerWithId nav-point). Visible to PickFromCell only for the squad whose main owns the
     /// trigger ID. Completes when a member reaches the trigger.</summary>
     Quest,
+    /// <summary>Hold cover near an active exit, then continue the other mains.</summary>
+    ExtractCamp,
 }
 
 /// <summary>
@@ -38,6 +40,16 @@ public class MainObjective
     /// cell; for Quest, the trigger's nav-point.</summary>
     public Vector3 Position;
     public bool Completed;
+    public bool KillAmbush;
+    public float KillZoneRadius;
+    public Vector3 KillZoneCenter;
+    public float CampElapsed;
+    public float CampStartedAt;
+    public float CampTargetDuration;
+    internal float CampRetryAt;
+    internal Orbit.Systems.AmbushSite CampSite;
+    public bool IsCampMain => Type == MainObjectiveType.ExtractCamp || Type == MainObjectiveType.Kills && KillAmbush;
+
     // Null preserves the original all-floor main semantics for existing zone files.
     public string ZoneFloorId;
     public float KillsFloorElapsed;

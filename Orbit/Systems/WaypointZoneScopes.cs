@@ -121,10 +121,12 @@ public partial class WaypointSystem
             Log.Debug($"ZONE SCOPE: {squad} type={ZoneBotType.For(squad.Leader.Bot)} floor={floor} picked {pick} Y={pick.Position.y:F2}");
     }
 
-    public readonly struct ZoneAnchor(Vector3 position, string floorId)
+    public readonly struct ZoneAnchor(Vector3 position, string floorId, Vector3 center = default, float radius = 0)
     {
         public readonly Vector3 Position = position;
         public readonly string FloorId = floorId;
+        public readonly Vector3 Center = center;
+        public readonly float Radius = radius;
     }
 
     private readonly List<Waypoint> _zoneAnchorCandidates = new();
@@ -139,7 +141,7 @@ public partial class WaypointSystem
             var floor = zone.Scope?.FloorId;
             if (string.IsNullOrEmpty(floor))
             {
-                result.Add(new ZoneAnchor(zone.WorldPosition, null));
+                result.Add(new ZoneAnchor(zone.WorldPosition, null, zone.WorldPosition, zone.Radius * ServerConfig.Zones.ZoneRadiusScale));
                 continue;
             }
             // Keep the actual floor's reachable POI as anchor. Sampling Y=0 can pick the wrong storey.
@@ -164,7 +166,7 @@ public partial class WaypointSystem
                 var point = _zoneAnchorCandidates[i];
                 if (!IsWaypointReachable(point, squad)) continue;
                 var anchorFloor = FloorCatalog.For(_zoneKey)?.Resolve(point.Position.x, point.Position.y, point.Position.z);
-                result.Add(new ZoneAnchor(point.Position, anchorFloor));
+                result.Add(new ZoneAnchor(point.Position, anchorFloor, zone.WorldPosition, zone.Radius * ServerConfig.Zones.ZoneRadiusScale));
                 found = true;
                 break;
             }

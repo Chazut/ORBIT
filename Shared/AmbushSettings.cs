@@ -14,12 +14,26 @@ public sealed class AmbushSettings
     public float CheckInterval { get; set; } = 60;
     public float Cooldown { get; set; } = 300;
     public float TravelTimeout { get; set; } = 120;
-    public int MaxActiveSquads { get; set; } = 3;
-    public int MaxCampsPerSquad { get; set; } = 2;
     public float MemberSpacing { get; set; } = 4;
     public CampSiteSettings Hotspots { get; set; } = new();
-    public CampSiteSettings Extracts { get; set; } = new() { Chance = .1f, DurationMin = 60, DurationMax = 180, DistanceMin = 20, DistanceMax = 45 };
-    public CampSiteSettings Airdrops { get; set; } = new() { Chance = .3f, DistanceMin = 15, DistanceMax = 40 };
+    public CampSiteSettings Extracts { get; set; } = new() { DistanceMin = 20, DistanceMax = 45 };
+    public CampSiteSettings Airdrops { get; set; } = new() { DistanceMin = 15, DistanceMax = 40 };
+
+    public AmbushStyleSettings Timmy { get; set; } = new(.15f, .05f, 30, 90, .20f, 20, 60);
+    public AmbushStyleSettings Cautious { get; set; } = new(.65f, .25f, 120, 300, .65f, 90, 180);
+    public AmbushStyleSettings Average { get; set; } = new(.30f, .10f, 60, 150, .40f, 45, 120);
+    public AmbushStyleSettings Aggressive { get; set; } = new(.15f, .05f, 30, 90, .25f, 20, 60);
+    public AmbushStyleSettings VeryAggressive { get; set; } = new(.05f, .02f, 20, 60, .15f, 10, 40);
+    public AmbushStyleSettings PlayerScavStyle { get; set; } = new(.25f, .10f, 45, 120, .45f, 30, 90);
+
+    public AmbushStyleSettings Style(string archetype, bool playerScav = false) => playerScav ? PlayerScavStyle : archetype switch
+    {
+        "Timmy" => Timmy,
+        "Cautious" => Cautious,
+        "Aggressive" => Aggressive,
+        "VeryAggressive" => VeryAggressive,
+        _ => Average
+    };
 
     public CampSiteSettings For(CampSiteKind kind) => kind switch
     {
@@ -35,34 +49,57 @@ public sealed class AmbushSettings
         MapBehaviorOverride.Range(CheckInterval, 15, 600, "Ambush check interval");
         MapBehaviorOverride.Range(Cooldown, 30, 1800, "Ambush cooldown");
         MapBehaviorOverride.Range(TravelTimeout, 15, 300, "Ambush travel timeout");
-        MapBehaviorOverride.Range(MaxActiveSquads, 1, 12, "Ambush active squads");
-        MapBehaviorOverride.Range(MaxCampsPerSquad, 1, 10, "Ambush camps per squad");
         MapBehaviorOverride.Range(MemberSpacing, 3, 12, "Ambush member spacing");
         foreach (CampSiteKind kind in Enum.GetValues(typeof(CampSiteKind)))
             (For(kind) ?? throw new ArgumentException("Ambush target settings must be objects.")).Validate();
+        foreach (var style in new[] { Timmy, Cautious, Average, Aggressive, VeryAggressive, PlayerScavStyle })
+            (style ?? throw new ArgumentException("Ambush personality settings must be objects.")).Validate();
     }
 }
 
 public sealed class CampSiteSettings
 {
     public bool Enabled { get; set; } = true;
-    // One roll per nearby target category at each check, never one roll per point.
-    public float Chance { get; set; } = .15f;
-    public float DurationMin { get; set; } = 45;
-    public float DurationMax { get; set; } = 120;
     public float DistanceMin { get; set; } = 10;
     public float DistanceMax { get; set; } = 35;
     public float SearchRadius { get; set; } = 200;
-    public int MaxSquads { get; set; } = 1;
 
     public void Validate()
     {
-        MapBehaviorOverride.Range(Chance, 0, 1, "Ambush chance");
-        MapBehaviorOverride.Range(DurationMin, 10, 600, "Ambush minimum duration");
-        MapBehaviorOverride.Range(DurationMax, DurationMin, 600, "Ambush maximum duration");
         MapBehaviorOverride.Range(DistanceMin, 5, 80, "Ambush minimum distance");
         MapBehaviorOverride.Range(DistanceMax, DistanceMin, 80, "Ambush maximum distance");
         MapBehaviorOverride.Range(SearchRadius, 25, 400, "Ambush search radius");
-        MapBehaviorOverride.Range(MaxSquads, 1, 4, "Ambush squads per target");
+    }
+}
+
+public sealed class AmbushStyleSettings
+{
+    public float KillAmbushChance { get; set; }
+    public float ExtractMainChance { get; set; }
+    public float ExtractDurationMin { get; set; }
+    public float ExtractDurationMax { get; set; }
+    public float AirdropChance { get; set; }
+    public float AirdropDurationMin { get; set; }
+    public float AirdropDurationMax { get; set; }
+
+    public AmbushStyleSettings() : this(.30f, .10f, 60, 150, .40f, 45, 120) { }
+
+    public AmbushStyleSettings(float kill, float extract, float extractMin, float extractMax,
+        float airdrop, float airdropMin, float airdropMax)
+    {
+        KillAmbushChance = kill; ExtractMainChance = extract;
+        ExtractDurationMin = extractMin; ExtractDurationMax = extractMax;
+        AirdropChance = airdrop; AirdropDurationMin = airdropMin; AirdropDurationMax = airdropMax;
+    }
+
+    public void Validate()
+    {
+        MapBehaviorOverride.Range(KillAmbushChance, 0, 1, "Kill ambush chance");
+        MapBehaviorOverride.Range(ExtractMainChance, 0, 1, "Extract camp main chance");
+        MapBehaviorOverride.Range(AirdropChance, 0, 1, "Airdrop ambush chance");
+        MapBehaviorOverride.Range(ExtractDurationMin, 10, 1800, "Extract camp minimum duration");
+        MapBehaviorOverride.Range(ExtractDurationMax, ExtractDurationMin, 1800, "Extract camp maximum duration");
+        MapBehaviorOverride.Range(AirdropDurationMin, 10, 1800, "Airdrop ambush minimum duration");
+        MapBehaviorOverride.Range(AirdropDurationMax, AirdropDurationMin, 1800, "Airdrop ambush maximum duration");
     }
 }

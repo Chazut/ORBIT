@@ -27,7 +27,7 @@
     </SettingsCard>
 
     <SettingsCard Title="Objective mix" OnReset="ResetMix"
-                  Subtitle="Shares are auto-normalized against each other, so they need not total exactly 100%.">
+                  Subtitle="Shares divide the rolls remaining after the extract camp chance (Ambush &amp; camping page). They are auto-normalized against each other.">
         <OrbitSlider T="float" @bind-Value="Cfg.PlayerScav.MainMixQuest" Label="Quest share" Fmt="P0"
                      Min="0f" Max="1f" Step="0.01f"
                      Tooltip="Share of Quest objectives in the PlayerScav mix." />

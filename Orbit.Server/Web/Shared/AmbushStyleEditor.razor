@@ -1,0 +1,16 @@
+<OrbitSlider T="float" @bind-Value="Cfg.KillAmbushChance" Label="Ambush mode on a Kill main" Fmt="P0" Min="0" Max="1" Step="0.01f"
+             Tooltip="Rolled once per Kill objective. A successful roll replaces roaming with holding cover for that Kill objective's existing duration, configured under Personalities." />
+<OrbitSlider T="float" @bind-Value="Cfg.ExtractMainChance" Label="Extract camp main chance" Fmt="P0" Min="0" Max="1" Step="0.01f"
+             Tooltip="Percentage of main objective rolls reserved for extract camping. The remaining rolls use the usual Quest / Kills / LootValue mix. If no reachable active exit exists, use the normal loot fallback." />
+<OrbitSlider T="float" Value="Cfg.ExtractDurationMin" ValueChanged="SetExtractMin" Label="Extract hold minimum" Unit="s" Min="10" Max="1800" Step="5" />
+<OrbitSlider T="float" @bind-Value="Cfg.ExtractDurationMax" Label="Extract hold maximum" Unit="s" Min="Cfg.ExtractDurationMin" Max="1800" Step="5" />
+<OrbitSlider T="float" @bind-Value="Cfg.AirdropChance" Label="Airdrop ambush chance per opportunity" Fmt="P0" Min="0" Max="1" Step="0.01f"
+             Tooltip="One roll per check with nearby landed drops, regardless of drop count. After holding, one member attempts to loot the crate while the others cover." />
+<OrbitSlider T="float" Value="Cfg.AirdropDurationMin" ValueChanged="SetAirdropMin" Label="Airdrop hold minimum" Unit="s" Min="10" Max="1800" Step="5" />
+<OrbitSlider T="float" @bind-Value="Cfg.AirdropDurationMax" Label="Airdrop hold maximum" Unit="s" Min="Cfg.AirdropDurationMin" Max="1800" Step="5" />
+
+@code {
+    [Parameter, EditorRequired] public Orbit.Settings.AmbushStyleSettings Cfg { get; set; } = default!;
+    private void SetExtractMin(float value) { Cfg.ExtractDurationMin = value; Cfg.ExtractDurationMax = Math.Max(value, Cfg.ExtractDurationMax); }
+    private void SetAirdropMin(float value) { Cfg.AirdropDurationMin = value; Cfg.AirdropDurationMax = Math.Max(value, Cfg.AirdropDurationMax); }
+}

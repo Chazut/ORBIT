@@ -111,11 +111,16 @@ public static class MainObjectiveBuilder
         var usedCells = new HashSet<string>();
         const int MaxRetriesOnDuplicate = 6;
 
+        var ambush = ServerConfig.Ambush;
+        var style = AmbushDirector.Style(squad);
+        var extractChance = ambush.Allows(squad.Leader.BotCategory) && ambush.Extracts.Enabled ? style.ExtractMainChance : 0f;
         for (var i = 0; i < count; i++)
         {
             var roll = Random.value;
             MainObjectiveType type;
-            if (roll < thQuest) type = MainObjectiveType.Quest;
+            // Extract camp reserves its configured percentage; the existing mix divides the remainder.
+            if (roll < extractChance) type = MainObjectiveType.ExtractCamp;
+            else if ((roll = (roll - extractChance) / Mathf.Max(.0001f, 1f - extractChance)) < thQuest) type = MainObjectiveType.Quest;
             else if (roll < thKills) type = MainObjectiveType.Kills;
             else type = MainObjectiveType.LootValue;
 
@@ -125,6 +130,9 @@ public static class MainObjectiveBuilder
                 MainObjective candidate = null;
                 switch (type)
                 {
+                    case MainObjectiveType.ExtractCamp:
+                        candidate = waypointSystem.RollExtractCampMain(squad, style);
+                        break;
                     case MainObjectiveType.Quest:
                         questPool ??= BuildQuestPool(waypointSystem);
                         candidate = RollQuest(questPool, waypointSystem, squad);
@@ -173,6 +181,8 @@ public static class MainObjectiveBuilder
             var m = squad.MainObjectives[i];
             if (m.Type == MainObjectiveType.Quest)
                 summary.Append($"Quest:{m.QuestTriggerId}@{m.CellCoords}");
+            else if (m.KillAmbush)
+                summary.Append($"Kills(ambush)@{m.CellCoords}");
             else
                 summary.Append($"{m.Type}@{m.CellCoords}");
         }
@@ -196,6 +206,10 @@ public static class MainObjectiveBuilder
             Position = pos,
             CellCoords = waypointSystem.WorldToCell(pos),
             KillsRoamTargetDuration = Random.Range(roamRange.x, roamRange.y),
+            KillZoneRadius = anchor.Radius,
+            KillZoneCenter = anchor.Center,
+            KillAmbush = ServerConfig.Ambush.Allows(squad.Leader.BotCategory) && ServerConfig.Ambush.Hotspots.Enabled
+                && Random.value < AmbushDirector.Style(squad).KillAmbushChance,
         };
     }
 

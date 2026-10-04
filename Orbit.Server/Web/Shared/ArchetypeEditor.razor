@@ -9,7 +9,7 @@
     </MudTooltip>
 </div>
 <MudText Typo="Typo.body2" Class="mb-2" Style="opacity:.5">
-    Shares are auto-normalized against each other, so they need not total exactly 100%.
+    Shares are auto-normalized across the rolls remaining after the extract camp chance (Ambush &amp; camping page). They need not total exactly 100%.
 </MudText>
 <OrbitSlider T="float" @bind-Value="Cfg.MainMixQuest" Label="Quest share" Fmt="P0"
              Min="0f" Max="1f" Step="0.01f"
@@ -33,12 +33,12 @@
                      Min="1f" Max="20f" Step="1f" Fmt="0" />
     </MudItem>
     <MudItem xs="12" sm="6">
-        <OrbitSlider T="float" @bind-Value="Cfg.KillsRoamDurationMin" Label="Kills roam min" Unit="s"
+        <OrbitSlider T="float" @bind-Value="Cfg.KillsRoamDurationMin" Label="Kills duration min" Unit="s"
                      Min="0f" Max="900f" Step="10f" Fmt="0"
-                     Tooltip="Time the squad spends roaming the Kills anchor before completing." />
+                     Tooltip="Kill main duration, spent roaming or holding cover when this main rolls ambush mode." />
     </MudItem>
     <MudItem xs="12" sm="6">
-        <OrbitSlider T="float" @bind-Value="Cfg.KillsRoamDurationMax" Label="Kills roam max" Unit="s"
+        <OrbitSlider T="float" @bind-Value="Cfg.KillsRoamDurationMax" Label="Kills duration max" Unit="s"
                      Min="0f" Max="900f" Step="10f" Fmt="0" />
     </MudItem>
 </MudGrid>

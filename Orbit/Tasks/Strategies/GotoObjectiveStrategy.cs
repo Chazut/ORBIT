@@ -1200,7 +1200,18 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
         using var timing = PerformanceJournal.Measure(TransitionPhase.StrategyObjectives, "strategy-operation", "CheckMainCompletion", squad.Id);
         switch (main.Type)
         {
+            case MainObjectiveType.ExtractCamp:
+                if (!ServerConfig.Ambush.Allows(squad.Leader?.BotCategory) || !ServerConfig.Ambush.Extracts.Enabled
+                    || !waypointSystem.IsAmbushSiteAvailable(main.CampSite, squad.Leader?.BotCategory))
+                {
+                    main.Completed = true;
+                    Log.Info($"AMBUSH: {squad} extract main skipped: disabled or exit unavailable");
+                }
+                break;
             case MainObjectiveType.Kills:
+                // An ambush Kill main completes through time actually spent holding its cover.
+                if (main.KillAmbush && ServerConfig.Ambush.Allows(squad.Leader?.BotCategory)
+                    && ServerConfig.Ambush.Hotspots.Enabled) break;
                 // Phase 1: roam starts as soon as ANY member is in the anchor cell. Same semantic as
                 // LootValue cell entry — every cell guarantees at least one reachable POI, so the bot has
                 // something to roam onto immediately.
@@ -1404,7 +1415,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
         {
             var main = squad.MainObjectives[i];
             if (main.Completed) continue;
-            if (main.Type == MainObjectiveType.Kills && main.KillsRoamStartedAt > 0f) return true;
+            if (main.Type == MainObjectiveType.Kills && !main.KillAmbush && main.KillsRoamStartedAt > 0f) return true;
             if (main.Type == MainObjectiveType.LootValue)
             {
                 for (var k = 0; k < squad.Size; k++)
@@ -1431,7 +1442,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
         {
             var main = squad.MainObjectives[i];
             if (main.Completed) continue;
-            if (main.Type == MainObjectiveType.Kills && main.KillsRoamStartedAt > 0f)
+            if (main.Type == MainObjectiveType.Kills && !main.KillAmbush && main.KillsRoamStartedAt > 0f)
                 return main;
             if (main.Type == MainObjectiveType.LootValue && lootValueActive == null)
             {
@@ -1584,7 +1595,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
             var m = squad.MainObjectives[i];
             if (m.Completed) continue;
             if (m.Type == MainObjectiveType.LootValue && m.LootValueEnteredAt > 0f) return m.Position;
-            if (m.Type == MainObjectiveType.Kills && m.KillsRoamStartedAt > 0f) return m.Position;
+            if (m.Type == MainObjectiveType.Kills && !m.KillAmbush && m.KillsRoamStartedAt > 0f) return m.Position;
         }
         return null;
     }

@@ -6,35 +6,51 @@
 
 <MudContainer MaxWidth="MaxWidth.Medium">
     <PageHeader Title="Ambush &amp; camping" OnReset="ResetPage"
-                Description="Squads can take a temporary detour to watch a hotspot, an active extract or a landed airdrop. They spread out, wait, then resume their objectives. Save to apply next raid." />
+                Description="Kill mains can use ambush mode, extract camping is a main objective, and landed airdrops create opportunities during the raid. Multiple squads can target the same location. Save to apply next raid." />
     <SettingsCard Title="Who can camp" OnReset="ResetParticipants"
-                  Subtitle="Only bots directed by ORBIT outside combat can start a camp. Combat, extraction and failed routes end the detour.">
+                  Subtitle="Only bots directed by ORBIT outside combat can start a camp. Combat interrupts the formation. Main objectives keep their remaining hold time for a later attempt.">
         <OrbitSwitch @bind-Value="Cfg.Ambush.Enabled" Label="Enable ambushes and camping" />
         <OrbitSwitch @bind-Value="Cfg.Ambush.Pmc" Label="PMCs" />
         <OrbitSwitch @bind-Value="Cfg.Ambush.PlayerScav" Label="PlayerScavs" />
         <OrbitSwitch @bind-Value="Cfg.Ambush.RequireCover" Label="Require cover"
-                     Tooltip="If no reachable, spaced cover with a sightline toward the target is found, the squad keeps its current objective. OFF also allows open watch positions." />
+                     Tooltip="If no reachable, spaced cover with a sightline toward the target is found, the squad retries later. Kill ambushes never turn into roaming timers. OFF also allows open watch positions." />
     </SettingsCard>
-    <SettingsCard Title="Frequency and limits" OnReset="ResetLimits">
-        <OrbitSlider T="float" @bind-Value="Cfg.Ambush.CheckInterval" Label="Check for an opportunity every" Unit="s" Min="15" Max="600" Step="15"
-                     Tooltip="Checks are staggered between squads. Each enabled target type gets one chance roll per check, regardless of the number of nearby targets." />
-        <OrbitSlider T="float" @bind-Value="Cfg.Ambush.Cooldown" Label="Cooldown after a camp" Unit="s" Min="30" Max="1800" Step="30" />
+    <SettingsCard Title="Planning and airdrop checks" OnReset="ResetLimits">
+        <OrbitSlider T="float" @bind-Value="Cfg.Ambush.CheckInterval" Label="Check for an airdrop every" Unit="s" Min="15" Max="600" Step="15"
+                     Tooltip="Only airdrops use these periodic chance rolls. Main objectives and Kill ambush mode are rolled when the squad receives its goals." />
+        <OrbitSlider T="float" @bind-Value="Cfg.Ambush.Cooldown" Label="Cooldown after an airdrop ambush" Unit="s" Min="30" Max="1800" Step="30" />
         <OrbitSlider T="float" @bind-Value="Cfg.Ambush.TravelTimeout" Label="Maximum time to reach camp" Unit="s" Min="15" Max="300" Step="15" />
-        <OrbitSlider T="int" @bind-Value="Cfg.Ambush.MaxActiveSquads" Label="Maximum camping squads on the map" Min="1" Max="12" Step="1" />
-        <OrbitSlider T="int" @bind-Value="Cfg.Ambush.MaxCampsPerSquad" Label="Maximum camps per squad per raid" Min="1" Max="10" Step="1" />
-        <OrbitSlider T="float" @bind-Value="Cfg.Ambush.MemberSpacing" Label="Minimum spacing between campers" Unit="m" Min="3" Max="12" Step="1" />
+        <OrbitSlider T="float" @bind-Value="Cfg.Ambush.MemberSpacing" Label="Minimum spacing within a squad" Unit="m" Min="3" Max="12" Step="1" />
     </SettingsCard>
     <SettingsCard Title="Hotspots" OnReset="@(() => Cfg.Ambush.Hotspots = new())"
-                  Subtitle="Positive-force zones from the selected preset, including its bot-type and floor filters. Player convergence is not used to place camps.">
+                  Subtitle="Only the zone assigned to a Kill main can become a hotspot ambush. Its floor and boundaries still apply. Holding uses the same duration as that Kill main; it replaces roaming.">
         <AmbushTargetEditor Cfg="Cfg.Ambush.Hotspots" />
     </SettingsCard>
     <SettingsCard Title="Extracts" OnReset="@(() => Cfg.Ambush.Extracts = new Orbit.Settings.AmbushSettings().Extracts)"
-                  Subtitle="Available exits can attract campers even when the squad cannot use that exit itself. Camping does not trigger extraction.">
+                  Subtitle="Rolled alongside other main objectives, with attraction toward a reachable active exit. Holding completes the objective without extracting the squad. An enemy exit is also a valid target.">
         <AmbushTargetEditor Cfg="Cfg.Ambush.Extracts" />
     </SettingsCard>
     <SettingsCard Title="Airdrops" OnReset="@(() => Cfg.Ambush.Airdrops = new Orbit.Settings.AmbushSettings().Airdrops)"
-                  Subtitle="After landing, a drop can attract campers for up to 20 minutes. Campers watch the area from a distance.">
+                  Subtitle="Nearby landed drops can attract several squads for up to 20 minutes. After holding, one member attempts to loot while the others cover. Each squad camps a given drop at most once.">
         <AmbushTargetEditor Cfg="Cfg.Ambush.Airdrops" />
+    </SettingsCard>
+    <SettingsCard Title="Timmy" OnReset="@(() => Cfg.Ambush.Timmy = new Orbit.Settings.AmbushSettings().Timmy)" Subtitle="Occasional short ambushes.">
+        <AmbushStyleEditor Cfg="Cfg.Ambush.Timmy" />
+    </SettingsCard>
+    <SettingsCard Title="Cautious (Rat, Coward, SnappingTurtle)" OnReset="@(() => Cfg.Ambush.Cautious = new Orbit.Settings.AmbushSettings().Cautious)" Subtitle="Frequent ambushes and longer extract / airdrop holds.">
+        <AmbushStyleEditor Cfg="Cfg.Ambush.Cautious" />
+    </SettingsCard>
+    <SettingsCard Title="Average (Normal)" OnReset="@(() => Cfg.Ambush.Average = new Orbit.Settings.AmbushSettings().Average)" Subtitle="Also used by PMCs when personality adaptation is disabled.">
+        <AmbushStyleEditor Cfg="Cfg.Ambush.Average" />
+    </SettingsCard>
+    <SettingsCard Title="Aggressive (Chad, Wreckless)" OnReset="@(() => Cfg.Ambush.Aggressive = new Orbit.Settings.AmbushSettings().Aggressive)" Subtitle="Fewer ambushes, shorter extract / airdrop holds.">
+        <AmbushStyleEditor Cfg="Cfg.Ambush.Aggressive" />
+    </SettingsCard>
+    <SettingsCard Title="VeryAggressive (GigaChad)" OnReset="@(() => Cfg.Ambush.VeryAggressive = new Orbit.Settings.AmbushSettings().VeryAggressive)" Subtitle="Rare ambushes and brief extract / airdrop holds.">
+        <AmbushStyleEditor Cfg="Cfg.Ambush.VeryAggressive" />
+    </SettingsCard>
+    <SettingsCard Title="PlayerScav" OnReset="@(() => Cfg.Ambush.PlayerScavStyle = new Orbit.Settings.AmbushSettings().PlayerScavStyle)" Subtitle="Separate settings; PlayerScavs have no SAIN personality profile.">
+        <AmbushStyleEditor Cfg="Cfg.Ambush.PlayerScavStyle" />
     </SettingsCard>
 </MudContainer>
 
@@ -50,7 +66,6 @@
     {
         var d = new Orbit.Settings.AmbushSettings();
         Cfg.Ambush.CheckInterval = d.CheckInterval; Cfg.Ambush.Cooldown = d.Cooldown;
-        Cfg.Ambush.TravelTimeout = d.TravelTimeout; Cfg.Ambush.MaxActiveSquads = d.MaxActiveSquads;
-        Cfg.Ambush.MaxCampsPerSquad = d.MaxCampsPerSquad; Cfg.Ambush.MemberSpacing = d.MemberSpacing;
+        Cfg.Ambush.TravelTimeout = d.TravelTimeout; Cfg.Ambush.MemberSpacing = d.MemberSpacing;
     }
 }
