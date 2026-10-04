@@ -64,11 +64,19 @@ public class Plugin : BaseUnityPlugin
     private const string IsbPluginGuid = "samc137.ISBinfo";
     private const string CombineSoldiersPluginGuid = "com.manimal.combinesoldiers";
 
-    private void Update() => PerformanceJournal.RefreshWriter();
+    private void Update()
+    {
+        Log.Refresh();
+        PerformanceJournal.RefreshWriter();
+    }
+
+    private void OnApplicationQuit() => Log.Shutdown();
+    private void OnDestroy() => Log.Shutdown();
 
     private void Awake()
     {
         LogSource = Logger;
+        Log.Initialize();
 
         StartCoroutine(DelayedLoad());
     }
@@ -312,7 +320,7 @@ public class Plugin : BaseUnityPlugin
             "ON (default): clean log - only warnings & errors, regardless of the Log levels below. Turn it OFF to use the Log levels (e.g. tick Debug there before sending a bug report).",
             null, new ConfigurationManagerAttributes { Category = "", Order = 1 }));
         LogLevels = Config.Bind(essentials, "Log levels", OrbitLogLevel.Info | OrbitLogLevel.Warning | OrbitLogLevel.Error, new ConfigDescription(
-            "Which message levels ORBIT writes (used when Quiet logging is OFF). Default: everything except Debug. Tick Debug for a detailed bug-report log - it works in the release build now, not just debug builds.",
+            "Which message levels ORBIT writes when Quiet logging is OFF. Info and Debug are queued for background writing; warnings and errors remain immediate. Debug works in Release builds. Full logging still has a CPU cost; sustained overload reports dropped verbose messages.",
             null, new ConfigurationManagerAttributes { Category = "", Order = 0 }));
         PerfLogging = Config.Bind(essentials, "Performance logging", false, new ConfigDescription(
             "ON: records every frame over the 60 FPS budget (16.67 ms), slow bot decisions and Ghost transitions, even with Quiet logging. Automatically saves a performance journal in BepInEx/ORBIT/diagnostics during the raid and a final summary when it ends. Larger stalls also save a detailed JSON capture.",

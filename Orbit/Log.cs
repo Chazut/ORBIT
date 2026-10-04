@@ -1,5 +1,7 @@
 using System.Runtime.CompilerServices;
 using System.Text;
+using System.Threading;
+using Orbit.Helpers;
 using UnityEngine;
 
 namespace Orbit;
@@ -22,6 +24,58 @@ public enum OrbitLogLevel
 /// </summary>
 public static class Log
 {
+    private static BufferedLogWriter _writer;
+    private static int _mainThreadId, _lastFrame;
+    private static float _nextReport;
+
+    internal static void Initialize()
+    {
+        _mainThreadId = Thread.CurrentThread.ManagedThreadId;
+        _lastFrame = Time.frameCount;
+        var source = Plugin.LogSource;
+        _writer = new BufferedLogWriter(message => source.LogInfo(message));
+    }
+
+    internal static void Refresh()
+    {
+        Volatile.Write(ref _lastFrame, Time.frameCount);
+        if (Time.unscaledTime < _nextReport) return;
+        _nextReport = Time.unscaledTime + 5f;
+        ReportLosses(Volatile.Read(ref _writer));
+    }
+
+    internal static void Shutdown()
+    {
+        var writer = Interlocked.Exchange(ref _writer, null);
+        if (writer == null) return;
+        if (!writer.Stop(1000))
+            Plugin.LogSource.LogWarning(Stamp("ASYNC LOG: shutdown drain timed out; pending verbose messages may be missing."));
+        ReportLosses(writer);
+    }
+
+    private static void ReportLosses(BufferedLogWriter writer)
+    {
+        if (writer == null) return;
+        var dropped = writer.TakeDroppedCount();
+        var failures = writer.TakeFailureCount();
+        if (dropped != 0 || failures != 0)
+            Plugin.LogSource.LogWarning(Stamp($"ASYNC LOG: dropped={dropped} writeFailures={failures}; verbose log is incomplete."));
+    }
+
+    private static string Stamp(string message)
+    {
+        var frame = Thread.CurrentThread.ManagedThreadId == _mainThreadId ? Time.frameCount : Volatile.Read(ref _lastFrame);
+        return $"F{frame}: {message}";
+    }
+
+    private static void WriteVerbose(string message)
+    {
+        var stamped = Stamp(message);
+        var writer = Volatile.Read(ref _writer);
+        if (writer == null) Plugin.LogSource.LogInfo(stamped);
+        else writer.Enqueue(stamped);
+    }
+
     // Quiet logging wins: a one-click "only warnings + errors". Otherwise the per-level flags apply. Before the
     // config is bound (very early boot) default to everything except Debug.
     private static OrbitLogLevel Effective()
@@ -32,11 +86,12 @@ public static class Log
 
     /// <summary>True while Debug output is enabled — guard expensive debug-string building with this in hot paths.</summary>
     public static bool DebugEnabled => (Effective() & OrbitLogLevel.Debug) != 0;
+    public static bool InfoEnabled => (Effective() & OrbitLogLevel.Info) != 0;
 
     public static void Debug(string message)
     {
         if ((Effective() & OrbitLogLevel.Debug) == 0) return;
-        Plugin.LogSource.LogInfo($"F{Time.frameCount}: {message}");
+        WriteVerbose(message);
     }
 
     /// <summary>
@@ -48,35 +103,40 @@ public static class Log
     public static void Debug(DebugMessageHandler message)
     {
         if (!message.Enabled) return;
-        Plugin.LogSource.LogInfo($"F{Time.frameCount}: {message.GetText()}");
+        WriteVerbose(message.GetText());
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static void Info(string message)
     {
         if ((Effective() & OrbitLogLevel.Info) == 0) return;
-        Plugin.LogSource.LogInfo($"F{Time.frameCount}: {message}");
+        WriteVerbose(message);
+    }
+
+    public static void Info(InfoMessageHandler message)
+    {
+        if (message.Enabled) WriteVerbose(message.GetText());
     }
 
     /// <summary>Always written (version banner and other must-see one-shots), regardless of levels.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static void Always(string message)
     {
-        Plugin.LogSource.LogInfo($"F{Time.frameCount}: {message}");
+        Plugin.LogSource.LogInfo(Stamp(message));
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static void Warning(string message)
     {
         if ((Effective() & OrbitLogLevel.Warning) == 0) return;
-        Plugin.LogSource.LogWarning($"F{Time.frameCount}: {message}");
+        Plugin.LogSource.LogWarning(Stamp(message));
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static void Error(string message)
     {
         if ((Effective() & OrbitLogLevel.Error) == 0) return;
-        Plugin.LogSource.LogError($"F{Time.frameCount}: {message}");
+        Plugin.LogSource.LogError(Stamp(message));
     }
 }
 
@@ -91,8 +151,11 @@ public struct DebugMessageHandler
     private readonly StringBuilder _sb;
 
     public DebugMessageHandler(int literalLength, int formattedCount, out bool shouldAppend)
+        : this(Log.DebugEnabled, literalLength, formattedCount, out shouldAppend) { }
+
+    internal DebugMessageHandler(bool enabled, int literalLength, int formattedCount, out bool shouldAppend)
     {
-        shouldAppend = Log.DebugEnabled;
+        shouldAppend = enabled;
         _sb = shouldAppend ? new StringBuilder(literalLength + formattedCount * 16) : null;
     }
 
@@ -112,4 +175,21 @@ public struct DebugMessageHandler
         _sb.Append(text);
         if (alignment < 0 && text.Length < -alignment) _sb.Append(' ', -alignment - text.Length);
     }
+}
+
+[InterpolatedStringHandler]
+public struct InfoMessageHandler
+{
+    private DebugMessageHandler _message;
+
+    public InfoMessageHandler(int literalLength, int formattedCount, out bool shouldAppend)
+        => _message = new DebugMessageHandler(Log.InfoEnabled, literalLength, formattedCount, out shouldAppend);
+
+    internal bool Enabled => _message.Enabled;
+    internal string GetText() => _message.GetText();
+    public void AppendLiteral(string value) => _message.AppendLiteral(value);
+    public void AppendFormatted(string value) => _message.AppendFormatted(value);
+    public void AppendFormatted<T>(T value) => _message.AppendFormatted(value);
+    public void AppendFormatted<T>(T value, string format) => _message.AppendFormatted(value, format);
+    public void AppendFormatted<T>(T value, int alignment, string format = null) => _message.AppendFormatted(value, alignment, format);
 }
