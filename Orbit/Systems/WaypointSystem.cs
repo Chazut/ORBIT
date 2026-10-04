@@ -184,6 +184,7 @@ public partial class WaypointSystem
             RegisterWaypointInCell(coords, waypoint);
         }
 
+        InitializeOperations();
         Log.Debug("Populating cells with synthetic waypoints");
         _validCellQueue = new Queue<Vector2Int>();
         for (var x = 0; x < _gridSize.x; x++)
@@ -1896,6 +1897,8 @@ public partial class WaypointSystem
     {
         var doors = pick.LockedDoorsOnPath;
         if (doors == null || doors.Count == 0) return true;
+        foreach (var door in doors)
+            if (door != null && door.DoorState == EDoorState.Locked && !MultiStepAccess.CanForceUnlock(door)) return false;
 
         var isMainAnchor = IsWaypointMainAnchorOfSquad(squad, pick);
         var intermediateRaw = squad.Personality != null
@@ -2624,6 +2627,8 @@ public partial class WaypointSystem
         // Reserve blanket-block: every exfil on this map is conditional (D-2 power+key, Hermetic Door
         // power+key, Train timed, Sewer Manhole, Cliff Descent w/ Paracord+Red Rebel...). Bots can't satisfy
         // any of them.
+        if (MultiStepAccess.IsConditional(exfil))
+            return squadIsPmc == true && MultiStepAccess.ExitActive(exfil) && MatchesBotSpawnEntry(squad, exfil);
         if (string.Equals(_mapId, "RezervBase", StringComparison.OrdinalIgnoreCase))
             return false;
 
@@ -2710,6 +2715,8 @@ public partial class WaypointSystem
             if ((allowedFactions & ExtractFaction.PlayerScav) == 0) return false;
         }
         else if (!allowedFactions.IsBotEnabled(role.Value)) return false;
+        if (MultiStepAccess.IsConditional(exfil))
+            return squadIsPmc == true && MultiStepAccess.ExitActive(exfil) && MatchesBotSpawnEntry(squad, exfil);
         if (string.Equals(_mapId, "RezervBase", StringComparison.OrdinalIgnoreCase)) return false;
         if (exfil.Status == EExfiltrationStatus.NotPresent
             || exfil.Status == EExfiltrationStatus.Hidden

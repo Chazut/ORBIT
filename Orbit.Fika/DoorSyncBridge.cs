@@ -69,6 +69,7 @@ internal sealed class DoorSyncBridge : IDisposable
             // allocate different wrapper delegates, so they cannot remove the original handler.
             FikaEventDispatcher.OnFikaEvent += OnFikaEvent;
             OrbitDoorEvents.Changed += OnDoorChanged;
+            OrbitInteractionEvents.Changed += OnSwitchChanged;
         }
         catch
         {
@@ -198,6 +199,16 @@ internal sealed class DoorSyncBridge : IDisposable
             return;
         }
         if (_session == null || packet.Session != _session || string.IsNullOrEmpty(packet.DoorId)) return;
+        if (packet.Kind == DoorMessage.SwitchInteraction)
+        {
+            if (packet.State != (byte)EInteractionType.Open || !_order.Receive(packet.DoorId, packet.Revision)) return;
+            if (_world?.FindDoor(packet.DoorId) is Switch target && target.DoorState == EDoorState.Shut)
+            {
+                target.LockForInteraction();
+                target.Interact(new InteractionResult(EInteractionType.Open));
+            }
+            return;
+        }
         if (packet.Kind == DoorMessage.Acknowledge)
         {
             _order.Acknowledge(packet.DoorId, packet.Revision, packet.Token);
@@ -232,6 +243,15 @@ internal sealed class DoorSyncBridge : IDisposable
         if (operation == OrbitDoorEvents.Operation.Finalize && !_watches.ContainsKey(door.Id)) return;
         _known[door.Id] = door;
         _watches[door.Id] = new Watch { Door = door, Expires = Time.time + 16f };
+    }
+
+    private void OnSwitchChanged(WorldInteractiveObject target, EInteractionType interaction)
+    {
+        if (_network == null || !_host || target is not Switch || target.ForceLocalInteraction
+            || interaction != EInteractionType.Open || string.IsNullOrEmpty(target.Id)) return;
+        var packet = Packet(DoorMessage.SwitchInteraction, target.Id);
+        packet.State = (byte)interaction;
+        Send(packet);
     }
 
     private static bool Settled(Door door)
@@ -359,6 +379,7 @@ internal sealed class DoorSyncBridge : IDisposable
     public void Dispose()
     {
         OrbitDoorEvents.Changed -= OnDoorChanged;
+        OrbitInteractionEvents.Changed -= OnSwitchChanged;
         FikaEventDispatcher.OnFikaEvent -= OnFikaEvent;
         _harmony.UnpatchSelf();
         Reset();

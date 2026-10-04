@@ -18,7 +18,7 @@ internal sealed class AmbushDirector(WaypointSystem waypoints)
 
     internal static bool Available(Squad squad)
     {
-        if (squad.Leader == null || squad.Size == 0 || squad.ExtractRequested || squad.SainResolutionPending
+        if (squad.Leader == null || squad.Size == 0 || squad.Operation?.Active == true || squad.ExtractRequested || squad.SainResolutionPending
             || squad.CombatCallerMemberIdx >= 0 || Time.time < squad.GhostFightUntil || squad.CorpseEscort.Active
             || squad.PreInterruptObjectiveLocation != null || squad.InvestigateNoisePosition.HasValue
             || squad.Objective.Location?.Category is WaypointCategory.Exfil or WaypointCategory.Corpse) return false;

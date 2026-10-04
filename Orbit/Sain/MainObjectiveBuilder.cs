@@ -124,12 +124,19 @@ public static class MainObjectiveBuilder
             else if (roll < thKills) type = MainObjectiveType.Kills;
             else type = MainObjectiveType.LootValue;
 
+            var operationRoll = type == MainObjectiveType.LootValue
+                && ServerConfig.MultiStep.Allows(squad.Leader.BotCategory)
+                && Random.value < WaypointSystem.OperationStyle(squad).LootMainChance;
             MainObjective main = null;
             for (var attempt = 0; attempt < MaxRetriesOnDuplicate && main == null; attempt++)
             {
                 MainObjective candidate = null;
                 switch (type)
                 {
+                    case MainObjectiveType.LootValue:
+                        if (operationRoll)
+                            candidate = waypointSystem.RollOperationMain(squad);
+                        break;
                     case MainObjectiveType.ExtractCamp:
                         candidate = waypointSystem.RollExtractCampMain(squad, style);
                         break;
@@ -153,7 +160,7 @@ public static class MainObjectiveBuilder
                 }
                 if (candidate == null) break; // pool empty, give up on this slot
 
-                if (!usedCells.Contains(candidate.CellCoords + "|" + candidate.ZoneFloorId))
+                if (!usedCells.Contains(candidate.Operation?.Definition.Id ?? candidate.CellCoords + "|" + candidate.ZoneFloorId))
                     main = candidate;
                 // else: collision with an existing cell within THIS squad — retry the same type. Cross-squad
                 // collisions are intentional (multiple squads can target the same Quest / Kills / LootValue
@@ -163,7 +170,7 @@ public static class MainObjectiveBuilder
             if (main != null)
             {
                 squad.MainObjectives.Add(main);
-                usedCells.Add(main.CellCoords + "|" + main.ZoneFloorId);
+                usedCells.Add(main.Operation?.Definition.Id ?? main.CellCoords + "|" + main.ZoneFloorId);
             }
         }
 

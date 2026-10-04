@@ -2,7 +2,7 @@ using Fika.Core.Networking.LiteNetLib.Utils;
 
 namespace Orbit.Fika;
 
-internal enum DoorMessage : byte { Hello, Welcome, State, Barrier, Fence, Acknowledge }
+internal enum DoorMessage : byte { Hello, Welcome, State, Barrier, Fence, Acknowledge, SwitchInteraction }
 
 // Separate from the audio protocol. State is sent only to peers that negotiated this version.
 internal struct OrbitDoorPacket : INetSerializable

@@ -62,6 +62,8 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
 
     public override void Deactivate(Entity entity)
     {
+        if (entity is Squad operatingSquad)
+            operatingSquad.Operation?.End(operatingSquad, waypointSystem, "strategy deactivated");
         if (entity is Squad campingSquad) campingSquad.Camp.End(campingSquad, "strategy deactivated");
         if (entity is Squad squad) squad.CorpseEscort.End(squad, waypointSystem, "strategy deactivated");
         // Return any assignments before deactivating.
@@ -174,7 +176,6 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
             // Tick main objectives (Kills timer / LootValue completion / extract trigger when all done).
             // Independent of the per-squad objective dispatch flow below — mains drive the long-term force
             // attraction, the dispatch picks tick-level secondary POIs.
-            TickMainObjectives(squad);
 
             // Squad rally: the first member to engage becomes the "caller" and squad.Objective.Location is
             // swapped to a virtual Waypoint at their position so realign converges everyone there to support.
@@ -209,6 +210,13 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
             }
 
             CheckTimeExtractTrigger(squad);
+
+            if (waypointSystem.TickOperation(squad, SquadAnyMemberInCombat(squad)))
+            {
+                UpdateAgents(squad, out _);
+                continue;
+            }
+            TickMainObjectives(squad);
 
             var escortingCorpse = squad.CorpseEscort.Maintain(squad, waypointSystem, SquadAnyMemberInCombat(squad));
             if (TryContinueLootExtractSweep(squad)) continue;
@@ -764,6 +772,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
 
             if (squad.CorpseEscort.UpdateMember(squad, agent, i, waypointSystem)) continue;
             if (squad.Camp.Owns(agent)) continue;
+            if (squad.Operation?.Owns(agent) == true) continue;
 
             // An agent is "aligned" with the squad if their location IS the squad's main objective, OR if
             // they're working a splinter that was picked around the squad's current main objective. Without

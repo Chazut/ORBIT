@@ -160,6 +160,11 @@ public static class OrbitTelemetry
         var category = loc != null ? loc.Category.ToString() : "";
         if (agent.Squad?.Camp.Owns(agent) == true)
             category = agent.Squad.Camp.Looter == agent ? "AirdropLoot" : "Ambush" + agent.Squad.Camp.Site.Kind;
+        if (agent.Squad?.Operation?.Owns(agent) == true)
+        {
+            var operation = agent.Squad.Operation;
+            category = $"MultiStep: {operation.Definition.Name} ({operation.Index + 1}/{operation.Count}) {operation.Current.Label}";
+        }
         var x = loc?.Position.x ?? 0f;
         var y = loc?.Position.y ?? 0f;
         var z = loc?.Position.z ?? 0f;
@@ -284,6 +289,12 @@ public static class OrbitTelemetry
                     Y = m.Position.y,
                     Z = m.Position.z,
                     Completed = m.Completed,
+                    OperationId = m.Operation?.Definition.Id,
+                    OperationName = m.Operation?.Definition.Name,
+                    OperationStep = m.Operation?.Current.Label,
+                    OperationStepIndex = m.Operation == null ? 0 : m.Operation.Index + 1,
+                    OperationStepCount = m.Operation?.Count ?? 0,
+                    OperationState = m.Operation?.Status,
                     KillAmbush = m.KillAmbush,
                     CampStartedAt = m.CampStartedAt,
                     CampElapsed = m.CampElapsed,
@@ -359,7 +370,13 @@ public class OrbitSquadMainObjectives
 
 public class OrbitMainObjective
 {
-    /// <summary>"Kills" | "LootValue" | "Quest" | "ExtractCamp".</summary>
+    public string OperationId;
+    public string OperationName;
+    public string OperationStep;
+    public int OperationStepIndex;
+    public int OperationStepCount;
+    public string OperationState;
+    /// <summary>"Kills" | "LootValue" | "Quest" | "ExtractCamp" | "MultiStep".</summary>
     public string Type;
     public int CellX;
     public int CellY;

@@ -307,6 +307,9 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                         else if (objective.Location.Category == WaypointCategory.Exfil
                                  && objective.Location.Target is ExfiltrationPoint exfil)
                         {
+                            if (Orbit.Systems.MultiStepAccess.IsConditional(exfil)
+                                && !Orbit.Systems.MultiStepAccess.ExitActive(exfil))
+                            { objective.Status = ObjectiveStatus.Failed; break; }
                             if (ExfilArrival.IsSharedTimer(exfil) && ExfilArrival.IsUnavailable(exfil))
                             {
                                 Log.Info($"{agent} V-Ex {exfil.name} unavailable on arrival, selecting another exfil");
@@ -328,6 +331,8 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                                 }
                                 else if (outsideWait >= ExfilOutsideTriggerForceExtractSeconds)
                                 {
+                                    if (Orbit.Systems.MultiStepAccess.IsConditional(exfil))
+                                    { objective.Status = ObjectiveStatus.Failed; break; }
                                     if (ExfilArrival.IsSharedTimer(exfil))
                                     {
                                         Log.Info($"{agent} V-Ex {exfil.name} trigger unreachable, selecting another exfil");
@@ -509,6 +514,7 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                 // Force the despawn only near the exit. A distant local blockage says nothing about
                 // whether the exit is reachable from a nearby NavMesh point.
                 if (!ExfilArrival.IsSharedTimer(exfil)
+                    && !Orbit.Systems.MultiStepAccess.IsConditional(exfil)
                     && (agent.Position - location.Position).sqrMagnitude <= ExfilForceDespawnProximitySqr)
                 {
                     ActivateExfilForBot(exfil, agent);
@@ -518,6 +524,7 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                     return;
                 }
                 if (exfil.Settings?.ExfiltrationType == EExfiltrationType.Individual
+                    && !Orbit.Systems.MultiStepAccess.IsConditional(exfil)
                     && exfil.Status != EExfiltrationStatus.NotPresent && exfil.Status != EExfiltrationStatus.Hidden)
                 {
                     // Keep both solo and squad pins. The position-based watchdog survives these short
@@ -564,6 +571,7 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
     // bot leave. OnItemTransferred starts the V-Ex car countdown.
     private static void ActivateExfilForBot(ExfiltrationPoint exfil, Agent agent)
     {
+        if (Orbit.Systems.MultiStepAccess.IsConditional(exfil)) return;
         try
         {
             // ProfileId overload — the IPlayer overload pulls in IDissonancePlayer which Orbit's csproj

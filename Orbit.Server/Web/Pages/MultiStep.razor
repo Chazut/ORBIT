@@ -1,0 +1,45 @@
+@page "/orbit/multi-step"
+@layout Orbit.Server.Web.Shared.MainLayout
+@inherits Orbit.Server.Web.OrbitConfigPage
+
+<PageTitle>ORBIT: Multi-step objectives</PageTitle>
+<MudContainer MaxWidth="MaxWidth.Medium">
+    <PageHeader Title="Multi-step objectives" OnReset="@(() => Cfg.MultiStep = new())"
+                Description="Squads can prepare access to valuable rooms or conditional exits. One operation uses one main slot, with its steps in order. Combat pauses progress and world changes are shared by all squads. Save to apply next raid." />
+    <SettingsCard Title="Participants and timing">
+        <OrbitSwitch @bind-Value="Cfg.MultiStep.Enabled" Label="Enable multi-step objectives" />
+        <OrbitSwitch @bind-Value="Cfg.MultiStep.Pmc" Label="PMCs" />
+        <OrbitSwitch @bind-Value="Cfg.MultiStep.PlayerScav" Label="PlayerScavs (loot operations)" />
+        <OrbitSlider T="float" @bind-Value="Cfg.MultiStep.StepTimeout" Label="Travel timeout per step" Unit="s" Min="30" Max="900" Step="30" />
+        <OrbitSlider T="float" @bind-Value="Cfg.MultiStep.LootDuration" Label="Maximum time looting the destination" Unit="s" Min="10" Max="600" Step="10" />
+        <OrbitSlider T="float" @bind-Value="Cfg.MultiStep.RegroupTimeout" Label="Wait for squad inside Saferoom" Unit="s" Min="10" Max="180" Step="5" />
+    </SettingsCard>
+    <SettingsCard Title="Operations" Subtitle="Relative selection weights within the available loot or extraction pool. Zero disables that chain. Keys and cards are simulated; bots must still reach the real reader or door and activate the power. Labs and Labyrinth are excluded.">
+        @foreach (var item in Operations)
+        {
+            <OrbitSlider T="float" Value="Cfg.MultiStep.Weight(item.Key)" ValueChanged="@(value => Cfg.MultiStep.Weights[item.Key] = value)"
+                         Label="@item.Value" Min="0" Max="10" Step="0.5f" />
+        }
+    </SettingsCard>
+    <SettingsCard Title="Timmy"><MultiStepStyleEditor Cfg="Cfg.MultiStep.Timmy" /></SettingsCard>
+    <SettingsCard Title="Cautious"><MultiStepStyleEditor Cfg="Cfg.MultiStep.Cautious" /></SettingsCard>
+    <SettingsCard Title="Average"><MultiStepStyleEditor Cfg="Cfg.MultiStep.Average" /></SettingsCard>
+    <SettingsCard Title="Aggressive"><MultiStepStyleEditor Cfg="Cfg.MultiStep.Aggressive" /></SettingsCard>
+    <SettingsCard Title="Very aggressive"><MultiStepStyleEditor Cfg="Cfg.MultiStep.VeryAggressive" /></SettingsCard>
+    <SettingsCard Title="PlayerScav"><MultiStepStyleEditor Cfg="Cfg.MultiStep.PlayerScavStyle" /></SettingsCard>
+</MudContainer>
+
+@code {
+    private static readonly Dictionary<string, string> Operations = new()
+    {
+        ["kiba"] = "Interchange: power, optional alarm, KIBA doors, loot",
+        ["ultra"] = "Interchange: power, ULTRA Medical, loot",
+        ["object21ws"] = "Interchange: power, 21WS reader, loot",
+        ["object14"] = "Interchange: power, urinal, 11SR reader, Object 14 lever, loot",
+        ["saferoom-loot"] = "Interchange: power, urinal, 11SR reader, Saferoom loot",
+        ["saferoom-extract"] = "Interchange: Saferoom access, loot, regroup, close door, extract",
+        ["d2"] = "Reserve: power, D-2 button, gate, extract",
+        ["hermetic"] = "Reserve: Hermetic lever, reach exit before power expires",
+        ["zb013"] = "Customs: power, Factory door, ZB-013 extraction"
+    };
+}

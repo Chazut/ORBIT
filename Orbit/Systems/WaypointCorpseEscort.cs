@@ -43,11 +43,11 @@ public partial class WaypointSystem
     }
 
     internal bool TryPickCorpseEscortPosition(Agent agent, Vector3 looterPosition, Vector3 anchor,
-        List<CoverPoint> covers, List<Vector3> occupied, List<Vector3> rejected, int slot, out CoverPoint chosen)
+        List<CoverPoint> covers, List<Vector3> occupied, List<Vector3> rejected, int slot, out CoverPoint chosen, int maxPaths = 12)
     {
         // Local path validation prevents "nearby" guards on another floor or behind a long detour.
         // Native cover is preferred, with a strict budget per member instead of pathing every voxel.
-        var pathBudget = 12;
+        var pathBudget = System.Math.Min(12, maxPaths);
         if (covers != null)
         {
             for (var category = CoverCategory.Hard; category <= CoverCategory.Soft; category++)
@@ -68,7 +68,7 @@ public partial class WaypointSystem
 
         // No usable cover: dispersed walkable positions, still close to the looter. This is an ordinary
         // move order, never a teleport. Rotate the samples per member to avoid a shared destination.
-        pathBudget = 8;
+        pathBudget = maxPaths >= 12 ? 8 : System.Math.Min(8, pathBudget);
         for (var sample = 0; sample < 16 && pathBudget > 0; sample++)
         {
             var angle = (slot * 2.399963f) + sample * Mathf.PI / 4f;

@@ -22,6 +22,8 @@ public enum MainObjectiveType
     Quest,
     /// <summary>Hold cover near an active exit, then continue the other mains.</summary>
     ExtractCamp,
+    /// <summary>A persistent chain of world interactions, counted as one main objective.</summary>
+    MultiStep,
 }
 
 /// <summary>
@@ -32,6 +34,7 @@ public enum MainObjectiveType
 /// </summary>
 public class MainObjective
 {
+    internal Orbit.Systems.OperationPlan Operation;
     public MainObjectiveType Type;
     /// <summary>Grid anchor — used by the force-attraction formula.</summary>
     public Vector2Int CellCoords;

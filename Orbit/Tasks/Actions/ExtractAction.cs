@@ -102,6 +102,15 @@ public class ExtractAction(AgentData dataset, float hysteresis) : Task<Agent>(hy
             return;
         }
 
+        if (Orbit.Systems.MultiStepAccess.IsConditional(exfil)
+            && (!Orbit.Systems.MultiStepAccess.ExitActive(exfil) || !ExfilArrival.IsInside(agent, loc)))
+        {
+            _footExtractStartTime.Remove(agent.Id);
+            agent.Objective.Status = ObjectiveStatus.None;
+            agent.Objective.DispatchTime = Time.time;
+            return;
+        }
+
         UpdateFootExtract(agent);
     }
 
@@ -116,7 +125,10 @@ public class ExtractAction(AgentData dataset, float hysteresis) : Task<Agent>(hy
             return;
         }
 
-        if (now - startedAt < FootExtractStandTime) return;
+        var seconds = agent.Objective.Location?.Target is ExfiltrationPoint point
+                      && Orbit.Systems.MultiStepAccess.IsConditional(point)
+            ? Mathf.Max(FootExtractStandTime, point.Settings.ExfiltrationTime) : FootExtractStandTime;
+        if (now - startedAt < seconds) return;
 
         _footExtractStartTime.Remove(agent.Id);
         DespawnAgent(agent);
