@@ -170,6 +170,8 @@ public static class MainObjectiveBuilder
             if (main != null)
             {
                 squad.MainObjectives.Add(main);
+                // One final camp can last until departure; additional camps could never be pursued.
+                if (main.Type == MainObjectiveType.ExtractCamp) extractChance = 0f;
                 usedCells.Add(main.Operation?.Definition.Id ?? main.CellCoords + "|" + main.ZoneFloorId);
             }
         }
@@ -180,6 +182,15 @@ public static class MainObjectiveBuilder
             Log.Warning($"{squad} generated zero main objectives (no eligible anchors); will behave like baseline dispatch");
             return;
         }
+
+        for (var i = 0; i < squad.MainObjectives.Count - 1; i++)
+            if (squad.MainObjectives[i].Type == MainObjectiveType.ExtractCamp)
+            {
+                var camp = squad.MainObjectives[i];
+                squad.MainObjectives.RemoveAt(i);
+                squad.MainObjectives.Add(camp);
+                break;
+            }
 
         var summary = new StringBuilder();
         for (var i = 0; i < squad.MainObjectives.Count; i++)

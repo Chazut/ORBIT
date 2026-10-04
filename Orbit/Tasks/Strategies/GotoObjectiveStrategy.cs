@@ -83,7 +83,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
 
             if (squad.Camp.Active)
             {
-                CheckTimeExtractTrigger(squad);
+                RaidTimeExtraction.Check(squad);
                 if (squad.Camp.Tick(squad, waypointSystem))
                 {
                     UpdateAgents(squad, out _); // Emergency extraction still takes priority for each member.
@@ -93,7 +93,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
 
             if (squad.Camp.PendingAirdrop != null)
             {
-                CheckTimeExtractTrigger(squad);
+                RaidTimeExtraction.Check(squad);
                 if (_ambush.TryStartPending(squad))
                 {
                     UpdateAgents(squad, out _);
@@ -220,7 +220,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                 squad.CombatCallerMemberIdx = -1;
             }
 
-            CheckTimeExtractTrigger(squad);
+            RaidTimeExtraction.Check(squad);
 
             if (waypointSystem.TickOperation(squad, SquadAnyMemberInCombat(squad)))
             {
@@ -1532,40 +1532,6 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
             Log.Info($"{squad} combat caller cleared (grace elapsed)");
             squad.CombatCallerMemberIdx = -1;
         }
-    }
-
-    private static void CheckTimeExtractTrigger(Squad squad)
-    {
-        if (squad.ExtractRequested && squad.LootExtractSweep == null) return;
-        var leaderBot = squad?.Leader?.Bot;
-        if (leaderBot?.Profile?.Info?.Settings == null) return;
-        var role = leaderBot.Profile.Info.Settings.Role;
-        // Eligibility: same gate as the loot-value trigger — only factions permitted to extract bother to
-        // roll a threshold.
-        if (!(ServerConfig.Loot.ExtractAllowedFor).IsBotEnabled(role)) return;
-
-        // Lazy-roll the threshold the first time we evaluate this squad.
-        if (float.IsNaN(squad.TimeExtractThresholdSeconds))
-            squad.TimeExtractThresholdSeconds = RollExtractThreshold(leaderBot);
-
-        var gameTimer = Singleton<AbstractGame>.Instance?.GameTimer;
-        if (gameTimer == null) return;
-        if (!gameTimer.SessionTime.HasValue) return;
-        var remaining = (float)(gameTimer.SessionTime.Value.TotalSeconds - gameTimer.PastTime.TotalSeconds);
-        if (remaining > squad.TimeExtractThresholdSeconds) return;
-
-        squad.ExtractRequested = true;
-        squad.ExtractRequestedReason = $"raid time low ({remaining:F0}s left)";
-        Log.Info($"{squad}: raid time low ({remaining:F0}s remaining <= {squad.TimeExtractThresholdSeconds:F0}s threshold for role {role}) — squad will bee-line to nearest eligible exfil");
-    }
-
-    private static float RollExtractThreshold(BotOwner leaderBot)
-    {
-        var isPlayerScav = leaderBot?.Profile != null && leaderBot.Profile.WillBeAPlayerScav();
-        var windowPct = isPlayerScav ? ServerConfig.PlayerScav.TimeExtractWindow : ServerConfig.MainObjectives.TimeExtractWindow;
-        var totalRaidSeconds = (float)(Singleton<AbstractGame>.Instance?.GameTimer?.SessionTime?.TotalSeconds ?? 0d);
-        if (totalRaidSeconds <= 0f) return 0f;
-        return totalRaidSeconds * Random.Range(windowPct.x, windowPct.y) / 100f;
     }
 
     // After this many consecutive "all members failed en-route" branches on the same objective the squad

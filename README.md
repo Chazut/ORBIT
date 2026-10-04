@@ -93,7 +93,9 @@ real reasons - enough roubles, goals completed, or the raid clock - and
 they coordinate on shared exfils like the car.
 
 PMC and PlayerScav squads can hold cover within a Kill main or receive an
-extract-camping main. Airdrops create temporary detours: eligible nearby squads
+extract-camping main. A squad can roll one extract camp, pursued after all its other
+mains. It then holds until its time-based extraction threshold, with emergency
+departures still available. Airdrops create temporary detours: eligible nearby squads
 roll as soon as the plane releases the crate, approach its estimated landing area,
 then hold cover. Once the hold is over and the crate has landed, one member loots
 while the others cover, before the squad resumes its objectives. Several squads

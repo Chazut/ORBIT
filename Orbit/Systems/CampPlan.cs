@@ -77,7 +77,7 @@ internal sealed class CampPlan
         if (main != null)
         {
             if (main.Type == MainObjectiveType.Kills) main.CampTargetDuration = main.KillsRoamTargetDuration;
-            _duration = Mathf.Max(0, main.CampTargetDuration - main.CampElapsed);
+            _duration = main.Type == MainObjectiveType.ExtractCamp ? 0 : Mathf.Max(0, main.CampTargetDuration - main.CampElapsed);
         }
         else if (PendingAirdrop != site) _duration = Random.Range(style.AirdropDurationMin, style.AirdropDurationMax);
         if (_directLoot) _duration = 0;
@@ -97,7 +97,8 @@ internal sealed class CampPlan
             agent.Objective.DispatchTime = Time.time;
             agent.Guard.CoverPoint = pair.Value;
         }
-        Log.Info($"AMBUSH: {squad} approach kind={site.Kind} target={site.Position} members={Slots.Count} hold={_duration:F0}s");
+        var hold = main?.Type == MainObjectiveType.ExtractCamp ? "until-time-extract" : $"{_duration:F0}s";
+        Log.Info($"AMBUSH: {squad} approach kind={site.Kind} target={site.Position} members={Slots.Count} hold={hold}");
         if (_directLoot) Log.Info($"AMBUSH: {squad} direct airdrop loot reason=no reachable cover landed={site.Landed}");
         if (site.Kind == CampSiteKind.Airdrop) Orbit.Api.OrbitTelemetry.MainObjectivesRevision++;
     }
@@ -150,7 +151,8 @@ internal sealed class CampPlan
                 if (Main.Type == MainObjectiveType.Kills && Main.KillsRoamStartedAt <= 0) Main.KillsRoamStartedAt = Time.time;
                 Orbit.Api.OrbitTelemetry.MainObjectivesRevision++;
             }
-            Log.Info($"AMBUSH: {squad} holding kind={Site.Kind} duration={_duration:F0}s");
+            var hold = Main?.Type == MainObjectiveType.ExtractCamp ? "until-time-extract" : $"{_duration:F0}s";
+            Log.Info($"AMBUSH: {squad} holding kind={Site.Kind} duration={hold}");
             if (Site.Kind == CampSiteKind.Airdrop) Orbit.Api.OrbitTelemetry.MainObjectivesRevision++;
         }
         if (Looter != null) return true;
@@ -161,7 +163,7 @@ internal sealed class CampPlan
             _held += elapsed;
             if (Main != null) Main.CampElapsed += elapsed;
         }
-        if (Holding && _held >= _duration)
+        if (Holding && Main?.Type != MainObjectiveType.ExtractCamp && _held >= _duration)
         {
             // The hold can finish during the descent. Keep cover until the landing callback arrives.
             if (Site.Kind == CampSiteKind.Airdrop && !Site.Landed) return true;

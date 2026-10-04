@@ -129,7 +129,7 @@ public partial class WaypointSystem
             return new MainObjective
             {
                 Type = MainObjectiveType.ExtractCamp, Position = site.Position, CellCoords = WorldToCell(site.Position),
-                CampSite = site, CampTargetDuration = UnityEngine.Random.Range(style.ExtractDurationMin, style.ExtractDurationMax)
+                CampSite = site
             };
         }
         return null;

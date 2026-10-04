@@ -290,6 +290,7 @@ public static class OrbitTelemetry
                     CampStartedAt = m.CampStartedAt,
                     CampElapsed = m.CampElapsed,
                     CampTargetDuration = m.KillAmbush ? m.KillsRoamTargetDuration : m.CampTargetDuration,
+                    CampUntilTimeExtract = m.Type == MainObjectiveType.ExtractCamp,
                     CampHolding = squad.Camp.Main == m && squad.Camp.Holding,
                     KillsRoamStartedAt = m.KillsRoamStartedAt,
                     KillsRoamTargetDuration = m.KillsRoamTargetDuration,
@@ -385,6 +386,7 @@ public class OrbitMainObjective
     public float CampStartedAt;
     public float CampElapsed;
     public float CampTargetDuration;
+    public bool CampUntilTimeExtract;
     public bool CampHolding;
     public float KillsRoamStartedAt;
     public float KillsRoamTargetDuration;

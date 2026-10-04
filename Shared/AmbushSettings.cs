@@ -76,6 +76,7 @@ public sealed class AmbushStyleSettings
 {
     public float KillAmbushChance { get; set; }
     public float ExtractMainChance { get; set; }
+    // Retained for preset compatibility. Extract camps now last until time-based departure.
     public float ExtractDurationMin { get; set; }
     public float ExtractDurationMax { get; set; }
     public float AirdropChance { get; set; }

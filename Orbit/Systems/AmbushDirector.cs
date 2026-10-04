@@ -94,7 +94,7 @@ internal sealed class AmbushDirector(WaypointSystem waypoints)
         if (squad.MainObjectives != null)
             foreach (var main in squad.MainObjectives)
             {
-                if (main.Completed || !main.IsCampMain || Time.time < main.CampRetryAt) continue;
+                if (!main.CanPursue(squad.MainObjectives) || !main.IsCampMain || Time.time < main.CampRetryAt) continue;
                 var rule = cfg.For(main.Type == MainObjectiveType.ExtractCamp ? CampSiteKind.Extract : CampSiteKind.Hotspot);
                 var delta = main.Position - squad.Leader.Position;
                 var distance = delta.x * delta.x + delta.z * delta.z;

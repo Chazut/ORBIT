@@ -380,6 +380,8 @@ public class LootContainerAction(AgentData dataset, WaypointSystem waypointSyste
     {
         var squad = agent.Squad;
         if (squad == null || squad.ExtractRequested) return;
+        // A planned final camp takes precedence over routine wealth-based departures.
+        if (MainObjective.HasPendingExtractCamp(squad.MainObjectives)) return;
 
         var totalLooted = SumSquadLootedAlive(squad, out var aliveCount);
 
@@ -442,6 +444,7 @@ public class LootContainerAction(AgentData dataset, WaypointSystem waypointSyste
     {
         if (agent == null || agent.SoloExtractRequested || agent.SoloLootThresholdRolled) return;
         if (agent.Squad == null || agent.Squad.ExtractRequested) return;
+        if (MainObjective.HasPendingExtractCamp(agent.Squad.MainObjectives)) return;
 
         // Respect "Extract allowed for" — None (or a set excluding this bot) blocks the solo loot-threshold
         // extract just like the squad triggers. PlayerScavs route to their own flag (shared WildSpawnType).

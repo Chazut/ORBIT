@@ -120,7 +120,7 @@ public partial class WaypointSystem
             var distance = float.MaxValue;
             foreach (var main in squad.MainObjectives)
             {
-                if (main.Completed) continue;
+                if (!main.CanPursue(squad.MainObjectives)) continue;
                 var d = (main.Position - squad.Leader.Position).sqrMagnitude;
                 if (d < distance) { nearest = main; distance = d; }
             }

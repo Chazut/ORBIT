@@ -629,7 +629,7 @@ public partial class WaypointSystem
         for (var i = 0; i < squad.MainObjectives.Count; i++)
         {
             var main = squad.MainObjectives[i];
-            if (main.Completed) continue;
+            if (!main.CanPursue(squad.MainObjectives)) continue;
             if (main.CellCoords == cellCoords) return true;
         }
         return false;
@@ -644,7 +644,7 @@ public partial class WaypointSystem
         for (var i = 0; i < squad.MainObjectives.Count; i++)
         {
             var main = squad.MainObjectives[i];
-            if (main.Completed) continue;
+            if (!main.CanPursue(squad.MainObjectives)) continue;
             var delta = (Vector2)(main.CellCoords - currentCoords);
             var dist = delta.magnitude;
             if (main.Type == MainObjectiveType.Kills && main.KillsRoamStartedAt > 0f)
@@ -1994,7 +1994,7 @@ public partial class WaypointSystem
         for (var i = 0; i < mains.Count; i++)
         {
             var m = mains[i];
-            if (m == null || m.Completed) continue;
+            if (m == null || !m.CanPursue(mains)) continue;
             // LootValue mains: any loot waypoint in the cell is an "anchor" worth priority-picking. The 5m
             // euclidean test wasn't enough because m.Position = cell-center; waypoints at the edge can be
             // 30m+ from center and would lose the priority pick.

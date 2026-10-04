@@ -8,7 +8,7 @@
     <PageHeader Title="Ambush &amp; camping" OnReset="ResetPage"
                 Description="Kill mains can use ambush mode, extract camping is a main objective, and airdrops create opportunities as soon as the plane releases the crate. Multiple squads can target the same location. Save to apply next raid." />
     <SettingsCard Title="Who can camp" OnReset="ResetParticipants"
-                  Subtitle="Only bots directed by ORBIT outside combat can start a camp. Combat interrupts the formation. Main objectives keep their remaining hold time for a later attempt.">
+                  Subtitle="Only bots directed by ORBIT outside combat can start a camp. Combat interrupts the formation. Kill ambushes keep their remaining hold time; extract camps resume until time-based departure.">
         <OrbitSwitch @bind-Value="Cfg.Ambush.Enabled" Label="Enable ambushes and camping" />
         <OrbitSwitch @bind-Value="Cfg.Ambush.Pmc" Label="PMCs" />
         <OrbitSwitch @bind-Value="Cfg.Ambush.PlayerScav" Label="PlayerScavs" />
@@ -27,7 +27,7 @@
         <AmbushTargetEditor Cfg="Cfg.Ambush.Hotspots" />
     </SettingsCard>
     <SettingsCard Title="Extracts" OnReset="@(() => Cfg.Ambush.Extracts = new Orbit.Settings.AmbushSettings().Extracts)"
-                  Subtitle="Rolled alongside other main objectives, with attraction toward a reachable active exit. Holding completes the objective without extracting the squad. An enemy exit is also a valid target.">
+                  Subtitle="At most one per squad, pursued after every other main. Hold near the exit until the squad's time-based extraction threshold, then leave. Emergency departures remain available. An enemy exit is also a valid camp target.">
         <AmbushTargetEditor Cfg="Cfg.Ambush.Extracts" />
     </SettingsCard>
     <SettingsCard Title="Airdrops" OnReset="@(() => Cfg.Ambush.Airdrops = new Orbit.Settings.AmbushSettings().Airdrops)"

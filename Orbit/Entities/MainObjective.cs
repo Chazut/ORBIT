@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace Orbit.Entities;
@@ -20,7 +21,7 @@ public enum MainObjectiveType
     /// quest's TriggerWithId nav-point). Visible to PickFromCell only for the squad whose main owns the
     /// trigger ID. Completes when a member reaches the trigger.</summary>
     Quest,
-    /// <summary>Hold cover near an active exit, then continue the other mains.</summary>
+    /// <summary>After the other mains, hold cover near an exit until time-based extraction.</summary>
     ExtractCamp,
     /// <summary>A persistent chain of world interactions, counted as one main objective.</summary>
     MultiStep,
@@ -52,6 +53,24 @@ public class MainObjective
     internal float CampRetryAt;
     internal Orbit.Systems.AmbushSite CampSite;
     public bool IsCampMain => Type == MainObjectiveType.ExtractCamp || Type == MainObjectiveType.Kills && KillAmbush;
+
+    public bool CanPursue(IReadOnlyList<MainObjective> mains)
+    {
+        if (Completed) return false;
+        if (Type != MainObjectiveType.ExtractCamp) return true;
+        if (mains != null)
+            for (var i = 0; i < mains.Count; i++)
+                if (!mains[i].Completed && mains[i].Type != MainObjectiveType.ExtractCamp) return false;
+        return true;
+    }
+
+    public static bool HasPendingExtractCamp(IReadOnlyList<MainObjective> mains)
+    {
+        if (mains != null)
+            for (var i = 0; i < mains.Count; i++)
+                if (!mains[i].Completed && mains[i].Type == MainObjectiveType.ExtractCamp) return true;
+        return false;
+    }
 
     // Null preserves the original all-floor main semantics for existing zone files.
     public string ZoneFloorId;
