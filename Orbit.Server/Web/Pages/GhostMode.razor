@@ -243,6 +243,9 @@
                      Min="0f" Max="150f" Step="5f" Fmt="0"
                      Tooltip="Within this distance, the Ghost meets awake bot setting applies. If an awake group cannot sleep safely, the Ghost wakes using the existing grace period." />
         <div class="mt-1"></div>
+        <OrbitSlider T="float" @bind-Value="Cfg.GhostMode.WakeIntervalMs" Label="Delay between bot wake-ups" Unit="ms"
+                     Min="0f" Max="500f" Step="10f" Fmt="0"
+                     Tooltip="Time after one bot finishes waking before the next non-urgent bot starts. Visible bots, aiming and combat threats bypass this delay. Higher values spread the work over more time." />
         <OrbitSwitch @bind-Value="Cfg.GhostMode.ScopedWake" Label="Scoped wake"
                      Tooltip="ON (default): aiming through a magnified optic wakes bots ahead of you, in a cone wider than the scope view so they never pop in at the reticle. OFF: only the normal wake ring applies." />
         @if (Cfg.GhostMode.ScopedWake)
@@ -339,6 +342,7 @@
         Cfg.GhostMode.SleepDistance = d.SleepDistance;
         Cfg.GhostMode.WakeDistance = d.WakeDistance;
         Cfg.GhostMode.HostileWakeDistance = d.HostileWakeDistance;
+        Cfg.GhostMode.WakeIntervalMs = d.WakeIntervalMs;
         Cfg.GhostMode.ScopedWake = d.ScopedWake;
         Cfg.GhostMode.ScopedWakeMaxDistance = d.ScopedWakeMaxDistance;
     }

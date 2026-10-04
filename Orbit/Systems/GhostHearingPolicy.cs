@@ -25,10 +25,12 @@ internal static class GhostHearingPolicy
         internal ComponentFlag(string typeName, string member, bool method, bool unknown)
         {
             _unknown = unknown;
-            _type = AccessTools.TypeByName(typeName);
+            using (PerformanceJournal.Measure(TransitionPhase.HearingTypeLookup, "hearing-type-lookup", typeName, always: true))
+                _type = OptionalModTypes.Find(typeName);
             if (_type == null) return;
             try
             {
+                using var timing = PerformanceJournal.Measure(TransitionPhase.HearingCompile, "hearing-compile", typeName, always: true);
                 var instance = Expression.Parameter(typeof(object), "instance");
                 var typed = Expression.Convert(instance, _type);
                 Expression value = method ? Expression.Call(typed, AccessTools.Method(_type, member, Type.EmptyTypes))
@@ -40,6 +42,7 @@ internal static class GhostHearingPolicy
 
         internal bool Get(BotOwner bot)
         {
+            using var timing = TransitionPerformance.Measure(TransitionPhase.HearingComponentRead);
             if (_type == null) return false;
             var component = bot.GetComponent(_type);
             return component != null && (_read?.Invoke(component) ?? _unknown);
@@ -52,6 +55,7 @@ internal static class GhostHearingPolicy
 
     internal static GhostHearingCategory Category(BotOwner bot)
     {
+        using var timing = PerformanceJournal.Measure(TransitionPhase.HearingCategory, "hearing-category", profile: bot?.ProfileId);
         try { return ReadCategory(bot); }
         catch (Exception e)
         {

@@ -39,7 +39,7 @@ public class Plugin : BaseUnityPlugin
 {
     public const string PluginGuid = "com.chazut.orbit";
     public const string PluginName = "ORBIT";
-    public const string OrbitVersion = "2.1.0";
+    public const string OrbitVersion = "2.1.1";
 
     public static ManualLogSource LogSource;
 
@@ -63,6 +63,8 @@ public class Plugin : BaseUnityPlugin
     // ApplyFactionTakeoverToggle) so a future com.-prefixed variant ("com.samc137.ISBinfo") still registers.
     private const string IsbPluginGuid = "samc137.ISBinfo";
     private const string CombineSoldiersPluginGuid = "com.manimal.combinesoldiers";
+
+    private void Update() => PerformanceJournal.RefreshWriter();
 
     private void Awake()
     {
@@ -148,6 +150,8 @@ public class Plugin : BaseUnityPlugin
         EnableSafe(new InventoryChangePatch());
         EnableSafe(new LootItemKilledPatch());
         EnableSafe(new CorpseRegistrationPatch());
+        GhostDeathDiagnostics.Enable();
+        GhostWakeActivationDiagnostics.Enable();
         EnableSafe(new RescueInterceptPatch());
 
         // BSG layer bypasses
@@ -311,7 +315,7 @@ public class Plugin : BaseUnityPlugin
             "Which message levels ORBIT writes (used when Quiet logging is OFF). Default: everything except Debug. Tick Debug for a detailed bug-report log - it works in the release build now, not just debug builds.",
             null, new ConfigurationManagerAttributes { Category = "", Order = 0 }));
         PerfLogging = Config.Bind(essentials, "Performance logging", false, new ConfigDescription(
-            "ON: writes compact PERF summaries every 30s, even with Quiet logging. Frames of 250 ms or more also trigger a JSON capture in BepInEx/ORBIT/diagnostics after a short delay (one per minute, at most 10 per raid). Transition timings are inclusive and must not be added together.",
+            "ON: records every frame over the 60 FPS budget (16.67 ms), slow bot decisions and Ghost transitions, even with Quiet logging. Automatically saves a performance journal in BepInEx/ORBIT/diagnostics during the raid and a final summary when it ends. Larger stalls also save a detailed JSON capture.",
             null, new ConfigurationManagerAttributes { Category = "", Order = -1 }));
     }
 

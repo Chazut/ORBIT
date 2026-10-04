@@ -1,4 +1,5 @@
 using System;
+using Orbit.Helpers;
 using System.Collections.Generic;
 using System.Reflection;
 using EFT;
@@ -226,7 +227,7 @@ public static class NativePatrolDiagnostics
 
     private static string HuntSnapshot(BotOwner bot)
     {
-        _huntType ??= AccessTools.TypeByName("MoreBotsAPI.Components.BotHuntManager");
+        _huntType ??= OptionalModTypes.Find("MoreBotsAPI.Components.BotHuntManager");
         var hunt = _huntType == null ? null : bot.GetComponent(_huntType);
         if (hunt == null) return "";
         object Read(string name)

@@ -1,4 +1,5 @@
 using System;
+using Orbit.Helpers;
 using System.Collections.Generic;
 using System.Reflection;
 using DrakiaXYZ.BigBrain.Brains;
@@ -143,7 +144,7 @@ public sealed partial class NativeGhostSystem
         if (!_huntResolved)
         {
             _huntResolved = true;
-            _huntType = AccessTools.TypeByName("MoreBotsAPI.Components.BotHuntManager");
+            _huntType = OptionalModTypes.Find("MoreBotsAPI.Components.BotHuntManager");
             if (_huntType != null)
             {
                 _huntActive = AccessTools.Field(_huntType, "active");

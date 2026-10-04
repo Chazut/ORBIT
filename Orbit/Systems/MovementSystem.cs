@@ -46,14 +46,19 @@ public partial class MovementSystem
     public void Update(List<Agent> liveAgents)
     {
         _recoveryAgents = liveAgents;
-        TickDoorOpenWatches();
-        TickGhostPendingDoors();
+        using (MeasureMovement(TransitionPhase.MovementDoorWatch, "door watches"))
+            TickDoorOpenWatches();
+        using (MeasureMovement(TransitionPhase.MovementPendingDoors, "pending Ghost doors"))
+            TickGhostPendingDoors();
 
-        ProcessMoveJobs();
+        using (MeasureMovement(TransitionPhase.MovementJobs, "path jobs"))
+            ProcessMoveJobs();
 
         for (var i = 0; i < liveAgents.Count; i++)
         {
             var agent = liveAgents[i];
+            using var timing = MeasureMovement(TransitionPhase.MovementAgent,
+                !agent.IsActive ? "inactive" : agent.IsDormant ? "ghost" : "awake", agent);
 
             if (!agent.IsActive)
             {
@@ -84,24 +89,41 @@ public partial class MovementSystem
                 // so the invalid-path streak rescue never fires; a bot that fell asleep within seconds of
                 // spawning used to sit in that room for the whole raid (Streets, Gipphe). Both rescues move
                 // the body through Player.Teleport, which the wake resync already uses on inactive bodies.
-                TryIdleIslandRescue(agent);
-                TrySpawnIslandRescue(agent, liveAgents);
+                using (MeasureMovement(TransitionPhase.MovementIdleRescue, "idle rescue", agent))
+                    TryIdleIslandRescue(agent);
+                using (MeasureMovement(TransitionPhase.MovementSpawnRescue, "spawn rescue", agent))
+                    TrySpawnIslandRescue(agent, liveAgents);
                 if (DormancySystem.GhostMovementEnabled)
+                {
+                    using var ghostTiming = MeasureMovement(TransitionPhase.MovementGhost, "Ghost path follow", agent);
                     GhostFollowPath(agent);
+                }
                 continue;
             }
 
-            if (agent.Stuck.Recovery.Observe(agent.Position, agent.Bot?.Mover))
-                TryReturnToValidatedAnchor(agent);
+            using (MeasureMovement(TransitionPhase.MovementRecovery, "recovery anchor", agent))
+            {
+                if (agent.Stuck.Recovery.Observe(agent.Position, agent.Bot?.Mover))
+                    TryReturnToValidatedAnchor(agent);
+            }
 
             // Runs before UpdateMovement: an islanded bot has no path, so UpdateMovement early-returns and the
             // stuck remediation never sees it.
-            TryIdleIslandRescue(agent);
-            TrySpawnIslandRescue(agent, liveAgents);
+            using (MeasureMovement(TransitionPhase.MovementIdleRescue, "idle rescue", agent))
+                TryIdleIslandRescue(agent);
+            using (MeasureMovement(TransitionPhase.MovementSpawnRescue, "spawn rescue", agent))
+                TrySpawnIslandRescue(agent, liveAgents);
 
-            UpdateMovement(agent);
+            using (MeasureMovement(TransitionPhase.MovementAwake, "awake movement", agent))
+                UpdateMovement(agent);
         }
     }
+
+    private static PerformanceJournal.WorkScope MeasureMovement(TransitionPhase phase, string operation, Agent agent = null)
+        => PerformanceJournal.Enabled
+            ? PerformanceJournal.Measure(phase, "movement-operation", operation,
+                agent?.Squad?.Id ?? -1, agent?.Bot?.Profile?.Id)
+            : default;
 
     private void ProcessMoveJobs()
     {
@@ -125,6 +147,7 @@ public partial class MovementSystem
                     continue;
                 }
 
+                using var timing = MeasureMovement(TransitionPhase.MovementJob, "apply path job", agent);
                 StartMovement(agent, job);
                 TrackGhostPathInvalid(agent, job);
             }
@@ -450,6 +473,7 @@ public partial class MovementSystem
         if (Time.time < movement.NextGhostDoorCheck) return;
         movement.NextGhostDoorCheck = Time.time + GhostDoorCheckInterval;
 
+        using var timing = MeasureMovement(TransitionPhase.MovementGhostDoors, "Ghost door check", agent);
         var doors = movement.GhostDoors.Get(_doorSystem, pos);
         var ray = new Ray(pos, dir);
         for (var i = 0; i < doors.Count; i++)

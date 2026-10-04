@@ -70,6 +70,7 @@ public class GhostModeConfig
     public float SleepDistance { get; set; } = 250f;
     public float WakeDistance { get; set; } = 200f;
     public float HostileWakeDistance { get; set; } = 75f;
+    public float WakeIntervalMs { get; set; } = 50f;
 
     // ON (default): sleeping ORBIT squads keep looting along their routes. OFF: sleepers walk past
     // everything and the loot waits for the players.

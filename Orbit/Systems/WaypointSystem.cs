@@ -48,6 +48,7 @@ public partial class WaypointSystem
     private readonly Dictionary<Entity, Vector2Int> _assignments;
 
     private readonly BotsController _botsController;
+    private readonly SpawnEntryPoints _spawnEntryPoints;
     private readonly ConfigBundle<WaypointConfig.MapZone> _zoneConfig;
     private readonly List<Zone> _zones;
     private readonly Vector2[,] _advectionField;
@@ -122,6 +123,7 @@ public partial class WaypointSystem
             || (zoneKey != mapId && ServerConfig.TryGetZoneOverride(mapId, out serverZones)))
             _zoneConfig.ApplyOverride(serverZones);
         _botsController = botsController;
+        _spawnEntryPoints = SpawnEntryPoints.Capture();
         _humanPlayers = humanPlayers;
 
         // _cellSize must be set before WaypointGatherer is constructed — the gatherer scales synthetic/exfil
@@ -433,6 +435,7 @@ public partial class WaypointSystem
 
     public Waypoint RequestNear(Entity entity, Vector3 worldPos, Waypoint previous)
     {
+        using var timing = PerformanceJournal.Measure(TransitionPhase.WaypointSearch, "waypoint-search", "RequestNear", (entity as Squad)?.Id ?? -1);
         // Always try and return assignments first to avoid counting our own influence into the decision.
         Return(entity);
 
@@ -1251,116 +1254,74 @@ public partial class WaypointSystem
     /// </summary>
     private const float NearestExfilCacheTtlSeconds = 2f;
 
+    private readonly NearestExfilSearch _exfilSearch = new();
+    private Func<Waypoint, NearestExfilSearch.Route> _exfilQuery;
+    private Vector3 _exfilSearchOrigin;
+    private int _exfilSearchSquad;
+
     public Waypoint FindNearestEligibleExfil(Squad squad)
     {
         if (squad?.Leader?.Bot == null) return null;
-
-        // The extract-interrupt gate polls this every tick and it now path-checks each candidate (below), so
-        // cache the verdict briefly. Reachability from a moving leader changes slowly; 2 s stays responsive
-        // without re-pathing every exfil each frame.
         if (Time.time - squad.NearestExfilCachedAt < NearestExfilCacheTtlSeconds
             && (squad.NearestExfilCached == null || !squad.CompletedPoiIds.Contains(squad.NearestExfilCached.Id)))
             return squad.NearestExfilCached;
 
+        using var timing = PerformanceJournal.Measure(TransitionPhase.ExfilSearch, "exfil-search", squad: squad.Id);
         bool? squadIsPmc = null;
         var role = squad.Leader.Bot.Profile?.Info?.Settings?.Role;
         if (role.HasValue) squadIsPmc = role.Value.IsPMC();
         var leaderPos = squad.Leader.Bot.Position;
-
         if (!squad.ExfilEligibilityLogged)
         {
             squad.ExfilEligibilityLogged = true;
             LogEligibleExfilsForSquad(squad, squadIsPmc);
         }
 
-        // An exfil can be open + faction-valid yet sit on a navmesh region the leader can't path to (Woods when
-        // the spawn-side exit is closed and the only open one is across a gap). Without a per-squad reachability
-        // gate the squad bee-lines to it, stops hundreds of metres short, fails, and re-picks the SAME
-        // unreachable exfil until the raid ends. IsReachableFromPosition is stateless/per-leader, so it isn't
-        // masked by IsWaypointReachable's global positive cache when another squad reached the same exfil.
-        var best = ScanNearestReachableExfil(squad, squadIsPmc, leaderPos, ignoreEntry: false, out var partialEntry);
-        if (best == null)
+        using (PerformanceJournal.Measure(TransitionPhase.ExfilEligibility, "exfil-eligibility", squad: squad.Id))
         {
-            // Pass 2: drop the spawn-side entry filter so a squad whose entry derivation failed still gets out.
-            best = ScanNearestReachableExfil(squad, squadIsPmc, leaderPos, ignoreEntry: true, out var partialAny);
-            if (best != null)
+            _exfilSearch.Clear();
+            for (var cx = 0; cx < _gridSize.x; cx++)
+            for (var cy = 0; cy < _gridSize.y; cy++)
             {
-                Log.Warning($"{squad} no spawn-side eligible exfil — falling back to nearest reachable faction-allowed exfil {best} (entry derivation may have failed)");
-            }
-            else
-            {
-                // No exfil has a complete path: commit to the best partial-path candidate rather than give
-                // up on extraction. The squad walks as far as the mesh allows, then the proximity despawn /
-                // 3-strike arrival machinery decides (leave if close, blacklist + re-scan otherwise).
-                best = partialEntry ?? partialAny;
-                if (best != null)
-                    Log.Info($"{squad} no fully reachable exfil — committing to partial-path exfil {best} (will walk as far as the mesh allows)");
+                var locs = _cells[cx, cy].Waypoints;
+                for (var i = 0; i < locs.Count; i++)
+                {
+                    var loc = locs[i];
+                    if (loc.Category != WaypointCategory.Exfil || squad.CompletedPoiIds.Contains(loc.Id)) continue;
+                    var entryEligible = SquadCanUseWaypoint(squad, squadIsPmc, loc);
+                    if (!entryEligible && !SquadCanUseWaypointIgnoringEntry(squad, squadIsPmc, loc)) continue;
+                    _exfilSearch.Add(loc, (loc.Position - leaderPos).sqrMagnitude, entryEligible);
+                }
             }
         }
-
+        _exfilSearchOrigin = leaderPos; _exfilSearchSquad = squad.Id;
+        _exfilQuery ??= QueryExfilRoute;
+        var best = _exfilSearch.Find(_exfilQuery, out var fallback, out var partial);
+        if (fallback)
+            Log.Warning($"{squad} no spawn-side eligible exfil, falling back to nearest reachable faction-allowed exfil {best} (entry derivation may have failed)");
+        else if (partial)
+            Log.Info($"{squad} no fully reachable exfil, committing to partial-path exfil {best} (will walk as far as the mesh allows)");
         squad.NearestExfilCached = best;
         squad.NearestExfilCachedAt = Time.time;
         return best;
     }
 
-    // Nearest exfil that is (a) not squad-blacklisted, (b) faction/status/entry-eligible, and (c) has a
-    // COMPLETE navmesh path from the leader. Also reports, via bestPartial, the eligible exfil whose partial
-    // path ends closest to it — the caller falls back to it when nothing is fully reachable. Paths every
-    // eligible candidate: exfil counts are tiny and the caller caches the verdict for 2s.
-    private Waypoint ScanNearestReachableExfil(Squad squad, bool? squadIsPmc, Vector3 leaderPos, bool ignoreEntry, out Waypoint bestPartial)
+    private NearestExfilSearch.Route QueryExfilRoute(Waypoint loc)
     {
-        var blacklist = squad.CompletedPoiIds;
-        Waypoint best = null;
-        var bestDist = float.MaxValue;
-        bestPartial = null;
-        var bestPartialGapSqr = float.MaxValue;
-        for (var cx = 0; cx < _gridSize.x; cx++)
-        for (var cy = 0; cy < _gridSize.y; cy++)
-        {
-            var locs = _cells[cx, cy].Waypoints;
-            for (var i = 0; i < locs.Count; i++)
-            {
-                var loc = locs[i];
-                if (loc.Category != WaypointCategory.Exfil) continue;
-                if (blacklist.Contains(loc.Id)) continue;
-                if (!(ignoreEntry ? SquadCanUseWaypointIgnoringEntry(squad, squadIsPmc, loc)
-                                  : SquadCanUseWaypoint(squad, squadIsPmc, loc))) continue;
-                var complete = NavMesh.CalculatePath(leaderPos, loc.Position, NavMesh.AllAreas, _reachabilityScratchPath)
-                               && _reachabilityScratchPath.status == NavMeshPathStatus.PathComplete;
-                if (complete)
-                {
-                    var distSqr = (loc.Position - leaderPos).sqrMagnitude;
-                    if (distSqr < bestDist)
-                    {
-                        bestDist = distSqr;
-                        best = loc;
-                    }
-                    continue;
-                }
-                var corners = _reachabilityScratchPath.corners;
-                if (corners == null || corners.Length == 0)
-                {
-                    Log.Debug($"{squad} exfil scan: {loc} eligible but NO navmesh path at all — skipped");
-                    continue;
-                }
-                var gapSqr = (corners[corners.Length - 1] - loc.Position).sqrMagnitude;
-                // Where and how far the partial path goes tells a real mesh cut (same end point from anywhere) from
-                // a search that ran out of budget on a long route (the end point follows the leader).
-                var partialLength = 0f;
-                for (var c = 1; c < corners.Length; c++) partialLength += Vector3.Distance(corners[c - 1], corners[c]);
-                Log.Debug($"{squad} exfil scan: {loc} eligible but path PARTIAL — ends {Mathf.Sqrt(gapSqr):F0}m short (from {leaderPos}, {Vector3.Distance(leaderPos, loc.Position):F0}m away, path covers {partialLength:F0}m in {corners.Length} corners and ends at {corners[corners.Length - 1]})");
-                if (gapSqr < bestPartialGapSqr)
-                {
-                    bestPartialGapSqr = gapSqr;
-                    bestPartial = loc;
-                }
-            }
-        }
-        return best;
+        var complete = CalculateTimedPath(_exfilSearchOrigin, loc.Position, _reachabilityScratchPath,
+                           TransitionPhase.ExfilPath, loc.Name, _exfilSearchSquad)
+                       && _reachabilityScratchPath.status == NavMeshPathStatus.PathComplete;
+        if (complete) return new NearestExfilSearch.Route(true, 0f);
+        var corners = _reachabilityScratchPath.corners;
+        var gap = corners == null || corners.Length == 0 ? float.MaxValue
+            : (corners[corners.Length - 1] - loc.Position).sqrMagnitude;
+        return new NearestExfilSearch.Route(false, gap);
     }
 
     private void LogEligibleExfilsForSquad(Squad squad, bool? squadIsPmc)
     {
+        if (!Log.DebugEnabled) return;
+        using var timing = PerformanceJournal.Measure(TransitionPhase.ExfilDiagnostics, "exfil-diagnostics", squad: squad.Id);
         var leaderPos = squad.Leader?.Bot?.Position ?? Vector3.zero;
         var entry = squad.Leader?.Bot?.Profile?.Info?.EntryPoint;
         if (string.IsNullOrEmpty(entry))
@@ -1856,6 +1817,7 @@ public partial class WaypointSystem
 
     private Waypoint RequestFar(Entity entity)
     {
+        using var timing = PerformanceJournal.Measure(TransitionPhase.WaypointSearch, "waypoint-search", "RequestFar", (entity as Squad)?.Id ?? -1);
         // Walk the round-robin queue past cells whose waypoints are all filtered for this entity (e.g.
         // dead-end cells that only contain an ineligible exfil). Capped at queue length so the squad doesn't
         // burn a full pass if literally every cell is unusable.
@@ -2460,8 +2422,15 @@ public partial class WaypointSystem
 
     public bool IsReachableFromPosition(Vector3 from, Vector3 to)
     {
-        return NavMesh.CalculatePath(from, to, NavMesh.AllAreas, _reachabilityScratchPath)
+        return CalculateTimedPath(from, to, _reachabilityScratchPath, TransitionPhase.WaypointPath, "position reachability", -1)
                && _reachabilityScratchPath.status == NavMeshPathStatus.PathComplete;
+    }
+
+    private static bool CalculateTimedPath(Vector3 from, Vector3 to, NavMeshPath path,
+        TransitionPhase phase, string detail, int squad)
+    {
+        using var timing = PerformanceJournal.Measure(phase, "path-query", detail, squad);
+        return NavMesh.CalculatePath(from, to, NavMesh.AllAreas, path);
     }
 
     private bool IsWaypointReachable(Waypoint loc, Squad squad)
@@ -2480,8 +2449,8 @@ public partial class WaypointSystem
         var leaderBot = squad?.Leader?.Bot;
         if (leaderBot == null) return true; // can't verify yet — let the caller proceed
 
-        var path = new NavMeshPath();
-        var reachable = NavMesh.CalculatePath(leaderBot.Position, loc.Position, NavMesh.AllAreas, path)
+        var path = _reachabilityScratchPath;
+        var reachable = CalculateTimedPath(leaderBot.Position, loc.Position, path, TransitionPhase.WaypointPath, loc.Name, squadId)
                         && path.status == NavMeshPathStatus.PathComplete;
         if (reachable)
         {
@@ -2754,7 +2723,7 @@ public partial class WaypointSystem
         return squadIsPmc.Value;
     }
 
-    private static bool MatchesBotSpawnEntry(Squad squad, ExfiltrationPoint exfil)
+    private bool MatchesBotSpawnEntry(Squad squad, ExfiltrationPoint exfil)
     {
         var leader = squad?.Leader?.Bot;
         if (leader == null) return true;
@@ -2789,7 +2758,7 @@ public partial class WaypointSystem
         return false;
     }
 
-    private static string ResolveDerivedEntryPoint(Squad squad)
+    private string ResolveDerivedEntryPoint(Squad squad)
     {
         if (squad == null) return null;
         if (squad.DerivedEntryPoint != null) return squad.DerivedEntryPoint;
@@ -2801,24 +2770,9 @@ public partial class WaypointSystem
             return string.Empty;
         }
 
-        EFT.Game.Spawning.SpawnPointMarker bestMarker = null;
-        var bestDistSqr = float.MaxValue;
-        var markers = UnityEngine.Object.FindObjectsOfType<EFT.Game.Spawning.SpawnPointMarker>();
-        for (var i = 0; i < markers.Length; i++)
-        {
-            var m = markers[i];
-            if (m == null || m.SpawnPoint == null) continue;
-            var infiltration = m.SpawnPoint.Infiltration;
-            if (string.IsNullOrEmpty(infiltration)) continue;
-            var distSqr = (m.Position - spawnPos).sqrMagnitude;
-            if (distSqr < bestDistSqr)
-            {
-                bestDistSqr = distSqr;
-                bestMarker = m;
-            }
-        }
-
-        var derived = bestMarker?.SpawnPoint?.Infiltration ?? string.Empty;
+        using var timing = PerformanceJournal.Measure(TransitionPhase.SpawnEntryResolve,
+            "spawn-entry-resolve", squad: squad.Id, always: true);
+        var derived = _spawnEntryPoints.FindNearest(spawnPos, out var bestDistSqr);
         squad.DerivedEntryPoint = derived;
         Log.Debug($"{squad} derived EntryPoint='{derived}' from spawn pos {spawnPos} (closest SpawnPointMarker {Mathf.Sqrt(bestDistSqr):F1}m away)");
         return derived;

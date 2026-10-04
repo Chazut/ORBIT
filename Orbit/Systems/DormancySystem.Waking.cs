@@ -10,7 +10,11 @@ namespace Orbit.Systems;
 
 public partial class DormancySystem
 {
-    private const float WakeQueueDeadline = 0.25f;
+    private const float WakeQueuePriorityAge = 0.5f;
+    private float _nextOverflowTrace;
+    private BotOwner _activatingBot;
+    private PendingWake _activatingGroup;
+    private long _activationStarted;
     private const int MaxQueuedWakeGroups = 32;
     private readonly GhostWakeBudget _wakeFrameBudget = new();
     private readonly Dictionary<object, PendingWake> _wakingGroups = new();
@@ -33,7 +37,7 @@ public partial class DormancySystem
         internal GhostWakeReason Reason;
         internal float Started;
         internal int Next, Activated;
-        internal bool Invalidated;
+        internal bool Invalidated, Promoted;
     }
 
     private bool IsWaking(object key) => key != null && _wakingGroups.ContainsKey(key);
@@ -66,27 +70,20 @@ public partial class DormancySystem
         return false;
     }
 
-    private bool CanStageAt(Vector3 position)
-        => CanStageAt(position, out _);
+    private bool CanStageAt(Vector3 position) => ViewUrgency(position) == null;
 
-    private bool CanStageAt(Vector3 position, out bool adsThreat)
+    private string ViewUrgency(Vector3 position)
     {
-        adsThreat = false;
-        // No usable human view means we cannot prove a delayed body would be safely out of sight.
-        if (_wakeHumans.Count == 0) return false;
+        if (_wakeHumans.Count == 0) return "human-view-unavailable";
         var aliveView = false;
-        var critical = Mathf.Min(_wakeDistanceSqr, 75f * 75f);
         foreach (var view in _wakeHumans)
         {
             var player = view.Player;
             if (player?.HealthController is not { IsAlive: true }) continue;
             aliveView = true;
             var to = position - player.Position;
-            if (to.sqrMagnitude <= critical) return false;
             var forward = player.LookDirection;
-            if (forward.sqrMagnitude < 0.01f) return false;
-            // Cover the normal view plus a sweep margin. ADS only promotes groups in this view,
-            // never drains unrelated groups behind the player or behind opaque cover.
+            if (forward.sqrMagnitude < 0.01f) return "human-view-unavailable";
             if (Vector3.Dot(to, forward.normalized) < Mathf.Sqrt(to.sqrMagnitude) * 0.5f) continue;
             var eye = player.Position + new Vector3(0f, 1.5f, 0f);
             for (var sample = 0; sample < 2; sample++)
@@ -95,21 +92,45 @@ public partial class DormancySystem
                 var distance = ray.magnitude;
                 if (distance < 1f || !Physics.Raycast(eye, ray / distance, distance,
                     LayersMaskController.HighPolyWithTerrainMask))
-                {
-                    adsThreat = player.HandsController is Player.FirearmController firearm && firearm.IsAiming;
-                    return false;
-                }
+                    return player.HandsController is Player.FirearmController firearm && firearm.IsAiming
+                        ? "player-ADS" : "player-visible";
             }
         }
-        return aliveView;
+        return aliveView ? null : "human-view-unavailable";
     }
 
-    private bool CanStageBot(BotOwner bot)
-        => bot != null && !bot.IsDead && bot.GetPlayer?.HealthController is { IsAlive: true }
-           && bot.Memory?.GoalEnemy == null && bot.Memory?.IsUnderFire != true
-           && !_targetedBy.ContainsKey(bot.ProfileId) && !_nativeGhosts.InFight(bot)
-           && !InScopedView(bot.Position, out _)
-           && CanStageAt(bot.GetPlayer.Position);
+    private string BotWakeUrgency(BotOwner bot)
+    {
+        if (bot == null || bot.IsDead || bot.GetPlayer?.HealthController is not { IsAlive: true }) return "invalid-member";
+        if (bot.Memory?.GoalEnemy != null || bot.Memory?.IsUnderFire == true) return "active-combat";
+        if (_targetedBy.ContainsKey(bot.ProfileId)) return "targeted";
+        if (_nativeGhosts.InFight(bot)) return "native-combat";
+        if (InScopedView(bot.Position, out _)) return "scoped-view";
+        return ViewUrgency(bot.GetPlayer.Position);
+    }
+
+    private bool CanStageBot(BotOwner bot) => BotWakeUrgency(bot) == null;
+
+    private void TraceWakeDecision(string mode, GhostWakeReason reason, string detail, BotOwner member, float waitedMs = 0)
+        => DiagnosticCapture.WakeDecision(mode, reason.Cause.ToString(), detail, member?.ProfileId, _stagedWakes.Count, waitedMs);
+
+    private bool BypassWake(GhostWakeReason reason, string detail, BotOwner member)
+    {
+        TraceWakeDecision("bypass", reason, detail, member);
+        return false;
+    }
+
+    private bool DeferOverflow(GhostWakeReason reason, BotOwner member)
+    {
+        // Keep the group asleep and retry on its next normal poll, rather than flushing many bodies.
+        // Admission always checks real urgency before capacity, so danger never waits for a slot.
+        if (Time.realtimeSinceStartup >= _nextOverflowTrace)
+        {
+            _nextOverflowTrace = Time.realtimeSinceStartup + 1f;
+            TraceWakeDecision("deferred", reason, "queue-capacity", member);
+        }
+        return true;
+    }
 
     private GhostWakeReason? PreWakeReason(Squad squad)
     {
@@ -132,17 +153,27 @@ public partial class DormancySystem
     }
 
     private static bool StageableReason(GhostWakeReason reason)
-        => reason.Cause is GhostWakeCause.HumanProximity or GhostWakeCause.PreWake;
+        => reason.Cause is GhostWakeCause.HumanProximity or GhostWakeCause.PreWake
+            or GhostWakeCause.BotProximity or GhostWakeCause.Extraction or GhostWakeCause.RealFight;
 
     private bool TryStageWake(Squad squad, GhostWakeReason reason)
     {
-        if (!StageableReason(reason)) return false;
-        if (_wakingGroups.TryGetValue(squad, out var existing)) return !StagedWakeUrgency(existing).HasValue;
-        if (_stagedWakes.Count >= MaxQueuedWakeGroups || !IsSquadDormant(squad)
-            || squad.GhostFightUntil > Time.time) return false;
+        var first = squad.Members.Count > 0 ? squad.Members[0].Bot : null;
+        if (!StageableReason(reason)) return BypassWake(reason, "wake-cause", first);
+        if (_wakingGroups.TryGetValue(squad, out var existing))
+        {
+            var urgent = StagedWakeUrgency(existing);
+            return !urgent.HasValue || BypassWake(reason, urgent.Value.Message, first);
+        }
+        if (!IsSquadDormant(squad)) return BypassWake(reason, "group-not-fully-ghost", first);
+        if (squad.GhostFightUntil > Time.time) return BypassWake(reason, "active-ghost-fight", first);
         foreach (var agent in squad.Members)
-            if (!CanStageBot(agent.Bot) || _wakingBots.ContainsKey(agent.Bot)
-                || AnyAwakeBotNear(agent.Position, squad)) return false;
+        {
+            var blocker = BotWakeUrgency(agent.Bot);
+            if (blocker != null) return BypassWake(reason, blocker, agent.Bot);
+            if (_wakingBots.ContainsKey(agent.Bot)) return BypassWake(reason, "member-already-queued", agent.Bot);
+        }
+        if (_stagedWakes.Count >= MaxQueuedWakeGroups) return DeferOverflow(reason, first);
         var pending = new PendingWake { Key = squad, Squad = squad, Reason = reason, Started = Time.realtimeSinceStartup };
         foreach (var agent in squad.Members) { pending.Bots.Add(agent.Bot); pending.Agents.Add(agent); }
         AddStagedWake(pending);
@@ -151,14 +182,24 @@ public partial class DormancySystem
 
     private bool TryStageWake(object key, List<BotOwner> group, GhostWakeReason reason)
     {
-        if (!StageableReason(reason)) return false;
-        if (_wakingGroups.TryGetValue(key, out var existing)) return !StagedWakeUrgency(existing).HasValue;
-        if (_stagedWakes.Count >= MaxQueuedWakeGroups || group.Count == 0
-            || VanillaDormantCount(group) != group.Count) return false;
+        var first = group.Count > 0 ? group[0] : null;
+        if (!StageableReason(reason)) return BypassWake(reason, "wake-cause", first);
+        if (_wakingGroups.TryGetValue(key, out var existing))
+        {
+            var urgent = StagedWakeUrgency(existing);
+            return !urgent.HasValue || BypassWake(reason, urgent.Value.Message, first);
+        }
+        if (group.Count == 0 || VanillaDormantCount(group) != group.Count)
+            return BypassWake(reason, "group-not-fully-ghost", first);
         foreach (var bot in group)
-            if (!CanStageBot(bot) || _wakingBots.ContainsKey(bot) || AnyAwakeBotNear(bot.Position, null)) return false;
+        {
+            var blocker = BotWakeUrgency(bot);
+            if (blocker != null) return BypassWake(reason, blocker, bot);
+            if (_wakingBots.ContainsKey(bot)) return BypassWake(reason, "member-already-queued", bot);
+        }
+        if (_stagedWakes.Count >= MaxQueuedWakeGroups) return DeferOverflow(reason, first);
         var pending = new PendingWake { Key = key, Reason = reason, Started = Time.realtimeSinceStartup };
-        pending.Bots.AddRange(group); // Never retain the collection pool's mutable list.
+        pending.Bots.AddRange(group);
         AddStagedWake(pending);
         return true;
     }
@@ -168,6 +209,7 @@ public partial class DormancySystem
         _wakingGroups.Add(pending.Key, pending);
         _stagedWakes.Add(pending);
         foreach (var bot in pending.Bots) _wakingBots.Add(bot, pending);
+        TraceWakeDecision("queued", pending.Reason, "safe-to-delay", pending.Bots[0]);
         Log.Info($"GHOST WAKE QUEUE: queued members={pending.Bots.Count} cause={pending.Reason.Cause} first={pending.Bots[0].ProfileId}");
     }
 
@@ -182,6 +224,7 @@ public partial class DormancySystem
 
     private void ForgetStagedBot(BotOwner bot)
     {
+        GhostWakeActivationDiagnostics.Forget(bot);
         if (bot == null || !_wakingBots.TryGetValue(bot, out var pending)) return;
         // Force a fresh safety/membership check on the next pump; never keep removed bodies queued.
         _wakingBots.Remove(bot);
@@ -191,13 +234,14 @@ public partial class DormancySystem
     private void ClearStagedWakes()
     {
         _stagedWakes.Clear(); _wakingGroups.Clear(); _wakingBots.Clear();
+        _wakeFrameBudget.Reset(); _nextOverflowTrace = 0;
+        _activatingBot = null; _activatingGroup = null;
+        GhostWakeActivationDiagnostics.Reset();
     }
 
     private GhostWakeReason? StagedWakeUrgency(PendingWake pending)
     {
         if (pending.Invalidated) return new(GhostWakeCause.GroupChanged, "member removed during staged wake");
-        if (Time.realtimeSinceStartup - pending.Started >= WakeQueueDeadline)
-            return new(pending.Reason.Cause, "staged wake deadline");
         if (pending.Squad != null)
         {
             if (pending.Squad.Members.Count != pending.Agents.Count)
@@ -227,12 +271,10 @@ public partial class DormancySystem
                 return new(GhostWakeCause.RealFight, "combat during staged wake");
             if (InScopedView(bot.Position, out _))
                 return new(GhostWakeCause.ScopedView, "player scope on staged group");
-            if (!CanStageAt(bot.Position, out var adsThreat))
-                return new(adsThreat ? GhostWakeCause.ScopedView : GhostWakeCause.HumanProximity,
-                    adsThreat ? "player ADS on staged group" : "visible or close during staged wake");
+            if (ViewUrgency(bot.Position) is { } viewReason)
+                return new(viewReason == "player-ADS" ? GhostWakeCause.ScopedView : GhostWakeCause.HumanProximity, viewReason);
         }
-        // Awake squadmates are expected during a transition. Other live bodies still make an
-        // encounter urgent, even between the normal world scans.
+        // Mere proximity is queued. Actual targeting must still interrupt the delay between world scans.
         foreach (var player in _gameWorld.AllAlivePlayersList)
         {
             if (player == null || !player.AIData.IsAI || player.HealthController is not { IsAlive: true }
@@ -241,16 +283,16 @@ public partial class DormancySystem
             var owner = player.AIData.BotOwner;
             if (owner == null || pending.Bots.Contains(owner) || !IsActivatedNeighbour(player)) continue;
             foreach (var bot in pending.Bots)
-                if (ReferenceEquals(owner.Memory?.GoalEnemy?.Person, bot.GetPlayer)
-                    || (player.Position - bot.Position).sqrMagnitude <= _hostileWakeDistanceSqr)
-                    return new(GhostWakeCause.BotProximity, "live encounter during staged wake");
+                if (ReferenceEquals(owner.Memory?.GoalEnemy?.Person, bot.GetPlayer))
+                    return new(GhostWakeCause.Targeted, "live targeting during staged wake");
         }
         return null;
     }
 
     private void PumpStagedWakes()
     {
-        if (_stagedWakes.Count == 0 || _gameWorld?.AllAlivePlayersList == null) return;
+        if (_gameWorld?.AllAlivePlayersList == null) return;
+        if (_stagedWakes.Count == 0 && _activatingBot == null) return;
         using var timing = TransitionPerformance.Measure(TransitionPhase.WakeQueue);
         UpdateScopeState();
         for (var i = _stagedWakes.Count - 1; i >= 0; i--)
@@ -268,13 +310,58 @@ public partial class DormancySystem
                 FinishStagedWake(pending, new(GhostWakeCause.NativeFallback, "staged wake safety fallback"), forced: true);
             }
         }
-        while (_stagedWakes.Count > 0 && _wakeFrameBudget.TryBegin(Time.frameCount, Stopwatch.GetTimestamp()))
+        if (_activatingBot != null)
         {
-            var pending = _stagedWakes[0];
-            // Round-robin groups so a large squad cannot monopolize the shared frame budget.
-            _stagedWakes.RemoveAt(0); _stagedWakes.Add(pending);
-            WakeStagedMember(pending, pending.Next++, pending.Reason);
-            if (pending.Next == pending.Bots.Count) FinishStagedWake(pending, pending.Reason, forced: false);
+            var waiting = !_activatingBot.IsDead && _activatingBot.GetPlayer?.HealthController is { IsAlive: true }
+                && _activatingBot.BotState is EBotState.PreActive or EBotState.NonActive;
+            var elapsed = (Stopwatch.GetTimestamp() - _activationStarted) * 1000d / Stopwatch.Frequency;
+            if (waiting && elapsed < 5000) return;
+            if (waiting)
+            {
+                TraceWakeDecision("activation-stalled", _activatingGroup.Reason, "not-active-after-5s", _activatingBot, (float)elapsed);
+                Log.Warning($"GHOST WAKE QUEUE: activation stalled for {_activatingBot.ProfileId}; releasing queue slot without replaying activation");
+                GhostWakeActivationDiagnostics.Forget(_activatingBot);
+            }
+            var completed = _activatingGroup;
+            _activatingBot = null; _activatingGroup = null;
+            _wakeFrameBudget.Complete(Stopwatch.GetTimestamp(), _cfg.WakeIntervalMs);
+            if (completed.Next == completed.Bots.Count && _wakingGroups.TryGetValue(completed.Key, out var current)
+                && ReferenceEquals(current, completed)) FinishStagedWake(completed, completed.Reason, forced: false);
+        }
+        if (_stagedWakes.Count == 0) return;
+        var selected = 0;
+        var oldest = float.MaxValue;
+        for (var i = 0; i < _stagedWakes.Count; i++)
+        {
+            var item = _stagedWakes[i];
+            var age = Time.realtimeSinceStartup - item.Started;
+            if (age < WakeQueuePriorityAge) continue;
+            if (!item.Promoted)
+            {
+                item.Promoted = true;
+                TraceWakeDecision("aged", item.Reason, "priority-after-500ms", item.Bots[0], age * 1000f);
+            }
+            if (item.Started < oldest) { oldest = item.Started; selected = i; }
+        }
+        if (!_wakeFrameBudget.TryBegin(Time.frameCount, Stopwatch.GetTimestamp())) return;
+        var next = _stagedWakes[selected];
+        _stagedWakes.RemoveAt(selected); _stagedWakes.Add(next);
+        try
+        {
+            var bot = next.Bots[next.Next];
+            WakeStagedMember(next, next.Next++, next.Reason);
+            if (bot != null && !bot.IsDead && bot.GetPlayer?.HealthController is { IsAlive: true }
+                && bot.BotState is EBotState.PreActive or EBotState.NonActive)
+            {
+                _activatingBot = bot; _activatingGroup = next;
+                _activationStarted = Stopwatch.GetTimestamp();
+            }
+            else if (next.Next == next.Bots.Count) FinishStagedWake(next, next.Reason, forced: false);
+        }
+        finally
+        {
+            // PostActivate only requests PreActive. Wait for the engine's later activation tick.
+            if (_activatingBot == null) _wakeFrameBudget.Complete(Stopwatch.GetTimestamp(), _cfg.WakeIntervalMs);
         }
     }
 
@@ -305,6 +392,7 @@ public partial class DormancySystem
     {
         if (forced)
         {
+            TraceWakeDecision("urgent", reason, reason.Message, pending.Bots[0], (Time.realtimeSinceStartup - pending.Started) * 1000f);
             _wakeFrameBudget.Urgent(Time.frameCount);
             for (var i = pending.Next; i < pending.Bots.Count; i++) WakeStagedMember(pending, i, reason);
         }
@@ -351,6 +439,8 @@ public partial class DormancySystem
         }
         if (pending.Squad != null) pending.Squad.DormancySleepAllowedAt = Time.time + reason.CooldownSeconds;
         else _vanillaSleepAllowedAt[pending.Key] = Time.time + reason.CooldownSeconds;
+        if (forced) _wakeFrameBudget.Complete(Stopwatch.GetTimestamp(), _cfg.WakeIntervalMs);
+        TraceWakeDecision("complete", reason, forced ? "immediate" : "paced", pending.Bots[0], (Time.realtimeSinceStartup - pending.Started) * 1000f);
         _windowWakes++;
         RecordWake(reason.Cause);
         Log.Info($"GHOST WAKE QUEUE: completed members={pending.Activated}/{pending.Bots.Count} forced={forced} cause={reason.Cause} elapsedMs={(Time.realtimeSinceStartup - pending.Started) * 1000f:F1} first={pending.Bots[0].ProfileId}");

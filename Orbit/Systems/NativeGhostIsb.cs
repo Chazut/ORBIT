@@ -1,4 +1,5 @@
 using System;
+using Orbit.Helpers;
 using System.Collections.Generic;
 using System.Linq;
 using System.Linq.Expressions;
@@ -25,7 +26,8 @@ internal static class NativeGhostIsb
     {
         if (_resolved) return;
         _resolved = true;
-        _agentType = AccessTools.TypeByName("ISBSpecialForces.Behavior.BlackDivision.ISBTacticalAgent");
+        using var timing = PerformanceJournal.Measure(TransitionPhase.NativeBindings, "native-bindings", "NativeGhostIsb", always: true);
+        _agentType = OptionalModTypes.Find("ISBSpecialForces.Behavior.BlackDivision.ISBTacticalAgent");
         if (_agentType == null) return;
         var harmony = new Harmony(PatchId);
         try
@@ -35,7 +37,7 @@ internal static class NativeGhostIsb
             _destination = Getter<Vector3>("Destination");
             _running = Getter<bool>("_running");
             _mission = Getter<bool>("CanRunMission");
-            var camera = AccessTools.TypeByName("ISBSpecialForces.Components.ISBCameraHuntController");
+            var camera = OptionalModTypes.Find("ISBSpecialForces.Components.ISBCameraHuntController");
             var alive = AccessTools.PropertyGetter(_agentType, "Alive");
             var eligible = AccessTools.Method(camera, "EligibleHunter", new[] { typeof(BotOwner) });
             var disable = AccessTools.Method(_agentType, "OnDisable", Type.EmptyTypes);

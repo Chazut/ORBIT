@@ -13,7 +13,10 @@ public class GhostSpawnRegistrationPatch : ModulePatch
     protected override MethodBase GetTargetMethod() => AccessTools.Method(typeof(BotOwner), nameof(BotOwner.PreActivate));
     [PatchPrefix]
     public static void Prefix(BotOwner __instance)
-        => Singleton<OrbitManager>.Instance?.DormancySystem.RegisterSpawn(__instance);
+    {
+        Orbit.Helpers.PerformanceJournal.Event("spawn-preactivate", __instance?.ProfileId);
+        Singleton<OrbitManager>.Instance?.DormancySystem.RegisterSpawn(__instance);
+    }
 }
 
 public class GhostSpawnActivationPatch : ModulePatch
@@ -25,7 +28,10 @@ public class GhostSpawnActivationPatch : ModulePatch
     public static void Prefix(BotOwner __instance, EBotState value)
     {
         if (value == EBotState.Active)
+        {
+            Orbit.Helpers.PerformanceJournal.Event("body-active", __instance?.ProfileId);
             Singleton<OrbitManager>.Instance?.DormancySystem.RegisterFirstActivation(__instance);
+        }
     }
 }
 
