@@ -148,6 +148,8 @@ public static class OrbitTelemetry
         if (loc?.IsAirdrop == true) category = "AirdropLoot";
         if (agent.Squad?.Camp.Owns(agent) == true)
             category = agent.Squad.Camp.Looter == agent ? "AirdropLoot" : "Ambush" + agent.Squad.Camp.Site.Kind;
+        else if (agent.Squad != null)
+            category = Orbit.Systems.ExtractCampApproach.Category(agent.Squad, agent) ?? category;
         if (agent.Squad?.Rush?.Owns(agent) == true)
         {
             var rush = agent.Squad.Rush;
@@ -297,6 +299,10 @@ public static class OrbitTelemetry
                     CampElapsed = m.CampElapsed,
                     CampTargetDuration = m.KillAmbush ? m.KillsRoamTargetDuration : m.CampTargetDuration,
                     CampUntilTimeExtract = m.Type == MainObjectiveType.ExtractCamp,
+                    CampState = m.CampState,
+                    CampFailure = m.CampFailure,
+                    CampSearchAttempt = m.CampSearchAttempt,
+                    CampSearchRadius = m.CampSearchRadius,
                     CampHolding = squad.Camp.Main == m && squad.Camp.Holding || m.Rush?.Kind == "Sniper" && m.Rush.Status == "holding",
                     KillsRoamStartedAt = m.KillsRoamStartedAt,
                     KillsRoamTargetDuration = m.KillsRoamTargetDuration,
@@ -395,6 +401,10 @@ public class OrbitMainObjective
     public float CampTargetDuration;
     public bool CampUntilTimeExtract;
     public bool CampHolding;
+    public string CampState;
+    public string CampFailure;
+    public int CampSearchAttempt;
+    public float CampSearchRadius;
     public float KillsRoamStartedAt;
     public float KillsRoamTargetDuration;
     public float LootValueEnteredAt;

@@ -104,10 +104,29 @@ internal sealed class AmbushDirector(WaypointSystem waypoints)
             }
         if (pending != null)
         {
+            // Finish the staged approach before consuming the local cover attempts.
+            var extract = pending.Type == MainObjectiveType.ExtractCamp;
+            var rule = cfg.For(extract ? CampSiteKind.Extract : CampSiteKind.Hotspot);
+            if (extract && Vector3.Distance(squad.Leader.Position, pending.Position) > rule.DistanceMax + 10f) return false;
             _nextPlan = Time.time + .5f;
             pending.CampRetryAt = Time.time + 15f;
             pending.CampSite ??= waypoints.CreateKillMainCampSite(pending);
+            if (extract)
+            {
+                pending.CampSearchAttempt++;
+                pending.CampSearchRadius = rule.DistanceMax * (1f + .5f * (pending.CampSearchAttempt - 1));
+                pending.SetCampState("searching cover");
+                Orbit.Api.OrbitTelemetry.MainObjectivesRevision++;
+            }
+            waypoints.BeginAmbushSearch();
             if (pending.CampSite != null && TryFormation(squad, pending.CampSite, pending)) return true;
+            if (extract)
+            {
+                Log.Info($"AMBUSH SEARCH: {squad} attempt={pending.CampSearchAttempt}/4 radius={pending.CampSearchRadius:F1}m rejected={waypoints.AmbushRejections}");
+                if (pending.CampSearchAttempt >= 4)
+                    (pending.CampApproach ??= new ExtractCampApproach(pending)).Fail(squad, waypoints,
+                        "cover search exhausted: " + waypoints.AmbushRejections);
+            }
             Log.Debug($"AMBUSH: {squad} main={pending.Type} waiting for reachable cover at {pending.Position}");
             return false;
         }
@@ -139,7 +158,8 @@ internal sealed class AmbushDirector(WaypointSystem waypoints)
         // Spacing belongs to this formation only. Other squads never reserve a target or its surroundings.
         foreach (var member in squad.Members)
         {
-            if (!waypoints.TryPickAmbushCover(member, site, rule, _occupied, ref pathBudget, out var cover)) break;
+            if (!waypoints.TryPickAmbushCover(member, site, rule, _occupied, ref pathBudget, out var cover,
+                    main?.CampSearchRadius ?? 0)) break;
             _positions.Add(member, cover);
             _occupied.Add(cover.Position);
         }

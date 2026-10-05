@@ -52,6 +52,17 @@ public class MainObjective
     public float CampElapsed;
     public float CampStartedAt;
     public float CampTargetDuration;
+    public string CampState;
+    public string CampFailure;
+    public int CampSearchAttempt;
+    public float CampSearchRadius;
+
+    internal void SetCampState(string state, string failure = null)
+    {
+        if (CampState == state && CampFailure == failure) return;
+        CampState = state; CampFailure = failure;
+        Orbit.Api.OrbitTelemetry.MainObjectivesRevision++;
+    }
     internal float CampRetryAt;
     internal Orbit.Systems.AmbushSite CampSite;
     internal Orbit.Systems.ExtractCampApproach CampApproach;

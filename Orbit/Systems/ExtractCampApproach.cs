@@ -23,12 +23,15 @@ internal sealed class ExtractCampApproach(MainObjective main) : IObjectiveWork
     void IObjectiveWork.ResumeObjectiveWork() => Tick(_squad, _waypoints);
 
     internal static bool Owns(Squad squad, Agent agent)
+        => Category(squad, agent) != null;
+
+    internal static string Category(Squad squad, Agent agent)
     {
-        if (squad.MainObjectives == null) return false;
+        if (squad.MainObjectives == null) return null;
         foreach (var item in squad.MainObjectives)
             if (item.CampApproach is { } plan && plan._orders.TryGetValue(agent, out var point)
-                && agent.Objective.Location == point) return true;
-        return false;
+                && agent.Objective.Location == point) return plan._waitingForCover ? "SearchingAmbushExtract" : "ApproachingAmbushExtract";
+        return null;
     }
 
     internal bool Tick(Squad squad, WaypointSystem waypoints)
@@ -47,7 +50,7 @@ internal sealed class ExtractCampApproach(MainObjective main) : IObjectiveWork
         _idle += delta;
         var distance = Vector3.Distance(squad.Leader.Position, main.Position);
         if (distance < _bestDistance - 5) { _bestDistance = distance; _idle = 0; }
-        if (_idle >= ServerConfig.Ambush.TravelTimeout)
+        if (_idle >= ServerConfig.Ambush.TravelTimeout && distance > ServerConfig.Ambush.Extracts.DistanceMax + 10f)
             return Fail(squad, waypoints, "no approach progress or cover unavailable");
         if (_actor == null || !squad.Members.Contains(_actor) || !_actor.IsActive || _actor.SoloExtractRequested)
         {
@@ -60,6 +63,7 @@ internal sealed class ExtractCampApproach(MainObjective main) : IObjectiveWork
         var near = ServerConfig.Ambush.Extracts.DistanceMax + 10;
         if (distance <= near)
         {
+            main.SetCampState("searching cover");
             if (!_waitingForCover)
             {
                 Release(squad, waypoints);
@@ -72,6 +76,7 @@ internal sealed class ExtractCampApproach(MainObjective main) : IObjectiveWork
             return true;
         }
         if (_waitingForCover) { Release(squad, waypoints); return true; }
+        main.SetCampState("approach");
         if (_orders.ContainsKey(_actor))
         {
             if ((_actor.Position - _anchor).sqrMagnitude <= 9f)
@@ -115,10 +120,11 @@ internal sealed class ExtractCampApproach(MainObjective main) : IObjectiveWork
         return true;
     }
 
-    private bool Fail(Squad squad, WaypointSystem waypoints, string reason)
+    internal bool Fail(Squad squad, WaypointSystem waypoints, string reason)
     {
         Release(squad, waypoints);
         main.Completed = true;
+        main.SetCampState("failed", reason);
         Orbit.Api.OrbitTelemetry.MainObjectivesRevision++;
         Log.Info($"EXTRACT CAMP ROUTE: {squad} failed target={main.Position} reason={reason}");
         return false;

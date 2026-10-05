@@ -68,6 +68,7 @@ internal sealed class CampPlan
             (main.CampApproach ??= new ExtractCampApproach(main)).Release(squad, waypoints);
         Site = site;
         Main = main;
+        main?.SetCampState("approach");
         _held = _holdTick = 0;
         Holding = false;
         _directLoot = directLoot && site.Kind == CampSiteKind.Airdrop;
@@ -150,6 +151,7 @@ internal sealed class CampPlan
             if (Main != null)
             {
                 if (Main.CampStartedAt <= 0) Main.CampStartedAt = Time.time;
+                Main.SetCampState("holding");
                 if (Main.Type == MainObjectiveType.Kills && Main.KillsRoamStartedAt <= 0) Main.KillsRoamStartedAt = Time.time;
                 Orbit.Api.OrbitTelemetry.MainObjectivesRevision++;
             }
@@ -255,8 +257,10 @@ internal sealed class CampPlan
         if (squad.Objective.Location == _mission) squad.Objective.Duration = Main?.Completed == true ? 0 : _missionDuration;
         if (Main != null)
         {
+            Main.SetCampState(Main.Completed ? "completed" : "paused", Main.Completed ? null : reason);
             if (Main.Type == MainObjectiveType.ExtractCamp && reason is ("route failed or assignment changed" or "travel timeout" or "member displaced"))
                 Main.CampApproach?.Retry(squad, _waypoints, reason);
+            if (!Main.Completed) { Main.CampSearchAttempt = 0; Main.CampSearchRadius = 0; }
             Main.CampRetryAt = Time.time + 5f;
             Orbit.Api.OrbitTelemetry.MainObjectivesRevision++;
         }
