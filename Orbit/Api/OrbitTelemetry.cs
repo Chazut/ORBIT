@@ -297,7 +297,7 @@ public static class OrbitTelemetry
                     CampElapsed = m.CampElapsed,
                     CampTargetDuration = m.KillAmbush ? m.KillsRoamTargetDuration : m.CampTargetDuration,
                     CampUntilTimeExtract = m.Type == MainObjectiveType.ExtractCamp,
-                    CampHolding = squad.Camp.Main == m && squad.Camp.Holding,
+                    CampHolding = squad.Camp.Main == m && squad.Camp.Holding || m.Rush?.Kind == "Sniper" && m.Rush.Status == "holding",
                     KillsRoamStartedAt = m.KillsRoamStartedAt,
                     KillsRoamTargetDuration = m.KillsRoamTargetDuration,
                     LootValueEnteredAt = m.LootValueEnteredAt,

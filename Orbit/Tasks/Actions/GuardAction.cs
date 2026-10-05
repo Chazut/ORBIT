@@ -135,6 +135,7 @@ public class GuardAction(AgentData dataset, MovementSystem movementSystem, float
                 agent.GuardOnLootPoiSinceTime = -1f;
             }
 
+            if (agent.Squad?.Rush?.Sniper is { } sniper && sniper.Watch(agent)) continue;
             var coverPoint = guard.CoverPoint.Value;
 
             switch (agent.Guard.Status)

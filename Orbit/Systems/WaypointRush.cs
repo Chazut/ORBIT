@@ -40,9 +40,14 @@ public partial class WaypointSystem
         var style = cfg.Style(squad.Personality?.Archetype.ToString());
         if (style.Chance <= 0 || style.Chance < 1 && Random.value >= style.Chance) return null;
         var pools = new Dictionary<string, List<RushPoint>>();
+        var scoped = false;
+        if (style.Weight("Sniper", RushRaidSeconds) > 0)
+            foreach (var member in squad.Members)
+                if (SniperEquipment.Eligible(member, cfg.SniperMinZoom)) { scoped = true; break; }
         foreach (var point in _rushPoints)
         {
             if (!point.Enabled || point.Weight <= 0 || style.Weight(point.Kind, RushRaidSeconds) <= 0) continue;
+            if (point.Kind == "Sniper" && !scoped) continue;
             var position = new Vector3(point.X, point.Y, point.Z);
             if (point.Kind == "Spawn" && (position - squad.SpawnPosition).sqrMagnitude < Mathf.Pow(cfg.OwnSpawnExclusion + point.Radius, 2)) continue;
             if (point.Kind == "Boss" && !RushDefaults.IsResident(_zoneKey, point.Boss)) continue;
@@ -60,7 +65,7 @@ public partial class WaypointSystem
         }
         if (kind == null) return null;
         var points = pools[kind];
-        if (kind is "Marked" or "Custom" or "Boss")
+        if (kind is "Marked" or "Custom" or "Boss" or "Sniper")
         {
             RushPoint chosen = null;
             total = 0;
@@ -69,7 +74,7 @@ public partial class WaypointSystem
             { total += p.Weight; if (chosen == null || Random.value * total < p.Weight) chosen = p; }
             points = kind == "Boss" ? points.FindAll(p => p.Boss == chosen.Boss) : new() { chosen };
         }
-        var plan = new RushPlan(kind, points, style.SearchScale);
+        var plan = new RushPlan(kind, points, style.SearchScale, style);
         var first = points[0];
         var main = new MainObjective { Type = MainObjectiveType.Rush, Rush = plan,
             Position = new Vector3(first.X, first.Y, first.Z), ZoneFloorId = first.FloorId };

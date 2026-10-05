@@ -17,6 +17,12 @@
         <OrbitSlider T="int" @bind-Value="Cfg.Rush.SpawnSectors" Label="Maximum sectors per spawn rush" Min="1" Max="10" Step="1" />
         <OrbitSlider T="float" @bind-Value="Cfg.Rush.SpawnDeadline" Label="End all spawn rushes after raid begins" Unit="s" Min="30" Max="1200" Step="30" />
     </SettingsCard>
+    <SettingsCard Title="Sniper equipment and combat" Subtitle="One scoped PMC takes the firing post while squadmates cover nearby. Native visibility and shooting rules apply. Several squads can select the same site.">
+        <OrbitSlider T="float" @bind-Value="Cfg.Rush.SniperMinZoom" Label="Minimum available optic magnification" Unit="x" Min="1.5f" Max="20" Step="0.5f" />
+        <OrbitSwitch @bind-Value="Cfg.Rush.SniperCombatHold" Label="Prefer shooting from the post during safe distant combat (SAIN)" />
+        <OrbitSlider T="float" @bind-Value="Cfg.Rush.SniperDisengageDistance" Label="Resume ordinary combat for threats closer than" Unit="m" Min="50" Max="200" Step="5" />
+        <MudText Typo="Typo.caption">Medical actions, incoming fire, nearby enemies and squad combat orders retain priority. Unsupported SAIN versions keep ordinary combat.</MudText>
+    </SettingsCard>
     <MudTabs Elevation="0" Rounded="true" PanelClass="pt-4" Color="Color.Primary">
         <MudTabPanel Text="Timmy"><SettingsCard Title="Timmy"><RushStyleEditor Cfg="Cfg.Rush.Timmy" /></SettingsCard></MudTabPanel>
         <MudTabPanel Text="Cautious"><SettingsCard Title="Cautious"><RushStyleEditor Cfg="Cfg.Rush.Cautious" /></SettingsCard></MudTabPanel>
@@ -34,7 +40,7 @@
             @foreach (var floor in Floors) { <MudSelectItem Value="@floor.Id">@floor.Name</MudSelectItem> }
         </MudSelect>
         <MudTabs ActivePanelIndex="_tab" ActivePanelIndexChanged="SelectTab" Color="Color.Primary" Class="my-3">
-            <MudTabPanel Text="Spawn" /><MudTabPanel Text="Boss" /><MudTabPanel Text="Marked" /><MudTabPanel Text="Other" />
+            <MudTabPanel Text="Spawn" /><MudTabPanel Text="Boss" /><MudTabPanel Text="Marked" /><MudTabPanel Text="Other" /><MudTabPanel Text="Sniper" />
         </MudTabs>
         <MudStack Row="true" Class="mb-3" Wrap="Wrap.Wrap">
             <MudButton Disabled="@(Kind == "Boss" && !Bosses.Any())" OnClick="@(() => { _placing = true; _moving = false; })" Variant="Variant.Filled" Color="Color.Primary">Add point on map</MudButton>
@@ -63,6 +69,15 @@
                         <circle cx="@F(p.x)" cy="@F(p.y)" r="@F(point.Radius * Scale)" fill="@color" fill-opacity=".08" stroke="@color" stroke-opacity=".4" />
                         <circle cx="@F(p.x)" cy="@F(p.y)" r="6" fill="@color"><title>@point.Name (@point.Kind), height @F(point.Y) m</title></circle>
                     </g>
+                    @if (point.Kind == "Sniper")
+                    {
+                        var left = WatchEnd(point, -point.WatchArc / 2); var right = WatchEnd(point, point.WatchArc / 2); var middle = WatchEnd(point, 0);
+                        @if (point.WatchArc >= 359)
+                        { <circle cx="@F(p.x)" cy="@F(p.y)" r="@F(point.WatchDistance * Scale)" fill="#22d3ee" fill-opacity=".09" stroke="#22d3ee" stroke-opacity=".5" pointer-events="none" /> }
+                        else
+                        { <path d="@($"M {F(p.x)} {F(p.y)} L {F(left.x)} {F(left.y)} A {F(point.WatchDistance * Scale)} {F(point.WatchDistance * Scale)} 0 {(point.WatchArc > 180 ? 1 : 0)} 1 {F(right.x)} {F(right.y)} Z")" fill="#22d3ee" fill-opacity=".09" stroke="#22d3ee" stroke-opacity=".5" pointer-events="none" /> }
+                        <line x1="@F(p.x)" y1="@F(p.y)" x2="@F(middle.x)" y2="@F(middle.y)" stroke="#22d3ee" pointer-events="none" />
+                    }
                     @if (point.Kind == "Marked" && point.Id == _selected)
                     {
                         var loot = ToMap(point.LootX, point.LootZ);
@@ -88,9 +103,19 @@
                 <MudSelectItem Value="@((string?)null)">Automatic from height</MudSelectItem>
                 @foreach (var floor in Floors) { <MudSelectItem Value="@floor.Id">@floor.Name</MudSelectItem> }
             </MudSelect>
-            <OrbitSlider T="float" @bind-Value="selected.Radius" Label="Search / loot radius" Unit="m" Min="1" Max="200" Step="1" />
-            <OrbitSlider T="float" @bind-Value="selected.SearchSeconds" Label="Search / loot duration" Unit="s" Min="1" Max="600" Step="1" />
+            <OrbitSlider T="float" @bind-Value="selected.Radius" Label="@(Kind == "Sniper" ? "Post search radius" : "Search / loot radius")" Unit="m" Min="1" Max="200" Step="1" />
+            @if (Kind != "Sniper") { <OrbitSlider T="float" @bind-Value="selected.SearchSeconds" Label="Search / loot duration" Unit="s" Min="1" Max="600" Step="1" /> }
             <OrbitSlider T="float" @bind-Value="selected.Weight" Label="@(Kind == "Spawn" ? "Sector eligibility (zero disables)" : "Selection weight (zero disables)")" Min="0" Max="10" Step="0.5f" />
+            @if (Kind == "Sniper")
+            {
+                <MudText Typo="Typo.caption">The search radius limits candidate positions around this point. Hold duration comes from the personality tab. Bearings: 0 = +Z, 90 = +X. The cone rotates with the map.</MudText>
+                <OrbitSlider T="float" @bind-Value="selected.WatchYaw" Label="Watch bearing" Unit="deg" Min="0" Max="360" Step="5" />
+                <OrbitSlider T="float" @bind-Value="selected.WatchArc" Label="Watch sector" Unit="deg" Min="15" Max="360" Step="5" />
+                <OrbitSlider T="float" @bind-Value="selected.WatchPitch" Label="Watch elevation (negative looks down)" Unit="deg" Min="-45" Max="30" Step="1" />
+                <OrbitSlider T="float" @bind-Value="selected.WatchDistance" Label="Sightline scan distance" Unit="m" Min="50" Max="500" Step="10" />
+                <OrbitSwitch @bind-Value="selected.Elevated" Label="Find a reachable roof 3-16 m above this seed" />
+                <MudText Typo="Typo.caption">For a manually placed roof point, set its actual height and leave roof search off. Suggestions are survey seeds; unreachable or obstructed posts are skipped. RaidReview records the resolved position.</MudText>
+            }
             @if (Kind == "Boss")
             {
                 <MudSelect T="string" @bind-Value="selected.Boss" Label="Resident boss">
@@ -121,7 +146,7 @@
     private string? _selected;
     private int _tab;
     private bool _placing, _moving, _preview;
-    private static readonly string[] Kinds = ["Spawn", "Boss", "Marked", "Custom"];
+    private static readonly string[] Kinds = ["Spawn", "Boss", "Marked", "Custom", "Sniper"];
     private string Kind => Kinds[_tab];
     private List<RushPoint> Points => Cfg.Rush.Points(_map);
     private RushPoint? Selected => Points.FirstOrDefault(p => p.Id == _selected);
@@ -137,6 +162,11 @@
     {
         var a = MapViews.Rot(View.X1, View.Z1, View.Rot); var b = MapViews.Rot(View.X2, View.Z2, View.Rot); var p = MapViews.Rot(x, z, View.Rot);
         return ((p.x - MathF.Min(a.x, b.x)) * Scale, (MathF.Max(a.z, b.z) - p.z) * Scale);
+    }
+    private (float x, float y) WatchEnd(RushPoint p, float offset)
+    {
+        var angle = (p.WatchYaw + offset) * MathF.PI / 180;
+        return ToMap(p.X + MathF.Sin(angle) * p.WatchDistance, p.Z + MathF.Cos(angle) * p.WatchDistance);
     }
     private void SelectMap(string map) { _map = map; EditablePoints(); _floor = "*"; _selected = null; _placing = _moving = false; }
     private void SelectTab(int tab) { _tab = tab; _selected = null; _placing = _moving = false; }

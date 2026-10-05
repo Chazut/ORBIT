@@ -127,6 +127,7 @@ public class OrbitManager
 
     public void Dispose()
     {
+        SniperCombat.Clear();
         Orbit.Patches.AirdropLandedPatch.OnAirdropLanded -= WaypointSystem.RegisterLandedAirdrop;
         Orbit.Patches.AirdropReleasedPatch.OnAirdropReleased -= OnAirdropReleased;
         try { _botsController.BotSpawner.OnBotRemoved -= OnBotRemoved; } catch { }

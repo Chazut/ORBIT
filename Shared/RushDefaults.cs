@@ -30,7 +30,13 @@ public static class RushDefaults
             _ => false
         };
     }
-    public static Dictionary<string, List<RushPoint>> Create() => new()
+    public static Dictionary<string, List<RushPoint>> Create()
+    {
+        var maps = CreateBase();
+        SniperDefaults.AddTo(maps);
+        return maps;
+    }
+    private static Dictionary<string, List<RushPoint>> CreateBase() => new()
     {
         ["bigmap"] = new()
         {

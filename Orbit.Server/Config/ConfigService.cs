@@ -104,8 +104,12 @@ public class ConfigService(ISptLogger<ConfigService> logger)
             rush.Remove("maps");
         }
         Merge(defaults, supplied);
+        var upgradeSniper = supplied["rush"] is System.Text.Json.Nodes.JsonObject savedRush
+            && savedRush["sniper_catalogue_version"] == null;
         var parsed = JsonSerializer.Deserialize<OrbitServerConfig>(defaults.ToJsonString(), _jsonOptions)
             ?? throw new InvalidDataException("Empty config.");
+        if (upgradeSniper) Orbit.Settings.SniperDefaults.AddTo(parsed.Rush.Maps);
+        parsed.Rush.SniperCatalogueVersion = 1;
         BehaviorValidation.Validate(parsed);
         parsed.ConfigVersion = new OrbitServerConfig().ConfigVersion;
         return JsonSerializer.Serialize(parsed, _jsonOptions);

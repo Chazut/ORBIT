@@ -26,7 +26,7 @@ internal enum TransitionPhase
     SpawnEntryScan, SpawnEntryResolve, ExfilEligibility, ExfilDiagnostics,
     MovementDoorWatch, MovementPendingDoors, MovementJobs, MovementJob, MovementAgent,
     MovementRecovery, MovementIdleRescue, MovementSpawnRescue, MovementGhost, MovementGhostDoors, MovementAwake,
-    TravelPlanning, TravelExposure, TravelCoverScan, TravelPath, TravelGait,
+    TravelPlanning, TravelExposure, TravelCoverScan, TravelPath, TravelGait, SniperPlanning,
     Count
 }
 

@@ -15,11 +15,13 @@ internal sealed class RushPlan
 {
     internal readonly string Kind;
     internal MainObjective Main;
-    internal string Status { get; private set; } = "pending";
-    internal string Step => _current < 0 ? _lastSiteName ?? "Choose nearest reachable sector" : _sites[_current].Name;
+    private string _status = "pending";
+    internal string Status { get => Sniper?.Status ?? _status; private set => _status = value; }
+    internal readonly SniperPlan Sniper;
+    internal string Step => Sniper != null ? Sniper.Step : _current < 0 ? _lastSiteName ?? "Choose nearest reachable sector" : _sites[_current].Name;
     internal int Index => _visited;
     internal int Count => Kind == "Spawn" ? Mathf.Min(ServerConfig.Rush.SpawnSectors, _sites.Count) : _sites.Count;
-    internal string Name => Kind + " rush";
+    internal string Name => Kind == "Sniper" ? "Sniper overwatch" : Kind + " rush";
     private readonly List<RushPoint> _sites;
     private readonly string[] _states;
     private readonly int[] _sequence;
@@ -36,14 +38,16 @@ internal sealed class RushPlan
     private bool _paused, _partial, _inside, _doorApproach;
     private Vector3 _anchor, _sortOrigin;
 
-    internal RushPlan(string kind, List<RushPoint> sites, float searchScale)
-    { Kind = kind; _sites = sites; _states = new string[sites.Count]; _sequence = new int[sites.Count]; _searchScale = searchScale; }
+    internal RushPlan(string kind, List<RushPoint> sites, float searchScale, RushStyle style = null)
+    { Kind = kind; _sites = sites; _states = new string[sites.Count]; _sequence = new int[sites.Count]; _searchScale = searchScale;
+        if (kind == "Sniper") Sniper = new SniperPlan(sites[0], style ?? new()); }
 
-    internal bool Owns(Agent agent) => !Main.Completed && !_paused && !agent.SoloExtractRequested
+    internal bool Owns(Agent agent) => Sniper != null ? Sniper.Owns(agent) : !Main.Completed && !_paused && !agent.SoloExtractRequested
         && (!_orders.TryGetValue(agent, out var point) || agent.Objective.Location == point);
 
     internal bool Tick(Squad squad, WaypointSystem waypoints, bool combat)
     {
+        if (Sniper != null) return Sniper.Tick(squad, waypoints, Main, combat);
         if (Main.Completed) return false;
         var now = Time.time;
         var delta = _lastTick > 0 ? Mathf.Clamp(now - _lastTick, 0, 1) : 0;
@@ -229,6 +233,7 @@ internal sealed class RushPlan
     }
     internal bool End(Squad squad, WaypointSystem waypoints, string reason)
     {
+        if (Sniper != null) return Sniper.End(squad, waypoints, reason, Main);
         Release(squad, waypoints); Main.Completed = true;
         if (_current >= 0 && _states[_current] == "current") _states[_current] = reason;
         SetStatus(squad, reason); return false;
@@ -240,6 +245,7 @@ internal sealed class RushPlan
     }
     internal Orbit.Api.OrbitRushPoint[] Snapshot()
     {
+        if (Sniper != null) return Sniper.Snapshot();
         var result = new Orbit.Api.OrbitRushPoint[_sites.Count];
         for (var i = 0; i < result.Length; i++)
         { var p = _sites[i]; result[i] = new() { Id = p.Id, Name = p.Name, X = p.X, Y = p.Y, Z = p.Z,

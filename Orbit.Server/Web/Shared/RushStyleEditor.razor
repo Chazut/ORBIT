@@ -8,6 +8,10 @@
 <OrbitSlider T="float" @bind-Value="Cfg.MarkedStartWindow" Label="Latest marked rush start after raid begins" Unit="s" Min="0" Max="3600" Step="30" />
 <OrbitSlider T="float" @bind-Value="Cfg.CustomStartWindow" Label="Latest custom rush start after raid begins" Unit="s" Min="0" Max="3600" Step="30" />
 <OrbitSlider T="float" @bind-Value="Cfg.SearchScale" Label="Search duration multiplier" Min="0.1f" Max="5" Step="0.1f" />
+<OrbitSlider T="float" @bind-Value="Cfg.SniperWeight" Label="Sniper weight (requires a scoped rifle)" Min="0" Max="10" Step="0.5f" />
+<OrbitSlider T="float" @bind-Value="Cfg.SniperStartWindow" Label="Latest sniper start after raid begins" Unit="s" Min="0" Max="3600" Step="30" />
+<OrbitSlider T="float" @bind-Value="Cfg.SniperHoldMin" Label="Sniper minimum hold" Unit="s" Min="10" Max="1800" Step="10" />
+<OrbitSlider T="float" @bind-Value="Cfg.SniperHoldMax" Label="Sniper maximum hold" Unit="s" Min="10" Max="1800" Step="10" />
 @code {
     [Parameter, EditorRequired] public Orbit.Settings.RushStyle Cfg { get; set; } = default!;
 }
