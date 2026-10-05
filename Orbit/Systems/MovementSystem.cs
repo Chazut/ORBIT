@@ -41,6 +41,7 @@ public partial class MovementSystem
         _stuckRemediation = new StuckRemediation(this, humanPlayers);
         _humanPlayers = humanPlayers;
         _waypointSystem = waypointSystem;
+        _waypointSystem.OpenRushDoor = OpenObjectiveDoor;
         _travelWorld = new TravelRouteWorld(waypointSystem);
         _navJobExecutor.TravelPlanner = new TravelRoutePlanner(_travelWorld);
     }
@@ -1052,6 +1053,21 @@ public partial class MovementSystem
         return foundDoors;
     }
 
+    internal bool OpenObjectiveDoor(Agent agent, Door door)
+    {
+        if (door == null || !door.Operatable || door.DoorState != EDoorState.Shut
+            || door.InteractingPlayer != null) return false;
+        if (agent.IsDormant)
+        {
+            if (IsGhostDoorPending(door)) return false;
+            GhostOpenDoor(agent, door, "for marked rush", respectCooldown: true);
+            return IsGhostDoorPending(door);
+        }
+        if (!OpenDoor(agent, door)) return false;
+        StartDoorWatch(agent, door, "RushOpen");
+        return true;
+    }
+
     /// <summary>
     /// Reset the player's "can use prop" state machine, ask BSG to construct a validated InteractionResult
     /// via <see cref="Door.Interact"/> (this is the call that checks key inventory, ownership, lock state,
@@ -1127,7 +1143,7 @@ public partial class MovementSystem
         }
         catch (System.Exception e)
         {
-            Log.Debug($"{agent} OpenDoor on {door.Id} threw: {e.Message}");
+            Log.Warning($"{agent} OpenDoor on {door.Id} threw: {e}");
             return false;
         }
     }

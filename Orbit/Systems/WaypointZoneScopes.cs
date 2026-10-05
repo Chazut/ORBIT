@@ -44,6 +44,19 @@ public partial class WaypointSystem
             && MatchesZoneFloorAtTarget(targetFloor, target.Position, position);
     }
 
+    public bool HasReachedObjectiveFloor(Agent agent, Waypoint target, Vector3 position)
+    {
+        var squad = agent?.Squad;
+        // Managed routes may cross several floors in the same cell. A pending Kills main
+        // must not impose its own floor on a Rush or multi-step interaction/loot waypoint.
+        if (target != null && (squad?.Rush?.Owns(agent) == true || squad?.Operation?.Owns(agent) == true))
+        {
+            var floor = FloorCatalog.For(_zoneKey)?.Resolve(target.Position.x, target.Position.y, target.Position.z);
+            return floor == null || MatchesZoneFloorAtTarget(floor, target.Position, position);
+        }
+        return HasReachedZoneFloor(squad, target, position);
+    }
+
     private float ZoneStrength(Zone zone, Vector2 coords)
     {
         var radius = zone.Radius * ServerConfig.Zones.ZoneRadiusScale;

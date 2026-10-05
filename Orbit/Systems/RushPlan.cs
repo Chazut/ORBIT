@@ -150,6 +150,11 @@ internal sealed class RushPlan : IObjectiveWork
             RememberApproach(_actor.Position);
             Release(squad, waypoints); _route.Reset(); _retries = 0; return true;
         }
+        // Arrival at the handle takes precedence over a stopped mover's failure. Let the
+        // normal door interaction settle without consuming navigation retries at the handle.
+        if (door != null && !_inside && _doorApproach && !_partial
+            && (_actor.Position - _anchor).sqrMagnitude <= 1f)
+            return InteractDoor(squad, waypoints, site, door);
         if (_actor.Objective.Status == ObjectiveStatus.Failed)
         {
             RememberApproach(_anchor);
@@ -164,39 +169,7 @@ internal sealed class RushPlan : IObjectiveWork
         {
             _doorApproach = true; Release(squad, waypoints); _route.Reset(); _approachHistory.Clear(); _retries = 0; return true;
         }
-        if (door != null && !_inside)
-        {
-            if (door.DoorState == EDoorState.Open)
-            {
-                _inside = true; Release(squad, waypoints); _route.Reset(); _elapsed = 0; _retries = 0; _approachHistory.Clear();
-                Main.Position = LootPosition(site); Main.CellCoords = waypoints.WorldToCell(Main.Position);
-                SetStatus(squad, "entering room"); return true;
-            }
-            var interaction = door.GetInteractionParameters(_actor.Position).InteractionPosition;
-            if ((_actor.Position - interaction).sqrMagnitude > 4f)
-            {
-                Release(squad, waypoints); _route.Reset();
-                if (++_retries >= 3) return Skip(squad, waypoints, "door interaction point unreachable");
-                return true;
-            }
-            _actor.Look.Target = door.transform.position;
-            if (now < _interactAt || !door.Operatable || door.DoorState == EDoorState.Interacting || door.InteractingPlayer != null) return true;
-            _interactAt = now + 5;
-            if (++_attempts > 3) return Skip(squad, waypoints, "door interaction failed");
-            try
-            {
-                if (door.DoorState == EDoorState.Locked)
-                {
-                    if (!MultiStepAccess.CanForceUnlock(door)) return Skip(squad, waypoints, "door requires power");
-                    door.Unlock(); Orbit.Api.OrbitDoorEvents.Raise(door, Orbit.Api.OrbitDoorEvents.Operation.Unlock);
-                }
-                else { door.LockForInteraction(); door.Interact(new InteractionResult(EInteractionType.Open));
-                    Orbit.Api.OrbitDoorEvents.Raise(door, Orbit.Api.OrbitDoorEvents.Operation.Open); }
-                SetStatus(squad, "unlocking door");
-            }
-            catch (Exception error) { Log.Warning($"RUSH: {squad} door={site.DoorId} error={error.Message}"); }
-            return true;
-        }
+        if (door != null && !_inside) return InteractDoor(squad, waypoints, site, door);
         if (Kind == "Marked") { _held = 0; SetStatus(squad, "looting"); return true; }
         if (Status != "searching") { _held = 0; SetStatus(squad, "searching"); }
         if (_held >= site.SearchSeconds * _searchScale) return Visit(squad, waypoints);
@@ -212,6 +185,41 @@ internal sealed class RushPlan : IObjectiveWork
                 && _path.status == NavMeshPathStatus.PathComplete)
                 SetOrder(_actor, Point(waypoints, hit.position, "Search " + site.Name), waypoints);
         }
+        return true;
+    }
+
+    private bool InteractDoor(Squad squad, WaypointSystem waypoints, RushPoint site, Door door)
+    {
+        if (door.DoorState == EDoorState.Open)
+        {
+            _inside = true; Release(squad, waypoints); _route.Reset(); _elapsed = 0; _retries = 0; _approachHistory.Clear();
+            Main.Position = LootPosition(site); Main.CellCoords = waypoints.WorldToCell(Main.Position);
+            SetStatus(squad, "entering room"); return true;
+        }
+        try
+        {
+            var interaction = door.GetInteractionParameters(_actor.Position).InteractionPosition;
+            if ((_actor.Position - interaction).sqrMagnitude > 4f)
+            {
+                Release(squad, waypoints); _route.Reset();
+                if (++_retries >= 3) return Skip(squad, waypoints, "door interaction point unreachable");
+                return true;
+            }
+            _actor.Look.Target = door.transform.position;
+            var now = Time.time;
+            if (now < _interactAt || !door.Operatable || door.DoorState == EDoorState.Interacting || door.InteractingPlayer != null) return true;
+            _interactAt = now + 5;
+            if (++_attempts > 3) return Skip(squad, waypoints, "door interaction failed");
+            if (door.DoorState == EDoorState.Locked)
+            {
+                if (!MultiStepAccess.CanForceUnlock(door)) return Skip(squad, waypoints, "door requires power");
+                door.Unlock(); Orbit.Api.OrbitDoorEvents.Raise(door, Orbit.Api.OrbitDoorEvents.Operation.Unlock);
+                SetStatus(squad, "unlocking door");
+            }
+            else if (waypoints.OpenRushDoor?.Invoke(_actor, door) == true)
+                SetStatus(squad, "opening door");
+        }
+        catch (Exception error) { Log.Warning($"RUSH: {squad} door={site.DoorId} error={error}"); }
         return true;
     }
 
@@ -272,7 +280,7 @@ internal sealed class RushPlan : IObjectiveWork
     {
         SetStatus(squad, _states[_current]); Release(squad, waypoints); _processed++;
         _current = -1; _retries = _attempts = 0; ResetRanking();
-        _elapsed = _held = 0; _inside = _doorApproach = false; _loot = null; _attempted.Clear(); _route.Reset();
+        _elapsed = _held = _interactAt = 0; _inside = _doorApproach = false; _loot = null; _attempted.Clear(); _route.Reset();
         if (_visited >= Count || _processed >= _sites.Count) return End(squad, waypoints, FinishReason());
         SetStatus(squad, "planning route"); return true;
     }

@@ -132,6 +132,11 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                     objective.Status = ObjectiveStatus.Moving;
                     break;
                 case ObjectiveStatus.Moving:
+                    if (Time.time < agent.Movement.DoorInteractHoldUntil)
+                    {
+                        _stuckEnRouteTracker.Remove(agent.Id);
+                        break;
+                    }
                     if (agent.Movement.HasPath && objective.ArrivalPath != agent.Movement.Path)
                         objective.ArrivalPath = agent.Movement.Path;
 
@@ -274,7 +279,7 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                     {
                         ClearLoSBlockedTracking(agent);
                     }
-                    if (inRadius && !waypointSystem.HasReachedZoneFloor(agent.Squad, objective.Location, agent.Position))
+                    if (inRadius && !waypointSystem.HasReachedObjectiveFloor(agent, objective.Location, agent.Position))
                     {
                         inRadius = false;
                         arrivalRefusal = "floor";

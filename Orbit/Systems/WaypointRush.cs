@@ -28,6 +28,7 @@ public partial class WaypointSystem
     }
 
     internal Door RushDoor(string id) => _rushDoors.TryGetValue(id, out var door) ? door : null;
+    internal System.Func<Agent, Door, bool> OpenRushDoor;
     internal void RegisterRushCorpse(Corpse corpse, string role)
     {
         if (corpse != null && RushDefaults.IsResident(_zoneKey, role)) _rushCorpses[corpse] = role;
