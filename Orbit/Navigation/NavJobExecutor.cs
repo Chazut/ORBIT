@@ -14,6 +14,7 @@ public class NavJob(Vector3 origin, Vector3 target)
     public readonly Vector3 Target = target;
     public NavMeshPathStatus Status = NavMeshPathStatus.PathInvalid;
     public Vector3[] Path;
+    internal TravelRequest Travel;
     public bool IsReady => Path != null;
 }
 
@@ -25,6 +26,7 @@ public class NavJob(Vector3 origin, Vector3 target)
 public class NavJobExecutor(int batchSize = 5)
 {
     private readonly Queue<NavJob> _jobQueue = new(20);
+    internal TravelRoutePlanner TravelPlanner;
 
     public NavJob Submit(Vector3 origin, Vector3 target)
     {
@@ -52,9 +54,16 @@ public class NavJobExecutor(int batchSize = 5)
             var job = _jobQueue.Dequeue();
             var path = new NavMeshPath();
             NavMesh.CalculatePath(job.Origin, job.Target, NavMesh.AllAreas, path);
-            job.Path = path.corners;
             job.Status = path.status;
+            if (job.Travel != null && TravelPlanner != null && job.Status == NavMeshPathStatus.PathComplete)
+                TravelPlanner.Submit(job, path.corners, Time.time);
+            else job.Path = path.corners;
             counter++;
+        }
+        if (TravelPlanner != null)
+        {
+            using var timing = Helpers.PerformanceJournal.Measure(Helpers.TransitionPhase.TravelPlanning, "travel-planning");
+            TravelPlanner.Update(Time.time);
         }
     }
 }

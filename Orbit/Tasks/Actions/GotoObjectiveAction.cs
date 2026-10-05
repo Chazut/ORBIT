@@ -128,7 +128,7 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                     var destination = objective.Location.Category == WaypointCategory.Exfil
                         ? objective.Location.ExfilInteriorPosition ?? objective.Location.Position
                         : objective.Location.Position;
-                    movementSystem.MoveToByPath(agent, destination, sprint: shouldSprint);
+                    movementSystem.MoveToByPath(agent, destination, sprint: shouldSprint, styledTravel: true);
                     objective.Status = ObjectiveStatus.Moving;
                     break;
                 case ObjectiveStatus.Moving:
@@ -143,7 +143,7 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                     // "Moving but not advancing" limbo at an off-navmesh loot spot where the Status-gated
                     // arrival-fail below never fires. Only accumulates while ORBIT drives the bot: when yielded
                     // to SAIN / vanilla the bot may sit still legitimately (combat, cover), so reset instead.
-                    if (!agent.IsActive)
+                    if (!agent.IsActive || MovementSystem.IsTravelPaused(agent))
                     {
                         _stuckEnRouteTracker.Remove(agent.Id);
                     }

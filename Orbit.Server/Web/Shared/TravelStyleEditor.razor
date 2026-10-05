@@ -1,0 +1,22 @@
+@using Orbit.Settings
+<MudText Typo="Typo.body2" Class="mb-2" Style="opacity:.65">
+    The squad follows its leader's travel style while ORBIT controls movement, including in Ghost Mode.
+    Cover is a preference: bots still cross open ground when necessary. Combat movement remains unchanged.
+</MudText>
+<OrbitSwitch @bind-Value="Cfg.Enabled" Label="Use travel style" Tooltip="Apply this archetype's route preferences and observation stops on travel legs." />
+<OrbitSlider T="float" @bind-Value="Cfg.CoverPreference" Label="Cover preference" Fmt="P0" Min="0f" Max="1f" Step=".01f"
+             Tooltip="Higher values favor routes with nearby solid geometry. Foliage alone does not count as hard cover. 0% keeps the ordinary route." />
+<OrbitSlider T="float" @bind-Value="Cfg.MaxDetourRatio" Label="Maximum route length" Fmt="P0" Min="1f" Max="2f" Step=".05f"
+             Tooltip="Compared with the ordinary route: 150% permits a route up to half as long again. Unreachable or excessively long alternatives are rejected." />
+<OrbitSlider T="float" @bind-Value="Cfg.PauseChance" Label="Observation chance" Fmt="P0" Min="0f" Max="1f" Step=".01f"
+             Tooltip="Chance for the leader to stop briefly at nearby cover. Nearby travelling squad members wait together. No observation stops during rushes or extraction." />
+<OrbitSlider T="float" @bind-Value="Cfg.PauseInterval" Label="Minimum time between observations" Unit="s" Fmt="0" Min="10f" Max="180f" Step="1f" />
+<MudGrid>
+    <MudItem xs="12" sm="6"><OrbitSlider T="float" @bind-Value="Cfg.PauseDurationMin" Label="Observation duration min" Unit="s" Fmt="0.0" Min="0f" Max="5f" Step=".1f" /></MudItem>
+    <MudItem xs="12" sm="6"><OrbitSlider T="float" @bind-Value="Cfg.PauseDurationMax" Label="Observation duration max" Unit="s" Fmt="0.0" Min="0f" Max="5f" Step=".1f" /></MudItem>
+</MudGrid>
+<OrbitSlider T="float" @bind-Value="Cfg.ExposedSprintChance" Label="Sprint across open ground" Fmt="P0" Min="0f" Max="1f" Step=".05f"
+             Tooltip="Additional chance per travel leg to sprint through exposed portions, even if ordinary sprint propensity is zero. Stamina, doors, indoor movement and sharp turns still restrict sprinting." />
+@code {
+    [Parameter] public TravelStyle Cfg { get; set; } = new();
+}

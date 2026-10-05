@@ -79,9 +79,10 @@
 </MudGrid>
 
 <MudText Typo="Typo.subtitle2" Class="mt-4 mb-2" Style="opacity:.75">Movement</MudText>
+<TravelStyleEditor Cfg="Cfg.Travel" />
 <OrbitSlider T="float" @bind-Value="Cfg.SprintPropensity" Label="Sprint propensity" Fmt="P0"
              Min="0f" Max="1f" Step="0.05f"
-             Tooltip="0% = never sprint, 100% = always." />
+             Tooltip="Ordinary travel sprint chance. Travel style can also request sprinting across exposed ground. Stamina, indoor movement and turns still apply." />
 <OrbitSlider T="float" @bind-Value="Cfg.LockedDoorChance" Label="Locked door unlock chance" Fmt="P0"
              Min="0f" Max="1f" Step="0.05f"
              Tooltip="Probability of force-unlocking a locked door for an intermediate POI. Main-anchor POIs always roll 100%." />

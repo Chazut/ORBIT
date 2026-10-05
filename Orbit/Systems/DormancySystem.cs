@@ -1098,7 +1098,8 @@ public partial class DormancySystem
             var movement = agent.Movement;
             if (movement.Status == MovementStatus.Moving && movement.Target != Movement.Infinity)
                 _movementSystem.MoveToByPath(agent, movement.Target,
-                    movement.Pose, movement.Speed, movement.Prone, movement.Sprint, movement.Urgency);
+                    movement.Pose, movement.Speed, movement.Prone, movement.Sprint, movement.Urgency,
+                    styledTravel: movement.Travel != null);
 
             Log.Debug($"{agent} wake: state={bot.BotState} pathInFlight={movement.Status == MovementStatus.Moving}");
         }

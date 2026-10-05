@@ -41,6 +41,8 @@ public partial class MovementSystem
         _stuckRemediation = new StuckRemediation(this, humanPlayers);
         _humanPlayers = humanPlayers;
         _waypointSystem = waypointSystem;
+        _travelWorld = new TravelRouteWorld(waypointSystem);
+        _navJobExecutor.TravelPlanner = new TravelRoutePlanner(_travelWorld);
     }
 
     public void Update(List<Agent> liveAgents)
@@ -69,6 +71,8 @@ public partial class MovementSystem
                 ResetPath(agent);
                 continue;
             }
+
+            if (HoldForTravelObservation(agent)) continue;
 
             // Dormant body: the GameObject is disabled, so the mover / doors / stuck machinery below has
             // nothing to drive. The ghost follower advances the transform along the planned path instead
@@ -172,7 +176,7 @@ public partial class MovementSystem
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void MoveToByPath(
         Agent agent, Vector3 destination, float pose = 1f, float speed = 1f, bool prone = false, bool sprint = false,
-        MovementUrgency urgency = MovementUrgency.Medium)
+        MovementUrgency urgency = MovementUrgency.Medium, bool styledTravel = false)
     {
         if (NavMesh.SamplePosition(destination, out var hit, TargetEps, NavMesh.AllAreas))
             destination = hit.position;
@@ -181,7 +185,7 @@ public partial class MovementSystem
         agent.Movement.Target = destination;
         // Origin recovery can use a corner of the previous path. Scheduling supersedes older jobs;
         // clearing the path afterwards must retain the new request's revision.
-        ScheduleMoveJob(agent, destination);
+        ScheduleMoveJob(agent, destination, styledTravel);
         ResetPath(agent, MovementStatus.Moving, invalidatePending: false);
         ResetGait(agent, pose, speed, prone, sprint, urgency);
         agent.Movement.Retry = 0;
@@ -207,7 +211,7 @@ public partial class MovementSystem
         agent.Movement.Retry++;
     }
 
-    private void ScheduleMoveJob(Agent agent, Vector3 destination)
+    private void ScheduleMoveJob(Agent agent, Vector3 destination, bool styledTravel = false)
     {
         var origin = agent.Position;
 
@@ -236,7 +240,9 @@ public partial class MovementSystem
         }
 
         var job = _navJobExecutor.Submit(origin, destination);
-        _moveJobs.Enqueue((agent, job, ++agent.Movement.PathRevision));
+        var revision = ++agent.Movement.PathRevision;
+        if (styledTravel) job.Travel = CreateTravel(agent, destination, revision);
+        _moveJobs.Enqueue((agent, job, revision));
     }
 
     private const int GhostInvalidPathRescueStreak = 3;
@@ -311,7 +317,7 @@ public partial class MovementSystem
     {
         var movement = agent.Movement;
         var crouched = movement.Pose < 0.5f;
-        var sprinting = GhostUpdateSprint(agent, movement.Sprint && !crouched);
+        var sprinting = GhostUpdateSprint(agent, WantsTravelSprint(agent, movement.Sprint) && !crouched);
         if (sprinting) return GhostSprintSpeed;
         var speed = GhostWalkSpeed * Mathf.Clamp(movement.Speed, 0.1f, 1f);
         return crouched ? speed * GhostCrouchSpeedMul : speed;
@@ -681,7 +687,7 @@ public partial class MovementSystem
             bot.Mover.SetTargetMoveSpeed(movementSpeed);
 
         // Sprint
-        var shouldSprint = movement.Sprint && CanSprint(agent) && !doorsNearby;
+        var shouldSprint = WantsTravelSprint(agent, movement.Sprint) && CanSprint(agent) && !doorsNearby;
         if (player.Physical.Sprinting != shouldSprint)
             player.EnableSprint(shouldSprint);
 
@@ -1352,6 +1358,8 @@ public partial class MovementSystem
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void ResetPath(Agent agent, MovementStatus status = MovementStatus.Stopped, bool invalidatePending = true)
     {
+        EndTravelObservation(agent);
+        agent.Movement.Travel = null;
         // A queued result belongs to the old route even if the executor finishes after this reset.
         if (invalidatePending) agent.Movement.PathRevision++;
         // Explicitly DON'T reset the target — it hasn't changed. Only the path is supposed to be deleted.
@@ -1367,6 +1375,10 @@ public partial class MovementSystem
         movement.Path = job.Path;
         movement.Status = MovementStatus.Moving;
         movement.CurrentCorner = 0;
+        movement.Travel = job.Travel?.Result == null ? null : new TravelMotion
+        {
+            Request = job.Travel, ExposedSprint = UnityEngine.Random.value < job.Travel.Style.ExposedSprintChance
+        };
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

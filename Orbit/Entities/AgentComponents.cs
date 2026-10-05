@@ -77,6 +77,7 @@ public enum MovementUrgency
 
 public class Movement
 {
+    internal Orbit.Systems.TravelMotion Travel;
     public static readonly Vector3 Infinity = new(float.MaxValue, float.MaxValue, float.MaxValue);
 
     /// <summary>Sentinel "no target" — far enough from anywhere that distance
