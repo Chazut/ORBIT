@@ -54,6 +54,7 @@ public class MainObjective
     public float CampTargetDuration;
     internal float CampRetryAt;
     internal Orbit.Systems.AmbushSite CampSite;
+    internal Orbit.Systems.ExtractCampApproach CampApproach;
     public bool IsCampMain => Type == MainObjectiveType.ExtractCamp || Type == MainObjectiveType.Kills && KillAmbush;
 
     public bool CanPursue(IReadOnlyList<MainObjective> mains)

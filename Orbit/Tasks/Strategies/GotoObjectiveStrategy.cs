@@ -67,6 +67,8 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
         {
             operatingSquad.Rush?.End(operatingSquad, waypointSystem, "strategy deactivated");
             operatingSquad.Operation?.End(operatingSquad, waypointSystem, "strategy deactivated");
+            if (operatingSquad.MainObjectives != null)
+                foreach (var main in operatingSquad.MainObjectives) main.CampApproach?.Release(operatingSquad, waypointSystem);
         }
         if (entity is Squad campingSquad) campingSquad.Camp.End(campingSquad, "strategy deactivated");
         if (entity is Squad squad) squad.CorpseEscort.End(squad, waypointSystem, "strategy deactivated");
@@ -261,6 +263,12 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
             }
 
             if (_ambush.TryStart(squad))
+            {
+                UpdateAgents(squad, out _);
+                continue;
+            }
+
+            if (waypointSystem.TickExtractCampApproach(squad))
             {
                 UpdateAgents(squad, out _);
                 continue;
@@ -791,7 +799,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
 
             if (squad.CorpseEscort.UpdateMember(squad, agent, i, waypointSystem)) continue;
             if (squad.Camp.PendingAirdrop != null || squad.Camp.Owns(agent)) continue;
-            if (squad.Operation?.Owns(agent) == true || squad.Rush?.Owns(agent) == true) continue;
+            if (squad.Operation?.Owns(agent) == true || squad.Rush?.Owns(agent) == true || ExtractCampApproach.Owns(squad, agent)) continue;
 
             // An agent is "aligned" with the squad if their location IS the squad's main objective, OR if
             // they're working a splinter that was picked around the squad's current main objective. Without

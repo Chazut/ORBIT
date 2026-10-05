@@ -64,6 +64,8 @@ internal sealed class CampPlan
     internal void Begin(Squad squad, AmbushSite site, Dictionary<Agent, CoverPoint> positions, WaypointSystem waypoints,
         MainObjective main = null, bool directLoot = false)
     {
+        if (main?.Type == MainObjectiveType.ExtractCamp)
+            (main.CampApproach ??= new ExtractCampApproach(main)).Release(squad, waypoints);
         Site = site;
         Main = main;
         _held = _holdTick = 0;
@@ -253,6 +255,8 @@ internal sealed class CampPlan
         if (squad.Objective.Location == _mission) squad.Objective.Duration = Main?.Completed == true ? 0 : _missionDuration;
         if (Main != null)
         {
+            if (Main.Type == MainObjectiveType.ExtractCamp && reason is ("route failed or assignment changed" or "travel timeout" or "member displaced"))
+                Main.CampApproach?.Retry(squad, _waypoints, reason);
             Main.CampRetryAt = Time.time + 5f;
             Orbit.Api.OrbitTelemetry.MainObjectivesRevision++;
         }

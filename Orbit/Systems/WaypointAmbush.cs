@@ -117,22 +117,20 @@ public partial class WaypointSystem
     internal MainObjective RollExtractCampMain(Squad squad, AmbushStyleSettings style)
     {
         BuildAmbushCatalog();
-        if (_campSites.Count == 0) return null;
-        var start = UnityEngine.Random.Range(0, _campSites.Count);
-        var paths = 0;
-        for (var i = 0; i < _campSites.Count; i++)
+        AmbushSite selected = null;
+        var eligible = 0;
+        foreach (var site in _campSites)
         {
-            var site = _campSites[(start + i) % _campSites.Count];
             if (site.Kind != CampSiteKind.Extract || !IsAmbushSiteAvailable(site, squad.Leader.BotCategory)) continue;
-            if (++paths > 8) break;
-            if (!IsReachableFromPosition(squad.SpawnPosition, site.Position)) continue;
-            return new MainObjective
-            {
-                Type = MainObjectiveType.ExtractCamp, Position = site.Position, CellCoords = WorldToCell(site.Position),
-                CampSite = site
-            };
+            // Equal chance among exits, independent of spawn, path length or this bot's own exits.
+            // Navigation is attempted when the main starts, including staged approaches.
+            if (++eligible == 1 || UnityEngine.Random.value * eligible < 1f) selected = site;
         }
-        return null;
+        return selected == null ? null : new MainObjective
+        {
+            Type = MainObjectiveType.ExtractCamp, Position = selected.Position, CellCoords = WorldToCell(selected.Position),
+            CampSite = selected
+        };
     }
 
     internal AmbushSite CreateKillMainCampSite(MainObjective main)
@@ -162,6 +160,18 @@ public partial class WaypointSystem
             Scope = new ZoneScope { FloorId = main.ZoneFloorId }, Generation = _campGeneration,
             ZoneCenter = main.KillZoneCenter, ZoneRadius = main.KillZoneRadius
         };
+    }
+
+    internal bool TickExtractCampApproach(Squad squad)
+    {
+        if (squad.MainObjectives == null) return false;
+        foreach (var main in squad.MainObjectives)
+            if (main.Type == MainObjectiveType.ExtractCamp && main.CanPursue(squad.MainObjectives))
+            {
+                main.CampApproach ??= new ExtractCampApproach(main);
+                return main.CampApproach.Tick(squad, this);
+            }
+        return false;
     }
 
     internal bool IsAmbushSiteAvailable(AmbushSite site, string botType)
