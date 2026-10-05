@@ -23,6 +23,7 @@ internal sealed class SniperPlan : IObjectiveWork
     private readonly Dictionary<Agent, int> _coverAttempts = new();
     private readonly NavMeshPath _path = new();
     private readonly List<Vector3> _watchDirections = new(5);
+    private readonly Dictionary<string, int> _surveyRejections = new();
     private readonly OperationRouteSearch _route = new();
     private Agent _actor;
     private MainObjective _main;
@@ -92,12 +93,21 @@ internal sealed class SniperPlan : IObjectiveWork
         }
         if (!_resolved)
         {
+            var site = new Vector3(_site.X, _site.Y, _site.Z);
+            var delta = _actor.Position - site; delta.y = 0;
+            if (_orders.ContainsKey(_actor) || delta.sqrMagnitude > 60f * 60f)
+                return ApproachSite(squad, w, site, now);
             if (!w.TryOperationWork(this)) return true;
             _nextWork = now + .15f;
             SetStatus(squad, "surveying post");
             if (!Survey(_actor.Position))
             {
-                if (_candidate >= 25) return End(squad, w, "no reachable sightline");
+                if (_candidate >= 25)
+                {
+                    var reasons = string.Join(",", _surveyRejections);
+                    Log.Info($"SNIPER SURVEY: {squad} candidates={_candidate} rejected={reasons}");
+                    return End(squad, w, "no usable post: " + reasons);
+                }
                 return true;
             }
             _resolved = true;
@@ -172,6 +182,39 @@ internal sealed class SniperPlan : IObjectiveWork
         return true;
     }
 
+    private bool ApproachSite(Squad squad, WaypointSystem w, Vector3 site, float now)
+    {
+        SetStatus(squad, "approaching site");
+        if (_orders.ContainsKey(_actor))
+        {
+            if (_actor.Objective.Status == ObjectiveStatus.Failed)
+            {
+                Release(squad, w); _route.Reset(); _nextWork = now + 2;
+                if (++_retries >= 3) return End(squad, w, "site approach failed");
+            }
+            else if (Near(_actor.Position, _leg, 2.5f) && _actor.Objective.Status == ObjectiveStatus.Finished)
+            { Release(squad, w); _route.Reset(); _retries = 0; }
+            return true;
+        }
+        if (!w.TryOperationWork(this)) return true;
+        _nextWork = now + .15f;
+        if (!_route.Find(_actor.Position, site, out _leg, out _))
+        {
+            if (_route.Pending) return true;
+            _route.Reset(); _nextWork = now + 2;
+            if (++_retries >= 3) return End(squad, w, "no advancing site approach");
+            return true;
+        }
+        foreach (var member in squad.Members)
+            if (member.IsActive && !member.SoloExtractRequested && !CorpseEscort.InFlight(member))
+                Assign(member, _leg, w, "Sniper site approach");
+        squad.Objective.Location = _orders[_actor]; squad.Objective.Status = SquadObjectiveState.Active;
+        return true;
+    }
+
+    private bool RejectSurvey(string reason)
+    { _surveyRejections.TryGetValue(reason, out var count); _surveyRejections[reason] = count + 1; return false; }
+
     private bool Survey(Vector3 origin)
     {
         var n = _candidate++;
@@ -182,12 +225,12 @@ internal sealed class SniperPlan : IObjectiveWork
         {
             // Start above the authored seed; accept only a roof in the documented elevation band.
             if (!Physics.Raycast(sample + Vector3.up * 16, Vector3.down, out var roof, 13,
-                LayersMaskController.HighPolyWithTerrainMask, QueryTriggerInteraction.Ignore)) return false;
+                LayersMaskController.HighPolyWithTerrainMask, QueryTriggerInteraction.Ignore)) return RejectSurvey("roof missing");
             sample = roof.point;
         }
         if (!NavMesh.SamplePosition(sample, out var nav, 1.5f, NavMesh.AllAreas)
             || Mathf.Abs(nav.position.y - sample.y) > 1.25f
-            || _site.Elevated && nav.position.y < _site.Y + 3) return false;
+            || _site.Elevated && nav.position.y < _site.Y + 3) return RejectSurvey("post mesh or height");
         // A usable view from the actual eye height, not a ground-level ray through a parapet.
         _pose = .5f;
         var head = nav.position + Vector3.up * 1.25f;
@@ -196,9 +239,9 @@ internal sealed class SniperPlan : IObjectiveWork
         {
             _pose = 1; head = nav.position + Vector3.up * 1.65f;
             SurveyDirections(head);
-            if (_watchDirections.Count == 0) return false;
+            if (_watchDirections.Count == 0) return RejectSurvey("sightline blocked");
         }
-        if (!NavMesh.CalculatePath(origin, nav.position, NavMesh.AllAreas, _path) || _path.status != NavMeshPathStatus.PathComplete) return false;
+        // Survey certifies the local post. The staged route search owns connectivity and stairs.
         _post = nav.position; return true;
     }
 
