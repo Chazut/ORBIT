@@ -301,6 +301,7 @@ public static class ServerConfig
     public static Orbit.Settings.MovementSettings Movement { get; private set; } = new Orbit.Settings.MovementSettings();
     public static Orbit.Settings.AmbushSettings Ambush { get; private set; } = new Orbit.Settings.AmbushSettings();
     public static Orbit.Settings.MultiStepSettings MultiStep { get; private set; } = new Orbit.Settings.MultiStepSettings();
+    public static Orbit.Settings.RushSettings Rush { get; private set; } = new();
 
     public static void ApplyMap(string mapId, string variantKey)
     {
@@ -328,6 +329,7 @@ public static class ServerConfig
         [JsonProperty("config_version")] public int ConfigVersion = 0;
         [JsonProperty("movement")] public Orbit.Settings.MovementSettings Movement = new Orbit.Settings.MovementSettings();
         [JsonProperty("ambush")] public Orbit.Settings.AmbushSettings Ambush = new Orbit.Settings.AmbushSettings();
+        [JsonProperty("rush")] public Orbit.Settings.RushSettings Rush = new();
         [JsonProperty("multi_step")] public Orbit.Settings.MultiStepSettings MultiStep = new Orbit.Settings.MultiStepSettings();
         [JsonProperty("map_overrides")] public Dictionary<string, Orbit.Settings.MapBehaviorOverride> MapOverrides = new Dictionary<string, Orbit.Settings.MapBehaviorOverride>();
         [JsonProperty("factions")] public FactionsSection Factions = new FactionsSection();
@@ -369,6 +371,7 @@ public static class ServerConfig
                 Movement = root.Movement ?? new Orbit.Settings.MovementSettings();
                 Ambush = root.Ambush ?? new Orbit.Settings.AmbushSettings();
                 MultiStep = root.MultiStep ?? new Orbit.Settings.MultiStepSettings();
+                Rush = root.Rush ?? new();
                 Factions = root.Factions ?? Factions;
                 General = root.General ?? General;
                 Loot = root.Loot ?? Loot;

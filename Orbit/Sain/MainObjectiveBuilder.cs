@@ -114,7 +114,9 @@ public static class MainObjectiveBuilder
         var ambush = ServerConfig.Ambush;
         var style = AmbushDirector.Style(squad);
         var extractChance = ambush.Allows(squad.Leader.BotCategory) && ambush.Extracts.Enabled ? style.ExtractMainChance : 0f;
-        for (var i = 0; i < count; i++)
+        var rush = isPmc && !isPlayerScav ? waypointSystem.RollRushMain(squad) : null;
+        if (rush != null) squad.MainObjectives.Add(rush);
+        for (var i = rush == null ? 0 : 1; i < count; i++)
         {
             var roll = Random.value;
             MainObjectiveType type;

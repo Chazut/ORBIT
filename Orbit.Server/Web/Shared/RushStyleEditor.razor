@@ -1,0 +1,13 @@
+<OrbitSlider T="float" @bind-Value="Cfg.Chance" Label="Opening rush chance per squad" Fmt="P0" Min="0" Max="1" Step="0.01f" />
+<OrbitSlider T="float" @bind-Value="Cfg.SpawnWeight" Label="Spawn weight" Min="0" Max="10" Step="0.5f" />
+<OrbitSlider T="float" @bind-Value="Cfg.BossWeight" Label="Boss weight" Min="0" Max="10" Step="0.5f" />
+<OrbitSlider T="float" @bind-Value="Cfg.MarkedWeight" Label="Marked weight" Min="0" Max="10" Step="0.5f" />
+<OrbitSlider T="float" @bind-Value="Cfg.CustomWeight" Label="Custom (Other) weight" Min="0" Max="10" Step="0.5f" />
+<OrbitSlider T="float" @bind-Value="Cfg.SpawnStartWindow" Label="Latest spawn rush start after raid begins" Unit="s" Min="0" Max="1200" Step="30" />
+<OrbitSlider T="float" @bind-Value="Cfg.BossStartWindow" Label="Latest boss rush start after raid begins" Unit="s" Min="0" Max="3600" Step="30" />
+<OrbitSlider T="float" @bind-Value="Cfg.MarkedStartWindow" Label="Latest marked rush start after raid begins" Unit="s" Min="0" Max="3600" Step="30" />
+<OrbitSlider T="float" @bind-Value="Cfg.CustomStartWindow" Label="Latest custom rush start after raid begins" Unit="s" Min="0" Max="3600" Step="30" />
+<OrbitSlider T="float" @bind-Value="Cfg.SearchScale" Label="Search duration multiplier" Min="0.1f" Max="5" Step="0.1f" />
+@code {
+    [Parameter, EditorRequired] public Orbit.Settings.RushStyle Cfg { get; set; } = default!;
+}

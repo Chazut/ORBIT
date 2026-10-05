@@ -21,6 +21,8 @@ public static class BehaviorValidation
         c.Ambush.Validate();
         if (c.MultiStep == null) throw new InvalidDataException("Multi-step settings must be an object.");
         c.MultiStep.Validate();
+        if (c.Rush == null) throw new InvalidDataException("Rush settings must be an object.");
+        c.Rush.Validate();
         if (c.Movement?.SprintByType == null || c.MapOverrides == null)
             throw new InvalidDataException("Movement and map overrides must be objects.");
         foreach (var pair in c.Movement.SprintByType)

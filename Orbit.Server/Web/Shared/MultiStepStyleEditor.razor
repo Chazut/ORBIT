@@ -1,7 +1,7 @@
 <OrbitSlider T="float" @bind-Value="Cfg.LootMainChance" Label="Replace a loot main with a multi-step operation" Fmt="P0" Min="0" Max="1" Step="0.01f"
              Tooltip="Rolled once when generating each loot main. The existing quest/kill/loot mix and number of mains stay the same. If no chain is available, use a normal loot main." />
 <OrbitSlider T="float" @bind-Value="Cfg.ExtractionChance" Label="Choose a prepared extraction" Fmt="P0" Min="0" Max="1" Step="0.01f"
-             Tooltip="One roll when the squad decides to extract. Only eligible exits on this map are considered. Failure returns to ordinary extraction." />
+             Tooltip="One roll when the squad decides to extract. Only eligible exits on this map are considered. On Reserve, if no ordinary exit is usable, an enabled extraction chain is chosen regardless of this chance. Failed Reserve routes can be retried after 30 seconds." />
 <OrbitSlider T="float" @bind-Value="Cfg.DisableAlarmChance" Label="Disable KIBA alarm before entry" Fmt="P0" Min="0" Max="1" Step="0.01f" />
 
 @code {

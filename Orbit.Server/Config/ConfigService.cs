@@ -93,6 +93,16 @@ public class ConfigService(ISptLogger<ConfigService> logger)
             defaults["map_overrides"] = maps.DeepClone();
             supplied.Remove("map_overrides");
         }
+        // Rush catalogues contain authored map/variant keys and complete point lists.
+        // Do not drop new variants or restore deleted points through the fixed-setting merge.
+        if (supplied["rush"] is System.Text.Json.Nodes.JsonObject rush
+            && rush.TryGetPropertyValue("maps", out var rushMaps))
+        {
+            if (rushMaps is not System.Text.Json.Nodes.JsonObject)
+                throw new InvalidDataException("Rush maps must be an object.");
+            defaults["rush"]!["maps"] = rushMaps.DeepClone();
+            rush.Remove("maps");
+        }
         Merge(defaults, supplied);
         var parsed = JsonSerializer.Deserialize<OrbitServerConfig>(defaults.ToJsonString(), _jsonOptions)
             ?? throw new InvalidDataException("Empty config.");

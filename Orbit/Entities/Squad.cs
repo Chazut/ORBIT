@@ -18,8 +18,10 @@ public class Squad(int id, float[] taskScores, int targetMembersCount) : Entity(
     internal readonly Orbit.Systems.CorpseEscort CorpseEscort = new();
     internal readonly Orbit.Systems.CampPlan Camp = new();
     internal Orbit.Systems.OperationPlan Operation;
+    internal Orbit.Systems.RushPlan Rush;
     internal bool OperationExtractRolled;
     internal bool OperationExtractCommitted;
+    internal float OperationExtractRetryAt;
     internal readonly HashSet<string> FailedOperationExits = new();
     public readonly int TargetMembersCount = targetMembersCount;
 

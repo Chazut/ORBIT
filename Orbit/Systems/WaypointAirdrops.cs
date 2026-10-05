@@ -52,7 +52,7 @@ public partial class WaypointSystem
         if (_landedAirdrops.Count == 0 || agent.IsDormant || !agent.IsActive || squad == null
             || squad.ExtractRequested || agent.SoloExtractRequested || squad.CombatCallerMemberIdx >= 0
             || Time.time < squad.GhostFightUntil || squad.Camp.Active || squad.Camp.PendingAirdrop != null
-            || squad.Operation?.Active == true || squad.CorpseEscort.Active
+            || (squad.Operation?.Active == true || MainObjective.HasPendingRush(squad.MainObjectives)) || squad.CorpseEscort.Active
             || agent.Bot?.Memory?.HaveEnemy == true || agent.Bot?.Memory?.IsUnderFire == true
             || agent.Bot?.LookSensor == null || agent.Player == null
             || agent.Objective.Location?.IsAirdrop == true || agent.Objective.Location?.Category == WaypointCategory.Corpse

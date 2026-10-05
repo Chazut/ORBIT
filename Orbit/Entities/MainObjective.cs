@@ -25,6 +25,7 @@ public enum MainObjectiveType
     ExtractCamp,
     /// <summary>A persistent chain of world interactions, counted as one main objective.</summary>
     MultiStep,
+    Rush,
 }
 
 /// <summary>
@@ -36,6 +37,7 @@ public enum MainObjectiveType
 public class MainObjective
 {
     internal Orbit.Systems.OperationPlan Operation;
+    internal Orbit.Systems.RushPlan Rush;
     public MainObjectiveType Type;
     /// <summary>Grid anchor — used by the force-attraction formula.</summary>
     public Vector2Int CellCoords;
@@ -57,11 +59,20 @@ public class MainObjective
     public bool CanPursue(IReadOnlyList<MainObjective> mains)
     {
         if (Completed) return false;
+        if (Type != MainObjectiveType.Rush && HasPendingRush(mains)) return false;
         if (Type != MainObjectiveType.ExtractCamp) return true;
         if (mains != null)
             for (var i = 0; i < mains.Count; i++)
                 if (!mains[i].Completed && mains[i].Type != MainObjectiveType.ExtractCamp) return false;
         return true;
+    }
+
+    public static bool HasPendingRush(IReadOnlyList<MainObjective> mains)
+    {
+        if (mains != null)
+            for (var i = 0; i < mains.Count; i++)
+                if (!mains[i].Completed && mains[i].Type == MainObjectiveType.Rush) return true;
+        return false;
     }
 
     public static bool HasPendingExtractCamp(IReadOnlyList<MainObjective> mains)

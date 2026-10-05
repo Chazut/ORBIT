@@ -27,7 +27,7 @@ internal sealed class OperationPlan
     private readonly HashSet<int> _attemptedLoot = new();
     private Agent _actor;
     private float _lastTick, _elapsed, _nextWork, _interactionAt, _regroupAt = -1;
-    private int _retries, _powerRetries;
+    private int _retries, _interactionRetries, _powerRetries;
     private bool _paused, _interactionPending;
     private Vector3 _anchor;
     private Waypoint _loot;
@@ -121,6 +121,7 @@ internal sealed class OperationPlan
             if (!waypoints.TryOperationPoint(_actor, step, _route, out _anchor, out var final))
             {
                 if (_route.Pending) return true;
+                if (TryNearbySwitch(squad, waypoints, "no complete path")) return true;
                 Log.Info($"MULTISTEP ROUTE: {squad} operation={Definition.Id} step={step.Label} from={_actor.Position} target={step.Position} samples={_route.Samples} partial={_route.PartialPaths} invalid={_route.InvalidPaths} attempt={_retries + 1}");
                 _actor = null;
                 _nextWork = now + 3f;
@@ -132,7 +133,7 @@ internal sealed class OperationPlan
                 Log.Info($"MULTISTEP ROUTE: {squad} operation={Definition.Id} step={step.Label} approach={_anchor} target={step.Position}");
             waypoints.CollectCorpseEscortCover(_anchor, _covers);
             _occupied.Clear();
-            SetOrder(_actor, Point(waypoints, _anchor, step.Label), waypoints);
+            SetOrder(_actor, Point(waypoints, _anchor, step.Label, _approachOnly ? 2f : 1f), waypoints);
             if (Main != null) { Main.Position = step.Position; Main.CellCoords = waypoints.WorldToCell(step.Position); }
             squad.Objective.Location = _orders[_actor];
             squad.Objective.Status = SquadObjectiveState.Active;
@@ -153,24 +154,25 @@ internal sealed class OperationPlan
             else SetOrder(member, Point(waypoints, _anchor, "Follow " + step.Label), waypoints);
             break;
         }
+        // BSG may stop just outside a one-metre anchor. Finish an approach leg before
+        // counting that as a route failure, then recalculate the remaining local path.
+        if (_approachOnly && (_actor.Position - _anchor).sqrMagnitude <= 4f)
+        {
+            ReleaseOrders(squad, waypoints);
+            _actor = null;
+            _retries = 0;
+            _route.Reset();
+            return true;
+        }
         if (_actor.Objective.Status == ObjectiveStatus.Failed)
         {
+            if (TryNearbySwitch(squad, waypoints, "arrival failed")) return true;
             ReleaseOrders(squad, waypoints);
             _actor = null;
             if (++_retries >= 3) return End(squad, waypoints, "operator route failed");
             return true;
         }
-        if (_approachOnly)
-        {
-            if ((_actor.Position - _anchor).sqrMagnitude <= 4f)
-            {
-                ReleaseOrders(squad, waypoints);
-                _actor = null;
-                _retries = 0;
-                _route.Reset();
-            }
-            return true;
-        }
+        if (_approachOnly) return true;
         if (step.Kind == OperationStepKind.Loot) return TickLoot(squad, waypoints);
         if (step.Kind == OperationStepKind.Extract) return TickExtract(squad, waypoints);
         if (step.Kind == OperationStepKind.Wait)
@@ -189,15 +191,34 @@ internal sealed class OperationPlan
             return Advance(squad, waypoints);
         }
         if ((_actor.Position - _anchor).sqrMagnitude > 1f) return true;
+        return Interact(squad, waypoints);
+    }
+
+    private bool TryNearbySwitch(Squad squad, WaypointSystem waypoints, string reason)
+    {
+        if (Current.Kind != OperationStepKind.Switch || Current.Object is not Switch sw
+            || !OperationSwitchReach.CanReach(_actor.Position, sw)) return false;
+        // Use the native interaction, including linked power, gate and extraction callbacks.
+        // Assigning DoorState directly would show an open lever without powering its circuit.
+        Interact(squad, waypoints, reason);
+        return true;
+    }
+
+    private bool Interact(Squad squad, WaypointSystem waypoints, string recovery = null)
+    {
+        var step = Current;
+        var now = Time.time;
         if (_interactionPending && now - _interactionAt < 5f) return true;
         if (step.Object.DoorState == EDoorState.Interacting || step.Object.InteractingPlayer != null)
             return true;
         if (!step.Object.Operatable) return true;
         if (step.Object is Door door && !MultiStepAccess.HasPower(door)) return true;
         if (step.Object is Switch sw && sw.DoorState == EDoorState.Locked) return true;
-        if (++_retries > 3) return End(squad, waypoints, "interaction failed");
+        if (++_interactionRetries > 3) return End(squad, waypoints, "interaction failed");
         try
         {
+            if (recovery != null)
+                Log.Info($"MULTISTEP SWITCH: {squad} operation={Definition.Id} step={step.Label} nearby recovery reason={recovery} distance={Vector3.Distance(_actor.Position, step.Position):F2}m");
             _actor.Look.Target = step.Object.transform.position;
             if (step.Object is Door locked && locked.DoorState == EDoorState.Locked)
             {
@@ -277,7 +298,7 @@ internal sealed class OperationPlan
     {
         ReleaseOrders(squad, waypoints);
         Index = index;
-        _actor = null; _loot = null; _elapsed = 0; _regroupAt = -1; _retries = 0; _interactionPending = false;
+        _actor = null; _loot = null; _elapsed = 0; _regroupAt = -1; _retries = 0; _interactionRetries = 0; _interactionPending = false;
         _route.Reset(); _approachOnly = false;
         _attemptedLoot.Clear();
         Status = "approach";
@@ -295,8 +316,8 @@ internal sealed class OperationPlan
         return false;
     }
 
-    private static Waypoint Point(WaypointSystem waypoints, Vector3 position, string name)
-        => new(waypoints.NewRuntimeWaypointId(), WaypointCategory.Synthetic, name, position, 1f, new(), new(), null);
+    private static Waypoint Point(WaypointSystem waypoints, Vector3 position, string name, float radius = 1f)
+        => new(waypoints.NewRuntimeWaypointId(), WaypointCategory.Synthetic, name, position, radius, new(), new(), null);
 
     private void SetOrder(Agent agent, Waypoint target, WaypointSystem waypoints)
     {

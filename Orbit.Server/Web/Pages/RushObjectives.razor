@@ -1,0 +1,180 @@
+@page "/orbit/rush"
+@layout Orbit.Server.Web.Shared.MainLayout
+@inherits Orbit.Server.Web.OrbitConfigPage
+@using Orbit.Settings
+@using Orbit.Zones
+@using Orbit.Server.Zones
+@using System.Globalization
+
+<PageTitle>ORBIT: Rush objectives</PageTitle>
+<MudContainer MaxWidth="MaxWidth.ExtraLarge">
+    <PageHeader Title="Rush objectives" OnReset="@(() => { Cfg.Rush = new(); _selected = null; })"
+        Description="One optional opening main per PMC squad, rolled after its personality resolves. Combat pauses it; extraction takes priority. PlayerScavs never rush. Save to apply next raid. Rush settings and map points travel with configuration/full presets and addons." />
+    <SettingsCard Title="Opening priority">
+        <OrbitSwitch @bind-Value="Cfg.Rush.Enabled" Label="Enable rush objectives" />
+        <OrbitSlider T="float" @bind-Value="Cfg.Rush.TravelTimeout" Label="Travel timeout per sector" Unit="s" Min="30" Max="1800" Step="30" />
+        <OrbitSlider T="float" @bind-Value="Cfg.Rush.OwnSpawnExclusion" Label="Distance outside own spawn sector" Unit="m" Min="10" Max="500" Step="10" />
+        <OrbitSlider T="int" @bind-Value="Cfg.Rush.SpawnSectors" Label="Maximum sectors per spawn rush" Min="1" Max="10" Step="1" />
+        <OrbitSlider T="float" @bind-Value="Cfg.Rush.SpawnDeadline" Label="End all spawn rushes after raid begins" Unit="s" Min="30" Max="1200" Step="30" />
+    </SettingsCard>
+    <MudTabs Elevation="0" Rounded="true" PanelClass="pt-4" Color="Color.Primary">
+        <MudTabPanel Text="Timmy"><SettingsCard Title="Timmy"><RushStyleEditor Cfg="Cfg.Rush.Timmy" /></SettingsCard></MudTabPanel>
+        <MudTabPanel Text="Cautious"><SettingsCard Title="Cautious"><RushStyleEditor Cfg="Cfg.Rush.Cautious" /></SettingsCard></MudTabPanel>
+        <MudTabPanel Text="Average"><SettingsCard Title="Average"><RushStyleEditor Cfg="Cfg.Rush.Average" /></SettingsCard></MudTabPanel>
+        <MudTabPanel Text="Aggressive"><SettingsCard Title="Aggressive"><RushStyleEditor Cfg="Cfg.Rush.Aggressive" /></SettingsCard></MudTabPanel>
+        <MudTabPanel Text="Very aggressive"><SettingsCard Title="Very aggressive"><RushStyleEditor Cfg="Cfg.Rush.VeryAggressive" /></SettingsCard></MudTabPanel>
+    </MudTabs>
+    <SettingsCard Title="Map targets" Subtitle="Native suggestions are possible SPT spawn sectors and marked doors. Custom spawners can use different locations. Several squads can choose the same target. Boss searches ignore whether the boss actually spawned and visit sites in travel-distance order.">
+        <MudSelect T="string" Value="_map" ValueChanged="SelectMap" Label="Map / layout" Variant="Variant.Outlined" Margin="Margin.Dense">
+            @foreach (var id in MapViews.Views.Keys)
+            { <MudSelectItem Value="@id">@ZoneStoreService.MapLabels.GetValueOrDefault(id, id)</MudSelectItem> }
+        </MudSelect>
+        <MudSelect T="string" @bind-Value="_floor" Label="Display floor" Variant="Variant.Outlined" Margin="Margin.Dense">
+            <MudSelectItem Value="@("*")">All floors</MudSelectItem>
+            @foreach (var floor in Floors) { <MudSelectItem Value="@floor.Id">@floor.Name</MudSelectItem> }
+        </MudSelect>
+        <MudTabs ActivePanelIndex="_tab" ActivePanelIndexChanged="SelectTab" Color="Color.Primary" Class="my-3">
+            <MudTabPanel Text="Spawn" /><MudTabPanel Text="Boss" /><MudTabPanel Text="Marked" /><MudTabPanel Text="Other" />
+        </MudTabs>
+        <MudStack Row="true" Class="mb-3" Wrap="Wrap.Wrap">
+            <MudButton Disabled="@(Kind == "Boss" && !Bosses.Any())" OnClick="@(() => { _placing = true; _moving = false; })" Variant="Variant.Filled" Color="Color.Primary">Add point on map</MudButton>
+            <MudButton OnClick="RestoreSuggestions" Variant="Variant.Outlined">Restore native suggestions for this tab</MudButton>
+            <MudSwitch T="bool" @bind-Value="_preview" Color="Color.Primary" Label="Preview connections" />
+        </MudStack>
+        @if (_placing || _moving)
+        { <MudAlert Severity="Severity.Info" Class="mb-2">Click the map to @(_moving ? "move the selected point" : "place a point"). New points use a suggested height for the selected floor; you can adjust it below. <MudButton OnClick="@(() => { _placing = _moving = false; })">Cancel</MudButton></MudAlert> }
+        @if (_preview) { <MudText Typo="Typo.caption">Dotted connections show the catalogue only. The game calculates the next sector from actual reachable path lengths.</MudText> }
+        <div style="overflow:auto;max-height:620px;border:1px solid #334155;background:#090f18">
+            <svg width="1000" height="@F(Height)" viewBox="@($"0 0 1000 {F(Height)}")" @onclick="MapClick" style="display:block;cursor:crosshair">
+                <ZoneFloorBackground MapId="@_map" Floor="Background" View="View" Height="Height" />
+                @if (_preview)
+                {
+                    var points = Visible.ToList();
+                    for (var i = 1; i < points.Count; i++)
+                    {
+                        var a = ToMap(points[i - 1].X, points[i - 1].Z); var b = ToMap(points[i].X, points[i].Z);
+                        <line x1="@F(a.x)" y1="@F(a.y)" x2="@F(b.x)" y2="@F(b.y)" stroke="#94a3b8" stroke-dasharray="5 7" opacity=".45" />
+                    }
+                }
+                @foreach (var point in Visible)
+                {
+                    var p = ToMap(point.X, point.Z); var color = point.Enabled ? point.Id == _selected ? "#fff" : "#ffb74d" : "#64748b";
+                    <g @onclick="@(() => SelectPoint(point.Id))" @onclick:stopPropagation="true" style="cursor:pointer">
+                        <circle cx="@F(p.x)" cy="@F(p.y)" r="@F(point.Radius * Scale)" fill="@color" fill-opacity=".08" stroke="@color" stroke-opacity=".4" />
+                        <circle cx="@F(p.x)" cy="@F(p.y)" r="6" fill="@color"><title>@point.Name (@point.Kind), height @F(point.Y) m</title></circle>
+                    </g>
+                    @if (point.Kind == "Marked" && point.Id == _selected)
+                    {
+                        var loot = ToMap(point.LootX, point.LootZ);
+                        <line x1="@F(p.x)" y1="@F(p.y)" x2="@F(loot.x)" y2="@F(loot.y)" stroke="#34d399" />
+                        <circle cx="@F(loot.x)" cy="@F(loot.y)" r="@F(point.Radius * Scale)" fill="#34d399" fill-opacity=".2" stroke="#34d399"><title>Room loot area</title></circle>
+                    }
+                }
+            </svg>
+        </div>
+        <MudSelect T="string" @bind-Value="_selected" Label="Selected point" Variant="Variant.Outlined" Margin="Margin.Dense">
+            @foreach (var point in Points.Where(p => p.Kind == Kind)) { <MudSelectItem Value="@point.Id">@point.Name @(point.Enabled ? "" : "(disabled)")</MudSelectItem> }
+        </MudSelect>
+        @if (Selected is { } selected)
+        {
+            <MudTextField @bind-Value="selected.Name" Label="Name" Immediate="true" />
+            <OrbitSwitch @bind-Value="selected.Enabled" Label="Enabled" />
+            <MudStack Row="true" Wrap="Wrap.Wrap">
+                <MudNumericField T="float" Immediate="true" @bind-Value="selected.X" Label="X" Step="1" />
+                <MudNumericField T="float" Immediate="true" @bind-Value="selected.Y" Label="Height (Y)" Step="0.1f" />
+                <MudNumericField T="float" Immediate="true" @bind-Value="selected.Z" Label="Z" Step="1" />
+            </MudStack>
+            <MudSelect T="string" @bind-Value="selected.FloorId" Label="Floor label (coordinates determine navigation)">
+                <MudSelectItem Value="@((string?)null)">Automatic from height</MudSelectItem>
+                @foreach (var floor in Floors) { <MudSelectItem Value="@floor.Id">@floor.Name</MudSelectItem> }
+            </MudSelect>
+            <OrbitSlider T="float" @bind-Value="selected.Radius" Label="Search / loot radius" Unit="m" Min="1" Max="200" Step="1" />
+            <OrbitSlider T="float" @bind-Value="selected.SearchSeconds" Label="Search / loot duration" Unit="s" Min="1" Max="600" Step="1" />
+            <OrbitSlider T="float" @bind-Value="selected.Weight" Label="@(Kind == "Spawn" ? "Sector eligibility (zero disables)" : "Selection weight (zero disables)")" Min="0" Max="10" Step="0.5f" />
+            @if (Kind == "Boss")
+            {
+                <MudSelect T="string" @bind-Value="selected.Boss" Label="Resident boss">
+                    @foreach (var boss in Bosses) { <MudSelectItem Value="@boss">@boss</MudSelectItem> }
+                </MudSelect>
+            }
+            @if (Kind == "Marked")
+            {
+                <MudTextField @bind-Value="selected.DoorId" Label="Exact scene door ID" />
+                <MudText Typo="Typo.caption">The PMC approaches this door's real interaction point and unlocks it with 100% success. Power-controlled doors cannot be bypassed.</MudText>
+                <MudStack Row="true" Wrap="Wrap.Wrap">
+                    <MudNumericField T="float" Immediate="true" @bind-Value="selected.LootX" Label="Room loot X" />
+                    <MudNumericField T="float" Immediate="true" @bind-Value="selected.LootY" Label="Room loot height" />
+                    <MudNumericField T="float" Immediate="true" @bind-Value="selected.LootZ" Label="Room loot Z" />
+                </MudStack>
+            }
+            <MudStack Row="true" Class="mt-3" Wrap="Wrap.Wrap">
+                <MudButton OnClick="@(() => { _moving = true; _placing = false; })" Variant="Variant.Outlined">Move on map</MudButton>
+                <MudButton OnClick="Duplicate" Variant="Variant.Outlined">Duplicate</MudButton>
+                <MudButton OnClick="Remove" Color="Color.Error">Delete point</MudButton>
+            </MudStack>
+        }
+    </SettingsCard>
+</MudContainer>
+
+@code {
+    private string _map = "bigmap", _floor = "*";
+    private string? _selected;
+    private int _tab;
+    private bool _placing, _moving, _preview;
+    private static readonly string[] Kinds = ["Spawn", "Boss", "Marked", "Custom"];
+    private string Kind => Kinds[_tab];
+    private List<RushPoint> Points => Cfg.Rush.Points(_map);
+    private RushPoint? Selected => Points.FirstOrDefault(p => p.Id == _selected);
+    private MapView View => MapViews.Views[_map];
+    private MapFloor[] Floors => FloorCatalog.For(_map)!.Floors;
+    private MapFloor Background => Floors.FirstOrDefault(f => f.Id == _floor) ?? Floors[0];
+    private float Scale => 1000 / MathF.Abs(MapViews.Rot(View.X2, View.Z2, View.Rot).x - MapViews.Rot(View.X1, View.Z1, View.Rot).x);
+    private float Height => MathF.Abs(MapViews.Rot(View.X2, View.Z2, View.Rot).z - MapViews.Rot(View.X1, View.Z1, View.Rot).z) * Scale;
+    private IEnumerable<RushPoint> Visible => Points.Where(p => p.Kind == Kind && (_floor == "*" || FloorCatalog.Matches(_map, _floor, p.X, p.Y, p.Z)));
+    private IEnumerable<string> Bosses => new[] { "bossBully", "bossKilla", "bossTagilla", "bossKojaniy", "bossGluhar", "bossSanitar", "bossBoar", "bossKolontay", "bossZryachiy", "bossKillaAgro", "bossTagillaAgro" }.Where(b => RushDefaults.IsResident(_map, b));
+    private static string F(float n) => n.ToString("0.###", CultureInfo.InvariantCulture);
+    private (float x, float y) ToMap(float x, float z)
+    {
+        var a = MapViews.Rot(View.X1, View.Z1, View.Rot); var b = MapViews.Rot(View.X2, View.Z2, View.Rot); var p = MapViews.Rot(x, z, View.Rot);
+        return ((p.x - MathF.Min(a.x, b.x)) * Scale, (MathF.Max(a.z, b.z) - p.z) * Scale);
+    }
+    private void SelectMap(string map) { _map = map; EditablePoints(); _floor = "*"; _selected = null; _placing = _moving = false; }
+    private void SelectTab(int tab) { _tab = tab; _selected = null; _placing = _moving = false; }
+    private void SelectPoint(string id) { _selected = id; _placing = _moving = false; }
+    private List<RushPoint> EditablePoints()
+    {
+        if (!Cfg.Rush.Maps.ContainsKey(_map)) Cfg.Rush.Maps[_map] = Points.Select(p => p.Copy()).ToList();
+        return Cfg.Rush.Maps[_map];
+    }
+    private void MapClick(MouseEventArgs e)
+    {
+        if (!_placing && !_moving) return;
+        var a = MapViews.Rot(View.X1, View.Z1, View.Rot); var b = MapViews.Rot(View.X2, View.Z2, View.Rot);
+        var p = MapViews.Rot((float)e.OffsetX / Scale + MathF.Min(a.x, b.x), MathF.Max(a.z, b.z) - (float)e.OffsetY / Scale, -View.Rot);
+        var points = EditablePoints();
+        var point = _moving ? points.FirstOrDefault(x => x.Id == _selected) : new RushPoint { Id = Guid.NewGuid().ToString("N"), Name = Kind + " point", Kind = Kind, Boss = Bosses.FirstOrDefault() ?? "", FloorId = _floor == "*" ? null : _floor };
+        if (point == null) return;
+        if (_placing)
+        {
+            point.Y = RushPointPlacement.SuggestHeight(_map, Background.Id, p.x, p.z);
+            point.LootY = point.Y;
+            points.Add(point);
+        }
+        var dx = p.x - point.X; var dz = p.z - point.Z;
+        point.X = p.x; point.Z = p.z; point.LootX += dx; point.LootZ += dz;
+        _selected = point.Id; _placing = _moving = false;
+    }
+    private void Duplicate()
+    {
+        if (Selected == null) return;
+        var copy = Selected.Copy(); copy.Id = Guid.NewGuid().ToString("N"); copy.Name += " copy";
+        EditablePoints().Add(copy); _selected = copy.Id;
+    }
+    private void Remove() { EditablePoints().RemoveAll(p => p.Id == _selected); _selected = null; }
+    private void RestoreSuggestions()
+    {
+        var points = EditablePoints(); var defaults = new RushSettings().Points(_map);
+        points.RemoveAll(p => p.Kind == Kind && defaults.Any(d => d.Id == p.Id));
+        points.AddRange(defaults.Where(p => p.Kind == Kind).Select(p => p.Copy())); _selected = null;
+    }
+}

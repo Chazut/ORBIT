@@ -148,7 +148,12 @@ public static class OrbitTelemetry
         if (loc?.IsAirdrop == true) category = "AirdropLoot";
         if (agent.Squad?.Camp.Owns(agent) == true)
             category = agent.Squad.Camp.Looter == agent ? "AirdropLoot" : "Ambush" + agent.Squad.Camp.Site.Kind;
-        if (agent.Squad?.Operation?.Owns(agent) == true)
+        if (agent.Squad?.Rush?.Owns(agent) == true)
+        {
+            var rush = agent.Squad.Rush;
+            category = $"{rush.Name}: {rush.Step} ({rush.Status})";
+        }
+        else if (agent.Squad?.Operation?.Owns(agent) == true)
         {
             var operation = agent.Squad.Operation;
             category = $"MultiStep: {operation.Definition.Name} ({operation.Index + 1}/{operation.Count}) {operation.Current.Label}";
@@ -280,12 +285,13 @@ public static class OrbitTelemetry
                     Y = m.Position.y,
                     Z = m.Position.z,
                     Completed = m.Completed,
-                    OperationId = m.Operation?.Definition.Id,
-                    OperationName = m.Operation?.Definition.Name,
-                    OperationStep = m.Operation?.Current.Label,
-                    OperationStepIndex = m.Operation == null ? 0 : m.Operation.Index + 1,
-                    OperationStepCount = m.Operation?.Count ?? 0,
-                    OperationState = m.Operation?.Status,
+                    OperationId = m.Operation?.Definition.Id ?? m.Rush?.Kind,
+                    OperationName = m.Operation?.Definition.Name ?? m.Rush?.Name,
+                    OperationStep = m.Operation?.Current.Label ?? m.Rush?.Step,
+                    OperationStepIndex = m.Operation != null ? m.Operation.Index + 1 : m.Rush != null ? System.Math.Min(m.Rush.Index + 1, m.Rush.Count) : 0,
+                    OperationStepCount = m.Operation?.Count ?? m.Rush?.Count ?? 0,
+                    OperationState = m.Operation?.Status ?? m.Rush?.Status,
+                    RushPoints = m.Rush?.Snapshot(),
                     KillAmbush = m.KillAmbush,
                     CampStartedAt = m.CampStartedAt,
                     CampElapsed = m.CampElapsed,
@@ -368,13 +374,14 @@ public class OrbitMainObjective
     public string AirdropStage;
     public string AirdropId;
     public bool AirdropLanded;
+    public OrbitRushPoint[] RushPoints;
     public string OperationId;
     public string OperationName;
     public string OperationStep;
     public int OperationStepIndex;
     public int OperationStepCount;
     public string OperationState;
-    /// <summary>"Kills" | "LootValue" | "Quest" | "ExtractCamp" | "MultiStep".</summary>
+    /// <summary>"Kills" | "LootValue" | "Quest" | "ExtractCamp" | "MultiStep" | "Rush".</summary>
     public string Type;
     public int CellX;
     public int CellY;
@@ -442,4 +449,11 @@ public class OrbitGhostHearingState
     public float SuppressedRange;
     public float MinimumDistance;
     public string State;
+}
+
+public sealed class OrbitRushPoint
+{
+    public string Id, Name, State;
+    public float X, Y, Z, Radius;
+    public int Sequence;
 }

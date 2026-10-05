@@ -185,6 +185,7 @@ public partial class WaypointSystem
         }
 
         InitializeOperations();
+        InitializeRush();
         Log.Debug("Populating cells with synthetic waypoints");
         _validCellQueue = new Queue<Vector2Int>();
         for (var x = 0; x < _gridSize.x; x++)

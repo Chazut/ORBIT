@@ -68,6 +68,7 @@ public class CorpseRegistrationPatch : ModulePatch
             );
 
             manager.WaypointSystem.AddRuntimeWaypoint(loc);
+            manager.WaypointSystem.RegisterRushCorpse(__result, __instance?.Profile?.Info?.Settings?.Role.ToString());
             var victimName = __instance?.Profile?.Info?.Nickname ?? "?";
             var victimProfileId = __instance?.Profile?.Id;
             Log.Debug($"CorpseRegistration: registered Corpse waypoint {loc} for victim {victimName} at ({pos.x:F2},{pos.y:F2},{pos.z:F2})");

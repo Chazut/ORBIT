@@ -170,7 +170,7 @@ public partial class WaypointSystem
         if (site.Kind == CampSiteKind.Hotspot)
             return site.Generation == _campGeneration && (site.Scope == null || site.Scope.Allows(botType));
         if (site.Kind == CampSiteKind.Airdrop) return site.Drop != null && Time.time < site.ExpiresAt;
-        if (site.Exfil?.Target is not ExfiltrationPoint exit) return false;
+        if (site.Exfil?.Target is not ExfiltrationPoint exit || !ExtractCampEligibility.Allows(exit)) return false;
         // Camping is distinct from extracting: an enemy's active exit is a valid ambush target.
         return exit.Status is EExfiltrationStatus.RegularMode or EExfiltrationStatus.Countdown;
     }

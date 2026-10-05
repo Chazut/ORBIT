@@ -101,10 +101,20 @@ public partial class WaypointSystem
                 squad.OperationExtractRolled = true;
                 squad.OperationExtractCommitted = UnityEngine.Random.value < OperationStyle(squad).ExtractionChance;
             }
-            if (!squad.OperationExtractCommitted) return false;
+            var reserveFallback = string.Equals(_mapId, "RezervBase", System.StringComparison.OrdinalIgnoreCase)
+                && squad.Leader?.BotCategory == "PMC";
+            // Reserve has no unconditional PMC exit. A failed personality roll must not
+            // strand a departing squad when no active exit or no-backpack route is usable.
+            if (!squad.OperationExtractCommitted
+                && (!reserveFallback || Time.time < squad.OperationExtractRetryAt
+                    || FindNearestEligibleExfil(squad) != null)) return false;
+            var forced = !squad.OperationExtractCommitted;
             var definition = PickOperation(squad, true);
             if (definition != null)
             {
+                squad.OperationExtractCommitted = true;
+                if (forced)
+                    Log.Info($"MULTISTEP EXTRACT: {squad} Reserve fallback operation={definition.Id} reason=no usable exit; personality roll overridden");
                 squad.Operation = new OperationPlan(definition, false);
                 var marker = new MainObjective { Type = MainObjectiveType.MultiStep, Operation = squad.Operation,
                     Position = squad.Operation.Current.Position, CellCoords = WorldToCell(squad.Operation.Current.Position) };
@@ -112,7 +122,20 @@ public partial class WaypointSystem
                 squad.MainObjectives ??= new List<MainObjective>();
                 squad.MainObjectives.Add(marker);
             }
-            else squad.OperationExtractCommitted = false;
+            else
+            {
+                squad.OperationExtractCommitted = false;
+                if (reserveFallback)
+                {
+                    // Try the other exit first. After exhausting both, allow a later attempt
+                    // from a new position/world state instead of blacklisting them forever.
+                    squad.OperationExtractRetryAt = Time.time + 30f;
+                    var retry = squad.FailedOperationExits.Remove("d2");
+                    retry |= squad.FailedOperationExits.Remove("hermetic");
+                    if (retry)
+                        Log.Info($"MULTISTEP EXTRACT: {squad} Reserve routes exhausted; retry in 30s");
+                }
+            }
         }
         else if (squad.MainObjectives != null)
         {
@@ -144,17 +167,18 @@ public partial class WaypointSystem
         return search.Find(actor.Position, target, out point, out final);
     }
 
-    internal Waypoint OperationLoot(Agent agent, Vector3 center, HashSet<int> attempted, out bool exhausted)
+    internal Waypoint OperationLoot(Agent agent, Vector3 center, HashSet<int> attempted, out bool exhausted, float radius = 15f)
     {
         exhausted = true;
         var coords = WorldToCell(center);
         var paths = 0;
-        for (var x = Mathf.Max(0, coords.x - 1); x <= Mathf.Min(_gridSize.x - 1, coords.x + 1); x++)
-        for (var y = Mathf.Max(0, coords.y - 1); y <= Mathf.Min(_gridSize.y - 1, coords.y + 1); y++)
+        var cellRadius = Mathf.Max(1, Mathf.CeilToInt(radius / _cellSize));
+        for (var x = Mathf.Max(0, coords.x - cellRadius); x <= Mathf.Min(_gridSize.x - 1, coords.x + cellRadius); x++)
+        for (var y = Mathf.Max(0, coords.y - cellRadius); y <= Mathf.Min(_gridSize.y - 1, coords.y + cellRadius); y++)
             foreach (var point in _cells[x, y].Waypoints)
             {
                 if (point.Category is not (WaypointCategory.ContainerLoot or WaypointCategory.LooseLoot)
-                    || (point.Position - center).sqrMagnitude > 225f || Mathf.Abs(point.Position.y - center.y) > 2.5f
+                    || (point.Position - center).sqrMagnitude > radius * radius || Mathf.Abs(point.Position.y - center.y) > 2.5f
                     || attempted.Contains(point.Id) || agent.Squad.CompletedPoiIds.Contains(point.Id)
                     || IsClaimedByOther(point.Id, agent.Id)
                     || !Orbit.Tasks.Actions.GotoObjectiveAction.IsLootableForAgent(agent, point)) continue;

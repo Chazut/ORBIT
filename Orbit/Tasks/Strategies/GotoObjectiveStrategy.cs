@@ -64,7 +64,10 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
     public override void Deactivate(Entity entity)
     {
         if (entity is Squad operatingSquad)
+        {
+            operatingSquad.Rush?.End(operatingSquad, waypointSystem, "strategy deactivated");
             operatingSquad.Operation?.End(operatingSquad, waypointSystem, "strategy deactivated");
+        }
         if (entity is Squad campingSquad) campingSquad.Camp.End(campingSquad, "strategy deactivated");
         if (entity is Squad squad) squad.CorpseEscort.End(squad, waypointSystem, "strategy deactivated");
         // Return any assignments before deactivating.
@@ -222,6 +225,11 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
 
             RaidTimeExtraction.Check(squad);
 
+            if (waypointSystem.TickRush(squad, SquadAnyMemberInCombat(squad)))
+            {
+                UpdateAgents(squad, out _);
+                continue;
+            }
             if (waypointSystem.TickOperation(squad, SquadAnyMemberInCombat(squad)))
             {
                 UpdateAgents(squad, out _);
@@ -783,7 +791,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
 
             if (squad.CorpseEscort.UpdateMember(squad, agent, i, waypointSystem)) continue;
             if (squad.Camp.PendingAirdrop != null || squad.Camp.Owns(agent)) continue;
-            if (squad.Operation?.Owns(agent) == true) continue;
+            if (squad.Operation?.Owns(agent) == true || squad.Rush?.Owns(agent) == true) continue;
 
             // An agent is "aligned" with the squad if their location IS the squad's main objective, OR if
             // they're working a splinter that was picked around the squad's current main objective. Without
@@ -1212,6 +1220,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
             var main = squad.MainObjectives[i];
             if (main.Completed) continue;
             allDone = false;
+            if (!main.CanPursue(squad.MainObjectives)) continue;
             CheckMainCompletion(squad, main, now);
             // Bump the revision so raid-review re-snapshots immediately rather than at its next periodic poll.
             if (main.Completed) Orbit.Api.OrbitTelemetry.MainObjectivesRevision++;
