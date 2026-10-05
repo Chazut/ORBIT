@@ -11,8 +11,11 @@ using UnityEngine.AI;
 
 namespace Orbit.Systems;
 
-internal sealed class RushPlan
+internal sealed class RushPlan : IObjectiveWork
 {
+    private Squad _squad;
+    private WaypointSystem _waypoints;
+    void IObjectiveWork.ResumeObjectiveWork() => Tick(_squad, _waypoints, WaypointSystem.ObjectiveCombat(_squad));
     internal readonly string Kind;
     internal MainObjective Main;
     private string _status = "pending";
@@ -47,6 +50,7 @@ internal sealed class RushPlan
 
     internal bool Tick(Squad squad, WaypointSystem waypoints, bool combat)
     {
+        _squad = squad; _waypoints = waypoints;
         if (Sniper != null) return Sniper.Tick(squad, waypoints, Main, combat);
         if (Main.Completed) return false;
         var now = Time.time;
@@ -64,6 +68,7 @@ internal sealed class RushPlan
         }
         if (combat || now < squad.GhostFightUntil)
         {
+            waypoints.CancelOperationWork(this);
             if (!_paused) { Release(squad, waypoints); _loot = null; _paused = true; SetStatus(squad, "paused"); }
             _nextWork = now + .25f;
             return false;
@@ -73,8 +78,7 @@ internal sealed class RushPlan
         if (_elapsed > ServerConfig.Rush.TravelTimeout && Status != "searching" && Status != "looting")
             return Skip(squad, waypoints, "travel timeout");
         if (Status is "searching" or "looting") _held += delta;
-        if (now < _nextWork || !waypoints.TryOperationWork()) return true;
-        _nextWork = now + .1f;
+        if (now < _nextWork) return true;
         if (_actor == null || !_actor.IsActive || !squad.Members.Contains(_actor) || _actor.SoloExtractRequested)
         {
             Release(squad, waypoints); _actor = null; _loot = null; _route.Reset();
@@ -82,7 +86,12 @@ internal sealed class RushPlan
                 if (member.IsActive && !member.SoloExtractRequested && !CorpseEscort.InFlight(member)) { _actor = member; break; }
             if (_actor == null) return End(squad, waypoints, "no available member");
         }
-        if (_current < 0) return SelectNext(squad, waypoints);
+        if (_current < 0)
+        {
+            if (!waypoints.TryOperationWork(this)) return true;
+            _nextWork = now + .1f;
+            return SelectNext(squad, waypoints);
+        }
         var site = _sites[_current];
         var door = Kind == "Marked" ? waypoints.RushDoor(site.DoorId) : null;
         if (Kind == "Marked" && door == null) return Skip(squad, waypoints, "door removed");
@@ -94,6 +103,8 @@ internal sealed class RushPlan
         if (Status == "looting")
         {
             if (_held >= site.SearchSeconds * _searchScale) return Visit(squad, waypoints);
+            if (!waypoints.TryOperationWork(this)) return true;
+            _nextWork = now + .1f;
             _loot = waypoints.OperationLoot(_actor, LootPosition(site), _attempted, out var exhausted, site.Radius);
             if (_loot != null) SetOrder(_actor, _loot, waypoints);
             else if (exhausted) return Visit(squad, waypoints);
@@ -101,6 +112,8 @@ internal sealed class RushPlan
         }
         if (!_orders.ContainsKey(_actor))
         {
+            if (!waypoints.TryOperationWork(this)) return true;
+            _nextWork = now + .1f;
             var target = _inside ? LootPosition(site) : Position(site);
             if (door != null && !_inside && _doorApproach) target = door.GetInteractionParameters(_actor.Position).InteractionPosition;
             if (!_route.Find(_actor.Position, target, out _anchor, out var final))
@@ -172,6 +185,7 @@ internal sealed class RushPlan
         if (_held >= site.SearchSeconds * _searchScale) return Visit(squad, waypoints);
         if (now >= _nextRoam)
         {
+            if (!waypoints.TryOperationWork(this)) return true;
             _nextRoam = now + 5;
             var offset = UnityEngine.Random.insideUnitCircle * site.Radius;
             var sample = Position(site) + new Vector3(offset.x, 0, offset.y);
@@ -233,6 +247,7 @@ internal sealed class RushPlan
     }
     internal bool End(Squad squad, WaypointSystem waypoints, string reason)
     {
+        waypoints.CancelOperationWork(this);
         if (Sniper != null) return Sniper.End(squad, waypoints, reason, Main);
         Release(squad, waypoints); Main.Completed = true;
         if (_current >= 0 && _states[_current] == "current") _states[_current] = reason;

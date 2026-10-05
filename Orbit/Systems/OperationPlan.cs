@@ -10,8 +10,11 @@ using UnityEngine;
 namespace Orbit.Systems;
 
 /// <summary>A persistent squad plan. All interactions occur at a reachable local point; combat pauses it.</summary>
-internal sealed class OperationPlan
+internal sealed class OperationPlan : IObjectiveWork
 {
+    private Squad _squad;
+    private WaypointSystem _waypoints;
+    void IObjectiveWork.ResumeObjectiveWork() => Tick(_squad, _waypoints, WaypointSystem.ObjectiveCombat(_squad));
     internal readonly OperationDefinition Definition;
     internal MainObjective Main;
     internal OperationStep Current => _steps[Index];
@@ -71,6 +74,7 @@ internal sealed class OperationPlan
 
     internal bool Tick(Squad squad, WaypointSystem waypoints, bool combat)
     {
+        _squad = squad; _waypoints = waypoints;
         if (!Active) return false;
         var now = Time.time;
         var delta = Mathf.Clamp(now - _lastTick, 0, 1);
@@ -81,6 +85,7 @@ internal sealed class OperationPlan
         // Paused orders may be replaced by the combat rally. Rebuild from current positions on resume.
         if (combat || now < squad.GhostFightUntil)
         {
+            waypoints.CancelOperationWork(this);
             if (_regroupAt >= 0) _regroupAt += delta;
             if (!_paused) { ReleaseOrders(squad, waypoints); _paused = true; Status = "paused"; LogStep(squad); }
             return false;
@@ -93,8 +98,6 @@ internal sealed class OperationPlan
             && (_actor == null || !CorpseEscort.InFlight(_actor)))
             return End(squad, waypoints, "step timeout");
         if (now < _nextWork) return true;
-        if (!waypoints.TryOperationWork()) return true;
-        _nextWork = now + .25f;
         if (Index > 0 && Definition.Power.DoorState == EDoorState.Shut)
         {
             if (++_powerRetries > 1) return End(squad, waypoints, "power expired twice");
@@ -118,6 +121,8 @@ internal sealed class OperationPlan
         }
         if (!_orders.ContainsKey(_actor))
         {
+            if (!waypoints.TryOperationWork(this)) return true;
+            _nextWork = now + .25f;
             if (!waypoints.TryOperationPoint(_actor, step, _route, out _anchor, out var final))
             {
                 if (_route.Pending) return true;
@@ -143,6 +148,7 @@ internal sealed class OperationPlan
         {
             if (member == _actor || !member.IsActive || member.SoloExtractRequested || _orders.ContainsKey(member)
                 || CorpseEscort.InFlight(member)) continue;
+            if (!waypoints.TryOperationWork(this)) return true;
             if (step.Kind is OperationStepKind.Regroup or OperationStepKind.Extract || _regroup != null)
                 SetOrder(member, Point(waypoints, _regroup?.ExfilInteriorPosition ?? _regroup?.Position ?? _anchor, "Regroup"), waypoints);
             else if (waypoints.TryPickCorpseEscortPosition(member, _anchor, _anchor, _covers, _occupied, _rejected, squad.Members.IndexOf(member), out var cover, 3))
@@ -258,6 +264,7 @@ internal sealed class OperationPlan
         if ((_actor.Position - Current.Position).sqrMagnitude > 225f) return true;
         if (Status != "looting") { Status = "looting"; _elapsed = 0; LogStep(squad); }
         if (_elapsed >= ServerConfig.MultiStep.LootDuration) return Advance(squad, waypoints);
+        if (!waypoints.TryOperationWork(this)) return true;
         _loot = waypoints.OperationLoot(_actor, Current.Position, _attemptedLoot, out var exhausted);
         if (_loot == null) return !exhausted || Advance(squad, waypoints);
         SetOrder(_actor, _loot, waypoints);
@@ -308,6 +315,7 @@ internal sealed class OperationPlan
 
     internal bool End(Squad squad, WaypointSystem waypoints, string reason)
     {
+        waypoints.CancelOperationWork(this);
         ReleaseOrders(squad, waypoints);
         Active = false; Status = reason;
         if (Definition.Extraction && reason != "completed") squad.FailedOperationExits.Add(Definition.Id);

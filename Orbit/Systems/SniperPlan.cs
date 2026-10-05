@@ -12,8 +12,11 @@ namespace Orbit.Systems;
 
 // One survey/path per shared objective work slot. Geometry is retained for this plan/raid.
 // No global search for enemies, no role changes, and no body operations on sleepers.
-internal sealed class SniperPlan
+internal sealed class SniperPlan : IObjectiveWork
 {
+    private Squad _squad;
+    private WaypointSystem _waypoints;
+    void IObjectiveWork.ResumeObjectiveWork() => Tick(_squad, _waypoints, _main, WaypointSystem.ObjectiveCombat(_squad));
     private readonly RushPoint _site;
     private readonly float _duration;
     private readonly Dictionary<Agent, Waypoint> _orders = new();
@@ -38,6 +41,7 @@ internal sealed class SniperPlan
 
     internal bool Tick(Squad squad, WaypointSystem w, MainObjective main, bool combat)
     {
+        _squad = squad; _waypoints = w;
         _main = main;
         if (main.Completed) return false;
         var now = Time.time;
@@ -62,6 +66,7 @@ internal sealed class SniperPlan
         }
         if (combat || now < squad.GhostFightUntil || _actor != null && !_actor.IsActive)
         {
+            w.CancelOperationWork(this);
             if (!_paused)
             {
                 Release(squad, w, keepCombatLease: _arrived);
@@ -75,8 +80,7 @@ internal sealed class SniperPlan
         { _paused = false; _route.Reset(); SetStatus(squad, "approach"); }
         if (!_arrived || _actor == null || !Near(_actor.Position, _post, 4)) _travel += dt;
         if (_travel >= ServerConfig.Rush.TravelTimeout) return End(squad, w, "travel timeout");
-        if (now < _nextWork || !w.TryOperationWork()) return true;
-        _nextWork = now + .15f;
+        if (now < _nextWork) return true;
         using var timing = PerformanceJournal.Measure(TransitionPhase.SniperPlanning, "sniper-plan", this, squad.Id);
         if (_actor == null)
         {
@@ -88,6 +92,8 @@ internal sealed class SniperPlan
         }
         if (!_resolved)
         {
+            if (!w.TryOperationWork(this)) return true;
+            _nextWork = now + .15f;
             SetStatus(squad, "surveying post");
             if (!Survey(_actor.Position))
             {
@@ -102,6 +108,8 @@ internal sealed class SniperPlan
         }
         if (!_orders.ContainsKey(_actor))
         {
+            if (!w.TryOperationWork(this)) return true;
+            _nextWork = now + .15f;
             if (!_route.Find(_actor.Position, _post, out _leg, out var final))
             {
                 if (_route.Pending) return true;
@@ -146,6 +154,7 @@ internal sealed class SniperPlan
                 member.Objective.Location = null; member.Objective.Status = ObjectiveStatus.None;
                 member.Guard.CoverPoint = null; member.Look.Target = null;
             }
+            if (!w.TryOperationWork(this)) return true;
             _coverAttempts.TryGetValue(member, out var attempts);
             if (attempts >= 3) return End(squad, w, "squad cover unreachable");
             _coverAttempts[member] = attempts + 1;
@@ -225,7 +234,7 @@ internal sealed class SniperPlan
     }
 
     internal bool End(Squad squad, WaypointSystem w, string reason, MainObjective main = null)
-    { _main ??= main; Release(squad, w); _main.Completed = true; SetStatus(squad, reason); return false; }
+    { w.CancelOperationWork(this); _main ??= main; Release(squad, w); _main.Completed = true; SetStatus(squad, reason); return false; }
     private void Release(Squad squad, WaypointSystem w, bool keepCombatLease = false)
     {
         if (!keepCombatLease && _actor != null) SniperCombat.Remove(_actor.Bot);

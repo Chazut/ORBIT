@@ -252,6 +252,11 @@ public partial class WaypointSystem
     /// move, the pull follows them.</summary>
     public void Update()
     {
+        if (_objectiveWork.CanPump(Time.frameCount))
+        {
+            using var timing = PerformanceJournal.Measure(TransitionPhase.StrategyObjectives, "deferred-objective", this, -1);
+            _objectiveWork.Pump(Time.frameCount);
+        }
         // Before the pacing gate so the deferred door-routing after-samples fire every frame.
         DoorRoutingDiag.Tick();
 

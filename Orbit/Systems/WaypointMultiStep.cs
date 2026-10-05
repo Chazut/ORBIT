@@ -14,14 +14,6 @@ public partial class WaypointSystem
     private MultiStepCatalog _operations;
     private readonly NavMeshPath _operationPath = new();
     private float _nextOperationPlan;
-    private int _operationWorkFrame = -1;
-
-    internal bool TryOperationWork()
-    {
-        if (_operationWorkFrame == Time.frameCount) return false;
-        _operationWorkFrame = Time.frameCount;
-        return true;
-    }
 
     private void InitializeOperations()
     {
