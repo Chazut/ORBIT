@@ -99,7 +99,7 @@ public partial class WaypointSystem
             // strand a departing squad when no active exit or no-backpack route is usable.
             if (!squad.OperationExtractCommitted
                 && (!reserveFallback || Time.time < squad.OperationExtractRetryAt
-                    || FindNearestEligibleExfil(squad) != null)) return false;
+                    || FindNearestEligibleExfil(squad) != null || ExfilSearchPending(squad))) return false;
             var forced = !squad.OperationExtractCommitted;
             var definition = PickOperation(squad, true);
             if (definition != null)

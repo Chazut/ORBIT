@@ -161,6 +161,7 @@ public class Plugin : BaseUnityPlugin
         EnableSafe(new LootItemKilledPatch());
         EnableSafe(new CorpseRegistrationPatch());
         GhostDeathDiagnostics.Enable();
+        NativeExtractionDiagnostics.Enable();
         GhostWakeActivationDiagnostics.Enable();
         EnableSafe(new RescueInterceptPatch());
 

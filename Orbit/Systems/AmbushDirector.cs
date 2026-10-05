@@ -12,8 +12,8 @@ internal sealed class AmbushDirector(WaypointSystem waypoints)
 {
     private readonly List<Squad> _active = new();
     private readonly List<AmbushSite> _candidates = new();
-    private readonly List<Vector3> _occupied = new();
-    private readonly Dictionary<Agent, CoverPoint> _positions = new();
+    private readonly Dictionary<Squad, CampFormationSearch> _formations = new();
+    private readonly List<Squad> _expiredFormations = new();
     private float _nextPlan;
 
     internal static bool Available(Squad squad) => UnavailableReason(squad) == null;
@@ -53,6 +53,11 @@ internal sealed class AmbushDirector(WaypointSystem waypoints)
 
     internal void Prune(IList<Squad> squads)
     {
+        _expiredFormations.Clear();
+        foreach (var pair in _formations)
+            if (!squads.Contains(pair.Key) || !pair.Value.Valid) _expiredFormations.Add(pair.Key);
+        foreach (var squad in _expiredFormations) CancelFormation(squad);
+
         for (var i = _active.Count - 1; i >= 0; i--)
         {
             var squad = _active[i];
@@ -73,7 +78,7 @@ internal sealed class AmbushDirector(WaypointSystem waypoints)
         {
             var reason = !cfg.Airdrops.Enabled ? "airdrops disabled"
                 : !cfg.Allows(squad.Leader?.BotCategory) ? "category disabled"
-                : squad.Camp.Active || squad.Camp.PendingAirdrop != null ? "camp already assigned"
+                : squad.Camp.Active || squad.Camp.PendingAirdrop != null || _formations.ContainsKey(squad) ? "camp already assigned"
                 : UnavailableReason(squad)
                     ?? (Time.time < squad.Camp.AirdropCooldownUntil ? "cooldown" : null)
                     ?? (squad.Camp.VisitedAirdrops.Contains(site) ? "already visited" : null);
@@ -98,9 +103,11 @@ internal sealed class AmbushDirector(WaypointSystem waypoints)
             || !Available(squad) || !waypoints.IsAmbushSiteAvailable(site, squad.Leader?.BotCategory)
             || Time.time - squad.Camp.PendingSince >= ServerConfig.Ambush.TravelTimeout)
         {
+            CancelFormation(squad);
             squad.Camp.End(squad, "unavailable or formation timeout");
             return false;
         }
+        if (_formations.ContainsKey(squad)) return ContinueFormation(squad) || squad.Camp.PendingAirdrop != null;
         if (Time.time < _nextPlan || Time.time < squad.Camp.FormationRetryAt) return true;
         _nextPlan = Time.time + .5f;
         squad.Camp.FormationRetryAt = Time.time + 5f;
@@ -124,6 +131,7 @@ internal sealed class AmbushDirector(WaypointSystem waypoints)
             }
             return false;
         }
+        if (_formations.ContainsKey(squad)) return ContinueFormation(squad);
         if (Time.time < _nextPlan) return false;
 
         // A main owns both its target and its mode. No periodic roll can turn another zone into a hotspot camp.
@@ -156,17 +164,7 @@ internal sealed class AmbushDirector(WaypointSystem waypoints)
                 pending.SetCampState("searching cover");
                 Orbit.Api.OrbitTelemetry.MainObjectivesRevision++;
             }
-            waypoints.BeginAmbushSearch();
-            if (pending.CampSite != null && TryFormation(squad, pending.CampSite, pending)) return true;
-            if (extract)
-            {
-                Log.Info($"AMBUSH SEARCH: {squad} attempt={pending.CampSearchAttempt}/4 radius={pending.CampSearchRadius:F1}m rejected={waypoints.AmbushRejections}");
-                if (pending.CampSearchAttempt >= 4)
-                    (pending.CampApproach ??= new ExtractCampApproach(pending)).Fail(squad, waypoints,
-                        "cover search exhausted: " + waypoints.AmbushRejections);
-            }
-            Log.Debug($"AMBUSH: {squad} main={pending.Type} waiting for reachable cover at {pending.Position}");
-            return false;
+            return pending.CampSite != null && TryFormation(squad, pending.CampSite, pending);
         }
 
         // Later opportunities still use periodic checks, including squads entering range after release.
@@ -194,56 +192,48 @@ internal sealed class AmbushDirector(WaypointSystem waypoints)
     private bool TryFormation(Squad squad, AmbushSite site, MainObjective main)
     {
         if (!waypoints.IsAmbushSiteAvailable(site, squad.Leader.BotCategory)) return false;
-        var rule = ServerConfig.Ambush.For(site.Kind);
-        var pathBudget = 24;
-        _occupied.Clear();
-        _positions.Clear();
-        // Spacing belongs to this formation only. Other squads never reserve a target or its surroundings.
-        foreach (var member in squad.Members)
-        {
-            if (!waypoints.TryPickAmbushCover(member, site, rule, _occupied, ref pathBudget, out var cover,
-                    main?.CampSearchRadius ?? 0)) break;
-            _positions.Add(member, cover);
-            _occupied.Add(cover.Position);
-        }
-        if (_positions.Count != squad.Size)
-        {
-            if (site.Kind != CampSiteKind.Airdrop) return false;
-            return TryDirectAirdrop(squad, site);
-        }
-        // Even when cover is optional, an entirely uncovered airdrop formation should just loot.
-        if (site.Kind == CampSiteKind.Airdrop)
-        {
-            var hasCover = false;
-            foreach (var position in _positions.Values) hasCover |= position.Category != CoverCategory.None;
-            if (!hasCover) return TryDirectAirdrop(squad, site);
-        }
-        squad.Camp.Begin(squad, site, _positions, waypoints, main);
-        if (!_active.Contains(squad)) _active.Add(squad);
-        return true;
+        var search = new CampFormationSearch(waypoints, squad, site, main);
+        _formations.Add(squad, search); waypoints.ScheduleFrameSearch(search);
+        return ContinueFormation(squad);
     }
 
-    private bool TryDirectAirdrop(Squad squad, AmbushSite site)
+    private void CancelFormation(Squad squad)
     {
-        _positions.Clear();
-        _occupied.Clear();
-        var pathBudget = 24;
-        var canApproach = false;
-        foreach (var member in squad.Members)
+        if (!_formations.Remove(squad, out var search)) return;
+        waypoints.CancelFrameSearch(search); search.Dispose();
+        // An interrupted calculation is not an exhausted cover attempt.
+        if (search.Main != null)
         {
-            // Approach the landing area without requiring an ambush sightline or cover.
-            if (waypoints.TryPickAirdropApproach(member, site, _occupied, ref pathBudget, out var position))
-                canApproach = true;
-            else
-                position = new CoverPoint(member.Position, (site.Position - member.Position).normalized,
-                    CoverCategory.None, CoverLevel.Stay);
-            _positions.Add(member, position);
-            _occupied.Add(position.Position);
+            if (search.Main.Type == MainObjectiveType.ExtractCamp)
+                search.Main.CampSearchAttempt = System.Math.Max(0, search.Main.CampSearchAttempt - 1);
+            search.Main.CampRetryAt = Time.time + 1;
         }
-        if (!canApproach) return false;
-        squad.Camp.Begin(squad, site, _positions, waypoints, directLoot: true);
-        if (!_active.Contains(squad)) _active.Add(squad);
-        // A landed crate can be claimed immediately, while the other members approach.
-        return squad.Camp.Tick(squad, waypoints);
+    }
+
+    private bool ContinueFormation(Squad squad)
+    {
+        var search = _formations[squad];
+        if (!search.Valid || search.Cancelled) { CancelFormation(squad); return false; }
+        waypoints.PumpFrameSearches();
+        if (search.Cancelled || !search.Valid) { CancelFormation(squad); return false; }
+        if (!search.Done) return true;
+        _formations.Remove(squad); waypoints.CancelFrameSearch(search);
+        if (search.Success)
+        {
+            squad.Camp.Begin(squad, search.Site, search.Positions, waypoints, search.Main, search.DirectLoot);
+            if (!_active.Contains(squad)) _active.Add(squad);
+            return !search.DirectLoot || squad.Camp.Tick(squad, waypoints);
+        }
+        var main = search.Main;
+        if (main?.Type == MainObjectiveType.ExtractCamp)
+        {
+            Log.Info($"AMBUSH SEARCH: {squad} attempt={main.CampSearchAttempt}/4 radius={main.CampSearchRadius:F1}m rejected={search.Rejections}");
+            if (main.CampSearchAttempt >= 4)
+                (main.CampApproach ??= new ExtractCampApproach(main)).Fail(squad, waypoints, "cover search exhausted: " + search.Rejections);
+        }
+        if (main != null)
+            Log.Debug($"AMBUSH: {squad} main={main.Type} waiting for reachable cover at {main.Position}");
+        else Decision(squad, search.Site, squad.Camp.PendingAirdrop != null ? "release" : "periodic", "formation unavailable");
+        return false;
     }
 }

@@ -36,11 +36,29 @@ internal static class GhostDeathTrace
     private static int _depth, _dropped, _ordinal, _observedDeaths;
     private static long _rootChildren;
     private static bool _active;
+    private static readonly Dictionary<System.Reflection.MethodInfo, int> CallbackSites = new();
+    private static System.Runtime.CompilerServices.ConditionalWeakTable<Delegate, Delegate[]> _listeners = new();
+    internal static Delegate[] Listeners(Delegate callback)
+    {
+        if (callback == null || !_active || Plugin.PerfLogging is not { Value: true } || Environment.CurrentManagedThreadId != OwnerThread) return null;
+        return _listeners.GetValue(callback, value => value.GetInvocationList());
+    }
+    internal static Scope EnterCallback(Delegate callback)
+    {
+        var method = callback.Method;
+        if (!CallbackSites.TryGetValue(method, out var site))
+        {
+            site = Register("subscriber " + method.DeclaringType?.Assembly.GetName().Name + ":"
+                + method.DeclaringType?.FullName + "." + method.Name);
+            CallbackSites.Add(method, site);
+        }
+        return Enter(site, -1);
+    }
     internal static int Register(string name)
     {
         var id = Sites.Count; Sites.Add(new Site { Name = name }); return id;
     }
-    internal static void ResetRaid() { _ordinal = _observedDeaths = 0; }
+    internal static void ResetRaid() { _ordinal = _observedDeaths = 0; _listeners = new(); }
     internal static void ObservedDeath() { if (Plugin.PerfLogging is { Value: true }) _observedDeaths++; }
 
     internal readonly struct Context : IDisposable

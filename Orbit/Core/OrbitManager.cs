@@ -72,6 +72,8 @@ public class OrbitManager
     public OrbitManager(BotsController botsController, BotRoster botRoster)
     {
         Orbit.Helpers.PerfMonitor.Reset();
+        Orbit.Looting.ItemPriceLookup.Reset();
+        Orbit.Looting.LootWorkBudget.Reset(true);
 
         var gameWorld = Singleton<GameWorld>.Instance;
 
@@ -80,6 +82,7 @@ public class OrbitManager
         ZoneKey = Orbit.Helpers.MapVariants.ZoneKey(MapId, MapVariant);
         Orbit.Helpers.ServerConfig.ApplyMap(MapId, ZoneKey);
         Orbit.Helpers.DiagnosticCapture.Reset(ZoneKey);
+        RuntimeCodePreparation.Prepare();
         if (MapVariant.Length > 0)
             Log.Always($"Map variant '{MapVariant}' detected on {MapId}: zones and geometry come from '{ZoneKey}' (base map as fallback)");
         Waypoints = new WaypointConfig();
@@ -137,6 +140,7 @@ public class OrbitManager
                 try { disposable.Dispose(); }
                 catch (System.Exception e) { Log.Warning($"Action cleanup failed: {e}"); }
         Orbit.Helpers.PerfMonitor.Finish(_liveAgents.Count, DormancySystem.DormantCount);
+        Orbit.Looting.LootWorkBudget.Reset(false);
         Orbit.Helpers.DiagnosticCapture.Finish();
     }
 
@@ -248,7 +252,10 @@ public class OrbitManager
             using (TransitionPerformance.Measure(TransitionPhase.UpdateStrategy))
                 StrategyManager.Update();
             using (TransitionPerformance.Measure(TransitionPhase.UpdateActions))
+            {
+                using (TransitionPerformance.Measure(TransitionPhase.LootResume)) Orbit.Looting.LootWorkBudget.Pump();
                 ActionManager.Update();
+            }
             using (TransitionPerformance.Measure(TransitionPhase.UpdateExtract))
                 TickEmergencyExtractWatchdog();
             // Sleep/wake decisions before movement so this frame's mover tick sees fresh dormancy state.

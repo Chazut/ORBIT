@@ -798,6 +798,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                     finishedCount++;
                     continue;
                 }
+                if (waypointSystem.ExfilSearchPending(squad, agent)) { finishedCount++; continue; }
                 // No eligible exfil, so drop the solo extract and rejoin the squad.
                 agent.SoloExtractRequested = false;
                 agent.SoloExtractReason = null;
@@ -1648,6 +1649,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
         if (squad.ExtractRequested)
         {
             newLocation = waypointSystem.FindNearestEligibleExfil(squad);
+            if (newLocation == null && waypointSystem.ExfilSearchPending(squad)) return;
             if (newLocation != null)
             {
                 Log.Debug($"{squad} ExtractRequested → routing to nearest eligible exfil {newLocation}");

@@ -183,6 +183,12 @@ public partial class WaypointSystem
             RegisterWaypointInCell(coords, waypoint);
         }
 
+        // Preserve cell order for equal-distance exits, indexed once while the map loads.
+        for (var cx = 0; cx < _gridSize.x; cx++)
+        for (var cy = 0; cy < _gridSize.y; cy++)
+            foreach (var point in _cells[cx, cy].Waypoints)
+                if (point.Category == WaypointCategory.Exfil) _exfilPoints.Add(point);
+
         InitializeOperations();
         InitializeRush();
         Log.Debug("Populating cells with synthetic waypoints");
@@ -1121,125 +1127,35 @@ public partial class WaypointSystem
         return bestDiff ?? bestSame;
     }
 
-    /// <summary>
-    /// Map-wide search for the nearest Exfil waypoint the squad is eligible to use. Two-pass: pass 1 applies
-    /// the full filter (faction + status + spawn-side entry); pass 2 drops the entry check so a squad that
-    /// derived their EntryPoint wrong (or for whom no SpawnPointMarker could be resolved) still extracts.
-    /// </summary>
-    private const float NearestExfilCacheTtlSeconds = 2f;
-
-    private readonly NearestExfilSearch _exfilSearch = new();
-    private Func<Waypoint, NearestExfilSearch.Route> _exfilQuery;
-    private Vector3 _exfilSearchOrigin;
-    private int _exfilSearchSquad;
-
-    public Waypoint FindNearestEligibleExfil(Squad squad, Agent solo = null)
+    private bool BeginExfilDiagnostics(Squad squad, bool? squadIsPmc)
     {
-        if (squad?.Leader?.Bot == null) return null;
-        if (solo == null && Time.time - squad.NearestExfilCachedAt < NearestExfilCacheTtlSeconds
-            && (squad.NearestExfilCached == null || !squad.CompletedPoiIds.Contains(squad.NearestExfilCached.Id)))
-            return squad.NearestExfilCached;
-
-        using var timing = PerformanceJournal.Measure(TransitionPhase.ExfilSearch, "exfil-search", squad: squad.Id);
-        bool? squadIsPmc = null;
-        var searchAgent = solo ?? squad.Leader;
-        var role = searchAgent.Bot.Profile?.Info?.Settings?.Role;
-        if (role.HasValue) squadIsPmc = role.Value.IsPMC();
-        var leaderPos = searchAgent.Bot.Position;
-        if (!squad.ExfilEligibilityLogged)
-        {
-            squad.ExfilEligibilityLogged = true;
-            LogEligibleExfilsForSquad(squad, squadIsPmc);
-        }
-
-        using (PerformanceJournal.Measure(TransitionPhase.ExfilEligibility, "exfil-eligibility", squad: squad.Id))
-        {
-            _exfilSearch.Clear();
-            for (var cx = 0; cx < _gridSize.x; cx++)
-            for (var cy = 0; cy < _gridSize.y; cy++)
-            {
-                var locs = _cells[cx, cy].Waypoints;
-                for (var i = 0; i < locs.Count; i++)
-                {
-                    var loc = locs[i];
-                    if (loc.Category != WaypointCategory.Exfil || squad.CompletedPoiIds.Contains(loc.Id)) continue;
-                    var entryEligible = SquadCanUseWaypoint(squad, squadIsPmc, loc, solo);
-                    if (!entryEligible && !SquadCanUseWaypointIgnoringEntry(squad, squadIsPmc, loc, solo)) continue;
-                    _exfilSearch.Add(loc, (loc.Position - leaderPos).sqrMagnitude, entryEligible);
-                }
-            }
-        }
-        _exfilSearchOrigin = leaderPos; _exfilSearchSquad = squad.Id;
-        _exfilQuery ??= QueryExfilRoute;
-        var best = _exfilSearch.Find(_exfilQuery, out var fallback, out var partial);
-        if (fallback)
-            Log.Warning($"{squad} no spawn-side eligible exfil, falling back to nearest reachable faction-allowed exfil {best} (entry derivation may have failed)");
-        else if (partial)
-            Log.Info($"{squad} no fully reachable exfil, committing to partial-path exfil {best} (will walk as far as the mesh allows)");
-        if (solo == null)
-        {
-            squad.NearestExfilCached = best;
-            squad.NearestExfilCachedAt = Time.time;
-        }
-        return best;
-    }
-
-    private NearestExfilSearch.Route QueryExfilRoute(Waypoint loc)
-    {
-        var complete = CalculateTimedPath(_exfilSearchOrigin, loc.Position, _reachabilityScratchPath,
-                           TransitionPhase.ExfilPath, loc.Name, _exfilSearchSquad)
-                       && _reachabilityScratchPath.status == NavMeshPathStatus.PathComplete;
-        if (complete) return new NearestExfilSearch.Route(true, 0f);
-        var corners = _reachabilityScratchPath.corners;
-        var gap = corners == null || corners.Length == 0 ? float.MaxValue
-            : (corners[corners.Length - 1] - loc.Position).sqrMagnitude;
-        return new NearestExfilSearch.Route(false, gap);
-    }
-
-    private void LogEligibleExfilsForSquad(Squad squad, bool? squadIsPmc)
-    {
-        if (!Log.DebugEnabled) return;
-        using var timing = PerformanceJournal.Measure(TransitionPhase.ExfilDiagnostics, "exfil-diagnostics", squad: squad.Id);
-        var leaderPos = squad.Leader?.Bot?.Position ?? Vector3.zero;
+        if (!Log.DebugEnabled || squad.ExfilEligibilityLogged) return false;
+        squad.ExfilEligibilityLogged = true;
         var entry = squad.Leader?.Bot?.Profile?.Info?.EntryPoint;
-        if (string.IsNullOrEmpty(entry))
-            entry = ResolveDerivedEntryPoint(squad);
+        if (string.IsNullOrEmpty(entry)) entry = ResolveDerivedEntryPoint(squad);
         if (string.IsNullOrEmpty(entry)) entry = "(none)";
-        // Re-fires on every AssignNewObjective tick while ExtractRequested — Debug, not Info.
         Log.Debug($"{squad} eligible exfils (leader entry='{entry}', isPmc={squadIsPmc}):");
-        for (var cx = 0; cx < _gridSize.x; cx++)
+        return true;
+    }
+
+    private void LogEligibleExfil(Squad squad, Waypoint point, Vector3 origin, bool entry, bool fallback)
+    {
+        if (!Log.DebugEnabled || point.Target is not ExfiltrationPoint exfil) return;
+        using var timing = PerformanceJournal.Measure(TransitionPhase.ExfilDiagnostics, "exfil-diagnostics", squad: squad.Id);
+        var distance = Vector3.Distance(point.Position, origin);
+        var verdict = entry ? "OK" : fallback ? "PASS-2-FALLBACK" : "REJECTED";
+        var entries = exfil.EligibleEntryPoints != null && exfil.EligibleEntryPoints.Length > 0
+            ? string.Join("/", exfil.EligibleEntryPoints) : "<any>";
+        var requirements = "<none>";
+        if (exfil.Requirements != null && exfil.Requirements.Length > 0)
         {
-            for (var cy = 0; cy < _gridSize.y; cy++)
-            {
-                var locs = _cells[cx, cy].Waypoints;
-                for (var i = 0; i < locs.Count; i++)
-                {
-                    var loc = locs[i];
-                    if (loc.Category != WaypointCategory.Exfil) continue;
-                    if (loc.Target is not ExfiltrationPoint exfil) continue;
-                    var dist = Mathf.Sqrt((loc.Position - leaderPos).sqrMagnitude);
-                    var pass1 = SquadCanUseWaypoint(squad, squadIsPmc, loc);
-                    var pass2 = !pass1 && SquadCanUseWaypointIgnoringEntry(squad, squadIsPmc, loc);
-                    string verdict;
-                    if (pass1) verdict = "OK";
-                    else if (pass2) verdict = "PASS-2-FALLBACK";
-                    else verdict = "REJECTED";
-                    var entries = exfil.EligibleEntryPoints != null && exfil.EligibleEntryPoints.Length > 0
-                        ? string.Join("/", exfil.EligibleEntryPoints)
-                        : "<any>";
-                    var reqs = "<none>";
-                    if (exfil.Requirements != null && exfil.Requirements.Length > 0)
-                    {
-                        var reqList = new List<string>(exfil.Requirements.Length);
-                        for (var r = 0; r < exfil.Requirements.Length; r++)
-                            if (exfil.Requirements[r] != null) reqList.Add(exfil.Requirements[r].Requirement.ToString());
-                        if (reqList.Count > 0) reqs = string.Join("+", reqList);
-                    }
-                    var kind = exfil is SharedExfiltrationPoint ? "Shared" : exfil is ScavExfiltrationPoint ? "ScavExfil" : "Exfil";
-                    Log.Debug($"  - {exfil.name} dist={dist:F0}m kind={kind} status={exfil.Status} entries={entries} reqs={reqs} → {verdict}");
-                }
-            }
+            var names = new List<string>(exfil.Requirements.Length);
+            foreach (var requirement in exfil.Requirements)
+                if (requirement != null) names.Add(requirement.Requirement.ToString());
+            if (names.Count > 0) requirements = string.Join("+", names);
         }
+        var kind = exfil is SharedExfiltrationPoint ? "Shared" : exfil is ScavExfiltrationPoint ? "ScavExfil" : "Exfil";
+        Log.Debug($"  - {exfil.name} dist={distance:F0}m kind={kind} status={exfil.Status} entries={entries} reqs={requirements} → {verdict}");
     }
 
     /// <summary>

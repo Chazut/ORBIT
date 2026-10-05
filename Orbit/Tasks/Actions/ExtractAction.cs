@@ -363,7 +363,8 @@ public class ExtractAction(AgentData dataset, float hysteresis) : Task<Agent>(hy
         {
             var loc = agent.Objective.Location;
             Log.Info($"{agent} ExtractAction: extracting via {loc} (LeaveData.RemoveFromMap)");
-            agent.Bot.LeaveData.RemoveFromMap();
+            using (Orbit.Helpers.NativeExtractionDiagnostics.Begin(agent.Player?.ProfileId))
+                agent.Bot.LeaveData.RemoveFromMap();
         }
         catch (System.Exception e)
         {

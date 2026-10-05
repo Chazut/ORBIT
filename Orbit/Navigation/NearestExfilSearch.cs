@@ -3,7 +3,7 @@ using System.Collections.Generic;
 
 namespace Orbit.Navigation;
 
-// Reusable scratch for one synchronous search. Entry-side eligibility has priority over distance;
+// Resumable search. Entry-side eligibility has priority over distance;
 // a complete route has priority over a partial route. Equal distances/gaps keep original cell order.
 internal sealed class NearestExfilSearch
 {
@@ -33,6 +33,12 @@ internal sealed class NearestExfilSearch
     }
 
     private readonly List<Candidate> _candidates = new(16);
+    private int _cursor, _pass, _bestOrder;
+    private float _bestGap;
+    private Waypoint _partialEntry, _partialPass;
+    internal Waypoint Result { get; private set; }
+    internal bool Fallback { get; private set; }
+    internal bool Partial { get; private set; }
     internal void Clear() => _candidates.Clear();
     internal void Add(Waypoint point, float distanceSqr, bool entryEligible)
         => _candidates.Add(new Candidate { Point = point, DistanceSqr = distanceSqr,
@@ -40,26 +46,35 @@ internal sealed class NearestExfilSearch
 
     internal Waypoint Find(Func<Waypoint, Route> query, out bool fallback, out bool partial)
     {
-        _candidates.Sort(ByDistance.Instance);
-        var entry = Scan(query, false, out var partialEntry);
-        fallback = false; partial = false;
-        if (entry != null) return entry;
-        var any = Scan(query, true, out var partialAny);
-        if (any != null) { fallback = true; return any; }
-        var best = partialEntry ?? partialAny;
-        partial = best != null;
-        return best;
+        Begin();
+        while (Step(query)) { }
+        fallback = Fallback; partial = Partial;
+        return Result;
     }
 
-    private Waypoint Scan(Func<Waypoint, Route> query, bool ignoreEntry, out Waypoint partial)
+    internal void Begin()
     {
-        partial = null;
-        var bestGap = float.MaxValue;
-        var bestOrder = int.MaxValue;
-        for (var i = 0; i < _candidates.Count; i++)
+        _candidates.Sort(ByDistance.Instance);
+        _cursor = _pass = 0; _bestGap = float.MaxValue; _bestOrder = int.MaxValue;
+        _partialEntry = _partialPass = Result = null; Fallback = Partial = false;
+    }
+
+    // True means pending, never a failed search. At most one new route query per step.
+    internal bool Step(Func<Waypoint, Route> query)
+    {
+        while (_pass < 2)
         {
+            if (_cursor >= _candidates.Count)
+            {
+                if (_pass++ == 0)
+                { _partialEntry = _partialPass; _partialPass = null; _cursor = 0; _bestGap = float.MaxValue; _bestOrder = int.MaxValue; continue; }
+                Result = _partialEntry ?? _partialPass; Partial = Result != null;
+                return false;
+            }
+            var i = _cursor++;
             var candidate = _candidates[i];
-            if (!ignoreEntry && !candidate.EntryEligible) continue;
+            if (_pass == 0 && !candidate.EntryEligible) continue;
+            var queried = !candidate.Queried;
             if (!candidate.Queried)
             {
                 candidate.Route = query(candidate.Point);
@@ -67,14 +82,16 @@ internal sealed class NearestExfilSearch
                 _candidates[i] = candidate;
             }
             // All remaining candidates are farther away. Their paths cannot improve this result.
-            if (candidate.Route.Complete && candidate.DistanceSqr < float.MaxValue) return candidate.Point;
-            if (candidate.Route.Complete) continue;
-            var gap = candidate.Route.GapSqr;
-            if (gap < bestGap || (partial != null && gap == bestGap && candidate.Order < bestOrder))
+            if (candidate.Route.Complete && candidate.DistanceSqr < float.MaxValue)
+            { Result = candidate.Point; Fallback = _pass == 1; return false; }
+            if (!candidate.Route.Complete)
             {
-                bestGap = gap; bestOrder = candidate.Order; partial = candidate.Point;
+                var gap = candidate.Route.GapSqr;
+                if (gap < _bestGap || (_partialPass != null && gap == _bestGap && candidate.Order < _bestOrder))
+                { _bestGap = gap; _bestOrder = candidate.Order; _partialPass = candidate.Point; }
             }
+            if (queried) return true;
         }
-        return null;
+        return false;
     }
 }

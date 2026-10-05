@@ -28,6 +28,7 @@ internal sealed class AmbushSite
     internal readonly List<CoverPoint> Covers = new();
     internal bool CoversReady;
     internal float CoversRadius;
+    internal int CoverProbe;
     internal bool SightlineReady;
     internal Vector3 SightlineTarget;
 }
@@ -211,65 +212,91 @@ public partial class WaypointSystem
         }
     }
 
+    // Synchronous adapters retained for callers that explicitly perform an offline search.
     internal bool TryPickAmbushCover(Agent agent, AmbushSite site, CampSiteSettings rule, List<Vector3> occupied,
         ref int pathBudget, out CoverPoint chosen, float distanceMax = 0)
     {
+        var budget = new AmbushSearchBudget(pathBudget); chosen = default;
+        foreach (var cover in SearchAmbushCover(agent, site, rule, occupied, budget, distanceMax))
+            if (cover.HasValue) { chosen = cover.Value; pathBudget = budget.Remaining; CopyRejections(budget); return true; }
+        pathBudget = budget.Remaining; CopyRejections(budget); return false;
+    }
+
+    private void CopyRejections(AmbushSearchBudget budget)
+    {
+        foreach (var pair in budget.Rejected)
+        { _campRejected.TryGetValue(pair.Key, out var count); _campRejected[pair.Key] = count + pair.Value; }
+    }
+
+    internal IEnumerable<CoverPoint?> SearchAmbushCover(Agent agent, AmbushSite site, CampSiteSettings rule,
+        List<Vector3> occupied, AmbushSearchBudget budget, float distanceMax = 0)
+    {
         if (distanceMax <= 0) distanceMax = rule.DistanceMax;
-        if (!site.CoversReady || distanceMax > site.CoversRadius + .1f)
+        if (distanceMax > site.CoversRadius + .1f)
+        { site.CoversRadius = distanceMax; site.CoversReady = false; site.CoverProbe = 0; }
+        // A shared target can be queried by several squads. Publish readiness only after all probes.
+        while (!site.CoversReady && site.CoverProbe < 8 && site.Covers.Count < 512 && budget.Remaining > 0)
         {
-            site.CoversReady = true;
-            site.CoversRadius = distanceMax;
-            // Bounded local cover queries, cached per target for the raid.
-            var radius = (rule.DistanceMin + distanceMax) * .5f;
-            for (var i = 0; i < 8 && site.Covers.Count < 512 && pathBudget > 0; i++)
-            {
-                pathBudget--;
-                var angle = i * Mathf.PI / 4f;
-                var sample = site.Position + new Vector3(Mathf.Cos(angle), 0, Mathf.Sin(angle)) * radius;
-                // Exit transforms can float above sloping terrain. Query cover voxels at the local floor.
-                if (site.Kind == CampSiteKind.Extract && NavMesh.SamplePosition(sample, out var ground, 12f, NavMesh.AllAreas))
-                    sample = ground.position;
-                CollectCorpseEscortCover(sample, _campCoverScratch);
-                foreach (var cover in _campCoverScratch)
-                    if (!site.Covers.Contains(cover) && site.Covers.Count < 512) site.Covers.Add(cover);
-            }
+            yield return null;
+            if (site.CoverProbe >= 8) break;
+            budget.Remaining--;
+            var angle = site.CoverProbe++ * Mathf.PI / 4f;
+            var radius = (rule.DistanceMin + site.CoversRadius) * .5f;
+            var sample = site.Position + new Vector3(Mathf.Cos(angle), 0, Mathf.Sin(angle)) * radius;
+            if (site.Kind == CampSiteKind.Extract && NavMesh.SamplePosition(sample, out var ground, 12f, NavMesh.AllAreas))
+                sample = ground.position;
+            CollectCorpseEscortCover(sample, _campCoverScratch);
+            foreach (var cover in _campCoverScratch)
+                if (!site.Covers.Contains(cover) && site.Covers.Count < 512) site.Covers.Add(cover);
         }
-        var firstCover = site.Covers.Count > 0 ? UnityEngine.Random.Range(0, site.Covers.Count) : 0;
+        site.CoversReady = site.CoverProbe >= 8 || site.Covers.Count >= 512;
+        var covers = site.Covers.ToArray();
+        var firstCover = covers.Length > 0 ? UnityEngine.Random.Range(0, covers.Length) : 0;
         for (var category = CoverCategory.Hard; category <= CoverCategory.Soft; category++)
-            for (var i = 0; i < site.Covers.Count && pathBudget > 0; i++)
+            for (var i = 0; i < covers.Length && budget.Remaining > 0; i++)
             {
-                var cover = site.Covers[(firstCover + i) % site.Covers.Count];
+                // Bound cheap rejected candidates as well as physics/path queries.
+                if ((i & 31) == 0) yield return null;
+                var cover = covers[(firstCover + i) % covers.Length];
                 if (cover.Category != category) continue;
-                if (ValidateAmbushPosition(agent, site, rule, cover.Position, occupied, ref pathBudget, out var position, distanceMax))
-                { chosen = new CoverPoint(position, cover.Direction, cover.Category, cover.Level); return true; }
+                yield return null;
+                if (ValidateAmbushPosition(agent, site, rule, cover.Position, occupied, budget, out var position, distanceMax))
+                { yield return new CoverPoint(position, cover.Direction, cover.Category, cover.Level); yield break; }
             }
         if (!ServerConfig.Ambush.RequireCover)
-            for (var i = 0; i < 12 && pathBudget > 0; i++)
+            for (var i = 0; i < 12 && budget.Remaining > 0; i++)
             {
+                yield return null;
                 var angle = i * Mathf.PI / 6f;
                 var radius = (rule.DistanceMin + distanceMax) * .5f;
                 var sample = site.Position + new Vector3(Mathf.Cos(angle), 0, Mathf.Sin(angle)) * radius;
-                if (ValidateAmbushPosition(agent, site, rule, sample, occupied, ref pathBudget, out var position, distanceMax))
-                { chosen = new CoverPoint(position, (site.Position - position).normalized, CoverCategory.None, CoverLevel.Stay); return true; }
+                if (ValidateAmbushPosition(agent, site, rule, sample, occupied, budget, out var position, distanceMax))
+                { yield return new CoverPoint(position, (site.Position - position).normalized, CoverCategory.None, CoverLevel.Stay); yield break; }
             }
-        chosen = default;
-        if (pathBudget <= 0) RejectAmbush("query budget");
-        return false;
+        if (budget.Remaining <= 0) budget.Reject("query budget");
     }
 
     internal bool TryPickAirdropApproach(Agent agent, AmbushSite site, List<Vector3> occupied,
         ref int budget, out CoverPoint chosen)
     {
-        chosen = default;
-        if (site.Kind != CampSiteKind.Airdrop) return false;
+        var work = new AmbushSearchBudget(budget); chosen = default;
+        foreach (var cover in SearchAirdropApproach(agent, site, occupied, work))
+            if (cover.HasValue) { chosen = cover.Value; budget = work.Remaining; return true; }
+        budget = work.Remaining; return false;
+    }
+
+    internal IEnumerable<CoverPoint?> SearchAirdropApproach(Agent agent, AmbushSite site, List<Vector3> occupied,
+        AmbushSearchBudget budget)
+    {
+        if (site.Kind != CampSiteKind.Airdrop) yield break;
         var spacing = ServerConfig.Ambush.MemberSpacing;
-        for (var i = 0; i <= 8 && budget > 0; i++)
+        for (var i = 0; i <= 8 && budget.Remaining > 0; i++)
         {
+            yield return null;
             var angle = i * Mathf.PI / 4f;
-            // The landing point itself may be the only reachable point on a narrow platform.
             var radius = i == 8 ? 0 : Mathf.Max(6f, spacing * 2f);
             var sample = site.Position + new Vector3(Mathf.Cos(angle), 0, Mathf.Sin(angle)) * radius;
-            budget--;
+            budget.Remaining--;
             if (!NavMesh.SamplePosition(sample, out var hit, 3f, NavMesh.AllAreas)
                 || Mathf.Abs(hit.position.y - site.Position.y) > 3f) continue;
             var crowded = false;
@@ -279,38 +306,37 @@ public partial class WaypointSystem
             if (!NavMesh.CalculatePath(agent.Position, hit.position, NavMesh.AllAreas, _campPath)
                 || _campPath.status != NavMeshPathStatus.PathComplete
                 || PathHelper.TotalLength(_campPath.corners) > ServerConfig.Ambush.Airdrops.SearchRadius * 1.5f + 50f) continue;
-            chosen = new CoverPoint(hit.position, (site.Position - hit.position).normalized, CoverCategory.None, CoverLevel.Stay);
-            return true;
+            yield return new CoverPoint(hit.position, (site.Position - hit.position).normalized, CoverCategory.None, CoverLevel.Stay);
+            yield break;
         }
-        return false;
     }
 
     private bool ValidateAmbushPosition(Agent agent, AmbushSite site, CampSiteSettings rule, Vector3 candidate,
-        List<Vector3> occupied, ref int budget, out Vector3 position, float distanceMax)
+        List<Vector3> occupied, AmbushSearchBudget budget, out Vector3 position, float distanceMax)
     {
         position = candidate;
         if (site.Kind == CampSiteKind.Hotspot
-            && XzDistanceSqr(candidate, site.ZoneCenter) > site.ZoneRadius * site.ZoneRadius) return RejectAmbush("outside main zone");
+            && XzDistanceSqr(candidate, site.ZoneCenter) > site.ZoneRadius * site.ZoneRadius) return budget.Reject("outside main zone");
         var delta = candidate - site.Position;
         var heightLimit = site.Kind == CampSiteKind.Extract ? 12f : 2f;
-        if (Mathf.Abs(delta.y) > heightLimit || !MatchesZoneFloor(site.Scope?.FloorId, candidate)) return RejectAmbush("height or floor");
+        if (Mathf.Abs(delta.y) > heightLimit || !MatchesZoneFloor(site.Scope?.FloorId, candidate)) return budget.Reject("height or floor");
         if (XzDistanceSqr(candidate, site.Position) < rule.DistanceMin * rule.DistanceMin
-            || XzDistanceSqr(candidate, site.Position) > distanceMax * distanceMax) return RejectAmbush("range");
+            || XzDistanceSqr(candidate, site.Position) > distanceMax * distanceMax) return budget.Reject("range");
         var spacing = ServerConfig.Ambush.MemberSpacing;
-        foreach (var used in occupied) if ((used - candidate).sqrMagnitude < spacing * spacing) return RejectAmbush("member spacing");
-        budget--;
+        foreach (var used in occupied) if ((used - candidate).sqrMagnitude < spacing * spacing) return budget.Reject("member spacing");
+        budget.Remaining--;
         if (!NavMesh.SamplePosition(candidate, out var hit, .75f, NavMesh.AllAreas)
-            || (hit.position - candidate).sqrMagnitude > .25f) return RejectAmbush("cover off mesh");
+            || (hit.position - candidate).sqrMagnitude > .25f) return budget.Reject("cover off mesh");
         if (site.Kind == CampSiteKind.Hotspot
-            && XzDistanceSqr(hit.position, site.ZoneCenter) > site.ZoneRadius * site.ZoneRadius) return RejectAmbush("outside main zone");
+            && XzDistanceSqr(hit.position, site.ZoneCenter) > site.ZoneRadius * site.ZoneRadius) return budget.Reject("outside main zone");
         delta = hit.position - site.Position;
-        if (Mathf.Abs(delta.y) > heightLimit || !MatchesZoneFloor(site.Scope?.FloorId, hit.position)) return RejectAmbush("height or floor");
+        if (Mathf.Abs(delta.y) > heightLimit || !MatchesZoneFloor(site.Scope?.FloorId, hit.position)) return budget.Reject("height or floor");
         if (XzDistanceSqr(hit.position, site.Position) < rule.DistanceMin * rule.DistanceMin
-            || XzDistanceSqr(hit.position, site.Position) > distanceMax * distanceMax) return RejectAmbush("range");
-        foreach (var used in occupied) if ((used - hit.position).sqrMagnitude < spacing * spacing) return RejectAmbush("member spacing");
+            || XzDistanceSqr(hit.position, site.Position) > distanceMax * distanceMax) return budget.Reject("range");
+        foreach (var used in occupied) if ((used - hit.position).sqrMagnitude < spacing * spacing) return budget.Reject("member spacing");
         if (!NavMesh.CalculatePath(agent.Position, hit.position, NavMesh.AllAreas, _campPath)
             || _campPath.status != NavMeshPathStatus.PathComplete
-            || PathHelper.TotalLength(_campPath.corners) > Mathf.Max(rule.SearchRadius, distanceMax) * 1.5f + 50f) return RejectAmbush("incomplete or excessive path");
+            || PathHelper.TotalLength(_campPath.corners) > Mathf.Max(rule.SearchRadius, distanceMax) * 1.5f + 50f) return budget.Reject("incomplete or excessive path");
         if (!site.SightlineReady)
         {
             site.SightlineReady = true;
@@ -319,7 +345,7 @@ public partial class WaypointSystem
         }
         // Require a sightline toward the target; a closed room behind it is not a useful ambush position.
         if (Physics.Linecast(hit.position + Vector3.up * 1.4f, site.SightlineTarget + Vector3.up * 1.2f,
-                LayersMaskController.HighPolyWithTerrainMask)) return RejectAmbush("blocked sightline");
+                LayersMaskController.HighPolyWithTerrainMask)) return budget.Reject("blocked sightline");
         position = hit.position;
         return true;
     }

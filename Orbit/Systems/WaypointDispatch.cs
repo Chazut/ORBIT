@@ -15,6 +15,10 @@ public partial class WaypointSystem
     private readonly List<Entity> _expiredDispatches = new();
     private bool _cachedDispatchPick;
 
+    internal void ScheduleFrameSearch(IFrameSearch search) => _dispatchQueue.Add(search);
+    internal void CancelFrameSearch(IFrameSearch search) => _dispatchQueue.Remove(search);
+    internal void PumpFrameSearches() => _dispatchQueue.Pump(Time.frameCount);
+
     private sealed class DispatchSearch : IFrameSearch, IDisposable
     {
         internal readonly Squad Squad;
@@ -89,6 +93,7 @@ public partial class WaypointSystem
 
     private void PumpDispatchSearches()
     {
+        PruneExfilSearches();
         _expiredDispatches.Clear();
         foreach (var entry in _dispatchSearches)
             if (!entry.Value.Valid) _expiredDispatches.Add(entry.Key);

@@ -6,18 +6,27 @@ namespace Orbit.Looting;
 
 public static class ItemPriceLookup
 {
+    private static readonly System.Collections.Generic.Dictionary<string, float> Prices = new();
+    private static object _source;
+    internal static void Reset() { Prices.Clear(); _source = null; }
+
     public static float GetPrice(Item item)
     {
         if (item?.Template == null) return 0f;
         // Normal clients: read EFT's handbook directly (unchanged). On a FIKA headless client this Instance
         // is never created (issue #5), so fall back to the server-fetched price cache populated at init.
         var handbook = Singleton<EFT.HandBook.Handbook>.Instance;
+        if (!ReferenceEquals(_source, handbook)) { Prices.Clear(); _source = handbook; }
+        var id = item.Template._id;
+        if (id == null) return 0f;
+        if (Prices.TryGetValue(id, out var cached)) return cached;
         if (handbook != null)
         {
-            try { return (float)handbook.GetBasePrice(item.Template._id); }
+            try { return Prices[id] = (float)handbook.GetBasePrice(id); }
             catch { /* fall through to the cache */ }
         }
-        return HandbookPriceCache.TryGet(item.Template._id, out var price) ? price : 0f;
+        if (HandbookPriceCache.TryGet(id, out var price)) return Prices[id] = price;
+        return 0f;
     }
 
     public static float GetPricePerSlot(Item item)

@@ -402,9 +402,10 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
         foreach (var child in CollectImmediateChildren(rootItem))
         {
             var slotItems = new List<DrainEntry>();
-            EnumerateItemsForDrain(child, "", slotItems);
+            await EnumerateItemsForDrainAsync(child, "", slotItems, ct);
             foreach (var entry in slotItems)
             {
+                await LootWorkBudget.Checkpoint(ct);
                 if (entry.Item is Weapon w)
                 {
                     containerWeapons.Add((w, entry.Path));
@@ -448,7 +449,7 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
 
         // Resolve the post-swap weapon set so mag / ammo pickups during phase 1 can be gated against the
         // loadout the bot will end the session with (not the one it currently holds).
-        ResolvePostSwapWeapons(null, containerWeapons);
+        await ResolvePostSwapWeaponsAsync(null, containerWeapons, ct);
 
         // Phase 1: drain non-weapon items.
         await DrainProgressiveAsync(drain, ct);
@@ -463,6 +464,7 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
         var toStrip = new List<(Weapon weapon, string path)>();
         foreach (var (w, path) in containerWeapons)
         {
+            await LootWorkBudget.Checkpoint(ct);
             if (!CanEquipWeaponIntoEmptySlot(w))
             {
                 toStrip.Add((w, path));
@@ -492,7 +494,7 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
         {
             ct.ThrowIfCancellationRequested();
             var modItems = new List<DrainEntry>();
-            EnumerateItemsForDrain(w, path, modItems);
+            await EnumerateItemsForDrainAsync(w, path, modItems, ct);
             foreach (var modEntry in modItems)
             {
                 if (ReferenceEquals(modEntry.Item, w)) continue;
@@ -504,10 +506,10 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
         // Phase 2b: pre-classify armor and helmet candidates. Container path is equip-only — a candidate
         // qualifies only if the bot's target slot is empty AND the candidate compatible. The highest-scoring
         // qualifying item per slot is kept; the others get nothing done to them (no mods to strip on armor).
-        (Item item, string path, float score)? bestArmor = ResolveBestGearForEmptySlot(containerArmors, EquipmentSlot.ArmorVest);
+        (Item item, string path, float score)? bestArmor = await ResolveBestGearForEmptySlotAsync(containerArmors, EquipmentSlot.ArmorVest, ct);
         if (bestArmor != null)
             Log.Info($"OrbitLootHandler.Container({Nick}, {container.name}): phase2 armor winner = {bestArmor.Value.path} → {bestArmor.Value.item.LocalizedName()} (score {bestArmor.Value.score:F1})");
-        (Item item, string path, float score)? bestHelmet = ResolveBestGearForEmptySlot(containerHelmets, EquipmentSlot.Headwear);
+        (Item item, string path, float score)? bestHelmet = await ResolveBestGearForEmptySlotAsync(containerHelmets, EquipmentSlot.Headwear, ct);
         if (bestHelmet != null)
             Log.Info($"OrbitLootHandler.Container({Nick}, {container.name}): phase2 helmet winner = {bestHelmet.Value.path} → {bestHelmet.Value.item.LocalizedName()} (score {bestHelmet.Value.score:F1})");
         // Rig candidates use a dedicated resolver because RigScorer is keyed off TacticalVest cells + armor
@@ -521,8 +523,10 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
             {
                 foreach (var (item, path) in containerRigs)
                 {
+                    await LootWorkBudget.Checkpoint(ct);
                     if (!rigSlot.CheckCompatibility(item)) continue;
-                    var score = RigScorer.Score(item);
+                    float score;
+                    using (TransitionPerformance.Measure(TransitionPhase.LootEvaluate)) score = RigScorer.Score(item);
                     if (score <= 0f) continue;
                     if (bestRig == null || score > bestRig.Value.score) bestRig = (item, path, score);
                 }
@@ -539,8 +543,10 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
             {
                 foreach (var (item, path) in containerBackpacks)
                 {
+                    await LootWorkBudget.Checkpoint(ct);
                     if (!backpackSlot.CheckCompatibility(item)) continue;
-                    var score = BackpackScorer.Score(item);
+                    float score;
+                    using (TransitionPerformance.Measure(TransitionPhase.LootEvaluate)) score = BackpackScorer.Score(item);
                     if (score <= 0f) continue;
                     if (bestBackpack == null || score > bestBackpack.Value.score) bestBackpack = (item, path, score);
                 }
@@ -557,8 +563,10 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
             {
                 foreach (var (item, path) in containerHeadsets)
                 {
+                    await LootWorkBudget.Checkpoint(ct);
                     if (!earpieceSlot.CheckCompatibility(item)) continue;
-                    var score = HeadsetScorer.Score(item);
+                    float score;
+                    using (TransitionPerformance.Measure(TransitionPhase.LootEvaluate)) score = HeadsetScorer.Score(item);
                     if (score <= 0f) continue;
                     if (bestHeadset == null || score > bestHeadset.Value.score) bestHeadset = (item, path, score);
                 }
@@ -634,7 +642,7 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
         }
     }
 
-    private (Item item, string path, float score)? ResolveBestGearForEmptySlot(List<(Item item, string path)> candidates, EquipmentSlot slotKind)
+    private async Task<(Item item, string path, float score)?> ResolveBestGearForEmptySlotAsync(List<(Item item, string path)> candidates, EquipmentSlot slotKind, CancellationToken ct)
     {
         if (candidates.Count == 0) return null;
         var equipment = _bot?.GetPlayer?.Inventory?.Equipment;
@@ -643,8 +651,10 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
         (Item item, string path, float score)? best = null;
         foreach (var (item, path) in candidates)
         {
+            await LootWorkBudget.Checkpoint(ct);
             if (!slot.CheckCompatibility(item)) continue;
-            var score = ArmorScorer.Score(item);
+            float score;
+            using (TransitionPerformance.Measure(TransitionPhase.LootEvaluate)) score = ArmorScorer.Score(item);
             if (score <= 0f) continue;
             if (best == null || score > best.Value.score) best = (item, path, score);
         }
@@ -669,6 +679,7 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
 
     private async Task LootCorpseAsync(Corpse corpse, CancellationToken ct)
     {
+        await LootWorkBudget.Checkpoint(ct);
         var equip = corpse.Item;
         if (equip == null)
         {
@@ -741,9 +752,10 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
             var root = slot?.ContainedItem;
             if (root == null) continue;
             var slotItems = new List<DrainEntry>();
-            EnumerateItemsForDrain(root, slotKind.ToString(), slotItems);
+            await EnumerateItemsForDrainAsync(root, slotKind.ToString(), slotItems, ct);
             foreach (var entry in slotItems)
             {
+                await LootWorkBudget.Checkpoint(ct);
                 if (entry.Item is Weapon nestedWeapon)
                 {
                     corpseWeapons.Add((entry.Path, nestedWeapon));
@@ -768,7 +780,7 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
             var root = slot?.ContainedItem;
             if (root == null) continue;
             var slotItems = new List<DrainEntry>();
-            EnumerateItemsForDrain(root, slotKind == EquipmentSlot.ArmBand ? "Belt" : slotKind.ToString(), slotItems);
+            await EnumerateItemsForDrainAsync(root, slotKind == EquipmentSlot.ArmBand ? "Belt" : slotKind.ToString(), slotItems, ct);
             // Search nested pouches normally, but leave the equipped belt on its corpse.
             if (slotKind == EquipmentSlot.ArmBand)
             {
@@ -778,6 +790,7 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
             var lastRevealOffset = 0;
             for (var i = 0; i < slotItems.Count; i++)
             {
+                await LootWorkBudget.Checkpoint(ct);
                 if (slotItems[i].Item is Weapon nestedWeapon)
                 {
                     corpseWeapons.Add((slotItems[i].Path, nestedWeapon));
@@ -803,6 +816,7 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
         Log.Debug($"OrbitLootHandler.Corpse({Nick}, {corpse.name}): phase1 drain queue size={queue.Count} non-weapon entries, {corpseWeapons.Count} weapon(s) deferred to phase 2, last reveal at {totalEstimatedMs}ms");
         for (var i = 0; i < queue.Count; i++)
         {
+            await LootWorkBudget.Checkpoint(ct);
             var e = queue[i];
             Log.Debug($"  [{i}] T={e.revealMs}ms slot={e.slot} path={e.entry.Path} item={e.entry.Item.LocalizedName()} ({e.entry.Item.Width}x{e.entry.Item.Height}, price={ItemPriceLookup.GetPrice(e.entry.Item):N0}₽, perSlot={ItemPriceLookup.GetPricePerSlot(e.entry.Item):N0}₽)");
         }
@@ -810,7 +824,7 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
         // Resolve the post-swap weapon set so mag / ammo pickups during phase 1 can be gated against the
         // loadout the bot will end the session with (not the one it currently holds).
         var corpseWeaponsForResolver = corpseWeapons.ConvertAll(t => (t.sourcePath, t.weapon));
-        ResolvePostSwapWeapons(corpseWeaponsForResolver, null);
+        await ResolvePostSwapWeaponsAsync(corpseWeaponsForResolver, null, ct);
 
         // Phase 1: drain everything that isn't a corpse weapon slot (rig / pockets / armor / bag, plus their
         // contents).
@@ -840,7 +854,10 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
         var toStrip = new List<(string sourcePath, Weapon weapon)>();
         foreach (var (sourcePath, weaponRoot) in corpseWeapons)
         {
-            var verdict = WeaponSwapper.WouldSwap(_bot, weaponRoot, _currentSourceRoot);
+            await LootWorkBudget.Checkpoint(ct);
+            WeaponSwapper.WouldSwapResult verdict;
+            using (TransitionPerformance.Measure(TransitionPhase.LootEvaluate))
+                verdict = WeaponSwapper.WouldSwap(_bot, weaponRoot, _currentSourceRoot);
             Log.Debug($"OrbitLootHandler.Corpse({Nick}, {corpse.name}): phase2 pre-eval {sourcePath} → {weaponRoot.LocalizedName()} would-swap={verdict.WouldSwap} score={verdict.CandidateScore:F1}");
             if (!verdict.WouldSwap)
             {
@@ -865,35 +882,50 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
         (EquipmentSlot slotKind, Item candidate, float score)? bestArmor = null;
         if (corpseArmorItem != null)
         {
-            var verdict = ArmorSwapper.WouldSwap(_bot, corpseArmorItem, EquipmentSlot.ArmorVest);
+            await LootWorkBudget.Checkpoint(ct);
+            ArmorSwapper.WouldSwapResult verdict;
+            using (TransitionPerformance.Measure(TransitionPhase.LootEvaluate))
+                verdict = ArmorSwapper.WouldSwap(_bot, corpseArmorItem, EquipmentSlot.ArmorVest);
             Log.Debug($"OrbitLootHandler.Corpse({Nick}, {corpse.name}): phase2 pre-eval ArmorVest → {corpseArmorItem.LocalizedName()} would-swap={verdict.WouldSwap} score={verdict.CandidateScore:F1}");
             if (verdict.WouldSwap) bestArmor = (EquipmentSlot.ArmorVest, corpseArmorItem, verdict.CandidateScore);
         }
         (EquipmentSlot slotKind, Item candidate, float score)? bestHelmet = null;
         if (corpseHelmetItem != null)
         {
-            var verdict = ArmorSwapper.WouldSwap(_bot, corpseHelmetItem, EquipmentSlot.Headwear);
+            await LootWorkBudget.Checkpoint(ct);
+            ArmorSwapper.WouldSwapResult verdict;
+            using (TransitionPerformance.Measure(TransitionPhase.LootEvaluate))
+                verdict = ArmorSwapper.WouldSwap(_bot, corpseHelmetItem, EquipmentSlot.Headwear);
             Log.Debug($"OrbitLootHandler.Corpse({Nick}, {corpse.name}): phase2 pre-eval Headwear → {corpseHelmetItem.LocalizedName()} would-swap={verdict.WouldSwap} score={verdict.CandidateScore:F1}");
             if (verdict.WouldSwap) bestHelmet = (EquipmentSlot.Headwear, corpseHelmetItem, verdict.CandidateScore);
         }
         (Item candidate, float score)? bestRig = null;
         if (corpseRigItem != null)
         {
-            var verdict = RigSwapper.WouldSwap(_bot, corpseRigItem);
+            await LootWorkBudget.Checkpoint(ct);
+            RigSwapper.WouldSwapResult verdict;
+            using (TransitionPerformance.Measure(TransitionPhase.LootEvaluate))
+                verdict = RigSwapper.WouldSwap(_bot, corpseRigItem);
             Log.Debug($"OrbitLootHandler.Corpse({Nick}, {corpse.name}): phase2 pre-eval TacticalVest → {corpseRigItem.LocalizedName()} would-swap={verdict.WouldSwap} score={verdict.CandidateScore:F1}");
             if (verdict.WouldSwap) bestRig = (corpseRigItem, verdict.CandidateScore);
         }
         (Item candidate, float score)? bestBackpack = null;
         if (corpseBackpackItem != null)
         {
-            var verdict = BackpackSwapper.WouldSwap(_bot, corpseBackpackItem);
+            await LootWorkBudget.Checkpoint(ct);
+            BackpackSwapper.WouldSwapResult verdict;
+            using (TransitionPerformance.Measure(TransitionPhase.LootEvaluate))
+                verdict = BackpackSwapper.WouldSwap(_bot, corpseBackpackItem);
             Log.Debug($"OrbitLootHandler.Corpse({Nick}, {corpse.name}): phase2 pre-eval Backpack → {corpseBackpackItem.LocalizedName()} would-swap={verdict.WouldSwap} score={verdict.CandidateScore:F1}");
             if (verdict.WouldSwap) bestBackpack = (corpseBackpackItem, verdict.CandidateScore);
         }
         (Item candidate, float score)? bestHeadset = null;
         if (corpseHeadsetItem != null)
         {
-            var verdict = HeadsetSwapper.WouldSwap(_bot, corpseHeadsetItem);
+            await LootWorkBudget.Checkpoint(ct);
+            HeadsetSwapper.WouldSwapResult verdict;
+            using (TransitionPerformance.Measure(TransitionPhase.LootEvaluate))
+                verdict = HeadsetSwapper.WouldSwap(_bot, corpseHeadsetItem);
             Log.Debug($"OrbitLootHandler.Corpse({Nick}, {corpse.name}): phase2 pre-eval Earpiece → {corpseHeadsetItem.LocalizedName()} would-swap={verdict.WouldSwap} score={verdict.CandidateScore:F1}");
             if (verdict.WouldSwap) bestHeadset = (corpseHeadsetItem, verdict.CandidateScore);
         }
@@ -904,7 +936,7 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
         {
             ct.ThrowIfCancellationRequested();
             var modItems = new List<DrainEntry>();
-            EnumerateItemsForDrain(weaponToStrip, sourcePath, modItems);
+            await EnumerateItemsForDrainAsync(weaponToStrip, sourcePath, modItems, ct);
             foreach (var modEntry in modItems)
             {
                 if (ReferenceEquals(modEntry.Item, weaponToStrip)) continue;
@@ -928,7 +960,10 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
             // Re-evaluate against the bot's updated loadout (phase 3 may have widened its ammo pool, shifting
             // the baseline). The recheck also surfaces the weapon that will be displaced so its mods can be
             // salvaged before the swap fires.
-            var recheck = WeaponSwapper.WouldSwap(_bot, best.Value.weapon, _currentSourceRoot);
+            await LootWorkBudget.Checkpoint(ct);
+            WeaponSwapper.WouldSwapResult recheck;
+            using (TransitionPerformance.Measure(TransitionPhase.LootEvaluate))
+                recheck = WeaponSwapper.WouldSwap(_bot, best.Value.weapon, _currentSourceRoot);
             if (!recheck.WouldSwap)
             {
                 Log.Info($"OrbitLootHandler.Corpse({Nick}, {corpse.name}): phase4 SKIP {best.Value.sourcePath} → {best.Value.weapon.LocalizedName()} — no longer beats updated loadout");
@@ -945,7 +980,7 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
             {
                 Log.Debug($"OrbitLootHandler.Corpse({Nick}, {corpse.name}): phase4 pre-strip mods of {recheck.DisplacedWeapon.LocalizedName()} (will be thrown to corpse by swap)");
                 var displacedModItems = new List<DrainEntry>();
-                EnumerateItemsForDrain(recheck.DisplacedWeapon, "BotDisplaced", displacedModItems);
+                await EnumerateItemsForDrainAsync(recheck.DisplacedWeapon, "BotDisplaced", displacedModItems, ct);
                 foreach (var modEntry in displacedModItems)
                 {
                     if (ReferenceEquals(modEntry.Item, recheck.DisplacedWeapon)) continue;
@@ -970,7 +1005,10 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
             ct.ThrowIfCancellationRequested();
             Log.Debug($"OrbitLootHandler.Corpse({Nick}, {corpse.name}): phase4 pre-armor settle (2500ms)");
             await Task.Delay(2500, ct);
-            var recheck = ArmorSwapper.WouldSwap(_bot, bestArmor.Value.candidate, bestArmor.Value.slotKind);
+            await LootWorkBudget.Checkpoint(ct);
+            ArmorSwapper.WouldSwapResult recheck;
+            using (TransitionPerformance.Measure(TransitionPhase.LootEvaluate))
+                recheck = ArmorSwapper.WouldSwap(_bot, bestArmor.Value.candidate, bestArmor.Value.slotKind);
             if (!recheck.WouldSwap)
             {
                 Log.Info($"OrbitLootHandler.Corpse({Nick}, {corpse.name}): phase4 SKIP armor → {bestArmor.Value.candidate.LocalizedName()} — no longer beats updated loadout");
@@ -989,7 +1027,10 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
             ct.ThrowIfCancellationRequested();
             Log.Debug($"OrbitLootHandler.Corpse({Nick}, {corpse.name}): phase4 pre-helmet settle (2500ms)");
             await Task.Delay(2500, ct);
-            var recheck = ArmorSwapper.WouldSwap(_bot, bestHelmet.Value.candidate, bestHelmet.Value.slotKind);
+            await LootWorkBudget.Checkpoint(ct);
+            ArmorSwapper.WouldSwapResult recheck;
+            using (TransitionPerformance.Measure(TransitionPhase.LootEvaluate))
+                recheck = ArmorSwapper.WouldSwap(_bot, bestHelmet.Value.candidate, bestHelmet.Value.slotKind);
             if (!recheck.WouldSwap)
             {
                 Log.Info($"OrbitLootHandler.Corpse({Nick}, {corpse.name}): phase4 SKIP helmet → {bestHelmet.Value.candidate.LocalizedName()} — no longer beats updated loadout");
@@ -1010,7 +1051,10 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
             ct.ThrowIfCancellationRequested();
             Log.Debug($"OrbitLootHandler.Corpse({Nick}, {corpse.name}): phase4 pre-rig settle (2500ms)");
             await Task.Delay(2500, ct);
-            var recheck = RigSwapper.WouldSwap(_bot, bestRig.Value.candidate);
+            await LootWorkBudget.Checkpoint(ct);
+            RigSwapper.WouldSwapResult recheck;
+            using (TransitionPerformance.Measure(TransitionPhase.LootEvaluate))
+                recheck = RigSwapper.WouldSwap(_bot, bestRig.Value.candidate);
             if (!recheck.WouldSwap)
             {
                 Log.Info($"OrbitLootHandler.Corpse({Nick}, {corpse.name}): phase4 SKIP rig → {bestRig.Value.candidate.LocalizedName()} — no longer beats updated loadout");
@@ -1031,7 +1075,10 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
             ct.ThrowIfCancellationRequested();
             Log.Debug($"OrbitLootHandler.Corpse({Nick}, {corpse.name}): phase4 pre-backpack settle (2500ms)");
             await Task.Delay(2500, ct);
-            var recheck = BackpackSwapper.WouldSwap(_bot, bestBackpack.Value.candidate);
+            await LootWorkBudget.Checkpoint(ct);
+            BackpackSwapper.WouldSwapResult recheck;
+            using (TransitionPerformance.Measure(TransitionPhase.LootEvaluate))
+                recheck = BackpackSwapper.WouldSwap(_bot, bestBackpack.Value.candidate);
             if (!recheck.WouldSwap)
             {
                 Log.Info($"OrbitLootHandler.Corpse({Nick}, {corpse.name}): phase4 SKIP backpack → {bestBackpack.Value.candidate.LocalizedName()} — no longer beats updated loadout");
@@ -1049,7 +1096,10 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
             ct.ThrowIfCancellationRequested();
             Log.Debug($"OrbitLootHandler.Corpse({Nick}, {corpse.name}): phase4 pre-headset settle (2500ms)");
             await Task.Delay(2500, ct);
-            var recheck = HeadsetSwapper.WouldSwap(_bot, bestHeadset.Value.candidate);
+            await LootWorkBudget.Checkpoint(ct);
+            HeadsetSwapper.WouldSwapResult recheck;
+            using (TransitionPerformance.Measure(TransitionPhase.LootEvaluate))
+                recheck = HeadsetSwapper.WouldSwap(_bot, bestHeadset.Value.candidate);
             if (!recheck.WouldSwap)
             {
                 Log.Info($"OrbitLootHandler.Corpse({Nick}, {corpse.name}): phase4 SKIP headset → {bestHeadset.Value.candidate.LocalizedName()} — no longer beats updated loadout");
@@ -1468,8 +1518,9 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
     // children before the wrapper so loose contents are extracted before the wrapper itself is moved. Slot
     // chains (weapon + mods, armor + plates) emit root-first. Non-RaidModdable weapon mods are skipped — they
     // can't be detached in raid.
-    private static void EnumerateItemsForDrain(Item item, string parentPath, List<DrainEntry> output)
+    private static async Task EnumerateItemsForDrainAsync(Item item, string parentPath, List<DrainEntry> output, CancellationToken ct)
     {
+        await LootWorkBudget.Checkpoint(ct);
         if (item == null) return;
         if (item is Mod mod && !mod.RaidModdable)
         {
@@ -1477,7 +1528,8 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
             return;
         }
 
-        var children = CollectImmediateChildren(item);
+        List<Item> children;
+        using (TransitionPerformance.Measure(TransitionPhase.LootPrepare)) children = CollectImmediateChildren(item);
         var hasGridContents = item is CompoundItem ci
                               && ci.Grids != null
                               && ci.Grids.Length > 0
@@ -1487,14 +1539,14 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
         if (hasGridContents)
         {
             foreach (var child in children)
-                EnumerateItemsForDrain(child, nextPath, output);
+                await EnumerateItemsForDrainAsync(child, nextPath, output, ct);
             output.Add(new DrainEntry(item, parentPath));
         }
         else
         {
             output.Add(new DrainEntry(item, parentPath));
             foreach (var child in children)
-                EnumerateItemsForDrain(child, nextPath, output);
+                await EnumerateItemsForDrainAsync(child, nextPath, output, ct);
         }
     }
 
@@ -1582,8 +1634,8 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
     /// that will be displaced by phase 4 swaps, add the phase 2 weapon winners (corpse) or empty-slot
     /// equips (container). Called once per session, before phase 1 drain runs.
     /// </summary>
-    private void ResolvePostSwapWeapons(List<(string sourcePath, Weapon weapon)> corpseWeapons,
-                                        List<(Weapon weapon, string path)> containerWeapons)
+    private async Task ResolvePostSwapWeaponsAsync(List<(string sourcePath, Weapon weapon)> corpseWeapons,
+                                        List<(Weapon weapon, string path)> containerWeapons, CancellationToken ct)
     {
         _postSwapWeapons.Clear();
         var displaced = new HashSet<string>();
@@ -1591,7 +1643,10 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
         {
             foreach (var (_, w) in corpseWeapons)
             {
-                var verdict = WeaponSwapper.WouldSwap(_bot, w, _currentSourceRoot);
+                await LootWorkBudget.Checkpoint(ct);
+                WeaponSwapper.WouldSwapResult verdict;
+                using (TransitionPerformance.Measure(TransitionPhase.LootEvaluate))
+                    verdict = WeaponSwapper.WouldSwap(_bot, w, _currentSourceRoot);
                 if (!verdict.WouldSwap) continue;
                 _postSwapWeapons.Add(w);
                 if (verdict.DisplacedWeapon != null) displaced.Add(verdict.DisplacedWeapon.Id);
@@ -1601,6 +1656,7 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
         {
             foreach (var (w, _) in containerWeapons)
             {
+                await LootWorkBudget.Checkpoint(ct);
                 if (CanEquipWeaponIntoEmptySlot(w)) _postSwapWeapons.Add(w);
             }
         }

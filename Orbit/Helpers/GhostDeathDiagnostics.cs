@@ -34,6 +34,7 @@ internal static class GhostDeathDiagnostics
     internal static void Enable()
     {
         var harmony = new Harmony("orbit.ghost-death.diagnostics");
+        Bind(harmony, typeof(Player), "ApplyDamageInfo", TransitionPhase.GhostPlayerDamage, calls: true);
         Bind(harmony, typeof(ActiveHealthController), "ApplyDamage", TransitionPhase.GhostHealthDamage, calls: true);
         Bind(harmony, typeof(ActiveHealthController), "Kill", TransitionPhase.GhostHealthKill, calls: true);
         Bind(harmony, typeof(Player), "OnBeenKilledByAggressor", TransitionPhase.GhostAggressor);
@@ -56,6 +57,7 @@ internal static class GhostDeathDiagnostics
             var method = type.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
                 .Single(m => m.Name == name && !m.IsGenericMethod);
             Phases[method] = phase;
+            RuntimeCodePreparation.Include(method as MethodInfo);
             harmony.Patch(method,
                 prefix: new HarmonyMethod(typeof(GhostDeathDiagnostics), nameof(Prefix)) { priority = Priority.First },
                 finalizer: new HarmonyMethod(typeof(GhostDeathDiagnostics), nameof(Finalizer)) { priority = Priority.Last });
@@ -84,7 +86,8 @@ internal static class GhostDeathDiagnostics
     }
 
     // Calls keep their original opcode, arguments, return value and exception propagation.
-    // Delegates remain a single multicast invocation, preserving subscriber order and short-circuiting.
+    // With diagnostics enabled, a captured multicast snapshot is measured in invocation order.
+    // Exceptions still stop dispatch at the failing subscriber; callbacks are never replaced on the event.
     private static IEnumerable<CodeInstruction> Calls(IEnumerable<CodeInstruction> instructions, MethodBase __originalMethod)
     {
         var code = instructions.ToList();
@@ -109,6 +112,7 @@ internal static class GhostDeathDiagnostics
             // damage, animation, inventory and corpse operations are measured individually.
             if (method.Name.StartsWith("get_") || method.DeclaringType == typeof(string)
                 || method.Name.StartsWith("ReleaseBeginSample") || method.Name.StartsWith("ReleaseEndSample")) continue;
+            RuntimeCodePreparation.Include(method);
             var instance = method.IsStatic ? Type.EmptyTypes : new[] { method.DeclaringType.IsValueType ? method.DeclaringType.MakeByRefType() : method.DeclaringType };
             var parameters = instance.Concat(method.GetParameters().Select(p => p.ParameterType)).ToArray();
             if (parameters.Any(p => p.IsPointer || p.IsByRefLike || p.IsByRef && p.GetElementType().IsByRefLike)) continue;
@@ -126,8 +130,13 @@ internal static class GhostDeathDiagnostics
             il.Emit(OpCodes.Call, AccessTools.Method(typeof(GhostDeathTrace), nameof(GhostDeathTrace.Enter)));
             il.Emit(OpCodes.Stloc, scope);
             il.BeginExceptionBlock();
-            for (var p = 0; p < parameters.Length; p++) il.Emit(OpCodes.Ldarg, (short)p);
-            il.Emit(call.opcode, method);
+            if (method.Name == "Invoke" && method.ReturnType == typeof(void) && typeof(Delegate).IsAssignableFrom(method.DeclaringType))
+                EmitSubscribers(il, method, parameters.Length);
+            else
+            {
+                for (var p = 0; p < parameters.Length; p++) il.Emit(OpCodes.Ldarg, (short)p);
+                il.Emit(call.opcode, method);
+            }
             if (result != null) il.Emit(OpCodes.Stloc, result);
             il.BeginFinallyBlock();
             il.Emit(OpCodes.Ldloca, scope);
@@ -142,5 +151,37 @@ internal static class GhostDeathDiagnostics
             call.opcode = OpCodes.Call; call.operand = wrapper;
         }
         return code;
+    }
+
+    private static void EmitSubscribers(ILGenerator il, MethodInfo invoke, int parameters)
+    {
+        var listeners = il.DeclareLocal(typeof(Delegate[]));
+        var index = il.DeclareLocal(typeof(int));
+        var callback = il.DeclareLocal(typeof(Delegate));
+        var scope = il.DeclareLocal(typeof(GhostDeathTrace.Scope));
+        var original = il.DefineLabel(); var done = il.DefineLabel();
+        var loop = il.DefineLabel(); var test = il.DefineLabel();
+        il.Emit(OpCodes.Ldarg_0);
+        il.Emit(OpCodes.Call, AccessTools.Method(typeof(GhostDeathTrace), nameof(GhostDeathTrace.Listeners)));
+        il.Emit(OpCodes.Stloc, listeners); il.Emit(OpCodes.Ldloc, listeners); il.Emit(OpCodes.Brfalse, original);
+        il.Emit(OpCodes.Ldc_I4_0); il.Emit(OpCodes.Stloc, index); il.Emit(OpCodes.Br, test);
+        il.MarkLabel(loop);
+        il.Emit(OpCodes.Ldloc, listeners); il.Emit(OpCodes.Ldloc, index); il.Emit(OpCodes.Ldelem_Ref); il.Emit(OpCodes.Stloc, callback);
+        il.Emit(OpCodes.Ldloc, callback);
+        il.Emit(OpCodes.Call, AccessTools.Method(typeof(GhostDeathTrace), nameof(GhostDeathTrace.EnterCallback))); il.Emit(OpCodes.Stloc, scope);
+        il.BeginExceptionBlock();
+        il.Emit(OpCodes.Ldloc, callback); il.Emit(OpCodes.Castclass, invoke.DeclaringType);
+        for (var p = 1; p < parameters; p++) il.Emit(OpCodes.Ldarg, (short)p);
+        il.Emit(OpCodes.Callvirt, invoke);
+        il.BeginFinallyBlock(); il.Emit(OpCodes.Ldloca, scope);
+        il.Emit(OpCodes.Call, AccessTools.Method(typeof(GhostDeathTrace.Scope), nameof(GhostDeathTrace.Scope.Dispose)));
+        il.EndExceptionBlock();
+        il.Emit(OpCodes.Ldloc, index); il.Emit(OpCodes.Ldc_I4_1); il.Emit(OpCodes.Add); il.Emit(OpCodes.Stloc, index);
+        il.MarkLabel(test); il.Emit(OpCodes.Ldloc, index); il.Emit(OpCodes.Ldloc, listeners); il.Emit(OpCodes.Ldlen); il.Emit(OpCodes.Conv_I4); il.Emit(OpCodes.Blt, loop);
+        il.Emit(OpCodes.Br, done);
+        il.MarkLabel(original);
+        for (var p = 0; p < parameters; p++) il.Emit(OpCodes.Ldarg, (short)p);
+        il.Emit(OpCodes.Callvirt, invoke);
+        il.MarkLabel(done);
     }
 }
