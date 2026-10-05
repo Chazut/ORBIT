@@ -40,18 +40,27 @@
             @foreach (var floor in Floors) { <MudSelectItem Value="@floor.Id">@floor.Name</MudSelectItem> }
         </MudSelect>
         <MudTabs ActivePanelIndex="_tab" ActivePanelIndexChanged="SelectTab" Color="Color.Primary" Class="my-3">
-            <MudTabPanel Text="Spawn" /><MudTabPanel Text="Boss" /><MudTabPanel Text="Marked" /><MudTabPanel Text="Other" /><MudTabPanel Text="Sniper" />
+            <MudTabPanel Text="Spawn" /><MudTabPanel Text="Boss" /><MudTabPanel Text="Marked" /><MudTabPanel Text="Sniper" /><MudTabPanel Text="Other" />
         </MudTabs>
         <MudStack Row="true" Class="mb-3" Wrap="Wrap.Wrap">
             <MudButton Disabled="@(Kind == "Boss" && !Bosses.Any())" OnClick="@(() => { _placing = true; _moving = false; })" Variant="Variant.Filled" Color="Color.Primary">Add point on map</MudButton>
             <MudButton OnClick="RestoreSuggestions" Variant="Variant.Outlined">Restore native suggestions for this tab</MudButton>
             <MudSwitch T="bool" @bind-Value="_preview" Color="Color.Primary" Label="Preview connections" />
+            <MudButton OnClick="ResetView" Variant="Variant.Outlined">Reset view</MudButton>
+            <MudText Typo="Typo.caption" Class="align-self-center">Zoom @F(_zoom)x</MudText>
         </MudStack>
         @if (_placing || _moving)
         { <MudAlert Severity="Severity.Info" Class="mb-2">Click the map to @(_moving ? "move the selected point" : "place a point"). New points use a suggested height for the selected floor; you can adjust it below. <MudButton OnClick="@(() => { _placing = _moving = false; })">Cancel</MudButton></MudAlert> }
         @if (_preview) { <MudText Typo="Typo.caption">Dotted connections show the catalogue only. The game calculates the next sector from actual reachable path lengths.</MudText> }
+        <MudText Typo="Typo.caption">Drag a point with the left button to move it. Scroll to zoom; hold the middle button to pan. Height and floor stay unchanged.</MudText>
         <div style="overflow:auto;max-height:620px;border:1px solid #334155;background:#090f18">
-            <svg width="1000" height="@F(Height)" viewBox="@($"0 0 1000 {F(Height)}")" @onclick="MapClick" style="display:block;cursor:crosshair">
+            <svg id="orbit-rush-canvas" width="1000" height="@F(Height)" viewBox="@($"{F(_panX)} {F(_panY)} {F(1000 / _zoom)} {F(Height / _zoom)}")" @onclick="MapClick"
+                 @onpointerdown="PointerDown" @onpointermove="PointerMove" @onpointerup="PointerUp"
+                 @onpointerleave="@(() => StopDrag())" @onpointercancel="@(() => StopDrag())" @ondragstart:preventDefault="true"
+                 @onwheel="Zoom" @onwheel:preventDefault="true" @onmousedown:preventDefault="true"
+                 style="display:block;flex-shrink:0;touch-action:none;user-select:none;-webkit-user-select:none;cursor:@Cursor">
+                @* Keep offsets relative to the SVG, including when dragging over a marker or image. *@
+                <style>#orbit-rush-canvas * { pointer-events: none; }</style>
                 <ZoneFloorBackground MapId="@_map" Floor="Background" View="View" Height="Height" />
                 @if (_preview)
                 {
@@ -65,9 +74,9 @@
                 @foreach (var point in Visible)
                 {
                     var p = ToMap(point.X, point.Z); var color = point.Enabled ? point.Id == _selected ? "#fff" : "#ffb74d" : "#64748b";
-                    <g @onclick="@(() => SelectPoint(point.Id))" @onclick:stopPropagation="true" style="cursor:pointer">
+                    <g @key="point.Id">
                         <circle cx="@F(p.x)" cy="@F(p.y)" r="@F(point.Radius * Scale)" fill="@color" fill-opacity=".08" stroke="@color" stroke-opacity=".4" />
-                        <circle cx="@F(p.x)" cy="@F(p.y)" r="6" fill="@color"><title>@point.Name (@point.Kind), height @F(point.Y) m</title></circle>
+                        <circle cx="@F(p.x)" cy="@F(p.y)" r="@F(6 / _zoom)" fill="@color"><title>@point.Name (@point.Kind), height @F(point.Y) m</title></circle>
                     </g>
                     @if (point.Kind == "Sniper")
                     {
@@ -146,7 +155,14 @@
     private string? _selected;
     private int _tab;
     private bool _placing, _moving, _preview;
-    private static readonly string[] Kinds = ["Spawn", "Boss", "Marked", "Custom", "Sniper"];
+    private static readonly string[] Kinds = ["Spawn", "Boss", "Marked", "Sniper", "Custom"];
+    private string? _dragId;
+    private long _pointerId;
+    private float _dragDx, _dragDz;
+    private bool _hoverPoint, _panning;
+    private float _zoom = 1, _panX, _panY;
+    private double _lastPanX, _lastPanY;
+    private string Cursor => _panning ? "move" : _dragId != null ? "grabbing" : !_placing && !_moving && _hoverPoint ? "grab" : "crosshair";
     private string Kind => Kinds[_tab];
     private List<RushPoint> Points => Cfg.Rush.Points(_map);
     private RushPoint? Selected => Points.FirstOrDefault(p => p.Id == _selected);
@@ -168,19 +184,110 @@
         var angle = (p.WatchYaw + offset) * MathF.PI / 180;
         return ToMap(p.X + MathF.Sin(angle) * p.WatchDistance, p.Z + MathF.Cos(angle) * p.WatchDistance);
     }
-    private void SelectMap(string map) { _map = map; EditablePoints(); _floor = "*"; _selected = null; _placing = _moving = false; }
-    private void SelectTab(int tab) { _tab = tab; _selected = null; _placing = _moving = false; }
-    private void SelectPoint(string id) { _selected = id; _placing = _moving = false; }
+    private void SelectMap(string map) { ResetView(); _map = map; EditablePoints(); _floor = "*"; _selected = null; _placing = _moving = false; }
+    private void SelectTab(int tab) { StopDrag(); _tab = tab; _selected = null; _placing = _moving = false; }
     private List<RushPoint> EditablePoints()
     {
         if (!Cfg.Rush.Maps.ContainsKey(_map)) Cfg.Rush.Maps[_map] = Points.Select(p => p.Copy()).ToList();
         return Cfg.Rush.Maps[_map];
     }
+    private (float x, float z) MapPosition(double x, double y)
+    {
+        var a = MapViews.Rot(View.X1, View.Z1, View.Rot); var b = MapViews.Rot(View.X2, View.Z2, View.Rot);
+        return MapViews.Rot((_panX + (float)Math.Clamp(x, 0, 1000) / _zoom) / Scale + MathF.Min(a.x, b.x), MathF.Max(a.z, b.z) - (_panY + (float)Math.Clamp(y, 0, Height) / _zoom) / Scale, -View.Rot);
+    }
+    private RushPoint? HitPoint(double x, double y)
+    {
+        RushPoint? hit = null;
+        var best = 12d * 12;
+        foreach (var point in Visible)
+        {
+            var p = ToMap(point.X, point.Z);
+            var dx = (p.x - _panX) * _zoom - x; var dy = (p.y - _panY) * _zoom - y;
+            var distance = dx * dx + dy * dy;
+            if (distance <= best) { best = distance; hit = point; }
+        }
+        return hit;
+    }
+    private void PointerDown(PointerEventArgs e)
+    {
+        if (!e.IsPrimary) return;
+        if (e.Button == 1)
+        {
+            StopDrag(); _panning = true; _pointerId = e.PointerId;
+            _lastPanX = e.OffsetX; _lastPanY = e.OffsetY;
+            return;
+        }
+        if (e.Button != 0 || _placing || _moving) return;
+        var hit = HitPoint(e.OffsetX, e.OffsetY);
+        if (hit == null) return;
+        var point = EditablePoints().First(p => p.Id == hit.Id);
+        var mouse = MapPosition(e.OffsetX, e.OffsetY);
+        _selected = _dragId = point.Id; _pointerId = e.PointerId;
+        _dragDx = point.X - mouse.x; _dragDz = point.Z - mouse.z;
+        _hoverPoint = true;
+    }
+    private void PointerMove(PointerEventArgs e)
+    {
+        if (_panning)
+        {
+            if (e.PointerId != _pointerId) return;
+            if ((e.Buttons & 4) == 0) { StopDrag(); return; }
+            _panX -= (float)(e.OffsetX - _lastPanX) / _zoom;
+            _panY -= (float)(e.OffsetY - _lastPanY) / _zoom;
+            _lastPanX = e.OffsetX; _lastPanY = e.OffsetY;
+            ClampPan();
+        }
+        else if (_dragId != null)
+        {
+            if (e.PointerId != _pointerId) return;
+            if ((e.Buttons & 1) == 0) { StopDrag(); return; }
+            if (Visible.FirstOrDefault(p => p.Id == _dragId) is not { } point) { StopDrag(); return; }
+            var p = MapPosition(e.OffsetX, e.OffsetY);
+            MovePoint(point, p.x + _dragDx, p.z + _dragDz);
+        }
+        else _hoverPoint = HitPoint(e.OffsetX, e.OffsetY) != null;
+    }
+    private void PointerUp(PointerEventArgs e)
+    {
+        if (_panning && e.PointerId == _pointerId) { StopDrag(); return; }
+        if (_dragId != null && e.PointerId == _pointerId)
+        {
+            if (Visible.FirstOrDefault(p => p.Id == _dragId) is { } point)
+            {
+                var p = MapPosition(e.OffsetX, e.OffsetY);
+                MovePoint(point, p.x + _dragDx, p.z + _dragDz);
+            }
+            StopDrag();
+        }
+        _hoverPoint = HitPoint(e.OffsetX, e.OffsetY) != null;
+    }
+    private void StopDrag() { _dragId = null; _hoverPoint = _panning = false; }
+    private void ResetView() { StopDrag(); _zoom = 1; _panX = _panY = 0; }
+    private void Zoom(WheelEventArgs e)
+    {
+        if (e.DeltaY == 0) return;
+        StopDrag();
+        var x = (float)e.OffsetX; var y = (float)e.OffsetY;
+        var anchorX = _panX + x / _zoom; var anchorY = _panY + y / _zoom;
+        _zoom = Math.Clamp(_zoom * (e.DeltaY < 0 ? 1.2f : 1 / 1.2f), 1, 8);
+        _panX = anchorX - x / _zoom; _panY = anchorY - y / _zoom;
+        ClampPan();
+    }
+    private void ClampPan()
+    {
+        _panX = Math.Clamp(_panX, 0, 1000 - 1000 / _zoom);
+        _panY = Math.Clamp(_panY, 0, Height - Height / _zoom);
+    }
+    private static void MovePoint(RushPoint point, float x, float z)
+    {
+        point.LootX += x - point.X; point.LootZ += z - point.Z;
+        point.X = x; point.Z = z;
+    }
     private void MapClick(MouseEventArgs e)
     {
-        if (!_placing && !_moving) return;
-        var a = MapViews.Rot(View.X1, View.Z1, View.Rot); var b = MapViews.Rot(View.X2, View.Z2, View.Rot);
-        var p = MapViews.Rot((float)e.OffsetX / Scale + MathF.Min(a.x, b.x), MathF.Max(a.z, b.z) - (float)e.OffsetY / Scale, -View.Rot);
+        if (e.Button != 0 || !_placing && !_moving) return;
+        var p = MapPosition(e.OffsetX, e.OffsetY);
         var points = EditablePoints();
         var point = _moving ? points.FirstOrDefault(x => x.Id == _selected) : new RushPoint { Id = Guid.NewGuid().ToString("N"), Name = Kind + " point", Kind = Kind, Boss = Bosses.FirstOrDefault() ?? "", FloorId = _floor == "*" ? null : _floor };
         if (point == null) return;
@@ -190,8 +297,7 @@
             point.LootY = point.Y;
             points.Add(point);
         }
-        var dx = p.x - point.X; var dz = p.z - point.Z;
-        point.X = p.x; point.Z = p.z; point.LootX += dx; point.LootZ += dz;
+        MovePoint(point, p.x, p.z);
         _selected = point.Id; _placing = _moving = false;
     }
     private void Duplicate()
