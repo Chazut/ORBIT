@@ -574,10 +574,10 @@ public partial class DormancySystem
                 var bot = player.AIData.BotOwner;
                 if (DormantProfileIds.Contains(player.ProfileId) || bot is not { BotState: EBotState.Active }
                     || !bot.gameObject.activeInHierarchy) continue;
-                var goalPerson = bot.Memory?.GoalEnemy?.Person;
-                if (goalPerson != null && !(_cfg.NativeGhostMovement && GhostMovementEnabled
+                var enemy = bot.Memory?.GoalEnemy;
+                if (GhostTargetingThreat.IsImmediate(enemy) && !(_cfg.NativeGhostMovement && GhostMovementEnabled
                     && NativeGhostSystem.CanRetainEnemy(bot)))
-                    _targetedBy.TryAdd(goalPerson.ProfileId, player);
+                    _targetedBy.TryAdd(enemy.Person.ProfileId, player);
             }
             catch
             {
