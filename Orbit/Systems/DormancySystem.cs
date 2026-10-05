@@ -1027,6 +1027,7 @@ public partial class DormancySystem
         var player = agent.Player;
 
         GhostWakeActivationDiagnostics.Track(bot);
+        var wakePose = new GhostWakePose(player);
         agent.IsDormant = false;
         // Fresh tracking state so the bleed gate starts from the wake-time HP.
         agent.LastPollHp = TotalHp(agent);
@@ -1041,8 +1042,11 @@ public partial class DormancySystem
             UnthrottleBrain(bot);
             using (TransitionPerformance.Measure(TransitionPhase.WakeBody))
                 bot.gameObject.SetActive(true);
+            wakePose.RestoreIfMoved("body activation");
             bot.PatrollingData.Unpause();
+            wakePose.RestoreIfMoved("patrol resume");
             bot.PostActivate();
+            wakePose.RestoreIfMoved("post activation");
             // Ground and fall bookkeeping were frozen while dormant (DormantGroundCollisionPatch): restart
             // them from the current height so a ghost that walked downhill does not "land" from its
             // sleep altitude on the first live tick.
@@ -1064,6 +1068,7 @@ public partial class DormancySystem
             }
 
             using var navigationTiming = TransitionPerformance.Measure(TransitionPhase.WakeNavigation);
+            wakePose.RestoreIfMoved("before navigation");
 
             // Ghost movement can leave the body marginally off-mesh (or squarely off it when the wake
             // lands mid-segment on a slope); snap back before the mover resumes. Path corners are
@@ -2707,6 +2712,7 @@ public partial class DormancySystem
     private bool WakeVanillaBotWithReason(BotOwner bot, GhostWakeReason reason)
     {
         if (!_vanillaDormant.Remove(bot)) return false;
+        var wakePose = new GhostWakePose(bot.GetPlayer);
         GhostWakeActivationDiagnostics.Track(bot);
         RecordWakeEvent(bot.GetPlayer, reason);
         var native = _nativeGhosts.Remove(bot);
@@ -2719,8 +2725,11 @@ public partial class DormancySystem
         {
             using (TransitionPerformance.Measure(TransitionPhase.WakeBody))
                 bot.gameObject.SetActive(true);
+            wakePose.RestoreIfMoved("native body activation");
             if (!native) bot.PatrollingData.Unpause();
+            wakePose.RestoreIfMoved("native patrol resume");
             bot.PostActivate();
+            wakePose.RestoreIfMoved("native post activation");
             if (native) NativeGhostSystem.ResyncAfterWake(bot);
         }
         catch (System.Exception e)
