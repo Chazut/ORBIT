@@ -73,6 +73,9 @@ public class SquadObjective
     public float Duration;
     public bool DurationAdjusted;
 
+    // A change of main priority is not proof that the current POI was visited.
+    public bool RepickRequested;
+
     // Bound full waypoint re-selection when every member has exhausted nearby loot.
     // Kept across anchor changes so repeated empty picks cannot spin each strategy tick.
     public float NextLootExhaustionRecheckAt;

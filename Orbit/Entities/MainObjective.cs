@@ -119,6 +119,8 @@ public class MainObjective
     /// entered the anchor cell. 0 while in approach phase. Surfaced to the raid-review overlay to render
     /// started LootValue mains with a thicker highlighted ring vs pending ones.</summary>
     public float LootValueEnteredAt;
+    // A follower can enter first; cached paths must be checked again once the leader is local.
+    public bool LootValueLocalValidation;
     /// <summary>Cumulative seconds the squad has been "engaged" on this
     /// main — engaged = at least one member in the anchor cell AND the squad is not in combat. The timeout
     /// fires when this reaches the configured budget, NOT when absolute time-since-entry does — so a 3-min

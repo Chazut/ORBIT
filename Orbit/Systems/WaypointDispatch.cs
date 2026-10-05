@@ -85,6 +85,15 @@ public partial class WaypointSystem
 
     internal bool DispatchPending(Entity entity) => _dispatchSearches.ContainsKey(entity);
 
+    internal void RefreshLootEntry(Squad squad, Vector2Int cell)
+    {
+        // Discard searches started at a distant origin before clearing their cached failures.
+        CancelDispatch(squad);
+        squad.PendingDispatchCompletedCurrent = false;
+        foreach (var member in squad.Members) CancelDispatch(member);
+        ClearSquadUnreachabilityForCell(squad, cell);
+    }
+
     private void CancelDispatch(Entity entity)
     {
         if (!_dispatchSearches.Remove(entity, out var search)) return;

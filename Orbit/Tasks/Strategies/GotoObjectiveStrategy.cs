@@ -358,6 +358,13 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                 continue;
             }
 
+            if (squadObjective.RepickRequested)
+            {
+                squadObjective.RepickRequested = false;
+                AssignNewObjective(squad, completedCurrent: false);
+                continue;
+            }
+
             if (waypointSystem.DispatchPending(squad))
             {
                 AssignNewObjective(squad, squad.PendingDispatchCompletedCurrent);
@@ -1325,12 +1332,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                             Log.Info($"{squad} LootValue main at {main.CellCoords} cell entered (member {i}) — {ServerConfig.MainObjectives.LootValueTimeoutSeconds:F0}s timeout armed, cleanup engaged");
                             // Apply the per-POI coverage roll exactly once, on cell entry.
                             waypointSystem.ApplyLootCoverageRollForCell(squad, main.CellCoords);
-                            // Force the squad to re-pick on the very next strategy tick. Without this the bot
-                            // can keep walking toward whatever intermediate POI it was assigned BEFORE
-                            // entering the cell for the full guard-duration — wasting the engagement window.
-                            // After the re-pick the main-anchor priority pick will grab the best loot POI
-                            // within 5m of the cell centre.
-                            squad.Objective.Duration = 0;
+                            LootMainEntry.Begin(squad, main, waypointSystem);
                             break;
                         }
                     }
@@ -1341,6 +1343,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                 // gets interrupted, fights, then returns to looting.
                 if (main.LootValueStartedAt > 0f)
                 {
+                    LootMainEntry.RefreshLocalReachability(squad, main, waypointSystem);
                     var anyMemberInCell = false;
                     for (var i = 0; i < squad.Size; i++)
                     {
@@ -1384,7 +1387,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                 // blacklisted by this squad. GATED on the squad having actually entered the cell — without
                 // this gate a Main loot can complete "by cell- clean" even when no member ever set foot in
                 // the cell.
-                if (main.LootValueEnteredAt > 0f
+                if (main.LootValueEnteredAt > 0f && main.LootValueLocalValidation
                     && IsLootCellCleaned(squad, main.CellCoords))
                 {
                     main.Completed = true;
@@ -1405,6 +1408,10 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
 
     private bool IsLootCellCleaned(Squad squad, Vector2Int cellCoords)
     {
+        // Deferred path queries must finish before their candidates can be ruled out.
+        if (waypointSystem.DispatchPending(squad)) return false;
+        foreach (var member in squad.Members)
+            if (waypointSystem.DispatchPending(member)) return false;
         if (cellCoords.x < 0 || cellCoords.x >= waypointSystem.GridSize.x
             || cellCoords.y < 0 || cellCoords.y >= waypointSystem.GridSize.y) return true;
         ref var cell = ref waypointSystem.Cells[cellCoords.x, cellCoords.y];
