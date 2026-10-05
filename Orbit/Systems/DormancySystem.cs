@@ -1022,6 +1022,7 @@ public partial class DormancySystem
 
     private void WakeAgentWithReason(Agent agent, GhostWakeReason reason)
     {
+        if (agent.IsDormant && !BotLandingGuard.PrepareWake(agent.Bot)) return;
         if (agent.IsDormant) RecordWakeEvent(agent.Player, reason);
         var bot = agent.Bot;
         var player = agent.Player;
@@ -2711,6 +2712,7 @@ public partial class DormancySystem
 
     private bool WakeVanillaBotWithReason(BotOwner bot, GhostWakeReason reason)
     {
+        if (_vanillaDormant.Contains(bot) && !BotLandingGuard.PrepareWake(bot)) return false;
         if (!_vanillaDormant.Remove(bot)) return false;
         var wakePose = new GhostWakePose(bot.GetPlayer);
         GhostWakeActivationDiagnostics.Track(bot);

@@ -24,7 +24,12 @@ internal readonly struct GhostWakePose
         if (!BotGroundPlacement.Finite(_position)) return;
         var distance = Vector3.Distance(current, _position);
         if (BotGroundPlacement.Finite(current) && distance <= .25f) return;
-        _player.Teleport(_position);
+        if (!BotGroundPlacement.TryResolve(_player, _position, out var landing, out var reason))
+        {
+            Log.Warning($"GHOST WAKE POSITION: {_player.Profile.Nickname} stage={stage} unsafe restore rejected at={_position} reason={reason}");
+            return;
+        }
+        _player.Teleport(landing);
         _player.Transform.rotation = _rotation;
         Log.Info($"GHOST WAKE POSITION: {_player.Profile.Nickname} stage={stage} before={_position} after={current} restored={_player.Position} displacement={distance:F2}m");
     }

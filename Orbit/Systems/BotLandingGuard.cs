@@ -34,6 +34,7 @@ internal static class BotLandingGuard
     private static readonly List<Watch> Watches = new();
     private static readonly List<Rejected> Rejections = new();
     private static readonly Dictionary<BotOwner, float> CorrectedUntil = new();
+    private static readonly Dictionary<BotOwner, float> WakeRetryAt = new();
     private static readonly NavMeshPath LocalPath = new();
     private static float _nextTick;
     private static float _probeWindow;
@@ -46,6 +47,7 @@ internal static class BotLandingGuard
         Humans.Clear();
         Rejections.Clear();
         CorrectedUntil.Clear();
+        WakeRetryAt.Clear();
         _nextTick = 0f;
         _probeWindow = 0f;
         _nearbyProbes = 0;
@@ -123,6 +125,56 @@ internal static class BotLandingGuard
         return true;
     }
 
+    // Certify a physical landing while the body is still inactive. An off-mesh Ghost can be
+    // below a slope even when its path corners are valid. Do not resume gravity in that state.
+    internal static bool PrepareWake(BotOwner bot)
+    {
+        var player = bot?.GetPlayer;
+        if (player == null || bot.IsDead) return true;
+        if (WakeRetryAt.TryGetValue(bot, out var retry) && Time.time < retry) return false;
+        var origin = player.Position;
+        if (!BotGroundPlacement.Finite(origin)) return false;
+        if (IsRejected(bot, origin))
+        {
+            RefreshHumans();
+            var rejected = new Watch { Bot = bot, Surface = origin, Landing = origin };
+            if (TryNearby(rejected, Humans, out _, out var nearby, out _))
+            { player.Teleport(nearby); WakeRetryAt.Remove(bot); return true; }
+            return false;
+        }
+        if (BotGroundPlacement.TryResolve(player, origin, out var landing, out var reason))
+        {
+            if ((landing - origin).sqrMagnitude > .0001f) player.Teleport(landing);
+            WakeRetryAt.Remove(bot);
+            return true;
+        }
+        // Inspect nearby height bands in nearest-first order, never distant path corners.
+        // The horizontal footprint stays within 2m; each candidate needs real capsule support.
+        for (var i = 0; i < 17; i++)
+        {
+            if (!TakeProbe()) { reason = "query-budget"; break; }
+            var height = i == 0 ? 0 : (i + 1) / 2 * (i % 2 == 1 ? 1 : -1);
+            var sample = origin + Vector3.up * height;
+            if (!NavMesh.SamplePosition(sample, out var hit, .75f, NavMesh.AllAreas)) continue;
+            var delta = hit.position - origin;
+            if (delta.x * delta.x + delta.z * delta.z > 4f || Mathf.Abs(delta.y) > 8f
+                || DangerZones.IsInside(hit.position) || IsRejected(bot, hit.position)) continue;
+            if (!BotGroundPlacement.TryResolve(player, hit.position, out landing, out reason)) continue;
+            if (!ClearOfOtherBodies(bot, landing)) { reason = "another-body"; continue; }
+            player.Teleport(landing);
+            WakeRetryAt.Remove(bot);
+            Log.Info($"GHOST WAKE GROUND: {bot.Profile.Nickname} supported before activation from={origin} to={landing}");
+            return true;
+        }
+        // A failed physical query must not turn into an unchecked placement. Keep the sleeper
+        // eligible for the next wake attempt; urgent requests still bypass the ordinary wake queue.
+        if (!WakeRetryAt.ContainsKey(bot))
+            Log.Warning($"GHOST WAKE GROUND: {bot.Profile.Nickname} activation deferred at={origin} reason={reason}");
+        if (WakeRetryAt.Count >= 256) WakeRetryAt.Clear();
+        WakeRetryAt[bot] = Time.time + .25f;
+        return false;
+    }
+
     private static void Place(BotOwner bot, Vector3 surface, Vector3 landing, string source, Action repath, bool corrected)
     {
         var player = bot.GetPlayer;
@@ -166,7 +218,13 @@ internal static class BotLandingGuard
             Log.Warning($"GROUND PLACEMENT: {bot.Profile.Nickname} wake validation deferred from={from} surface={surface} reason={reason}");
             return;
         }
-        TryRecover(bot, surface, "wake", repath);
+        if (!TryPlace(bot, surface, "wake", repath, validateGround: true))
+        {
+            if (IsRejected(bot, surface) && TryRecover(bot, surface, "wake", repath)) return;
+            // Activation may have changed the controller. Recheck the actual body instead of
+            // trusting a zero-height adjustment as proof of support.
+            if (PrepareWake(bot)) TryPlace(bot, bot.GetPlayer.Position, "wake", repath, validateGround: true);
+        }
     }
 
     private static bool TakeProbe()

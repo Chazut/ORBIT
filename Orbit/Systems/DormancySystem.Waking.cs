@@ -36,6 +36,7 @@ public partial class DormancySystem
         internal readonly List<Agent> Agents = new();
         internal GhostWakeReason Reason;
         internal float Started;
+        internal float GroundRetryAt;
         internal int Next, Activated;
         internal bool Invalidated, Promoted;
     }
@@ -329,11 +330,13 @@ public partial class DormancySystem
                 && ReferenceEquals(current, completed)) FinishStagedWake(completed, completed.Reason, forced: false);
         }
         if (_stagedWakes.Count == 0) return;
-        var selected = 0;
+        var selected = -1;
         var oldest = float.MaxValue;
         for (var i = 0; i < _stagedWakes.Count; i++)
         {
             var item = _stagedWakes[i];
+            if (Time.realtimeSinceStartup < item.GroundRetryAt) continue;
+            if (selected < 0) selected = i;
             var age = Time.realtimeSinceStartup - item.Started;
             if (age < WakeQueuePriorityAge) continue;
             if (!item.Promoted)
@@ -343,13 +346,18 @@ public partial class DormancySystem
             }
             if (item.Started < oldest) { oldest = item.Started; selected = i; }
         }
-        if (!_wakeFrameBudget.TryBegin(Time.frameCount, Stopwatch.GetTimestamp())) return;
+        if (selected < 0 || !_wakeFrameBudget.TryBegin(Time.frameCount, Stopwatch.GetTimestamp())) return;
         var next = _stagedWakes[selected];
         _stagedWakes.RemoveAt(selected); _stagedWakes.Add(next);
         try
         {
             var bot = next.Bots[next.Next];
-            WakeStagedMember(next, next.Next++, next.Reason);
+            WakeStagedMember(next, next.Next, next.Reason);
+            // Ground certification can defer one unsafe member. Retain its queue slot and
+            // let other groups run; never wait for activation of a body we kept inactive.
+            if (next.Squad != null ? next.Agents[next.Next].IsDormant : _vanillaDormant.Contains(bot))
+            { next.GroundRetryAt = Time.realtimeSinceStartup + .25f; return; }
+            next.Next++;
             if (bot != null && !bot.IsDead && bot.GetPlayer?.HealthController is { IsAlive: true }
                 && bot.BotState is EBotState.PreActive or EBotState.NonActive)
             {
@@ -379,7 +387,7 @@ public partial class DormancySystem
                 {
                     if (bot.IsDead || agent.Player?.HealthController is not { IsAlive: true }) OnAgentRemoved(agent);
                     else WakeAgentWithReason(agent, reason);
-                    pending.Activated++;
+                    if (!agent.IsDormant) pending.Activated++;
                 }
             }
             else if (bot.IsDead || bot.GetPlayer?.HealthController is not { IsAlive: true }) OnVanillaRemoved(bot);
