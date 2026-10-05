@@ -65,7 +65,6 @@ public partial class WaypointSystem
     private float _convergenceRadius;
     private float _convergenceForce;
 
-    private readonly List<Vector2Int> _tempCoordsBuffer = [];
     private readonly WaypointGatherer _waypointGatherer;
 
     // id → cell coords for fast removal. Populated by RegisterWaypointInCell regardless of whether the
@@ -252,6 +251,7 @@ public partial class WaypointSystem
     /// move, the pull follows them.</summary>
     public void Update()
     {
+        PumpDispatchSearches();
         if (_objectiveWork.CanPump(Time.frameCount))
         {
             using var timing = PerformanceJournal.Measure(TransitionPhase.StrategyObjectives, "deferred-objective", this, -1);
@@ -438,139 +438,6 @@ public partial class WaypointSystem
             }
         }
         return null;
-    }
-
-    public Waypoint RequestNear(Entity entity, Vector3 worldPos, Waypoint previous)
-    {
-        using var timing = PerformanceJournal.Measure(TransitionPhase.WaypointSearch, "waypoint-search", "RequestNear", (entity as Squad)?.Id ?? -1);
-        // Always try and return assignments first to avoid counting our own influence into the decision.
-        Return(entity);
-
-        // Pre-scan: if this squad has any tagged own-kill Corpse waypoint still alive (not claimed, not
-        // blacklisted, reachable), bee-line to it before the normal neighbour scan runs. The neighbour scan
-        // returns the first cell that yields any pick, so a fresh Synthetic in a closer-to-prefDir neighbour
-        // could beat an own- kill Corpse two cells away.
-        if (entity is Squad squadForKill)
-        {
-            var killPick = TryPickOwnKillCorpse(squadForKill);
-            if (killPick != null) return killPick;
-        }
-
-        var requestCoords = WorldToCell(worldPos);
-
-        if (!IsValidCell(requestCoords))
-            return FactionLocalOnly(entity) ? null : RequestFar(entity);
-
-        // Closeness short-circuit: if the squad is currently in the anchor cell of any pending main
-        // objective, pick from THIS cell instead of scanning neighbours. Without this, the inverse-distance
-        // force pulls the squad into the anchor cell but the standard neighbour scan keeps picking waypoints
-        // in surrounding cells — the squad orbits the objective without draining it.
-        if (entity is Squad squadInAnchorCell
-            && squadInAnchorCell.MainObjectives != null
-            && IsCurrentCellAnchorOfPendingMain(squadInAnchorCell, requestCoords))
-        {
-            var localCellRef = _cells[requestCoords.x, requestCoords.y];
-            if (localCellRef.HasWaypoints)
-            {
-                var localPick = AssignWaypoint(entity, requestCoords);
-                if (localPick != null) return localPick;
-            }
-            // No pick in the anchor cell (all claimed, all blacklisted, Quest reserved for a different squad)
-            // — fall through.
-        }
-
-        // If this squad has been failing to find anything reachable for a while (scavs spawned on an island,
-        // PMC trapped behind a closed door), don't let the dispatcher keep handing them neighbour/ map-wide
-        // cells they can't reach either. Pin them to their own cell only — they'll wait there until a member
-        // naturally drifts or the failure counter resets.
-        if (IsSquadIslanded(entity))
-        {
-            var currentCell = _cells[requestCoords.x, requestCoords.y];
-            if (!currentCell.HasWaypoints) return null;
-            return AssignWaypoint(entity, requestCoords);
-        }
-
-        var previousCoords = previous == null ? requestCoords : WorldToCell(previous.Position);
-        _tempCoordsBuffer.Clear();
-
-        // First pass: determine preferential direction
-        for (var dx = -1; dx <= 1; dx++)
-        {
-            for (var dy = -1; dy <= 1; dy++)
-            {
-                if (dx == 0 && dy == 0) continue;
-
-                var direction = new Vector2Int(dx, dy);
-                var coords = requestCoords + direction;
-
-                if (!IsValidCell(coords))
-                    continue;
-
-                ref var cell = ref _cells[coords.x, coords.y];
-
-                if (!cell.HasWaypoints)
-                    continue;
-
-                _tempCoordsBuffer.Add(direction);
-            }
-        }
-
-        var advectionVector = _advectionField[requestCoords.x, requestCoords.y]
-            + ScopedAttraction(entity as Squad, requestCoords);
-        var convergenceVector = _convergenceField[requestCoords.x, requestCoords.y];
-        var randomization = Random.insideUnitCircle;
-        randomization *= 0.5f;
-        var momentumVector = (Vector2)(requestCoords - previousCoords);
-        momentumVector.Normalize();
-        momentumVector *= 0.5f;
-        var homeVector = ComputeHomeAttraction(entity, requestCoords);
-        var mainObjectiveVector = ComputeMainObjectiveAttraction(entity, requestCoords);
-
-        var prefDirection = momentumVector + advectionVector + convergenceVector + randomization + homeVector + mainObjectiveVector;
-
-        Log.Debug(
-            $"Waypoint search from {requestCoords} direction: {prefDirection} mom: {momentumVector} adv: {advectionVector} conv: {convergenceVector} rand: {randomization} home: {homeVector} main: {mainObjectiveVector}"
-        );
-
-        if (_tempCoordsBuffer.Count == 0 || prefDirection == Vector2.zero)
-        {
-            Log.Debug("Zero vector preferred direction, trying the current cell, and failing that the map-wide least congested cell");
-            var currentCell = _cells[requestCoords.x, requestCoords.y];
-            if (currentCell.HasWaypoints)
-            {
-                var localPick = AssignWaypoint(entity, requestCoords);
-                if (localPick != null) return localPick;
-            }
-            return FactionLocalOnly(entity) ? null : RequestFar(entity);
-        }
-
-        prefDirection.Normalize();
-
-        // Sort candidate neighbours by closeness to the preferred direction (lowest angle first). Iterating
-        // in priority order lets us try the next-best neighbour when the first pick's waypoints are all
-        // filtered — instead of jumping straight to RequestFar across the map.
-        _tempCoordsBuffer.Sort((a, b) =>
-            Vector2.Angle(a, prefDirection).CompareTo(Vector2.Angle(b, prefDirection)));
-
-        for (var i = 0; i < _tempCoordsBuffer.Count; i++)
-        {
-            var neighbor = requestCoords + _tempCoordsBuffer[i];
-            var pick = AssignWaypoint(entity, neighbor);
-            if (pick != null) return pick;
-            // Every waypoint in this neighbour was filtered (unreachable from current leader nav position,
-            // ineligible exfil, blacklisted) — try the next-best neighbour before giving up on the local
-            // area.
-        }
-
-        // Local area genuinely exhausted: also try the current cell itself (the neighbour-scan loop skipped
-        // it), and only if that also fails do we escalate to the map-wide RequestFar.
-        var localCellFinal = _cells[requestCoords.x, requestCoords.y];
-        if (localCellFinal.HasWaypoints)
-        {
-            var localPick = AssignWaypoint(entity, requestCoords);
-            if (localPick != null) return localPick;
-        }
-        return FactionLocalOnly(entity) ? null : RequestFar(entity);
     }
 
     // Tuning for the per-scav home-attraction force. 3.0 keeps the home vector decisively above momentum
@@ -1657,6 +1524,12 @@ public partial class WaypointSystem
 
     public void Return(Entity entity)
     {
+        CancelDispatch(entity);
+        ReleaseAssignment(entity);
+    }
+
+    private void ReleaseAssignment(Entity entity)
+    {
         if (!_assignments.Remove(entity, out var coords))
             return;
 
@@ -1826,28 +1699,14 @@ public partial class WaypointSystem
     private bool IsValidCell(Vector2Int cell)
         => cell.x >= 0 && cell.x < _gridSize.x && cell.y >= 0 && cell.y < _gridSize.y;
 
-    private Waypoint RequestFar(Entity entity)
-    {
-        using var timing = PerformanceJournal.Measure(TransitionPhase.WaypointSearch, "waypoint-search", "RequestFar", (entity as Squad)?.Id ?? -1);
-        // Walk the round-robin queue past cells whose waypoints are all filtered for this entity (e.g.
-        // dead-end cells that only contain an ineligible exfil). Capped at queue length so the squad doesn't
-        // burn a full pass if literally every cell is unusable.
-        var attempts = _validCellQueue.Count;
-        Waypoint waypoint = null;
-        Vector2Int pick = default;
-        while (attempts-- > 0)
-        {
-            pick = _validCellQueue.Dequeue();
-            _validCellQueue.Enqueue(pick);
-            waypoint = AssignWaypoint(entity, pick);
-            if (waypoint != null) break;
-        }
-        Log.Debug($"Requesting {waypoint} in far cell {pick}");
-        return waypoint;
-    }
-
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private Waypoint AssignWaypoint(Entity entity, Vector2Int coords)
+    {
+        coords = ChooseAssignmentCell(entity, coords);
+        return CommitWaypoint(entity, coords, PickFromCell(_cells[coords.x, coords.y], entity, coords));
+    }
+
+    private Vector2Int ChooseAssignmentCell(Entity entity, Vector2Int coords)
     {
         // Timmy extra: 20% chance to wander into a random adjacent cell instead of the requested one.
         // Simulates a noob bot getting confused about which way they meant to go. PMC-only.
@@ -1863,12 +1722,12 @@ public partial class WaypointSystem
                 coords = alt.Value;
             }
         }
+        return coords;
+    }
+
+    private Waypoint CommitWaypoint(Entity entity, Vector2Int coords, Waypoint pick)
+    {
         ref var cell = ref _cells[coords.x, coords.y];
-        // Resolve the pick BEFORE committing congestion / advection repulsion / the assignment record: a probed
-        // cell that yields nothing must not leave a permanent PropagateForce(+1) behind. RequestNear's neighbour
-        // scan and RequestFar's map-wide sweep call this on many empty cells per tick, and that leak compounded
-        // (worst with roaming scavs — no main, no home pull, constant RequestFar) until the field blew up.
-        var pick = PickFromCell(cell, entity, coords);
         if (pick == null) return null;
         // A rejected door must reject the assignment before congestion, cooldowns or nearby-loot
         // dispatch can treat this waypoint as a valid squad anchor.
@@ -2390,6 +2249,7 @@ public partial class WaypointSystem
                     && !WasCorpseKilledBySquad(loc.Id, squad.Id)
                     && !HasLineOfSightToCorpse(squad, loc)) continue;
                 if (IsSquadKnownUnreachable(squad, loc.Id)) continue;
+                if (_cachedDispatchPick && RequiresReachabilityCheck(loc.Category) && !_pathReachable.Contains(loc.Id)) continue;
                 if (!SquadCanUseWaypoint(squad, squadIsPmc, loc)) continue;
                 if (HasFailedDoorOnPath(squad, loc)) continue;
                 var weight = ScopedWaypointWeight(squad, loc);
@@ -2458,6 +2318,10 @@ public partial class WaypointSystem
         {
             return false;
         }
+
+        // A prepared cell is selected without starting new paths. Runtime additions or a
+        // cache invalidation are handled by the next bounded search, never a surprise burst.
+        if (_cachedDispatchPick) return false;
 
         var leaderBot = squad?.Leader?.Bot;
         if (leaderBot == null) return true; // can't verify yet — let the caller proceed

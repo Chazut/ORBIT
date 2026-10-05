@@ -358,6 +358,12 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                 continue;
             }
 
+            if (waypointSystem.DispatchPending(squad))
+            {
+                AssignNewObjective(squad, squad.PendingDispatchCompletedCurrent);
+                continue;
+            }
+
             var finishedCount = UpdateAgents(squad, out var locallyExhaustedLootCount);
 
             if (TryAdvanceExhaustedLoot(squad, finishedCount, locallyExhaustedLootCount))
@@ -1614,6 +1620,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
 
     private void AssignNewObjective(Squad squad, bool completedCurrent = false)
     {
+        if (waypointSystem.DispatchPending(squad)) completedCurrent |= squad.PendingDispatchCompletedCurrent;
         using var timing = PerformanceJournal.Measure(TransitionPhase.StrategySelection, "strategy-operation", "AssignNewObjective", squad.Id);
         // A null result must not rescan every cell on every strategy tick. Real movement or a new
         // extraction request can bypass the short backoff; an unchanged failure cannot.
@@ -1697,6 +1704,12 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
 
         if (newLocation == null)
         {
+            if (waypointSystem.DispatchPending(squad))
+            {
+                squad.PendingDispatchCompletedCurrent = completedCurrent;
+                return;
+            }
+            squad.PendingDispatchCompletedCurrent = false;
             squad.ConsecutiveDispatchFailures++;
             var delay = squad.ConsecutiveDispatchFailures == 1 ? .5f
                 : squad.ConsecutiveDispatchFailures == 2 ? 1f
@@ -1712,6 +1725,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
         // Successful dispatch — reset the islanded counter so we don't pin a squad to its cell forever after
         // one good streak of failures.
         squad.ConsecutiveDispatchFailures = 0;
+        squad.PendingDispatchCompletedCurrent = false;
         squad.NextDispatchAttemptAt = 0f;
 
         objective.LocationPrevious = objective.Location;
