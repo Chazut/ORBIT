@@ -75,6 +75,8 @@ internal static class PerformanceJournal
         public double? DurationMs;
         public PhaseWork[] Phases;
         public int? AwakeBots, GhostBots, AwakeWithinWakeDistance;
+        [JsonProperty(NullValueHandling = NullValueHandling.Ignore)]
+        public GhostDeathTrace.Death DeathDetails;
     }
     private static readonly FrameWork[] Frames = { new(), new(), new(), new() };
     private static readonly List<Hitch> Hitches = new(MaxHitches);
@@ -96,6 +98,7 @@ internal static class PerformanceJournal
 
     internal static void Reset(string map)
     {
+        GhostDeathTrace.ResetRaid();
         _map = map; _path = null; _wasEnabled = _inUpdate = false;
         _raidStartedAt = float.NaN; _observedFrame = -1;
         _totalHitches = _droppedHitches = _droppedEvents = _batch = 0;
@@ -264,6 +267,14 @@ internal static class PerformanceJournal
     internal static WorkScope Measure(TransitionPhase phase, string kind, object subject = null, int squad = -1,
         string profile = null, bool always = false, bool details = false)
         => Enabled ? new WorkScope(phase, kind, subject, squad, profile, always, details) : default;
+
+    internal static void DeathTrace(string profile, GhostDeathTrace.Death details)
+    {
+        if (!Enabled) return;
+        AddEvent(new JournalEvent { Kind = "ghost-death-detail", Frame = Time.frameCount,
+            RecordedAt = Time.realtimeSinceStartup, RaidSeconds = RaidSeconds(Time.realtimeSinceStartup),
+            ProfileId = profile, DurationMs = details.DamageContextMs, DeathDetails = details });
+    }
 
     internal static void Tick()
     {
