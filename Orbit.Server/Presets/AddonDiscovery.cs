@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Orbit.Server.Config;
 using Orbit.Server.Zones;
+using Orbit.Settings;
 
 namespace Orbit.Server.Presets;
 
@@ -53,6 +54,7 @@ public static class AddonDiscovery
     {
         JsonObject? config = null;
         var maps = new Dictionary<string, MapZoneModel>();
+        var rushPoints = new Dictionary<string, List<RushPoint>>();
         // Files are sorted by relative path. Later files override supplied settings and whole maps.
         foreach (var part in parts)
         {
@@ -62,11 +64,12 @@ public static class AddonDiscovery
                 Merge(config, JsonNode.Parse(patch.GetRawText())!.AsObject());
             }
             foreach (var (map, content) in part.Maps) maps[map] = content;
+            foreach (var (map, points) in part.RushPoints) rushPoints[map] = points;
         }
         return new PresetAddon
         {
             Id = SourceId(source), Name = source.TrimEnd('/'), Source = source,
-            Config = config == null ? null : JsonSerializer.SerializeToElement(config), Maps = maps,
+            Config = config == null ? null : JsonSerializer.SerializeToElement(config), Maps = maps, RushPoints = rushPoints,
             Revision = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
                 JsonSerializer.Serialize(parts.Select(p => new { p.Source, p.Revision }))))),
             LegacyFileIds = parts.Select(p => p.Id).ToArray(),
@@ -117,11 +120,16 @@ public static class AddonDiscovery
             if (!IsConfig(config.Value)) throw new InvalidDataException("No recognized settings in Config.");
             ConfigService.NormalizeJson(config.Value.GetRawText());
         }
+        var pack = new ZonePackModel { Maps = maps };
+        if (root.TryGetProperty("RushPoints", out var rushPoints))
+            pack.RushPoints = JsonSerializer.Deserialize<Dictionary<string, List<RushPoint>>>(rushPoints.GetRawText());
+        pack.ValidateRushPoints();
         if (!config.HasValue && maps.Count == 0) throw new InvalidDataException("The addon contains no settings or maps.");
         return new PresetAddon
         {
             Id = SourceId(source),
             Name = name.Trim()[..Math.Min(name.Trim().Length, 80)], Source = source, Config = config, Maps = maps,
+            RushPoints = pack.RushPoints ?? new(),
             Revision = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(json))),
         };
 
@@ -150,6 +158,17 @@ public static class AddonDiscovery
         var merged = JsonNode.Parse(baseline)!.AsObject();
         Merge(merged, JsonNode.Parse(patch.GetRawText())!.AsObject());
         return ConfigService.NormalizeJson(merged.ToJsonString());
+    }
+
+    // Zone-pack points are map data, even though runtime configuration stores them under rush.maps.
+    public static JsonElement OverlayRushPoints(JsonElement baseline, Dictionary<string, List<RushPoint>> points)
+    {
+        if (points.Count == 0) return baseline;
+        var merged = JsonNode.Parse(baseline.GetRawText())!.AsObject();
+        var maps = merged["rush"]!["maps"]!.AsObject();
+        var options = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower };
+        foreach (var (map, catalogue) in points) maps[map] = JsonSerializer.SerializeToNode(catalogue, options);
+        return JsonSerializer.Deserialize<JsonElement>(ConfigService.NormalizeJson(merged.ToJsonString()));
     }
 
     private static void Merge(JsonObject target, JsonObject source)

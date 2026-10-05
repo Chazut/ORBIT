@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Orbit.Settings;
 using Orbit.Server.Zones;
 
 namespace Orbit.Server.Presets;
@@ -41,6 +42,7 @@ public sealed class PresetAddon
     public string[] LegacyFileIds { get; init; } = [];
     public JsonElement? Config { get; init; }
     public Dictionary<string, MapZoneModel> Maps { get; init; } = new();
+    public Dictionary<string, List<RushPoint>> RushPoints { get; init; } = new();
     public string Contents => Config.HasValue
         ? Maps.Count > 0 ? $"Settings + {Maps.Count} map(s)" : "Settings only"
         : $"{Maps.Count} map(s) only";

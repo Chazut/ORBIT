@@ -1,5 +1,6 @@
 using System.Reflection;
 using System.Text.Json;
+using Orbit.Settings;
 using SPTarkov.Common.Models.Logging;
 using SPTarkov.DI.Annotations;
 
@@ -299,7 +300,8 @@ public partial class ZoneStoreService(ISptLogger<ZoneStoreService> logger)
     // ── Zone packs (export / import, "ORBIT addons" on the Forge) ──────
 
     /// <summary>Builds the shareable pack JSON from the CURRENT working copies of the given maps.</summary>
-    public string ExportPack(IEnumerable<string> mapIds, string name, string author, string description)
+    public string ExportPack(IEnumerable<string> mapIds, string name, string author, string description,
+        RushSettings? rush = null)
     {
         var pack = new ZonePackModel
         {
@@ -307,11 +309,13 @@ public partial class ZoneStoreService(ISptLogger<ZoneStoreService> logger)
             Author = author?.Trim() ?? "",
             Description = description?.Trim() ?? "",
             OrbitVersion = typeof(ZoneStoreService).Assembly.GetName().Version?.ToString(3) ?? "",
+            RushPoints = rush == null ? null : new(),
         };
         foreach (var mapId in mapIds)
         {
             if (Array.IndexOf(MapIds, mapId) < 0) continue;
             pack.Maps[mapId] = GetWorking(mapId);
+            if (rush != null) pack.RushPoints![mapId] = rush.Points(mapId).Select(point => point.Copy()).ToList();
         }
         return JsonSerializer.Serialize(pack, _json);
     }
@@ -320,7 +324,7 @@ public partial class ZoneStoreService(ISptLogger<ZoneStoreService> logger)
     /// Imports a pack into the WORKING copies (not saved: the edits ride the unsaved-changes button so
     /// the user reviews them on the map first). Returns applied map ids and skipped entries.
     /// </summary>
-    public (List<string> Applied, List<string> Skipped) ImportPack(string json)
+    public (List<string> Applied, List<string> Skipped) ImportPack(string json, RushSettings? rush = null)
     {
         var applied = new List<string>();
         var skipped = new List<string>();
@@ -329,7 +333,11 @@ public partial class ZoneStoreService(ISptLogger<ZoneStoreService> logger)
             throw new InvalidDataException("Not a zone pack (no maps inside)");
         if (!string.IsNullOrEmpty(pack.Format) && !pack.Format.StartsWith("orbit-zones/"))
             throw new InvalidDataException($"Unknown pack format '{pack.Format}'");
+        pack.ValidateRushPoints();
+        if (pack.RushPoints is { Count: > 0 } && rush == null)
+            throw new InvalidDataException("This pack contains rush points; import it with the current rush settings.");
 
+        // Prepare every map before changing any working copy, including when a later entry is invalid.
         foreach (var kv in pack.Maps)
         {
             if (Array.IndexOf(MapIds, kv.Key) < 0 || kv.Value == null)
@@ -339,12 +347,15 @@ public partial class ZoneStoreService(ISptLogger<ZoneStoreService> logger)
             }
             Sanitize(kv.Value);
             NormalizeNativeFloors(kv.Key, kv.Value);
-            GetWorking(kv.Key); // seed the saved-state snapshot so the diff shows as pending
-            lock (_working)
-            {
-                _working[kv.Key] = kv.Value;
-            }
             applied.Add(kv.Key);
+        }
+        foreach (var mapId in applied)
+            GetWorking(mapId); // seed saved baselines before replacing any map
+        lock (_working)
+        {
+            foreach (var mapId in applied) _working[mapId] = pack.Maps[mapId];
+            if (rush != null && pack.RushPoints != null)
+                foreach (var (mapId, points) in pack.RushPoints) rush.Maps[mapId] = points;
         }
         if (applied.Count > 0) ZonesReplaced?.Invoke();
         return (applied, skipped);

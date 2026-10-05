@@ -208,12 +208,13 @@ public sealed class PresetService(ConfigService configs, ZoneStoreService zones,
             TrackEdits();
             var next = WithSavedEdits();
             var current = Capture();
-            var target = addon != null ? ApplyAddon(current, addon) : Resolve(next, id);
+            var target = addon != null ? ApplyAddon(current, addon, parts != PresetParts.ConfigOnly) : Resolve(next, id);
             if (parts != PresetParts.ConfigAndZones)
             {
                 target = Normalize(new PresetSnapshot
                 {
-                    Config = parts == PresetParts.ConfigOnly ? target.Config : current.Config,
+                    Config = parts == PresetParts.ConfigOnly ? target.Config
+                        : addon != null ? AddonDiscovery.OverlayRushPoints(current.Config, addon.RushPoints) : current.Config,
                     Maps = parts == PresetParts.ZonesOnly ? target.Maps : current.Maps,
                 });
                 var custom = NewPreset(UniqueName("Custom"), target);
@@ -329,11 +330,12 @@ public sealed class PresetService(ConfigService configs, ZoneStoreService zones,
     private PresetSnapshot Defaults() => new()
         { Config = JsonSerializer.Deserialize<JsonElement>(ConfigService.DefaultJson), Maps = zones.DefaultSnapshot() };
 
-    private PresetSnapshot ApplyAddon(PresetSnapshot baseline, PresetAddon addon)
+    private PresetSnapshot ApplyAddon(PresetSnapshot baseline, PresetAddon addon, bool includeRushPoints = true)
     {
         var combined = Normalize(baseline);
         if (addon.Config is { } patch)
             combined.Config = JsonSerializer.Deserialize<JsonElement>(AddonDiscovery.OverlayConfig(combined.Config.GetRawText(), patch));
+        if (includeRushPoints) combined.Config = AddonDiscovery.OverlayRushPoints(combined.Config, addon.RushPoints);
         foreach (var (map, content) in addon.Maps) combined.Maps[map] = content;
         return Normalize(combined);
     }

@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using Orbit.Settings;
 using Orbit.Zones;
 
 namespace Orbit.Server.Zones;
@@ -70,4 +71,16 @@ public class ZonePackModel
     public string Description { get; set; } = "";
     public string OrbitVersion { get; set; } = "";
     public Dictionary<string, MapZoneModel> Maps { get; set; } = new();
+    // Missing in older packs: leave existing rush catalogues untouched. An empty list clears a map.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Dictionary<string, List<RushPoint>>? RushPoints { get; set; }
+
+    public void ValidateRushPoints()
+    {
+        if (RushPoints == null) return;
+        foreach (var map in RushPoints.Keys)
+            if (!ZoneStoreService.MapIds.Contains(map) || !Maps.TryGetValue(map, out var zones) || zones == null)
+                throw new InvalidDataException($"Rush points must belong to a map included in the pack: '{map}'.");
+        new RushSettings { Maps = RushPoints }.Validate();
+    }
 }

@@ -341,7 +341,7 @@
     }
 
     <SettingsCard Title="Share zone packs"
-                  Subtitle="Export your hotspot setup as a single .json pack to publish on the Forge as an ORBIT addon, or import someone else's. Imports land as UNSAVED changes: review them on the map, then hit the global Save.">
+                  Subtitle="Export hotspots and Rush objective points for the selected maps as a single .json pack, or import someone else's. Includes point positions, floors and settings; global Rush and personality settings stay unchanged. Imports land as UNSAVED changes: review, then hit the global Save.">
         <div class="d-flex flex-wrap" style="gap:32px">
             <div style="min-width:320px; flex:1">
                 <MudText Typo="Typo.subtitle2" Class="mb-1">Export</MudText>
@@ -1073,7 +1073,7 @@
         var name = string.IsNullOrWhiteSpace(_packName)
             ? (_exportAllMaps ? "orbit-zones" : $"orbit-zones-{ZoneStoreService.MapLabels[_mapId]}")
             : _packName;
-        var json = ZoneStore.ExportPack(maps, name, _packAuthor, _packDescription);
+        var json = ZoneStore.ExportPack(maps, name, _packAuthor, _packDescription, Configs.Config.Rush);
         var slug = new string(name.Trim().ToLowerInvariant()
             .Select(c => char.IsLetterOrDigit(c) ? c : '-').ToArray()).Trim('-');
         if (slug.Length == 0) slug = "orbit-zones";
@@ -1088,7 +1088,7 @@
         {
             using var reader = new StreamReader(file.OpenReadStream(maxAllowedSize: 5_000_000));
             var json = await reader.ReadToEndAsync();
-            var (applied, skipped) = ZoneStore.ImportPack(json);
+            var (applied, skipped) = ZoneStore.ImportPack(json, Configs.Config.Rush);
             var appliedLabels = string.Join(", ", applied.Select(id => ZoneStoreService.MapLabels.TryGetValue(id, out var l) ? l : id));
             _importSummary = applied.Count == 0
                 ? "Nothing importable in that file."
