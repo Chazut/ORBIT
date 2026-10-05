@@ -1,71 +1,98 @@
 {
-  "BuiltinZones": {},
+  "SchemaVersion": 2,
+  "BuiltinZones": {
+    "ZoneMeteoStation": {
+      "Radius": {
+        "Min": 150,
+        "Max": 500
+      },
+      "Force": {
+        "Min": -0.25,
+        "Max": 0.75
+      },
+      "Decay": 1,
+      "KillMains": true,
+      "BotTypes": null,
+      "FloorId": "base"
+    },
+    "ZoneSmuglers": {
+      "Radius": {
+        "Min": 150,
+        "Max": 500
+      },
+      "Force": {
+        "Min": -0.25,
+        "Max": 0.75
+      },
+      "Decay": 1,
+      "KillMains": true,
+      "BotTypes": null,
+      "FloorId": "base"
+    }
+  },
   "CustomZones": [
     {
+      "Name": "Resort",
       "Position": {
-        "x": -250.0,
-        "y": -100.0
+        "x": -250,
+        "y": -100
       },
       "Radius": {
-        "Min": 500.0,
-        "Max": 600.0
+        "Min": 300,
+        "Max": 800
       },
       "Force": {
         "Min": -0.25,
         "Max": 0.75
       },
-      "Decay": 1.0
+      "Decay": 1,
+      "KillMains": true,
+      "BotTypes": null,
+      "FloorId": null
     },
     {
+      "Name": "Boat",
       "Position": {
-        "x": 160.0,
-        "y": -270.0
+        "x": -316,
+        "y": 484
       },
       "Radius": {
-        "Min": 500.0,
-        "Max": 600.0
-      },
-      "Force": {
-        "Min": 0.0,
-        "Max": 0.25
-      },
-      "Decay": 1.0
-    },
-    {
-      "Position": {
-        "x": -345.0,
-        "y": 455.0
-      },
-      "Radius": {
-        "Min": 500.0,
-        "Max": 600.0
+        "Min": 200,
+        "Max": 600
       },
       "Force": {
         "Min": -0.25,
         "Max": 0.75
       },
-      "Decay": 1.0
+      "Decay": 1,
+      "KillMains": true,
+      "BotTypes": null,
+      "FloorId": null
     },
     {
+      "Name": "Villas",
       "Position": {
-        "x": -925.0,
-        "y": 275.0
+        "x": 128,
+        "y": 112
       },
       "Radius": {
-        "Min": 500.0,
-        "Max": 600.0
+        "Min": 150,
+        "Max": 500
       },
       "Force": {
         "Min": -0.25,
         "Max": 0.75
       },
-      "Decay": 1.0
+      "Decay": 1,
+      "KillMains": true,
+      "BotTypes": null,
+      "FloorId": null
     }
   ],
   "Convergence": {
     "Radius": {
-      "Min": 750.0,
-      "Max": 1500.0
+      "Min": 750,
+      "Max": 1500
     },
     "Force": {
       "Min": 0.25,

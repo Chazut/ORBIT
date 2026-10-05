@@ -1,37 +1,85 @@
 {
+  "SchemaVersion": 2,
   "BuiltinZones": {
     "ZoneSubStorage": {
       "Radius": {
-        "Min": 300.0,
-        "Max": 350.0
+        "Min": 100,
+        "Max": 250
       },
       "Force": {
         "Min": -0.25,
         "Max": 0.5
       },
-      "Decay": 1.0
+      "Decay": 1,
+      "KillMains": true,
+      "BotTypes": [
+        "PMC",
+        "Scav",
+        "PlayerScav"
+      ],
+      "FloorId": "bunkers"
     },
     "ZoneBarrack": {
       "Radius": {
-        "Min": 300.0,
-        "Max": 350.0
+        "Min": 100,
+        "Max": 350
       },
       "Force": {
         "Min": -0.25,
-        "Max": 0.5
+        "Max": 0.75
       },
-      "Decay": 1.0
+      "Decay": 1,
+      "KillMains": true,
+      "BotTypes": [
+        "PMC",
+        "Scav",
+        "PlayerScav"
+      ],
+      "FloorId": "base|2nd-floor|3rd-floor"
+    },
+    "ZoneSubCommand": {
+      "Radius": {
+        "Min": 100,
+        "Max": 400
+      },
+      "Force": {
+        "Min": -0.25,
+        "Max": 1.25
+      },
+      "Decay": 0.8,
+      "KillMains": true,
+      "BotTypes": null,
+      "FloorId": "bunkers"
     }
   },
-  "CustomZones": [],
+  "CustomZones": [
+    {
+      "Position": {
+        "x": -6,
+        "y": 173
+      },
+      "Radius": {
+        "Min": 100,
+        "Max": 400
+      },
+      "Force": {
+        "Min": -0.5,
+        "Max": 1
+      },
+      "Decay": 1.2,
+      "KillMains": true,
+      "BotTypes": null,
+      "FloorId": null
+    }
+  ],
   "Convergence": {
     "Radius": {
-      "Min": 0.0,
-      "Max": 0.0
+      "Min": 0,
+      "Max": 0
     },
     "Force": {
-      "Min": 0.0,
-      "Max": 0.0
+      "Min": 0,
+      "Max": 0
     },
     "Enabled": false
   }

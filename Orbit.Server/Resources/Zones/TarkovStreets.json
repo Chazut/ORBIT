@@ -1,13 +1,71 @@
 {
-  "BuiltinZones": {},
+  "SchemaVersion": 2,
+  "BuiltinZones": {
+    "ZoneCard1": {
+      "Radius": {
+        "Min": 150,
+        "Max": 250
+      },
+      "Force": {
+        "Min": -0.25,
+        "Max": 0.75
+      },
+      "Decay": 1,
+      "KillMains": true,
+      "BotTypes": null,
+      "FloorId": "base"
+    },
+    "ZoneCarShowroom": {
+      "Radius": {
+        "Min": 150,
+        "Max": 250
+      },
+      "Force": {
+        "Min": -0.25,
+        "Max": 0.75
+      },
+      "Decay": 1,
+      "KillMains": true,
+      "BotTypes": null,
+      "FloorId": "base"
+    },
+    "ZoneColumn": {
+      "Radius": {
+        "Min": 150,
+        "Max": 250
+      },
+      "Force": {
+        "Min": -0.25,
+        "Max": 0.75
+      },
+      "Decay": 1,
+      "KillMains": true,
+      "BotTypes": null,
+      "FloorId": "base"
+    },
+    "ZoneFactory": {
+      "Radius": {
+        "Min": 150,
+        "Max": 250
+      },
+      "Force": {
+        "Min": -0.25,
+        "Max": 0.75
+      },
+      "Decay": 1,
+      "KillMains": true,
+      "BotTypes": null,
+      "FloorId": "base"
+    }
+  },
   "CustomZones": [],
   "Convergence": {
     "Radius": {
-      "Min": 150.0,
-      "Max": 300.0
+      "Min": 150,
+      "Max": 300
     },
     "Force": {
-      "Min": 0.0,
+      "Min": 0,
       "Max": 0.5
     },
     "Enabled": true

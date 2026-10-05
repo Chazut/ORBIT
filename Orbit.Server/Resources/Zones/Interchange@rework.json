@@ -1,25 +1,120 @@
 {
+  "SchemaVersion": 2,
   "BuiltinZones": {
-    "ZoneCenter": {
+    "ZoneCenterBot": {
       "Radius": {
-        "Min": 500.0,
-        "Max": 650.0
+        "Min": 500,
+        "Max": 650
       },
       "Force": {
         "Min": -0.25,
-        "Max": 1.0
+        "Max": 1
       },
-      "Decay": 0.75
+      "Decay": 0.8,
+      "KillMains": true,
+      "BotTypes": null,
+      "FloorId": "2nd-floor|3rd-floor"
+    },
+    "ZoneBearCamp": {
+      "Radius": {
+        "Min": 350,
+        "Max": 600
+      },
+      "Force": {
+        "Min": -0.5,
+        "Max": 1.5
+      },
+      "Decay": 1,
+      "KillMains": true,
+      "BotTypes": null,
+      "FloorId": "base"
     }
   },
-  "CustomZones": [],
+  "CustomZones": [
+    {
+      "Name": "Power",
+      "Position": {
+        "x": -203,
+        "y": -352
+      },
+      "Radius": {
+        "Min": 179,
+        "Max": 519
+      },
+      "Force": {
+        "Min": -0.25,
+        "Max": 0.75
+      },
+      "Decay": 1,
+      "KillMains": true,
+      "BotTypes": null,
+      "FloorId": null
+    },
+    {
+      "Name": "Loot",
+      "Position": {
+        "x": 81,
+        "y": 54
+      },
+      "Radius": {
+        "Min": 150,
+        "Max": 250
+      },
+      "Force": {
+        "Min": 0,
+        "Max": 1
+      },
+      "Decay": 1,
+      "KillMains": true,
+      "BotTypes": null,
+      "FloorId": "3rd-floor"
+    },
+    {
+      "Name": "Camp",
+      "Position": {
+        "x": -122,
+        "y": 237
+      },
+      "Radius": {
+        "Min": 150,
+        "Max": 300
+      },
+      "Force": {
+        "Min": -0.5,
+        "Max": 1
+      },
+      "Decay": 1,
+      "KillMains": true,
+      "BotTypes": null,
+      "FloorId": null
+    },
+    {
+      "Name": "Camp2",
+      "Position": {
+        "x": -327,
+        "y": -52
+      },
+      "Radius": {
+        "Min": 150,
+        "Max": 300
+      },
+      "Force": {
+        "Min": -0.5,
+        "Max": 1
+      },
+      "Decay": 1,
+      "KillMains": true,
+      "BotTypes": null,
+      "FloorId": null
+    }
+  ],
   "Convergence": {
     "Radius": {
-      "Min": 300.0,
-      "Max": 500.0
+      "Min": 300,
+      "Max": 500
     },
     "Force": {
-      "Min": 0.0,
+      "Min": 0,
       "Max": 0.5
     },
     "Enabled": true

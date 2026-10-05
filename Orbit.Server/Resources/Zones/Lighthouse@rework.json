@@ -1,64 +1,104 @@
 {
+  "SchemaVersion": 2,
   "BuiltinZones": {
     "Zone_Chalet": {
       "Radius": {
-        "Min": 300.0,
-        "Max": 350.0
+        "Min": 300,
+        "Max": 350
       },
       "Force": {
         "Min": -0.5,
         "Max": 1.25
       },
-      "Decay": 1.0
+      "Decay": 1,
+      "KillMains": true,
+      "BotTypes": [
+        "PMC"
+      ],
+      "FloorId": "base"
     },
     "Zone_Village": {
       "Radius": {
-        "Min": 400.0,
-        "Max": 450.0
+        "Min": 400,
+        "Max": 450
       },
       "Force": {
         "Min": -0.5,
         "Max": 1.25
       },
-      "Decay": 1.0
+      "Decay": 1,
+      "KillMains": true,
+      "BotTypes": null,
+      "FloorId": "base"
     }
   },
   "CustomZones": [
     {
+      "Name": "Snip",
       "Position": {
-        "x": 0.0,
-        "y": 475.0
+        "x": -65,
+        "y": 448
       },
       "Radius": {
-        "Min": 500.0,
-        "Max": 600.0
+        "Min": 500,
+        "Max": 600
       },
       "Force": {
         "Min": -0.25,
         "Max": 0.75
       },
-      "Decay": 1.0
+      "Decay": 1,
+      "KillMains": true,
+      "BotTypes": [
+        "PMC"
+      ],
+      "FloorId": null
     },
     {
+      "Name": "Base",
       "Position": {
-        "x": -55.0,
-        "y": -775.0
+        "x": -61,
+        "y": -581
       },
       "Radius": {
-        "Min": 400.0,
-        "Max": 450.0
+        "Min": 200,
+        "Max": 450
       },
       "Force": {
         "Min": -0.25,
         "Max": 0.75
       },
-      "Decay": 1.0
+      "Decay": 1,
+      "KillMains": true,
+      "BotTypes": null,
+      "FloorId": null
+    },
+    {
+      "Name": "Scav camp",
+      "Position": {
+        "x": 11,
+        "y": -19
+      },
+      "Radius": {
+        "Min": 250,
+        "Max": 600
+      },
+      "Force": {
+        "Min": 0.5,
+        "Max": 1.5
+      },
+      "Decay": 0.5,
+      "KillMains": true,
+      "BotTypes": [
+        "Scav"
+      ],
+      "FloorId": null
     }
   ],
   "Convergence": {
     "Radius": {
-      "Min": 250.0,
-      "Max": 1000.0
+      "Min": 250,
+      "Max": 1000
     },
     "Force": {
       "Min": 0.25,

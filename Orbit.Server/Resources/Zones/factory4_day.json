@@ -1,14 +1,15 @@
 {
+  "SchemaVersion": 2,
   "BuiltinZones": {},
   "CustomZones": [],
   "Convergence": {
     "Radius": {
-      "Min": 0.0,
-      "Max": 0.0
+      "Min": 0,
+      "Max": 0
     },
     "Force": {
-      "Min": 0.0,
-      "Max": 0.0
+      "Min": 0,
+      "Max": 0
     },
     "Enabled": false
   }

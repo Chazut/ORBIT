@@ -141,114 +141,224 @@ public class WaypointConfig
             { "Woods", new MapGeometry(new Vector2(-756, -915), new Vector2(647, 443), 125) },
         };
 
+        // Keep these fallback zones aligned with Orbit.Server/Resources/Zones.
         public static readonly Dictionary<string, MapZone> MapZones = new()
         {
             {
                 "bigmap", new MapZone(
                     new()
                     {
-                        { "ZoneDormitory", new BuiltinZone(new Range(250, 300), new Range(-0.75f, 1.5f)) },
-                        { "ZoneScavBase", new BuiltinZone(new Range(350, 400), new Range(-0.75f, 1.5f)) },
-                        { "ZoneOldAZS", new BuiltinZone(new Range(100, 150), new Range(-0.25f, 0.25f)) },
-                        { "ZoneGasStation", new BuiltinZone(new Range(200, 250), new Range(-0.25f, 0.75f)) },
+                        { "ZoneDormitory", new BuiltinZone(new Range(250f, 300f), new Range(-0.75f, 1.5f)) { FloorId = "base|2nd-floor|3rd-floor" } },
+                        { "ZoneScavBase", new BuiltinZone(new Range(350f, 400f), new Range(-0.75f, 1.5f)) { FloorId = "base|2nd-floor" } },
+                        { "ZoneOldAZS", new BuiltinZone(new Range(100f, 150f), new Range(-0.25f, 0.5f)) { FloorId = "base" } },
+                        { "ZoneGasStation", new BuiltinZone(new Range(200f, 250f), new Range(-0.25f, 0.75f)) { FloorId = "base" } },
                     },
                     [
-                        new CustomZone(new Vector2(-200, -100), new Range(350, 400), new Range(-0.25f, 0.5f)),
-                        new CustomZone(new Vector2(550, 125), new Range(150, 200), new Range(-0.25f, 0.5f))
+                        new CustomZone(new Vector2(-200f, -100f), new Range(350f, 400f), new Range(-0.25f, 0.5f)),
+                        new CustomZone(new Vector2(550f, 125f), new Range(150f, 200f), new Range(-0.25f, 0.5f)),
                     ],
-                    new Convergence(new Range(200, 400), new Range(0f, 0.5f))
+                    new Convergence(new Range(200f, 400f), new Range(0f, 0.5f), enabled: true)
                 )
             },
-            { "factory4_day", new MapZone([], [], new Convergence()) },
-            { "factory4_night", new MapZone([], [], new Convergence()) },
-            { "Sandbox", new MapZone([], [], new Convergence()) },
-            { "Sandbox_high", new MapZone([], [], new Convergence()) },
+            {
+                "factory4_day", new MapZone(
+                    new()
+                    {
+                    },
+                    [
+                    ],
+                    new Convergence(new Range(0f, 0f), new Range(0f, 0f), enabled: false)
+                )
+            },
+            {
+                "factory4_night", new MapZone(
+                    new()
+                    {
+                    },
+                    [
+                    ],
+                    new Convergence(new Range(0f, 0f), new Range(0f, 0f), enabled: false)
+                )
+            },
             {
                 "Interchange", new MapZone(
                     new()
                     {
-                        { "ZoneCenter", new BuiltinZone(new Range(500, 650), new Range(-0.25f, 1.0f), decay: 0.75f) }
+                        { "ZoneCenterBot", new BuiltinZone(new Range(500f, 650f), new Range(-0.25f, 1f), decay: 0.8f) { FloorId = "2nd-floor|3rd-floor" } },
                     },
-                    [],
-                    new Convergence(new Range(300, 500), new Range(0f, 0.5f))
+                    [
+                        // Power
+                        new CustomZone(new Vector2(-203f, -352f), new Range(179f, 519f), new Range(-0.25f, 0.75f)),
+                        // Loot
+                        new CustomZone(new Vector2(81f, 54f), new Range(150f, 250f), new Range(0f, 1f)) { FloorId = "3rd-floor" },
+                    ],
+                    new Convergence(new Range(300f, 500f), new Range(0f, 0.5f), enabled: true)
                 )
             },
-            // Seed for the rework variant: same tuning as the vanilla layout, edited separately.
             {
                 "Interchange@rework", new MapZone(
                     new()
                     {
-                        { "ZoneCenter", new BuiltinZone(new Range(500, 650), new Range(-0.25f, 1.0f), decay: 0.75f) }
+                        { "ZoneCenterBot", new BuiltinZone(new Range(500f, 650f), new Range(-0.25f, 1f), decay: 0.8f) { FloorId = "2nd-floor|3rd-floor" } },
+                        { "ZoneBearCamp", new BuiltinZone(new Range(350f, 600f), new Range(-0.5f, 1.5f)) { FloorId = "base" } },
                     },
-                    [],
-                    new Convergence(new Range(300, 500), new Range(0f, 0.5f))
+                    [
+                        // Power
+                        new CustomZone(new Vector2(-203f, -352f), new Range(179f, 519f), new Range(-0.25f, 0.75f)),
+                        // Loot
+                        new CustomZone(new Vector2(81f, 54f), new Range(150f, 250f), new Range(0f, 1f)) { FloorId = "3rd-floor" },
+                        // Camp
+                        new CustomZone(new Vector2(-122f, 237f), new Range(150f, 300f), new Range(-0.5f, 1f)),
+                        // Camp2
+                        new CustomZone(new Vector2(-327f, -52f), new Range(150f, 300f), new Range(-0.5f, 1f)),
+                    ],
+                    new Convergence(new Range(300f, 500f), new Range(0f, 0.5f), enabled: true)
                 )
             },
-            { "laboratory", new MapZone([], [], new Convergence()) },
-            { "Labyrinth", new MapZone([], [], new Convergence()) },
+            {
+                "laboratory", new MapZone(
+                    new()
+                    {
+                    },
+                    [
+                    ],
+                    new Convergence(new Range(0f, 0f), new Range(0f, 0f), enabled: false)
+                )
+            },
+            {
+                "Labyrinth", new MapZone(
+                    new()
+                    {
+                    },
+                    [
+                    ],
+                    new Convergence(new Range(0f, 0f), new Range(0f, 0f), enabled: false)
+                )
+            },
             {
                 "Lighthouse", new MapZone(
                     new()
                     {
-                        { "Zone_Chalet", new BuiltinZone(new Range(300, 350), new Range(-0.5f, 1.25f)) },
-                        { "Zone_Village", new BuiltinZone(new Range(400, 450), new Range(-0.5f, 1.25f)) }
+                        { "Zone_Chalet", new BuiltinZone(new Range(300f, 350f), new Range(-0.5f, 1.25f)) { FloorId = "base", BotTypes = ["PMC"] } },
+                        { "Zone_Village", new BuiltinZone(new Range(400f, 450f), new Range(-0.5f, 1.25f)) { FloorId = "base" } },
                     },
                     [
-                        new CustomZone(new Vector2(0, 475), new Range(500, 600), new Range(-0.25f, 0.75f)),
-                        new CustomZone(new Vector2(-55, -775), new Range(400, 450), new Range(-0.25f, 0.75f))
+                        // Snip
+                        new CustomZone(new Vector2(-65f, 448f), new Range(500f, 600f), new Range(-0.25f, 0.75f)) { BotTypes = ["PMC"] },
+                        // Base
+                        new CustomZone(new Vector2(-61f, -581f), new Range(200f, 450f), new Range(-0.25f, 0.75f)),
+                        // Scav camp
+                        new CustomZone(new Vector2(11f, -19f), new Range(250f, 600f), new Range(0.5f, 1.5f), decay: 0.5f) { BotTypes = ["Scav"] },
                     ],
-                    new Convergence(new Range(250, 1000), new Range(0.25f, 0.75f))
+                    new Convergence(new Range(250f, 1000f), new Range(0.25f, 0.75f), enabled: true)
                 )
             },
-            // Seed for the rework variant: same tuning as the vanilla layout, edited separately.
             {
                 "Lighthouse@rework", new MapZone(
                     new()
                     {
-                        { "Zone_Chalet", new BuiltinZone(new Range(300, 350), new Range(-0.5f, 1.25f)) },
-                        { "Zone_Village", new BuiltinZone(new Range(400, 450), new Range(-0.5f, 1.25f)) }
+                        { "Zone_Chalet", new BuiltinZone(new Range(300f, 350f), new Range(-0.5f, 1.25f)) { FloorId = "base", BotTypes = ["PMC"] } },
+                        { "Zone_Village", new BuiltinZone(new Range(400f, 450f), new Range(-0.5f, 1.25f)) { FloorId = "base" } },
                     },
                     [
-                        new CustomZone(new Vector2(0, 475), new Range(500, 600), new Range(-0.25f, 0.75f)),
-                        new CustomZone(new Vector2(-55, -775), new Range(400, 450), new Range(-0.25f, 0.75f))
+                        // Snip
+                        new CustomZone(new Vector2(-65f, 448f), new Range(500f, 600f), new Range(-0.25f, 0.75f)) { BotTypes = ["PMC"] },
+                        // Base
+                        new CustomZone(new Vector2(-61f, -581f), new Range(200f, 450f), new Range(-0.25f, 0.75f)),
+                        // Scav camp
+                        new CustomZone(new Vector2(11f, -19f), new Range(250f, 600f), new Range(0.5f, 1.5f), decay: 0.5f) { BotTypes = ["Scav"] },
                     ],
-                    new Convergence(new Range(250, 1000), new Range(0.25f, 0.75f))
+                    new Convergence(new Range(250f, 1000f), new Range(0.25f, 0.75f), enabled: true)
                 )
             },
             {
                 "RezervBase", new MapZone(
                     new()
                     {
-                        { "ZoneSubStorage", new BuiltinZone(new Range(300, 350), new Range(-0.25f, 0.5f)) },
-                        { "ZoneBarrack", new BuiltinZone(new Range(300, 350), new Range(-0.25f, 0.5f)) }
+                        { "ZoneSubStorage", new BuiltinZone(new Range(100f, 250f), new Range(-0.25f, 0.5f)) { FloorId = "bunkers", BotTypes = ["PMC", "Scav", "PlayerScav"] } },
+                        { "ZoneBarrack", new BuiltinZone(new Range(100f, 350f), new Range(-0.25f, 0.75f)) { FloorId = "base|2nd-floor|3rd-floor", BotTypes = ["PMC", "Scav", "PlayerScav"] } },
+                        { "ZoneSubCommand", new BuiltinZone(new Range(100f, 400f), new Range(-0.25f, 1.25f), decay: 0.8f) { FloorId = "bunkers" } },
                     },
-                    [],
-                    new Convergence()
+                    [
+                        new CustomZone(new Vector2(-6f, 173f), new Range(100f, 400f), new Range(-0.5f, 1f), decay: 1.2f),
+                    ],
+                    new Convergence(new Range(0f, 0f), new Range(0f, 0f), enabled: false)
+                )
+            },
+            {
+                "Sandbox", new MapZone(
+                    new()
+                    {
+                    },
+                    [
+                    ],
+                    new Convergence(new Range(0f, 0f), new Range(0f, 0f), enabled: false)
+                )
+            },
+            {
+                "Sandbox_high", new MapZone(
+                    new()
+                    {
+                    },
+                    [
+                    ],
+                    new Convergence(new Range(0f, 0f), new Range(0f, 0f), enabled: false)
                 )
             },
             {
                 "Shoreline", new MapZone(
-                    new(),
+                    new()
+                    {
+                        { "ZoneMeteoStation", new BuiltinZone(new Range(150f, 500f), new Range(-0.25f, 0.75f)) { FloorId = "base" } },
+                        { "ZoneSmuglers", new BuiltinZone(new Range(150f, 500f), new Range(-0.25f, 0.75f)) { FloorId = "base" } },
+                    },
                     [
-                        new CustomZone(new Vector2(-250, -100), new Range(500, 600), new Range(-0.25f, 0.75f)),
-                        new CustomZone(new Vector2(160, -270), new Range(500, 600), new Range(0f, 0.25f)),
-                        new CustomZone(new Vector2(-345, 455), new Range(500, 600), new Range(-0.25f, 0.75f)),
-                        new CustomZone(new Vector2(-925, 275), new Range(500, 600), new Range(-0.25f, 0.75f))
+                        // Resort
+                        new CustomZone(new Vector2(-250f, -100f), new Range(300f, 800f), new Range(-0.25f, 0.75f)),
+                        // Boat
+                        new CustomZone(new Vector2(-316f, 484f), new Range(200f, 600f), new Range(-0.25f, 0.75f)),
+                        // Villas
+                        new CustomZone(new Vector2(128f, 112f), new Range(150f, 500f), new Range(-0.25f, 0.75f)),
                     ],
-                    new Convergence(new Range(750, 1500), new Range(0.25f, 0.75f))
+                    new Convergence(new Range(750f, 1500f), new Range(0.25f, 0.75f), enabled: true)
                 )
             },
-            { "TarkovStreets", new MapZone([], [], new Convergence(new Range(150, 300), new Range(0f, 0.5f))) },
+            {
+                "TarkovStreets", new MapZone(
+                    new()
+                    {
+                        { "ZoneCard1", new BuiltinZone(new Range(150f, 250f), new Range(-0.25f, 0.75f)) { FloorId = "base" } },
+                        { "ZoneCarShowroom", new BuiltinZone(new Range(150f, 250f), new Range(-0.25f, 0.75f)) { FloorId = "base" } },
+                        { "ZoneColumn", new BuiltinZone(new Range(150f, 250f), new Range(-0.25f, 0.75f)) { FloorId = "base" } },
+                        { "ZoneFactory", new BuiltinZone(new Range(150f, 250f), new Range(-0.25f, 0.75f)) { FloorId = "base" } },
+                    },
+                    [
+                    ],
+                    new Convergence(new Range(150f, 300f), new Range(0f, 0.5f), enabled: true)
+                )
+            },
             {
                 "Woods", new MapZone(
-                    [],
+                    new()
+                    {
+                    },
                     [
-                        new CustomZone(new Vector2(-550, -200), new Range(500, 600), new Range(-0.25f, 0.25f)), // Old Sawmill
-                        new CustomZone(new Vector2(0, 0), new Range(700, 800), new Range(-0.35f, 1.25f)),       // New Sawmill
-                        new CustomZone(new Vector2(400, 250), new Range(600, 700), new Range(-0.25f, 0.5f)),    // Outskirts
-                        new CustomZone(new Vector2(135, -750), new Range(800, 1000), new Range(-0.35f, 1.0f))   // Friendship Bridge
+                        // Old Sawmill
+                        new CustomZone(new Vector2(-550f, -200f), new Range(300f, 600f), new Range(-0.25f, 0.75f)),
+                        // Sawmill
+                        new CustomZone(new Vector2(0f, 0f), new Range(400f, 800f), new Range(-0.35f, 1.25f), decay: 0.8f),
+                        // HouseCamping
+                        new CustomZone(new Vector2(400f, 250f), new Range(300f, 700f), new Range(-0.25f, 0.75f)),
+                        // Scav base
+                        new CustomZone(new Vector2(142f, -736f), new Range(300f, 600f), new Range(-0.25f, 0.75f)),
+                        // Usec Base
+                        new CustomZone(new Vector2(294f, -450f), new Range(300f, 600f), new Range(-0.25f, 0.75f)),
+                        // Village
+                        new CustomZone(new Vector2(-470f, -379f), new Range(300f, 600f), new Range(-0.25f, 0.75f)),
+                        // Lootspot
+                        new CustomZone(new Vector2(-196f, 221f), new Range(300f, 600f), new Range(-0.25f, 0.75f)),
                     ],
-                    new Convergence(new Range(500, 1250), new Range(0.25f, 0.75f))
+                    new Convergence(new Range(500f, 1250f), new Range(0.25f, 0.75f), enabled: true)
                 )
             },
         };
