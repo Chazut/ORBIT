@@ -5,48 +5,69 @@ namespace Orbit.Systems;
 
 public partial class DormancySystem
 {
+    private readonly GhostVisibility _visibility = new();
     private const float SniperMinimumDetectRange = 200f;
-
     private static float SniperDetectionReach(BotOwner bot, float weaponReach)
         => bot?.Profile?.Info?.Settings?.Role == WildSpawnType.marksman
             ? Mathf.Clamp(weaponReach, SniperMinimumDetectRange, SkirmishReachCap) : 0f;
-
     private static BotOwner MemberBot(GhostUnit unit, int index)
         => index < unit.Agents.Count ? unit.Agents[index].Bot : unit.VanillaBots[index - unit.Agents.Count];
-
-    private static bool TryFindGhostContact(GhostUnit a, GhostUnit b, out Vector3 closestA, out Vector3 closestB,
-        out float distanceSqr, out float reach, out bool sniperDetection)
+    private GhostVisibilityModel.Result MemberVisibility(BotOwner observer, BotOwner target, bool sniper = true)
     {
-        distanceSqr = float.MaxValue;
-        closestA = closestB = default;
-        reach = Mathf.Max(a.Reach, b.Reach);
-        sniperDetection = false;
-        var normalReach = reach;
+        var raw = UnitMemberReach(observer);
+        if (sniper) raw = Mathf.Max(raw, SniperDetectionReach(observer, raw));
+        return _visibility.Read(observer, target, raw, _darkness, HasNightVision(observer));
+    }
+    private bool TryFindGhostContact(GhostUnit a, GhostUnit b, out Vector3 closestA, out Vector3 closestB,
+        out float distanceSqr, out float reach, out bool sniperDetection, out float acquisition)
+    {
+        distanceSqr = float.MaxValue; reach = acquisition = 0;
+        closestA = closestB = default; sniperDetection = false;
         for (var i = 0; i < a.Count; i++)
         {
-            var pa = i < a.Agents.Count ? a.Agents[i].Position : a.VanillaBots[i - a.Agents.Count].GetPlayer.Position;
-            var sniperA = a.SniperReach > 0f && MemberBot(a, i).Profile.Info.Settings.Role == WildSpawnType.marksman
-                ? a.SniperReach : 0f;
+            var botA = MemberBot(a, i);
+            if (botA == null || botA.IsDead || botA.GetPlayer == null) continue;
+            var pa = botA.GetPlayer.Position;
             for (var j = 0; j < b.Count; j++)
             {
-                var pb = j < b.Agents.Count ? b.Agents[j].Position : b.VanillaBots[j - b.Agents.Count].GetPlayer.Position;
-                var sniperB = b.SniperReach > 0f && MemberBot(b, j).Profile.Info.Settings.Role == WildSpawnType.marksman
-                    ? b.SniperReach : 0f;
-                var delta = pa - pb;
-                var sniperReach = Mathf.Max(sniperA, sniperB);
-                var horizontalSqr = sniperReach > 0f ? delta.x * delta.x + delta.z * delta.z : 0f;
-                var useSniper = sniperReach > 0f && horizontalSqr <= sniperReach * sniperReach;
-                var d = useSniper ? horizontalSqr : delta.sqrMagnitude;
-                var candidateReach = useSniper ? sniperReach : normalReach;
-                if (d > candidateReach * candidateReach || d >= distanceSqr) continue;
-                distanceSqr = d;
-                closestA = pa;
-                closestB = pb;
-                reach = candidateReach;
+                var botB = MemberBot(b, j);
+                if (botB == null || botB.IsDead || botB.GetPlayer == null) continue;
+                var pb = botB.GetPlayer.Position;
+                var va = MemberVisibility(botA, botB); var vb = MemberVisibility(botB, botA);
+                var delta = pa - pb; var flat = delta.x * delta.x + delta.z * delta.z;
+                var sniperA = SniperDetectionReach(botA, 0) > 0;
+                var sniperB = SniperDetectionReach(botB, 0) > 0;
+                var seesA = va.Reach > 0 && (sniperA ? flat : delta.sqrMagnitude) <= va.Reach * va.Reach;
+                var seesB = vb.Reach > 0 && (sniperB ? flat : delta.sqrMagnitude) <= vb.Reach * vb.Reach;
+                if (!seesA && !seesB) continue;
+                var useSniper = seesA && sniperA || seesB && sniperB;
+                var distance = useSniper ? flat : delta.sqrMagnitude;
+                if (distance >= distanceSqr) continue;
+                distanceSqr = distance; closestA = pa; closestB = pb;
+                reach = Mathf.Max(seesA ? va.Reach : 0, seesB ? vb.Reach : 0);
+                acquisition = Mathf.Max(seesA ? va.Acquisition : 0, seesB ? vb.Acquisition : 0);
                 sniperDetection = useSniper;
             }
         }
-        // Heights are retained in the selected positions for physical sight lines and fight resolution.
         return distanceSqr < float.MaxValue;
+    }
+    private bool CanSeeGhostTarget(BotOwner observer, BotOwner target)
+    {
+        if (observer == null || target == null || observer.IsDead || target.IsDead
+            || observer.GetPlayer == null || target.GetPlayer == null) return false;
+        var reach = MemberVisibility(observer, target).Reach;
+        var delta = observer.GetPlayer.Position - target.GetPlayer.Position;
+        var distance = SniperDetectionReach(observer, 0) > 0 ? delta.x * delta.x + delta.z * delta.z : delta.sqrMagnitude;
+        return reach > 0 && distance <= reach * reach && ClearFightLos(observer.GetPlayer.Position, target.GetPlayer.Position);
+    }
+    private bool HasVisibleAttacker(GhostUnit opposing, BotOwner target)
+    {
+        for (var i = 0; i < opposing.Count; i++)
+        {
+            var attacker = MemberBot(opposing, i);
+            if (CanSeeGhostTarget(attacker, target)
+                && Vector3.Distance(attacker.GetPlayer.Position, target.GetPlayer.Position) <= WeaponKillRange(attacker.GetPlayer) * 1.3f) return true;
+        }
+        return false;
     }
 }

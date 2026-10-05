@@ -198,12 +198,12 @@ public partial class DormancySystem
     private readonly List<ScopeSource> _scopeSources = new();
     private float _unscopedFovDeg = 65f;
 
-    // Best-optic magnification cache per bot (skirmish reach). Weapons rarely change; 60s TTL.
+    // Equipment perception refreshes while asleep too, including optics looted by Ghosts.
     private readonly Dictionary<BotOwner, (float mag, float at)> _opticCache = new();
 
     // Weapon effective-kill-range cache per player (skirmish casualties). Same 60s TTL rationale.
     private readonly Dictionary<Player, (float range, float at)> _killRangeCache = new();
-    // Night vision cache per bot (skirmish reach and fight odds at night). Same 60s TTL rationale.
+    // Night equipment is checked every five seconds, independently of weather sampling.
     private readonly Dictionary<BotOwner, (bool has, float at)> _nightVisionCache = new();
     // Darkness of the current skirmish poll, 0 (day / lit interior) to 1 (full night).
     private float _darkness;
@@ -1296,7 +1296,7 @@ public partial class DormancySystem
                 // A unit mid-fight can't be pulled into a second one until its window closes.
                 if (UnitInFight(a) || UnitInFight(b)) continue;
 
-                if (!TryFindGhostContact(a, b, out var posA, out var posB, out var distSqr, out var reach, out var sniperDetection)) continue;
+                if (!TryFindGhostContact(a, b, out var posA, out var posB, out var distSqr, out var reach, out var sniperDetection, out var acquisition)) continue;
                 var dist = Mathf.Sqrt(distSqr);
 
                 // Terrain/structure LoS between the closest members, THREE rays that must ALL be
@@ -1309,7 +1309,8 @@ public partial class DormancySystem
                 if (_skirmishPairSeenAt.TryGetValue(pairKey, out var seenAt) && Time.time - seenAt < _skirmishCooldown)
                     continue;
 
-                // Point-blank contact is guaranteed; beyond that the chance falls with distance, shaded
+                // Point-blank contact starts at full chance before weather acquisition. Beyond that
+                // it falls with distance, shaded
                 // by how eager both sides are to engage (a Cautious/Rat squad shadows, a GigaChad pushes).
                 float contactChance;
                 if (dist <= SkirmishGuaranteedContactRange)
@@ -1319,6 +1320,7 @@ public partial class DormancySystem
                     var t = (dist - SkirmishGuaranteedContactRange) / Mathf.Max(1f, reach - SkirmishGuaranteedContactRange);
                     contactChance = Mathf.Min(0.95f, _contactChanceMul * ContactAggressionMul(a, b) * Mathf.Lerp(SkirmishChanceClose, SkirmishChanceFar, t));
                 }
+                contactChance *= acquisition;
                 if (Random.value > contactChance)
                 {
                     // A failed roll burns only a SHORT cooldown: the pair re-rolls within seconds while
@@ -1443,13 +1445,13 @@ public partial class DormancySystem
             for (var m = 0; m < squad.Members.Count; m++)
             {
                 unit.Agents.Add(squad.Members[m]);
-                var memberReach = UnitMemberReach(squad.Members[m].Bot);
+                var memberReach = MemberVisibility(squad.Members[m].Bot, null, sniper: false).Reach;
                 unit.Reach = Mathf.Max(unit.Reach, memberReach);
-                unit.SniperReach = Mathf.Max(unit.SniperReach, SniperDetectionReach(squad.Members[m].Bot, memberReach));
+                if (SniperDetectionReach(squad.Members[m].Bot, 0) > 0)
+                    unit.SniperReach = Mathf.Max(unit.SniperReach, MemberVisibility(squad.Members[m].Bot, null).Reach);
                 unit.KillRange = Mathf.Max(unit.KillRange, WeaponKillRange(squad.Members[m].Player));
                 unit.NightCapable |= HasNightVision(squad.Members[m].Bot);
             }
-            ApplyNightReach(unit);
             _ghostUnits.Add(unit);
         }
 
@@ -1473,13 +1475,13 @@ public partial class DormancySystem
                 // Only actual Ghosts participate in simulated fights.
                 if (!_vanillaDormant.Contains(group[m])) continue;
                 unit.VanillaBots.Add(group[m]);
-                var memberReach = UnitMemberReach(group[m]);
+                var memberReach = MemberVisibility(group[m], null, sniper: false).Reach;
                 unit.Reach = Mathf.Max(unit.Reach, memberReach);
-                unit.SniperReach = Mathf.Max(unit.SniperReach, SniperDetectionReach(group[m], memberReach));
+                if (SniperDetectionReach(group[m], 0) > 0)
+                    unit.SniperReach = Mathf.Max(unit.SniperReach, MemberVisibility(group[m], null).Reach);
                 unit.KillRange = Mathf.Max(unit.KillRange, WeaponKillRange(group[m].GetPlayer));
                 unit.NightCapable |= HasNightVision(group[m]);
             }
-            ApplyNightReach(unit);
             _ghostUnits.Add(unit);
         }
     }
@@ -1489,7 +1491,7 @@ public partial class DormancySystem
     private float UnitMemberReach(BotOwner bot)
     {
         if (bot == null) return SkirmishBaseDetectRange;
-        if (_opticCache.TryGetValue(bot, out var cached) && Time.time - cached.at < 60f)
+        if (_opticCache.TryGetValue(bot, out var cached) && Time.time - cached.at < 5f)
             return Mathf.Min(SkirmishReachCap, SkirmishBaseDetectRange * cached.mag);
 
         var mag = 1f;
@@ -1520,7 +1522,6 @@ public partial class DormancySystem
     // shots, target acquisition); two blind sides or two equipped sides stay even, they simply meet
     // closer. Darkness follows the raid clock: full from 22:30 to 04:30 with a one-hour ramp on each side.
     // Factory night is always dark; Factory day, Labs and the Labyrinth are lit interiors, never night.
-    private const float NightBlindReach = 35f;
     private const float NightBlindStrengthMul = 0.7f;
     private const string SpecialScopeParentId = "55818aeb4bdc2ddc698b456a"; // thermal and NV scopes
 
@@ -1550,7 +1551,7 @@ public partial class DormancySystem
     private bool HasNightVision(BotOwner bot)
     {
         if (bot == null) return false;
-        if (_nightVisionCache.TryGetValue(bot, out var cached) && Time.time - cached.at < 60f)
+        if (_nightVisionCache.TryGetValue(bot, out var cached) && Time.time - cached.at < 5f)
             return cached.has;
         var has = false;
         try
@@ -1587,13 +1588,6 @@ public partial class DormancySystem
         }
         _nightVisionCache[bot] = (has, Time.time);
         return has;
-    }
-
-    private void ApplyNightReach(GhostUnit unit)
-    {
-        if (_darkness <= 0f || unit.NightCapable) return;
-        unit.Reach = Mathf.Lerp(unit.Reach, Mathf.Min(unit.Reach, NightBlindReach), _darkness);
-        unit.SniperReach = Mathf.Lerp(unit.SniperReach, Mathf.Min(unit.SniperReach, NightBlindReach), _darkness);
     }
 
     private float NightFightMul(GhostUnit self, GhostUnit other)
@@ -1840,14 +1834,22 @@ public partial class DormancySystem
             try
             {
                 // Escalation: if either side woke mid-window (player proximity, scope, damage), the
-                // simulated fight turns REAL — wake the other side too, drop the remaining scripted
-                // casualties and wear, and let the actual AI finish what the dice started. They are
-                // within reach with line of sight by construction, so vision picks the fight up fast.
+                // other side wakes only if current weather, personal sight and physical LOS still
+                // permit contact. Always drop the remaining scripted casualties and wear.
                 if (UnitWokeMidFight(fight.Winner) || UnitWokeMidFight(fight.Loser))
                 {
-                    Log.Info($"GHOST SKIRMISH: {fight.Winner.Label} vs {fight.Loser.Label} escalated to a REAL fight (a side woke mid-window)");
-                    WakeGhostUnit(fight.Winner, "ghost fight escalation");
-                    WakeGhostUnit(fight.Loser, "ghost fight escalation");
+                    if (TryFindGhostContact(fight.Winner, fight.Loser, out var a, out var b, out _, out _, out _, out _)
+                        && ClearFightLos(a, b))
+                    {
+                        Log.Info($"GHOST SKIRMISH: {fight.Winner.Label} vs {fight.Loser.Label} escalated to a REAL fight (a side woke mid-window)");
+                        WakeGhostUnit(fight.Winner, "ghost fight escalation");
+                        WakeGhostUnit(fight.Loser, "ghost fight escalation");
+                    }
+                    else
+                    {
+                        Log.Info($"GHOST WEATHER: escalation cancelled between {fight.Winner.Label} and {fight.Loser.Label}; no current visual contact");
+                        PerformanceJournal.Event("ghost-weather-no-escalation", detail: fight.Winner.Key + "|" + fight.Loser.Key);
+                    }
                     ReleaseFightPins(fight);
                     _activeFights.RemoveAt(i);
                     continue;
@@ -1856,8 +1858,8 @@ public partial class DormancySystem
                 ExecuteDueKills(fight.LoserKillAts, fight.Loser, fight.Winner);
                 ExecuteDueKills(fight.WinnerKillAts, fight.Winner, fight.Loser);
                 if (Time.time < fight.EndsAt) continue;
-                ApplyFightAttrition(fight.Winner, fight.WinnerWoundChance, fight.WinnerWound);
-                ApplyFightAttrition(fight.Loser, fight.LoserWoundChance, fight.LoserWound);
+                ApplyFightAttrition(fight.Winner, fight.Loser, fight.WinnerWoundChance, fight.WinnerWound);
+                ApplyFightAttrition(fight.Loser, fight.Winner, fight.LoserWoundChance, fight.LoserWound);
                 _activeFights.RemoveAt(i);
             }
             catch (System.Exception e)
@@ -1908,13 +1910,13 @@ public partial class DormancySystem
 
     private static readonly EBodyPart[] AttritionParts = { EBodyPart.LeftArm, EBodyPart.RightArm, EBodyPart.LeftLeg, EBodyPart.RightLeg };
 
-    private void ApplyFightAttrition(GhostUnit unit, float woundChance, float perMemberDamage)
+    private void ApplyFightAttrition(GhostUnit unit, GhostUnit opposing, float woundChance, float perMemberDamage)
     {
         for (var i = 0; i < unit.Agents.Count; i++)
         {
             if (Random.value > woundChance) continue;
             var agent = unit.Agents[i];
-            if (!agent.IsDormant) continue; // woke mid-window — no invisible wounds on live bots
+            if (!agent.IsDormant || !HasVisibleAttacker(opposing, agent.Bot)) continue; // no invisible wounds on awake bots or through fog
             if (!WoundSurvivor(agent.Player, perMemberDamage)) continue;
             // Rebase the damage-wake baselines so fight wear never wakes the squad (the whole point of
             // the limiter). Real enemy damage still compares against the NEW baseline and wakes as usual.
@@ -1927,7 +1929,7 @@ public partial class DormancySystem
         {
             if (Random.value > woundChance) continue;
             var bot = unit.VanillaBots[i];
-            if (!_vanillaDormant.Contains(bot)) continue; // woke mid-window — no invisible wounds
+            if (!_vanillaDormant.Contains(bot) || !HasVisibleAttacker(opposing, bot)) continue; // same visibility rule for native members
             var beforeHp = VanillaHp(bot);
             if (!WoundSurvivor(bot.GetPlayer, perMemberDamage)) continue;
             _vanillaHpBaseline[bot] = VanillaHp(bot);
@@ -2282,10 +2284,7 @@ public partial class DormancySystem
                 ? unit.Agents[idx].IsDormant
                 : _vanillaDormant.Contains(unit.VanillaBots[idx - unit.Agents.Count]);
             if (!stillDormant) continue;
-            var victimPos = idx < unit.Agents.Count
-                ? unit.Agents[idx].Position
-                : unit.VanillaBots[idx - unit.Agents.Count].GetPlayer.Position;
-            var killer = PickVisibleKiller(opposing, victimPos);
+            var killer = PickVisibleKiller(opposing, MemberBot(unit, idx));
             if (killer == null) continue;
             if (idx < unit.Agents.Count)
             {
@@ -2327,9 +2326,10 @@ public partial class DormancySystem
     /// when its SVD squadmate is dead) and who have a clear line of sight. Weighted by gun fitness at
     /// that distance, not "the closest", so kills spread across the squad: with nearest-wins every
     /// simulated kill of a squad landed on whoever walked in front (release-raid logs).</summary>
-    private Player PickVisibleKiller(GhostUnit unit, Vector3 targetPos)
+    private Player PickVisibleKiller(GhostUnit unit, BotOwner target)
     {
         _killerCandidates.Clear();
+        var targetPos = target.GetPlayer.Position;
         var total = 0f;
         for (var i = 0; i < unit.Count; i++)
         {
@@ -2337,8 +2337,7 @@ public partial class DormancySystem
             if (p == null) continue;
             var d = Vector3.Distance(p.Position, targetPos);
             var maxShot = WeaponKillRange(p) * 1.3f;
-            if (d > maxShot) continue;
-            if (!ClearFightLos(p.Position, targetPos)) continue;
+            if (d > maxShot || !CanSeeGhostTarget(MemberBot(unit, i), target)) continue;
             // Same fitness curve as the fight roll: a gun comfortably inside its reach is favoured,
             // one at the edge of it still gets a share.
             var weight = Mathf.Lerp(0.3f, 1f, Mathf.Clamp01(maxShot / Mathf.Max(d, 10f) - 1f));

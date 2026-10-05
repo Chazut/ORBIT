@@ -28,7 +28,7 @@ internal enum TransitionPhase
     MovementRecovery, MovementIdleRescue, MovementSpawnRescue, MovementGhost, MovementGhostDoors, MovementAwake,
     TravelPlanning, TravelExposure, TravelCoverScan, TravelPath, TravelGait, SniperPlanning,
     GhostDeathDiagnosticReport,
-    CampSearch,
+    CampSearch, GhostWeather,
     LootResume, LootPrepare, LootEvaluate, NativeExtract, NativeExtractLeave, NativeExtractDeactivate,
     NativeExtractDispose, NativeExtractDespawn, GhostPlayerDamage,
     Count
