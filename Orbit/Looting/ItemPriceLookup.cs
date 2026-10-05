@@ -17,8 +17,9 @@ public static class ItemPriceLookup
         // is never created (issue #5), so fall back to the server-fetched price cache populated at init.
         var handbook = Singleton<EFT.HandBook.Handbook>.Instance;
         if (!ReferenceEquals(_source, handbook)) { Prices.Clear(); _source = handbook; }
-        var id = item.Template._id;
-        if (id == null) return 0f;
+        // MongoID is a value type. Comparing it with null converts null to MongoID and throws.
+        string id = item.Template._id;
+        if (string.IsNullOrEmpty(id)) return 0f;
         if (Prices.TryGetValue(id, out var cached)) return cached;
         if (handbook != null)
         {
