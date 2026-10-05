@@ -82,7 +82,7 @@ public class OrbitManager
         ZoneKey = Orbit.Helpers.MapVariants.ZoneKey(MapId, MapVariant);
         Orbit.Helpers.ServerConfig.ApplyMap(MapId, ZoneKey);
         Orbit.Helpers.DiagnosticCapture.Reset(ZoneKey);
-        RuntimeCodePreparation.Prepare();
+        DeathCodePreparation.Prepare(gameWorld.AllAlivePlayersList);
         if (MapVariant.Length > 0)
             Log.Always($"Map variant '{MapVariant}' detected on {MapId}: zones and geometry come from '{ZoneKey}' (base map as fallback)");
         Waypoints = new WaypointConfig();
