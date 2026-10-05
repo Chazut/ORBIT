@@ -22,7 +22,7 @@ internal sealed class RushPlan : IObjectiveWork
     internal string Status { get => Sniper?.Status ?? _status; private set => _status = value; }
     internal readonly SniperPlan Sniper;
     internal string Step => Sniper != null ? Sniper.Step : _current < 0 ? _lastSiteName ?? "Choose nearest reachable sector" : _sites[_current].Name;
-    internal int Index => _visited;
+    internal int Index => _processed;
     internal int Count => Kind == "Spawn" ? Mathf.Min(ServerConfig.Rush.SpawnSectors, _sites.Count) : _sites.Count;
     internal string Name => Kind == "Sniper" ? "Sniper overwatch" : Kind + " rush";
     private readonly List<RushPoint> _sites;
@@ -31,13 +31,15 @@ internal sealed class RushPlan : IObjectiveWork
     private readonly float _searchScale;
     private readonly Dictionary<Agent, Waypoint> _orders = new();
     private readonly HashSet<int> _attempted = new();
+    private readonly List<Vector3> _approachHistory = new();
     private readonly OperationRouteSearch _route = new();
     private readonly RushRouteEstimate _ranker = new();
     private readonly NavMeshPath _path = new();
     private Agent _actor;
     private string _lastSiteName;
     private Waypoint _loot;
-    private int _current = -1, _candidate, _best = -1, _visited, _retries, _attempts;
+    private int _current = -1, _candidate, _best = -1, _visited, _processed, _skipped, _retries, _attempts;
+    private string _lastFailure;
     private float _bestLength = float.MaxValue, _nextWork, _elapsed, _held, _lastTick, _nextRoam, _interactAt;
     private bool _paused, _partial, _inside, _doorApproach, _ranking;
     private string _bestRoute;
@@ -121,14 +123,16 @@ internal sealed class RushPlan : IObjectiveWork
             _nextWork = now + .1f;
             var target = _inside ? LootPosition(site) : Position(site);
             if (door != null && !_inside && _doorApproach) target = door.GetInteractionParameters(_actor.Position).InteractionPosition;
-            if (!_route.Find(_actor.Position, target, out _anchor, out var final))
+            if (!_route.Find(_actor.Position, target, out _anchor, out var final, _retries, _approachHistory))
             {
                 if (_route.Pending) return true;
+                Log.Info($"RUSH APPROACH: {squad} kind={Kind} site={site.Name} from={_actor.Position} target={target} samples={_route.Samples} partial={_route.PartialPaths} invalid={_route.InvalidPaths} attempt={_retries + 1}/3");
                 _route.Reset(); _nextWork = now + 2;
                 if (++_retries >= 3) return Skip(squad, waypoints, "unreachable");
                 return true;
             }
             _partial = !final;
+            if (_partial) Log.Info($"RUSH APPROACH: {squad} kind={Kind} site={site.Name} leg={_anchor} target={target} remaining={Vector3.Distance(_anchor, target):F1}m");
             SetOrder(_actor, Point(waypoints, _anchor, site.Name), waypoints);
             squad.Objective.Location = _orders[_actor]; squad.Objective.Status = SquadObjectiveState.Active;
         }
@@ -139,24 +143,32 @@ internal sealed class RushPlan : IObjectiveWork
             SetOrder(member, Point(waypoints, _anchor, "Follow rush"), waypoints);
             break;
         }
+        // A partial leg can end beside its anchor even when the mover reports failure.
+        // Count actual arrival before the status, then recalculate from the closer position.
+        if (_partial && (_actor.Position - _anchor).sqrMagnitude <= 9f)
+        {
+            RememberApproach(_actor.Position);
+            Release(squad, waypoints); _route.Reset(); _retries = 0; return true;
+        }
         if (_actor.Objective.Status == ObjectiveStatus.Failed)
         {
+            RememberApproach(_anchor);
             Release(squad, waypoints); _route.Reset();
             if (++_retries >= 3) return Skip(squad, waypoints, "movement failed");
             return true;
         }
         if (Status == "searching" && _held >= site.SearchSeconds * _searchScale) return Visit(squad, waypoints);
         if (Status != "searching" && (_actor.Position - _anchor).sqrMagnitude > (door != null && !_inside ? 1f : 9f)) return true;
-        if (_partial) { Release(squad, waypoints); _route.Reset(); return true; }
+        if (_partial) return true;
         if (door != null && !_inside && !_doorApproach)
         {
-            _doorApproach = true; Release(squad, waypoints); _route.Reset(); return true;
+            _doorApproach = true; Release(squad, waypoints); _route.Reset(); _approachHistory.Clear(); _retries = 0; return true;
         }
         if (door != null && !_inside)
         {
             if (door.DoorState == EDoorState.Open)
             {
-                _inside = true; Release(squad, waypoints); _route.Reset(); _elapsed = 0;
+                _inside = true; Release(squad, waypoints); _route.Reset(); _elapsed = 0; _retries = 0; _approachHistory.Clear();
                 Main.Position = LootPosition(site); Main.CellCoords = waypoints.WorldToCell(Main.Position);
                 SetStatus(squad, "entering room"); return true;
             }
@@ -219,7 +231,7 @@ internal sealed class RushPlan : IObjectiveWork
     // One route query per work tick, including staged estimates for distant sectors.
     private bool SelectNext(Squad squad, WaypointSystem waypoints)
     {
-        if (_visited >= Count) return End(squad, waypoints, "completed");
+        if (_visited >= Count) return End(squad, waypoints, FinishReason());
         if (!_ranking) { _ranking = true; _sortOrigin = _actor.Position; SetStatus(squad, "planning route"); }
         while (_candidate < _sites.Count && _states[_candidate] != null) _candidate++;
         if (_candidate < _sites.Count)
@@ -231,12 +243,12 @@ internal sealed class RushPlan : IObjectiveWork
             _candidate++; _ranker.Reset();
             return true;
         }
-        if (_best < 0) return End(squad, waypoints, Kind == "Boss" ? "boss not found" : "completed");
+        if (_best < 0) return End(squad, waypoints, FinishReason());
         ReportRoute(squad, _sites[_best], _bestLength, _bestRoute, true);
-        _current = _best; _lastSiteName = _sites[_current].Name; _states[_current] = "current"; _sequence[_current] = _visited + 1;
+        _current = _best; _lastSiteName = _sites[_current].Name; _states[_current] = "current"; _sequence[_current] = _processed + 1;
         Main.Position = Position(_sites[_current]); Main.CellCoords = waypoints.WorldToCell(Main.Position);
         Main.ZoneFloorId = _sites[_current].FloorId;
-        _elapsed = _held = 0; _route.Reset(); SetStatus(squad, "approach");
+        _elapsed = _held = 0; _route.Reset(); _approachHistory.Clear(); RememberApproach(_actor.Position); SetStatus(squad, "approach");
         return true;
     }
 
@@ -249,19 +261,31 @@ internal sealed class RushPlan : IObjectiveWork
     }
 
     private bool Visit(Squad squad, WaypointSystem waypoints)
-    { _states[_current] = "visited"; return Advance(squad, waypoints); }
+    { _states[_current] = "visited"; _visited++; return Advance(squad, waypoints); }
     private bool Skip(Squad squad, WaypointSystem waypoints, string reason)
     {
-        if (_current < 0) return End(squad, waypoints, reason);
+        if (_current < 0) return End(squad, waypoints, "failed: " + reason);
+        _lastFailure = reason; _skipped++;
         _states[_current] = "skipped: " + reason; return Advance(squad, waypoints);
     }
     private bool Advance(Squad squad, WaypointSystem waypoints)
     {
-        SetStatus(squad, _states[_current]); Release(squad, waypoints); _visited++;
+        SetStatus(squad, _states[_current]); Release(squad, waypoints); _processed++;
         _current = -1; _retries = _attempts = 0; ResetRanking();
         _elapsed = _held = 0; _inside = _doorApproach = false; _loot = null; _attempted.Clear(); _route.Reset();
-        if (_visited >= Count) return End(squad, waypoints, Kind == "Boss" ? "boss not found" : "completed");
+        if (_visited >= Count || _processed >= _sites.Count) return End(squad, waypoints, FinishReason());
         SetStatus(squad, "planning route"); return true;
+    }
+
+    private string FinishReason() => Kind == "Boss"
+        ? _skipped > 0 ? "failed: incomplete boss search" : "boss not found"
+        : _visited >= Count ? "completed" : "failed: " + (_lastFailure ?? "no reachable sector");
+
+    private void RememberApproach(Vector3 point)
+    {
+        // Prevent repeated sideways detours from bouncing between the same anchors.
+        if (_approachHistory.Count >= 32) _approachHistory.RemoveAt(0);
+        _approachHistory.Add(point);
     }
     internal bool End(Squad squad, WaypointSystem waypoints, string reason)
     {
@@ -274,7 +298,7 @@ internal sealed class RushPlan : IObjectiveWork
     private void SetStatus(Squad squad, string state)
     {
         Status = state; Orbit.Api.OrbitTelemetry.MainObjectivesRevision++;
-        Log.Info($"RUSH: {squad} kind={Kind} step={Mathf.Min(_visited + 1, Count)}/{Count} site={Step} state={state}");
+        Log.Info($"RUSH: {squad} kind={Kind} step={Mathf.Min(_processed + 1, Count)}/{Count} site={Step} state={state}");
     }
     internal Orbit.Api.OrbitRushPoint[] Snapshot()
     {
