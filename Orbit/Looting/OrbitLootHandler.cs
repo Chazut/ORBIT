@@ -685,13 +685,16 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
 
         var isPmc = corpse.Side == EPlayerSide.Bear || corpse.Side == EPlayerSide.Usec;
         var lootableSlots = isPmc ? CorpseLootableSlotsPmc : CorpseLootableSlotsNonPmc;
+        var corpseBelt = PackNStrapCompat.CorpseBelt(inventoryEquipment);
         _currentSourceRoot = inventoryEquipment;
 
         // Two interleaved timelines merged into one chronological queue: visible-track grabs are spaced by
         // InstantGrabDelayMs, search-track slots are sequential with progressive per-item reveal. Slot order
         // is randomised per track for natural variation.
         var visibleOrder = lootableSlots.Where(s => !SearchableCorpseSlots.Contains(s)).OrderBy(_ => Random.value).ToList();
-        var searchOrder = lootableSlots.Where(s => SearchableCorpseSlots.Contains(s)).OrderBy(_ => Random.value).ToList();
+        var searchSlots = lootableSlots.Where(s => SearchableCorpseSlots.Contains(s));
+        if (corpseBelt != null) searchSlots = searchSlots.Concat(new[] { EquipmentSlot.ArmBand });
+        var searchOrder = searchSlots.OrderBy(_ => Random.value).ToList();
         Log.Debug($"OrbitLootHandler.Corpse({Nick}, {corpse.name}): side={corpse.Side} pmc={isPmc} visibleOrder=[{string.Join(",", visibleOrder)}] searchOrder=[{string.Join(",", searchOrder)}]");
 
         // Loot session phases: 1 — drain non-weapon equipment + searchable grids; 2 — pre-classify every
@@ -765,7 +768,13 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
             var root = slot?.ContainedItem;
             if (root == null) continue;
             var slotItems = new List<DrainEntry>();
-            EnumerateItemsForDrain(root, slotKind.ToString(), slotItems);
+            EnumerateItemsForDrain(root, slotKind == EquipmentSlot.ArmBand ? "Belt" : slotKind.ToString(), slotItems);
+            // Search nested pouches normally, but leave the equipped belt on its corpse.
+            if (slotKind == EquipmentSlot.ArmBand)
+            {
+                slotItems.RemoveAll(entry => ReferenceEquals(entry.Item, corpseBelt));
+                Log.Info($"BELT LOOT: {Nick} corpse={corpse.name} entries={slotItems.Count}");
+            }
             var lastRevealOffset = 0;
             for (var i = 0; i < slotItems.Count; i++)
             {

@@ -17,7 +17,7 @@ public sealed class AmbushSettings
     public float MemberSpacing { get; set; } = 4;
     public CampSiteSettings Hotspots { get; set; } = new();
     public CampSiteSettings Extracts { get; set; } = new() { DistanceMin = 20, DistanceMax = 45 };
-    public CampSiteSettings Airdrops { get; set; } = new() { DistanceMin = 15, DistanceMax = 40 };
+    public CampSiteSettings Airdrops { get; set; } = new() { DistanceMin = 15, DistanceMax = 40, SearchRadius = 500 };
 
     public AmbushStyleSettings Timmy { get; set; } = new(.15f, .05f, 30, 90, .20f, 20, 60);
     public AmbushStyleSettings Cautious { get; set; } = new(.65f, .25f, 120, 300, .65f, 90, 180);
@@ -68,7 +68,7 @@ public sealed class CampSiteSettings
     {
         MapBehaviorOverride.Range(DistanceMin, 5, 80, "Ambush minimum distance");
         MapBehaviorOverride.Range(DistanceMax, DistanceMin, 80, "Ambush maximum distance");
-        MapBehaviorOverride.Range(SearchRadius, 25, 400, "Ambush search radius");
+        MapBehaviorOverride.Range(SearchRadius, 25, 1000, "Ambush search radius");
     }
 }
 

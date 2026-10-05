@@ -16,18 +16,39 @@ internal sealed class AmbushDirector(WaypointSystem waypoints)
     private readonly Dictionary<Agent, CoverPoint> _positions = new();
     private float _nextPlan;
 
-    internal static bool Available(Squad squad)
+    internal static bool Available(Squad squad) => UnavailableReason(squad) == null;
+
+    private static string UnavailableReason(Squad squad)
     {
-        if (squad.Leader == null || squad.Size == 0 || (squad.Operation?.Active == true || MainObjective.HasPendingRush(squad.MainObjectives)) || squad.ExtractRequested || squad.SainResolutionPending
-            || squad.CombatCallerMemberIdx >= 0 || Time.time < squad.GhostFightUntil || squad.CorpseEscort.Active
-            || squad.PreInterruptObjectiveLocation != null || squad.InvestigateNoisePosition.HasValue
-            || squad.Objective.Location?.Category is WaypointCategory.Exfil or WaypointCategory.Corpse) return false;
+        if (squad.Leader == null || squad.Size == 0) return "no leader or members";
+        if (squad.Operation?.Active == true) return "multi-step active";
+        if (MainObjective.HasPendingRush(squad.MainObjectives)) return "rush pending";
+        if (squad.ExtractRequested) return "extract requested";
+        if (squad.SainResolutionPending) return "personality unresolved";
+        if (squad.CombatCallerMemberIdx >= 0 || Time.time < squad.GhostFightUntil) return "combat";
+        if (squad.CorpseEscort.Active) return "corpse escort";
+        if (squad.PreInterruptObjectiveLocation != null) return "interrupted objective";
+        if (squad.InvestigateNoisePosition.HasValue) return "investigating noise";
+        if (squad.Objective.Location?.Category is WaypointCategory.Exfil or WaypointCategory.Corpse) return "extract or corpse objective";
         foreach (var agent in squad.Members)
-            if (agent == null || !agent.IsActive || agent.Player?.HealthController?.IsAlive != true
-                || agent.SoloExtractRequested || agent.LootExtractSweep != null
-                || (CorpseEscort.InFlight(agent) && squad.Camp.Looter != agent)
-                || agent.Bot?.Memory?.HaveEnemy == true || agent.Bot?.Memory?.IsUnderFire == true) return false;
-        return true;
+        {
+            if (agent == null || !agent.IsActive || agent.Player?.HealthController?.IsAlive != true) return "member unavailable";
+            if (agent.SoloExtractRequested || agent.LootExtractSweep != null) return "member extracting";
+            if (CorpseEscort.InFlight(agent) && squad.Camp.Looter != agent) return "member looting";
+            if (agent.Bot?.Memory?.HaveEnemy == true || agent.Bot?.Memory?.IsUnderFire == true) return "member in combat";
+        }
+        return null;
+    }
+
+    private static void Decision(Squad squad, AmbushSite site, string source, string reason, float? roll = null)
+    {
+        if (!Log.InfoEnabled && !PerformanceJournal.Enabled) return;
+        var distance = -1f;
+        if (site != null && squad.Leader != null)
+        { var delta = squad.Leader.Position - site.Position; distance = Mathf.Sqrt(delta.x * delta.x + delta.z * delta.z); }
+        var detail = $"source={source} reason={reason} leader={squad.Leader} members={squad.Size} style={squad.Personality?.Archetype} chance={Style(squad).AirdropChance:F3} roll={(roll.HasValue ? roll.Value.ToString("F3", System.Globalization.CultureInfo.InvariantCulture) : "none")} distance={distance:F1}m radius={ServerConfig.Ambush.Airdrops.SearchRadius:F0}m target={site?.Position}";
+        Log.Info($"AIRDROP DECISION: {squad} {detail}");
+        PerformanceJournal.Event("airdrop-decision", squad.Leader?.Bot?.Profile?.Id, detail, squad.Id);
     }
 
     internal void Prune(IList<Squad> squads)
@@ -46,16 +67,23 @@ internal sealed class AmbushDirector(WaypointSystem waypoints)
     internal void OnAirdropReleased(AmbushSite site, IList<Squad> squads)
     {
         var cfg = ServerConfig.Ambush;
-        if (site == null || !cfg.Airdrops.Enabled) return;
+        if (site == null) return;
         // Decide at the release event. Expensive cover/path work remains paced by TryStartPending.
         foreach (var squad in squads)
         {
-            if (squad.Camp.Active || squad.Camp.PendingAirdrop != null || !cfg.Allows(squad.Leader?.BotCategory)
-                || !Available(squad) || Time.time < squad.Camp.AirdropCooldownUntil
-                || squad.Camp.VisitedAirdrops.Contains(site)) continue;
+            var reason = !cfg.Airdrops.Enabled ? "airdrops disabled"
+                : !cfg.Allows(squad.Leader?.BotCategory) ? "category disabled"
+                : squad.Camp.Active || squad.Camp.PendingAirdrop != null ? "camp already assigned"
+                : UnavailableReason(squad)
+                    ?? (Time.time < squad.Camp.AirdropCooldownUntil ? "cooldown" : null)
+                    ?? (squad.Camp.VisitedAirdrops.Contains(site) ? "already visited" : null);
+            if (reason != null) { Decision(squad, site, "release", reason); continue; }
             var delta = squad.Leader.Position - site.Position;
-            if (delta.x * delta.x + delta.z * delta.z > cfg.Airdrops.SearchRadius * cfg.Airdrops.SearchRadius) continue;
-            if (Random.value >= Style(squad).AirdropChance) continue;
+            if (delta.x * delta.x + delta.z * delta.z > cfg.Airdrops.SearchRadius * cfg.Airdrops.SearchRadius)
+            { Decision(squad, site, "release", "out of range"); continue; }
+            var roll = Random.value;
+            if (roll >= Style(squad).AirdropChance) { Decision(squad, site, "release", "roll rejected", roll); continue; }
+            Decision(squad, site, "release", "selected", roll);
             squad.Camp.SelectAirdrop(squad, site);
             if (!_active.Contains(squad)) _active.Add(squad);
         }
@@ -85,7 +113,17 @@ internal sealed class AmbushDirector(WaypointSystem waypoints)
     {
         if (squad.Camp.PendingAirdrop != null) return TryStartPending(squad);
         var cfg = ServerConfig.Ambush;
-        if (squad.Camp.Active || !cfg.Allows(squad.Leader?.BotCategory) || !Available(squad)) return false;
+        if (squad.Camp.Active || !cfg.Allows(squad.Leader?.BotCategory)) return false;
+        var unavailable = UnavailableReason(squad);
+        if (unavailable != null)
+        {
+            if (cfg.Airdrops.Enabled && Time.time >= squad.Camp.NextAirdropDiagnostic)
+            {
+                squad.Camp.NextAirdropDiagnostic = Time.time + cfg.CheckInterval;
+                Decision(squad, null, "periodic", unavailable);
+            }
+            return false;
+        }
         if (Time.time < _nextPlan) return false;
 
         // A main owns both its target and its mode. No periodic roll can turn another zone into a hotspot camp.
@@ -142,10 +180,15 @@ internal sealed class AmbushDirector(WaypointSystem waypoints)
         squad.Camp.NextCheck = Time.time + cfg.CheckInterval * Random.Range(.8f, 1.2f);
         waypoints.CollectAmbushSites(squad, CampSiteKind.Airdrop, cfg.Airdrops.SearchRadius, _candidates);
         _candidates.RemoveAll(site => squad.Camp.VisitedAirdrops.Contains(site));
-        if (_candidates.Count == 0 || Random.value >= Style(squad).AirdropChance) return false;
+        if (_candidates.Count == 0) { Decision(squad, null, "periodic", "no unvisited candidate in range"); return false; }
+        var roll = Random.value;
+        if (roll >= Style(squad).AirdropChance) { Decision(squad, null, "periodic", "roll rejected", roll); return false; }
         _nextPlan = Time.time + .5f;
         // One bounded formation attempt per opportunity, irrespective of nearby drop count.
-        return TryFormation(squad, _candidates[Random.Range(0, _candidates.Count)], null);
+        var selected = _candidates[Random.Range(0, _candidates.Count)];
+        var started = TryFormation(squad, selected, null);
+        Decision(squad, selected, "periodic", started ? "selected" : "formation unavailable", roll);
+        return started;
     }
 
     private bool TryFormation(Squad squad, AmbushSite site, MainObjective main)

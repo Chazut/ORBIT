@@ -1,8 +1,8 @@
 <OrbitSwitch @bind-Value="Cfg.Enabled" Label="Enabled" />
 <OrbitSlider T="float" Value="Cfg.DistanceMin" ValueChanged="SetDistanceMin" Label="Minimum distance from target" Unit="m" Min="5" Max="80" Step="1" />
 <OrbitSlider T="float" @bind-Value="Cfg.DistanceMax" Label="Maximum distance from target" Unit="m" Min="Cfg.DistanceMin" Max="80" Step="1" />
-<OrbitSlider T="float" @bind-Value="Cfg.SearchRadius" Label="Start looking for cover within" Unit="m" Min="25" Max="400" Step="5"
-             Tooltip="For main objectives, the squad first travels toward its assigned goal. For airdrops, only nearby landed crates are considered." />
+<OrbitSlider T="float" @bind-Value="Cfg.SearchRadius" Label="Consider targets within" Unit="m" Min="25" Max="1000" Step="5"
+             Tooltip="For main objectives, the squad first travels toward its assigned goal. Airdrops are considered within this horizontal radius at release, then again during periodic checks." />
 
 @code {
     [Parameter, EditorRequired] public Orbit.Settings.CampSiteSettings Cfg { get; set; } = default!;

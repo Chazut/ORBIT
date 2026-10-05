@@ -25,6 +25,7 @@ internal sealed class CampPlan
     internal bool Holding { get; private set; }
     internal Agent Looter { get; private set; }
     internal float NextCheck;
+    internal float NextAirdropDiagnostic;
     internal readonly HashSet<AmbushSite> VisitedAirdrops = new();
     internal MainObjective Main { get; private set; }
     private float _startedAt, _lastTick, _holdTick, _held, _duration;

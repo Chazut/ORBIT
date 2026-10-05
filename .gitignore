@@ -20,3 +20,21 @@ notes/
 refs/
 perf/
 tests/
+
+# Local working files
+/PR_DESCRIPTION_v1.1.0.md
+/PR_DESCRIPTION_v1.2.0.md
+/RELEASE_NOTES_v1.1.0.md
+/RELEASE_NOTES_v1.2.0.md
+/RELEASE_NOTES_v1.2.1.md
+/RELEASE_NOTES_v1.3.0.md
+/RELEASE_NOTES_v2.0.0-RC1.md
+/RELEASE_NOTES_v2.0.0.md
+/RELEASE_NOTES_v2.1.0-RC.md
+/RELEASE_NOTES_v2.1.0-RC1.md
+/RELEASE_NOTES_v2.1.0-RC2.md
+/RELEASE_NOTES_v2.1.0-RC3.md
+/RELEASE_NOTES_v2.1.0-RC4.md
+/dashboard.cmd
+/publish.sh
+/work/

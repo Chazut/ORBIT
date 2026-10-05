@@ -32,13 +32,15 @@ internal sealed class RushPlan : IObjectiveWork
     private readonly Dictionary<Agent, Waypoint> _orders = new();
     private readonly HashSet<int> _attempted = new();
     private readonly OperationRouteSearch _route = new();
+    private readonly RushRouteEstimate _ranker = new();
     private readonly NavMeshPath _path = new();
     private Agent _actor;
     private string _lastSiteName;
     private Waypoint _loot;
     private int _current = -1, _candidate, _best = -1, _visited, _retries, _attempts;
     private float _bestLength = float.MaxValue, _nextWork, _elapsed, _held, _lastTick, _nextRoam, _interactAt;
-    private bool _paused, _partial, _inside, _doorApproach;
+    private bool _paused, _partial, _inside, _doorApproach, _ranking;
+    private string _bestRoute;
     private Vector3 _anchor, _sortOrigin;
 
     internal RushPlan(string kind, List<RushPoint> sites, float searchScale, RushStyle style = null)
@@ -67,25 +69,28 @@ internal sealed class RushPlan : IObjectiveWork
             if (found != null) return End(squad, waypoints, found);
         }
         if (combat || now < squad.GhostFightUntil)
+            return Pause(squad, waypoints, "paused");
+        if (_actor == null || !_actor.IsActive || _actor.Bot.IsDead || !squad.Members.Contains(_actor)
+            || _actor.SoloExtractRequested || (CorpseEscort.InFlight(_actor) && (_loot == null || _actor.Objective.Location != _loot)))
         {
-            waypoints.CancelOperationWork(this);
-            if (!_paused) { Release(squad, waypoints); _loot = null; _paused = true; SetStatus(squad, "paused"); }
-            _nextWork = now + .25f;
-            return false;
+            Release(squad, waypoints); _actor = null; _loot = null; _route.Reset();
+            if (_current < 0) ResetRanking();
+            var livingMember = false;
+            foreach (var member in squad.Members)
+            {
+                if (member.Bot.IsDead || member.SoloExtractRequested) continue;
+                livingMember = true;
+                if (member.IsActive && !CorpseEscort.InFlight(member)) { _actor = member; break; }
+            }
+            if (_actor == null) return livingMember ? Pause(squad, waypoints, "waiting for available member")
+                : End(squad, waypoints, "no remaining member");
         }
-        if (_paused) { _paused = false; _actor = null; _route.Reset(); SetStatus(squad, "approach"); }
+        if (_paused) { _paused = false; _route.Reset(); delta = 0; SetStatus(squad, _current < 0 ? "planning route" : "approach"); }
         _elapsed += delta;
         if (_elapsed > ServerConfig.Rush.TravelTimeout && Status != "searching" && Status != "looting")
             return Skip(squad, waypoints, "travel timeout");
         if (Status is "searching" or "looting") _held += delta;
         if (now < _nextWork) return true;
-        if (_actor == null || !_actor.IsActive || !squad.Members.Contains(_actor) || _actor.SoloExtractRequested)
-        {
-            Release(squad, waypoints); _actor = null; _loot = null; _route.Reset();
-            foreach (var member in squad.Members)
-                if (member.IsActive && !member.SoloExtractRequested && !CorpseEscort.InFlight(member)) { _actor = member; break; }
-            if (_actor == null) return End(squad, waypoints, "no available member");
-        }
         if (_current < 0)
         {
             if (!waypoints.TryOperationWork(this)) return true;
@@ -198,36 +203,49 @@ internal sealed class RushPlan : IObjectiveWork
         return true;
     }
 
-    // One candidate path per work tick; no burst of paths when a squad starts or advances.
+    private bool Pause(Squad squad, WaypointSystem waypoints, string reason)
+    {
+        waypoints.CancelOperationWork(this);
+        if (!_paused) { Release(squad, waypoints); _loot = null; _actor = null; _paused = true; }
+        if (Status != reason) SetStatus(squad, reason);
+        if (_current < 0) ResetRanking();
+        _nextWork = Time.time + .25f;
+        return false;
+    }
+
+    private void ResetRanking()
+    { _ranking = false; _candidate = 0; _best = -1; _bestLength = float.MaxValue; _bestRoute = null; _ranker.Reset(); }
+
+    // One route query per work tick, including staged estimates for distant sectors.
     private bool SelectNext(Squad squad, WaypointSystem waypoints)
     {
         if (_visited >= Count) return End(squad, waypoints, "completed");
-        if (_candidate == 0) { _sortOrigin = _actor.Position; SetStatus(squad, "planning route"); }
+        if (!_ranking) { _ranking = true; _sortOrigin = _actor.Position; SetStatus(squad, "planning route"); }
         while (_candidate < _sites.Count && _states[_candidate] != null) _candidate++;
         if (_candidate < _sites.Count)
         {
-            var index = _candidate++; var site = _sites[index]; var target = Position(site);
-
-            if (NavMesh.SamplePosition(target, out var hit, 3, NavMesh.AllAreas)
-                && Mathf.Abs(hit.position.y - target.y) <= 2.5f
-                && NavMesh.CalculatePath(_sortOrigin, hit.position, NavMesh.AllAreas, _path)
-                && _path.status == NavMeshPathStatus.PathComplete)
-            {
-                var length = PathHelper.TotalLength(_path.corners);
-                if (length < _bestLength) { _bestLength = length; _best = index; }
-            }
-            // A partial distant route may become resolvable through staged approaches. Defer it until
-            // complete routes have been visited, without pretending its straight distance is a path cost.
+            var index = _candidate; var site = _sites[index]; var target = Position(site);
+            if (!_ranker.Step(_sortOrigin, target, out var length, out var source)) return true;
+            ReportRoute(squad, site, length, source, false);
+            if (length < _bestLength) { _bestLength = length; _best = index; _bestRoute = source; }
+            _candidate++; _ranker.Reset();
             return true;
         }
-        if (_best < 0)
-            for (var i = 0; i < _sites.Count; i++) if (_states[i] == null) { _best = i; break; }
         if (_best < 0) return End(squad, waypoints, Kind == "Boss" ? "boss not found" : "completed");
+        ReportRoute(squad, _sites[_best], _bestLength, _bestRoute, true);
         _current = _best; _lastSiteName = _sites[_current].Name; _states[_current] = "current"; _sequence[_current] = _visited + 1;
         Main.Position = Position(_sites[_current]); Main.CellCoords = waypoints.WorldToCell(Main.Position);
         Main.ZoneFloorId = _sites[_current].FloorId;
         _elapsed = _held = 0; _route.Reset(); SetStatus(squad, "approach");
         return true;
+    }
+
+    private void ReportRoute(Squad squad, RushPoint site, float cost, string source, bool selected)
+    {
+        if (!Log.InfoEnabled && !PerformanceJournal.Enabled) return;
+        var detail = $"kind={Kind} site={site.Name} cost={cost:F1}m source={source} origin={_sortOrigin}";
+        Log.Info($"{(selected ? "RUSH SELECT" : "RUSH ROUTE")}: {squad} {detail}");
+        PerformanceJournal.Event(selected ? "rush-select" : "rush-route", squad.Leader?.Bot?.Profile?.Id, detail, squad.Id);
     }
 
     private bool Visit(Squad squad, WaypointSystem waypoints)
@@ -240,7 +258,7 @@ internal sealed class RushPlan : IObjectiveWork
     private bool Advance(Squad squad, WaypointSystem waypoints)
     {
         SetStatus(squad, _states[_current]); Release(squad, waypoints); _visited++;
-        _current = _best = -1; _candidate = _retries = _attempts = 0; _bestLength = float.MaxValue;
+        _current = -1; _retries = _attempts = 0; ResetRanking();
         _elapsed = _held = 0; _inside = _doorApproach = false; _loot = null; _attempted.Clear(); _route.Reset();
         if (_visited >= Count) return End(squad, waypoints, Kind == "Boss" ? "boss not found" : "completed");
         SetStatus(squad, "planning route"); return true;
