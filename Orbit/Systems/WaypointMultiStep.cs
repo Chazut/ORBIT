@@ -148,7 +148,7 @@ public partial class WaypointSystem
     }
 
     internal bool TryOperationPoint(Agent actor, OperationStep step, OperationRouteSearch search,
-        out Vector3 point, out bool final)
+        out Vector3 point, out bool final, int expansion, IReadOnlyList<Vector3> history)
     {
         var target = step.Position;
         if (step.Kind == OperationStepKind.Access && step.Object is KeycardDoor card
@@ -156,7 +156,7 @@ public partial class WaypointSystem
             target = card.Proxies[0].transform.position; // 11SR reader is upstairs, far from its door.
         else if (step.Kind is OperationStepKind.Access or OperationStepKind.Switch)
             target = step.Object.GetInteractionParameters(actor.Position).InteractionPosition;
-        return search.Find(actor.Position, target, out point, out final);
+        return search.Find(actor.Position, target, out point, out final, expansion, history, floorAware: true);
     }
 
     internal Waypoint OperationLoot(Agent agent, Vector3 center, HashSet<int> attempted, out bool exhausted, float radius = 15f,

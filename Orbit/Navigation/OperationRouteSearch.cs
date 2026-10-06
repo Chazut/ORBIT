@@ -27,13 +27,16 @@ internal sealed class OperationRouteSearch
     }
 
     internal bool Find(Vector3 origin, Vector3 target, out Vector3 point, out bool final,
-        int expansion = 0, IReadOnlyList<Vector3> avoided = null)
+        int expansion = 0, IReadOnlyList<Vector3> avoided = null, bool floorAware = false, float finalHeightTolerance = 2.5f)
     {
         point = default;
         final = false;
         Pending = false;
         expansion = Mathf.Clamp(expansion, 0, 2);
-        var totalCandidates = DirectCandidates + expansion * ExpandedCandidates;
+        // Vertical objectives need access routes on several floors, including stairs behind us.
+        // Enumeration is still resumed in slices of at most three navigation calls.
+        var expandedCandidates = floorAware ? 128 : ExpandedCandidates;
+        var totalCandidates = DirectCandidates + expansion * expandedCandidates;
         var work = 0;
         while (_candidate < totalCandidates && work < 3)
         {
@@ -58,6 +61,22 @@ internal sealed class OperationRouteSearch
                 sample = Vector3.MoveTowards(origin, target, Mathf.Min(length, distance * .65f));
                 sample.y = origin.y;
             }
+            else if (floorAware)
+            {
+                var probe = index - DirectCandidates;
+                var pass = probe / expandedCandidates;
+                var slot = probe % expandedCandidates;
+                var heading = slot % 16;
+                var angle = heading * Mathf.PI / 8f;
+                var length = (slot / 16 % 2 == 0 ? 20f : 40f) * (pass + 1);
+                var direction = target - origin; direction.y = 0;
+                if (direction.sqrMagnitude < .01f) direction = new Vector3(1, 0, 0);
+                direction = direction.normalized;
+                sample = origin + new Vector3(direction.x * Mathf.Cos(angle) - direction.z * Mathf.Sin(angle), 0,
+                    direction.x * Mathf.Sin(angle) + direction.z * Mathf.Cos(angle)) * length;
+                sample.y = origin.y + (target.y - origin.y) * (slot / 32 / 3f);
+                sampleRadius = pass == 0 ? 3f : 5f;
+            }
             else
             {
                 // Broaden failed Rush approaches across terrain and around obstacles. These are
@@ -79,7 +98,8 @@ internal sealed class OperationRouteSearch
                 sampleRadius = pass == 0 ? 6f : 12f;
             }
             if (!NavMesh.SamplePosition(sample, out var hit, sampleRadius, NavMesh.AllAreas)) continue;
-            if (local && (Mathf.Abs(hit.position.y - target.y) > 2.5f
+            if (floorAware && !local && Mathf.Abs(hit.position.y - sample.y) > 2.5f) continue;
+            if (local && (Mathf.Abs(hit.position.y - target.y) > finalHeightTolerance
                 || HorizontalDistance(hit.position, target) > 3f)) continue;
             Samples++;
             if (!NavMesh.CalculatePath(origin, hit.position, NavMesh.AllAreas, _path)
@@ -93,11 +113,13 @@ internal sealed class OperationRouteSearch
             var gap = Vector3.Distance(end, target);
             var originGap = Vector3.Distance(origin, target);
             // Require actual, useful progress; a wall endpoint beside the bot cannot create a retry loop.
-            if (Vector3.Distance(origin, end) < 5f || gap >= _approachGap) continue;
-            if (gap > originGap - 3f && (expansion < 2 || gap > originGap + 20f)) continue;
+            var score = gap + (floorAware ? Mathf.Abs(end.y - target.y) * 2f : 0);
+            if (Vector3.Distance(origin, end) < 5f || score >= _approachGap) continue;
+            var detour = floorAware && expansion > 0 ? expansion * 60f : expansion >= 2 ? 20f : -3f;
+            if (gap > originGap + detour) continue;
             if (Visited(end, avoided)) continue;
             _approach = end;
-            _approachGap = gap;
+            _approachGap = score;
         }
         if (_candidate < totalCandidates) { Pending = true; return false; }
         if (_approachGap == float.MaxValue) return false;
@@ -108,6 +130,13 @@ internal sealed class OperationRouteSearch
         { point = _approach; return true; }
         InvalidPaths++;
         return false;
+    }
+
+    internal static void Remember(List<Vector3> history, Vector3 point)
+    {
+        if (Visited(point, history)) return;
+        if (history.Count >= 64) history.RemoveAt(0);
+        history.Add(point);
     }
 
     private static bool Visited(Vector3 point, IReadOnlyList<Vector3> avoided)

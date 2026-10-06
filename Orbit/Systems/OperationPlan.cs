@@ -36,6 +36,7 @@ internal sealed class OperationPlan : IObjectiveWork
     private Waypoint _loot;
     private Waypoint _regroup;
     private readonly OperationRouteSearch _route = new();
+    private readonly List<Vector3> _approachHistory = new();
     private bool _approachOnly;
 
     internal OperationPlan(OperationDefinition definition, bool alarm)
@@ -123,25 +124,28 @@ internal sealed class OperationPlan : IObjectiveWork
         {
             if (!waypoints.TryOperationWork(this)) return true;
             _nextWork = now + .25f;
-            if (!waypoints.TryOperationPoint(_actor, step, _route, out _anchor, out var final))
+            OperationRouteSearch.Remember(_approachHistory, _actor.Position);
+            if (!waypoints.TryOperationPoint(_actor, step, _route, out _anchor, out var final, _retries, _approachHistory))
             {
-                if (_route.Pending) return true;
+                if (_route.Pending)
+                { _nextWork = now; waypoints.ContinueOperationWork(this); return true; }
                 if (TryNearbySwitch(squad, waypoints, "no complete path")) return true;
-                Log.Info($"MULTISTEP ROUTE: {squad} operation={Definition.Id} step={step.Label} from={_actor.Position} target={step.Position} samples={_route.Samples} partial={_route.PartialPaths} invalid={_route.InvalidPaths} attempt={_retries + 1}");
+                ReportRoute(squad, step, false);
                 _actor = null;
+                _route.Reset();
                 _nextWork = now + 3f;
                 if (++_retries >= 3) return End(squad, waypoints, "unreachable step");
                 return true;
             }
             _approachOnly = !final;
-            if (_approachOnly)
-                Log.Info($"MULTISTEP ROUTE: {squad} operation={Definition.Id} step={step.Label} approach={_anchor} target={step.Position}");
+            ReportRoute(squad, step, true);
             waypoints.CollectCorpseEscortCover(_anchor, _covers);
             _occupied.Clear();
             SetOrder(_actor, Point(waypoints, _anchor, step.Label, _approachOnly ? 2f : 1f), waypoints);
             if (Main != null) { Main.Position = step.Position; Main.CellCoords = waypoints.WorldToCell(step.Position); }
             squad.Objective.Location = _orders[_actor];
             squad.Objective.Status = SquadObjectiveState.Active;
+            return true; // Followers get their own work slice after the operator's route search.
         }
         // Prepare at most one follower per work tick, avoiding a burst of cover path searches.
         foreach (var member in squad.Members)
@@ -164,6 +168,7 @@ internal sealed class OperationPlan : IObjectiveWork
         // counting that as a route failure, then recalculate the remaining local path.
         if (_approachOnly && (_actor.Position - _anchor).sqrMagnitude <= 4f)
         {
+            OperationRouteSearch.Remember(_approachHistory, _actor.Position);
             ReleaseOrders(squad, waypoints);
             _actor = null;
             _retries = 0;
@@ -173,8 +178,10 @@ internal sealed class OperationPlan : IObjectiveWork
         if (_actor.Objective.Status == ObjectiveStatus.Failed)
         {
             if (TryNearbySwitch(squad, waypoints, "arrival failed")) return true;
+            OperationRouteSearch.Remember(_approachHistory, _anchor);
             ReleaseOrders(squad, waypoints);
             _actor = null;
+            _route.Reset();
             if (++_retries >= 3) return End(squad, waypoints, "operator route failed");
             return true;
         }
@@ -208,6 +215,16 @@ internal sealed class OperationPlan : IObjectiveWork
         // Assigning DoorState directly would show an open lever without powering its circuit.
         Interact(squad, waypoints, reason);
         return true;
+    }
+
+    private void ReportRoute(Squad squad, OperationStep step, bool found)
+    {
+        if (!Log.InfoEnabled && !PerformanceJournal.Enabled) return;
+        var detail = $"operation={Definition.Id} step={step.Label} from={_actor.Position} target={step.Position}";
+        if (found) detail += $" approach={_anchor} final={!_approachOnly}";
+        detail += $" samples={_route.Samples} partial={_route.PartialPaths} invalid={_route.InvalidPaths} attempt={_retries + 1} heightGap={step.Position.y - _actor.Position.y:F2}m";
+        Log.Info($"MULTISTEP ROUTE: {squad} {detail}");
+        PerformanceJournal.Event("multistep-route", _actor.Player?.ProfileId, detail, squad.Id);
     }
 
     private bool Interact(Squad squad, WaypointSystem waypoints, string recovery = null)
@@ -306,7 +323,7 @@ internal sealed class OperationPlan : IObjectiveWork
         ReleaseOrders(squad, waypoints);
         Index = index;
         _actor = null; _loot = null; _elapsed = 0; _regroupAt = -1; _retries = 0; _interactionRetries = 0; _interactionPending = false;
-        _route.Reset(); _approachOnly = false;
+        _route.Reset(); _approachOnly = false; _approachHistory.Clear();
         _attemptedLoot.Clear();
         Status = "approach";
         if (Main != null) { Main.Position = Current.Position; Main.CellCoords = waypoints.WorldToCell(Current.Position); }
