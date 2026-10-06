@@ -10,9 +10,6 @@ namespace Orbit.Systems;
 // the controller, animator, inventory operations or Ghost combat sound player.
 internal static class GhostWeaponVisuals
 {
-    // Temporary comparison build for raid 222: isolate the weapon rendering change.
-    internal static bool Enabled => false;
-
     private sealed class Mask
     {
         internal Player Player;
@@ -60,14 +57,12 @@ internal static class GhostWeaponVisuals
 
     internal static void Sleep(Player player)
     {
-        if (!Enabled) return;
         try { Hide(player, player?.HandsController?.ControllerGameObject); }
         catch (Exception error) { Failure(error); }
     }
 
     internal static void Hide(Player player, GameObject root)
     {
-        if (!Enabled) return;
         try
         {
             if (player == null || root == null || root.GetComponent<WeaponPrefab>() == null) return;
@@ -103,7 +98,6 @@ internal static class GhostWeaponVisuals
 
     internal static void Tick()
     {
-        if (!Enabled) return;
         // One tracked weapon per frame. Rescan each hierarchy at most every two seconds,
         // reusing component lists; new hands are hidden immediately by WeaponPrefab.Parent.
         if (Active.Count == 0) return;
