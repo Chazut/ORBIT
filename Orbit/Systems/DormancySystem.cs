@@ -2750,6 +2750,7 @@ public partial class DormancySystem
     public void OnVanillaRemoved(BotOwner bot)
     {
         ForgetStagedBot(bot);
+        NativeReloadRecovery.Forget(bot);
         NativePatrolDiagnostics.Forget(bot);
         var dormant = _vanillaDormant.Remove(bot);
         _nativeGhosts.Remove(bot);

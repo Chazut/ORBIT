@@ -14,12 +14,14 @@ internal static class NativeGhostDiagnostics
     private const int MaxBrainFailureReports = 8;
     public static void Clear()
     {
+        NativeReloadRecovery.Clear();
         NextReport.Clear();
         ReportedBrainFailures.Clear();
         NextWarningReport.Clear();
     }
     public static void Forget(BotOwner bot)
     {
+        NativeReloadRecovery.Forget(bot);
         if (bot?.ProfileId == null) return;
         NextReport.Remove(bot.ProfileId);
         NextWarningReport.Remove(bot.ProfileId);
