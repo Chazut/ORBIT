@@ -6,6 +6,7 @@ using Orbit.Entities;
 using Orbit.Helpers;
 using Orbit.Navigation;
 using Orbit.Settings;
+using Orbit.Tasks.Actions;
 using UnityEngine;
 using UnityEngine.AI;
 
@@ -82,6 +83,17 @@ internal sealed class RushPlan : IObjectiveWork
         }
         if (combat || now < squad.GhostFightUntil)
             return Pause(squad, waypoints, "paused");
+        // Recheck here as well as in the strategy: queued route work can resume between
+        // strategy ticks. A kill's approach must survive the end of the combat pause.
+        if (Kind == "Spawn" && HasOwnKillDetour(squad, waypoints))
+        {
+            var anchor = squad.Objective.Location;
+            Pause(squad, waypoints, "looting own kill");
+            // The ordinary corpse escort needs a stable mission anchor while Rush
+            // releases its movement orders. It will hand control back after looting.
+            squad.Objective.Location ??= anchor;
+            return false;
+        }
         if (_actor == null || !_actor.IsActive || _actor.Bot.IsDead || !squad.Members.Contains(_actor)
             || _actor.SoloExtractRequested || (CorpseEscort.InFlight(_actor) && (_loot == null || _actor.Objective.Location != _loot)))
         {
@@ -255,6 +267,26 @@ internal sealed class RushPlan : IObjectiveWork
         }
         catch (Exception error) { Log.Warning($"RUSH: {squad} door={site.DoorId} error={error}"); }
         return true;
+    }
+
+    private static bool HasOwnKillDetour(Squad squad, WaypointSystem waypoints)
+    {
+        if (squad.CorpseEscort.Active) return true;
+        foreach (var member in squad.Members)
+        {
+            if (!member.IsActive || member.Bot.IsDead || member.SoloExtractRequested) continue;
+            // Transfers can outlive the completed-body marker. Do not interrupt them.
+            if (CorpseEscort.InFlight(member)) return true;
+            var current = member.Objective.Location;
+            if (current?.Category == WaypointCategory.Corpse && current.Target != null
+                && GotoObjectiveAction.IsLootableForAgent(member, current)
+                && member.OwnKillCorpseIds.Contains(current.Id)
+                && !squad.CompletedPoiIds.Contains(current.Id) && !member.ValueSkippedPoiIds.Contains(current.Id)
+                && member.Objective.Status is not (ObjectiveStatus.Finished or ObjectiveStatus.Failed)) return true;
+            var pending = waypoints.TryGetNextOwnKillCorpseForAgent(squad, member);
+            if (pending != null && GotoObjectiveAction.IsLootableForAgent(member, pending)) return true;
+        }
+        return false;
     }
 
     private bool Pause(Squad squad, WaypointSystem waypoints, string reason)
