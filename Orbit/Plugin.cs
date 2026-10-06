@@ -128,8 +128,15 @@ public class Plugin : BaseUnityPlugin
         // Ghost Mode: awake bots must not raycast dormant (deactivated) ones. Inert while the limiter is
         // OFF — the dormant set stays empty and the prefix falls through.
         EnableSafe(new DormantVisionPatch());
-        EnableSafe(new GhostWeaponParentPatch());
-        EnableSafe(new GhostWeaponPoolPatch());
+        if (GhostWeaponVisuals.Enabled)
+        {
+            EnableSafe(new GhostWeaponParentPatch());
+            EnableSafe(new GhostWeaponPoolPatch());
+        }
+        else
+        {
+            Log.Always("Ghost weapon visual masking disabled (performance comparison build).");
+        }
         EnableSafe(new GhostSpawnRegistrationPatch());
         EnableSafe(new GhostSpawnActivationPatch());
         EnableSafe(new GhostSpawnContactPatch());
