@@ -62,7 +62,7 @@ internal sealed class AmbushDirector(WaypointSystem waypoints)
         {
             var squad = _active[i];
             if (!squads.Contains(squad)) squad.Camp.End(squad, "group removed");
-            if (!squad.Camp.Active && squad.Camp.PendingAirdrop == null) _active.RemoveAt(i);
+            if (!squad.Camp.Active && squad.Camp.PendingAirdrop == null && squad.Camp.RetryMain == null) _active.RemoveAt(i);
         }
     }
 
@@ -120,10 +120,13 @@ internal sealed class AmbushDirector(WaypointSystem waypoints)
     {
         if (squad.Camp.PendingAirdrop != null) return TryStartPending(squad);
         var cfg = ServerConfig.Ambush;
-        if (squad.Camp.Active || !cfg.Allows(squad.Leader?.BotCategory)) return false;
+        if (squad.Camp.Active) return false;
+        if (!cfg.Allows(squad.Leader?.BotCategory))
+        { squad.Camp.CancelMainRetry(); CancelFormation(squad); return false; }
         var unavailable = UnavailableReason(squad);
         if (unavailable != null)
         {
+            squad.Camp.CancelMainRetry();
             if (cfg.Airdrops.Enabled && Time.time >= squad.Camp.NextAirdropDiagnostic)
             {
                 squad.Camp.NextAirdropDiagnostic = Time.time + cfg.CheckInterval;
@@ -131,13 +134,16 @@ internal sealed class AmbushDirector(WaypointSystem waypoints)
             }
             return false;
         }
+        var wasRetrying = squad.Camp.RetryMain != null;
+        var retry = squad.Camp.GetMainRetry(squad);
+        if (wasRetrying && retry == null) CancelFormation(squad);
         if (_formations.ContainsKey(squad)) return ContinueFormation(squad);
-        if (Time.time < _nextPlan) return false;
+        if (Time.time < _nextPlan || retry != null && Time.time < retry.CampRetryAt) return retry != null;
 
         // A main owns both its target and its mode. No periodic roll can turn another zone into a hotspot camp.
-        MainObjective pending = null;
+        MainObjective pending = retry;
         var nearest = float.MaxValue;
-        if (squad.MainObjectives != null)
+        if (pending == null && squad.MainObjectives != null)
             foreach (var main in squad.MainObjectives)
             {
                 if (!main.CanPursue(squad.MainObjectives) || !main.IsCampMain || Time.time < main.CampRetryAt) continue;
@@ -225,6 +231,11 @@ internal sealed class AmbushDirector(WaypointSystem waypoints)
             return !search.DirectLoot || squad.Camp.Tick(squad, waypoints);
         }
         var main = search.Main;
+        if (main != null && squad.Camp.RetryMain == main)
+        {
+            squad.Camp.RetryMainAfterFailure(squad, main, "cover search exhausted: " + search.Rejections);
+            return squad.Camp.RetryMain != null;
+        }
         if (main?.Type == MainObjectiveType.ExtractCamp)
         {
             Log.Info($"AMBUSH SEARCH: {squad} attempt={main.CampSearchAttempt}/4 radius={main.CampSearchRadius:F1}m rejected={search.Rejections}");

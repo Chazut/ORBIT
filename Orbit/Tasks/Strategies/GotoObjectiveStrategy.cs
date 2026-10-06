@@ -106,6 +106,16 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                 }
             }
 
+            if (squad.Camp.RetryMain != null)
+            {
+                RaidTimeExtraction.Check(squad);
+                if (_ambush.TryStart(squad))
+                {
+                    UpdateAgents(squad, out _);
+                    continue;
+                }
+            }
+
             // Deferred SAIN personality resolution. PMC squads spawn before SAIN attaches its BotComponent
             // (1-2s delay), so SquadRegistry deferred the lookup + the main-objective roll. Retry here every
             // tick until the brain resolves or the 5 s deadline lapses (then lock to Average and generate
@@ -812,7 +822,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
             }
 
             if (squad.CorpseEscort.UpdateMember(squad, agent, i, waypointSystem)) continue;
-            if (squad.Camp.PendingAirdrop != null || squad.Camp.Owns(agent)) continue;
+            if (squad.Camp.PendingAirdrop != null || squad.Camp.RetryMain != null || squad.Camp.Owns(agent)) continue;
             if (squad.Operation?.Owns(agent) == true || squad.Rush?.Owns(agent) == true || ExtractCampApproach.Owns(squad, agent)) continue;
 
             // An agent is "aligned" with the squad if their location IS the squad's main objective, OR if

@@ -47,9 +47,9 @@ public partial class WaypointSystem
     public bool HasReachedObjectiveFloor(Agent agent, Waypoint target, Vector3 position)
     {
         var squad = agent?.Squad;
-        // Managed routes may cross several floors in the same cell. A pending Kills main
-        // must not impose its own floor on a Rush or multi-step interaction/loot waypoint.
-        if (target != null && (squad?.Rush?.Owns(agent) == true || squad?.Operation?.Owns(agent) == true))
+        // Managed destinations own their floor, even where unrelated global zones overlap.
+        if (target != null && (squad?.Camp?.Owns(agent) == true
+            || squad?.Rush?.Owns(agent) == true || squad?.Operation?.Owns(agent) == true))
         {
             var floor = FloorCatalog.For(_zoneKey)?.Resolve(target.Position.x, target.Position.y, target.Position.z);
             return floor == null || MatchesZoneFloorAtTarget(floor, target.Position, position);
@@ -90,8 +90,9 @@ public partial class WaypointSystem
         if (squad?.Leader == null || squad.ExtractRequested) return null;
         if (squad.MainObjectives != null)
             foreach (var main in squad.MainObjectives)
-                if (!main.Completed && main.Type == MainObjectiveType.Kills && main.CellCoords == coords
-                    && !string.IsNullOrEmpty(main.ZoneFloorId)) return main.ZoneFloorId;
+                // Null means all floors, not missing information to borrow from another zone.
+                if (main.CanPursue(squad.MainObjectives) && main.Type == MainObjectiveType.Kills
+                    && main.CellCoords == coords) return main.ZoneFloorId;
         var kind = ZoneBotType.For(squad.Leader.Bot);
         var best = 0f;
         string floor = null;

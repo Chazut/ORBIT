@@ -28,6 +28,8 @@ internal sealed class CampPlan
     internal float NextAirdropDiagnostic;
     internal readonly HashSet<AmbushSite> VisitedAirdrops = new();
     internal MainObjective Main { get; private set; }
+    internal MainObjective RetryMain { get; private set; }
+    private float _retryDeadline;
     private float _startedAt, _lastTick, _holdTick, _held, _duration;
     private Waypoint _mission;
     private WaypointSystem _waypoints;
@@ -51,6 +53,7 @@ internal sealed class CampPlan
 
     internal void SelectAirdrop(Squad squad, AmbushSite site)
     {
+        CancelMainRetry();
         PendingAirdrop = site;
         PendingSince = FormationRetryAt = _lastTick = Time.time;
         _mission = squad.Objective.Location;
@@ -65,6 +68,7 @@ internal sealed class CampPlan
     internal void Begin(Squad squad, AmbushSite site, Dictionary<Agent, CoverPoint> positions, WaypointSystem waypoints,
         MainObjective main = null, bool directLoot = false)
     {
+        CancelMainRetry();
         if (main?.Type == MainObjectiveType.ExtractCamp)
             (main.CampApproach ??= new ExtractCampApproach(main)).Release(squad, waypoints);
         Site = site;
@@ -152,6 +156,7 @@ internal sealed class CampPlan
             if (Main != null)
             {
                 if (Main.CampStartedAt <= 0) Main.CampStartedAt = Time.time;
+                Main.CampRouteFailures = 0;
                 Main.SetCampState("holding");
                 if (Main.Type == MainObjectiveType.Kills && Main.KillsRoamStartedAt <= 0) Main.KillsRoamStartedAt = Time.time;
                 Orbit.Api.OrbitTelemetry.MainObjectivesRevision++;
@@ -228,6 +233,7 @@ internal sealed class CampPlan
 
     internal void End(Squad squad, string reason)
     {
+        CancelMainRetry();
         if (PendingAirdrop != null)
         {
             PauseMission(squad);
@@ -263,6 +269,9 @@ internal sealed class CampPlan
                 Main.CampApproach?.Retry(squad, _waypoints, reason);
             if (!Main.Completed) { Main.CampSearchAttempt = 0; Main.CampSearchRadius = 0; }
             Main.CampRetryAt = Time.time + 5f;
+            if (Main.Type == MainObjectiveType.Kills && !Main.Completed
+                && reason is ("route failed or assignment changed" or "travel timeout" or "member displaced"))
+                RetryMainAfterFailure(squad, Main, reason);
             Orbit.Api.OrbitTelemetry.MainObjectivesRevision++;
         }
         if (Site.Kind == CampSiteKind.Airdrop) Orbit.Api.OrbitTelemetry.MainObjectivesRevision++;
@@ -274,5 +283,41 @@ internal sealed class CampPlan
         _directLoot = false;
         NextCheck = Time.time + ServerConfig.Ambush.Cooldown;
         AirdropCooldownUntil = NextCheck;
+    }
+
+    internal void CancelMainRetry() => RetryMain = null;
+
+    internal MainObjective GetMainRetry(Squad squad)
+    {
+        if (RetryMain == null) return null;
+        if (!RetryMain.CanPursue(squad.MainObjectives) || squad.MainObjectives?.Contains(RetryMain) != true
+            || squad.Objective.Location != _mission || !ServerConfig.Ambush.Hotspots.Enabled)
+        { CancelMainRetry(); return null; }
+        PauseMission(squad);
+        if (Time.time >= _retryDeadline)
+        { FailMainRetry(squad, RetryMain, "cover retry timeout"); return null; }
+        return RetryMain;
+    }
+
+    internal void RetryMainAfterFailure(Squad squad, MainObjective main, string reason)
+    {
+        if (++main.CampRouteFailures >= 3)
+        { FailMainRetry(squad, main, reason); return; }
+        // Keep the mission reserved through the short retry and its paced formation search.
+        // A real combat/emergency interrupt still releases it through AmbushDirector.Available.
+        if (RetryMain != main) _retryDeadline = Time.time + Mathf.Min(30f, ServerConfig.Ambush.TravelTimeout);
+        RetryMain = main;
+        main.CampRetryAt = Time.time + 5f;
+        main.SetCampState("paused", reason);
+        Log.Info($"AMBUSH: {squad} main=Kills retry={main.CampRouteFailures}/3 reason={reason}");
+    }
+
+    private void FailMainRetry(Squad squad, MainObjective main, string reason)
+    {
+        CancelMainRetry();
+        main.Completed = true;
+        main.SetCampState("failed", reason);
+        if (squad.Objective.Location == _mission) squad.Objective.Duration = 0;
+        Log.Info($"AMBUSH: {squad} main=Kills failed reason={reason}");
     }
 }

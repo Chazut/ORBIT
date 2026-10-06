@@ -64,6 +64,7 @@ public class MainObjective
         Orbit.Api.OrbitTelemetry.MainObjectivesRevision++;
     }
     internal float CampRetryAt;
+    internal int CampRouteFailures;
     internal Orbit.Systems.AmbushSite CampSite;
     internal Orbit.Systems.ExtractCampApproach CampApproach;
     public bool IsCampMain => Type == MainObjectiveType.ExtractCamp || Type == MainObjectiveType.Kills && KillAmbush;
