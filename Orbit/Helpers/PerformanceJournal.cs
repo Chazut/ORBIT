@@ -95,6 +95,13 @@ internal static class PerformanceJournal
         return buffer;
     }
     internal static bool Enabled => _map != null && Plugin.PerfLogging is { Value: true };
+    internal static Task PendingWrite => _writer ?? Task.CompletedTask;
+
+    internal static Task PrepareExport()
+    {
+        Flush(final: false, force: true);
+        return PendingWrite;
+    }
 
     internal static void Reset(string map)
     {
@@ -291,10 +298,11 @@ internal static class PerformanceJournal
     {
         if (_map == null || (!_wasEnabled && Hitches.Count == 0 && Events.Count == 0)) return;
         RefreshWriter();
-        if (!final && _writer != null) return;
+        if (!final && !force && _writer != null) return;
         if (!final && !force && Hitches.Count == 0 && Events.Count == 0) { _nextFlush = Time.realtimeSinceStartup + FlushSeconds; return; }
         _path ??= Path.Combine(BepInEx.Paths.BepInExRootPath, "ORBIT", "diagnostics",
             "performance-" + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss") + "-" + Guid.NewGuid().ToString("N") + ".jsonl");
+        DebugExport.RegisterDiagnostic(_path);
         var frame = Work(Time.frameCount);
         var packet = new
         {

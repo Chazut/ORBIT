@@ -53,6 +53,19 @@ public static class Log
         ReportLosses(writer);
     }
 
+    internal static System.Func<string> DebugFlush()
+    {
+        var writer = Volatile.Read(ref _writer);
+        var disks = new System.Collections.Generic.List<BepInEx.Logging.DiskLogListener>();
+        foreach (var listener in BepInEx.Logging.Logger.Listeners)
+            if (listener is BepInEx.Logging.DiskLogListener disk) disks.Add(disk);
+        return () => {
+            var drained = writer?.Drain(5000) != false;
+            foreach (var disk in disks) disk.LogWriter?.Flush();
+            return drained ? null : "Verbose log drain timed out; some queued messages may be missing.";
+        };
+    }
+
     private static void ReportLosses(BufferedLogWriter writer)
     {
         if (writer == null) return;

@@ -68,6 +68,7 @@ public class Plugin : BaseUnityPlugin
     {
         Log.Refresh();
         PerformanceJournal.RefreshWriter();
+        DebugExport.Refresh();
     }
 
     private void OnApplicationQuit() => Log.Shutdown();
@@ -337,6 +338,26 @@ public class Plugin : BaseUnityPlugin
         PerfLogging = Config.Bind(essentials, "Performance logging", false, new ConfigDescription(
             "ON: records every frame over the 60 FPS budget (16.67 ms), slow bot decisions and Ghost transitions, even with Quiet logging. Automatically saves a performance journal in BepInEx/ORBIT/diagnostics during the raid and a final summary when it ends. Larger stalls also save a detailed JSON capture.",
             null, new ConfigurationManagerAttributes { Category = "", Order = -1 }));
+        Config.Bind(essentials, "Debug report", string.Empty, new ConfigDescription(
+            "Creates a local ZIP with the BepInEx session log and the last raid's performance diagnostics, if available. During a raid, exports its current data. Saved in BepInEx/ORBIT/debug; attach it to your bug report. No upload is performed.",
+            null, new ConfigurationManagerAttributes { Category = "", Order = -2, HideDefaultButton = true, CustomDrawer = DrawDebugExportButton }));
+    }
+
+    private static void DrawDebugExportButton(ConfigEntryBase entry)
+    {
+        GUILayout.BeginVertical();
+        var enabled = GUI.enabled;
+        try
+        {
+            GUI.enabled = enabled && !DebugExport.Busy;
+            if (GUILayout.Button(DebugExport.Busy ? "Creating debug ZIP..." : "Create debug ZIP", GUILayout.ExpandWidth(true)))
+                DebugExport.Start();
+        }
+        finally { GUI.enabled = enabled; }
+        GUILayout.Label(DebugExport.Status, new GUIStyle(GUI.skin.label) { wordWrap = true });
+        if (DebugExport.LastPath != null && GUILayout.Button("Open debug folder", GUILayout.ExpandWidth(true)))
+            Application.OpenURL(new Uri(DebugExport.Folder + System.IO.Path.DirectorySeparatorChar).AbsoluteUri);
+        GUILayout.EndVertical();
     }
 
     // F12 helper: a real button that opens the server web UI in the default browser. The drawer

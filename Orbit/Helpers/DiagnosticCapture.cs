@@ -83,6 +83,7 @@ internal static class DiagnosticCapture
 
     internal static void Reset(string map)
     {
+        DebugExport.BeginRaid(map);
         Samples.Clear(); Wakes.Clear(); WakeDecisions.Clear(); WakeActivations.Clear(); Humans.Clear();
         _map = map; _enabled = _pending = false; _saved = 0;
         PerformanceJournal.Reset(map);
@@ -246,6 +247,7 @@ internal static class DiagnosticCapture
         };
         var folder = Path.Combine(BepInEx.Paths.BepInExRootPath, "ORBIT", "diagnostics");
         var path = Path.Combine(folder, "capture-" + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss-fff") + "-" + Guid.NewGuid().ToString("N") + ".json");
+        DebugExport.RegisterDiagnostic(path);
         _saved++;
         _pending = false;
         _nextCaptureAt = Time.realtimeSinceStartup + CooldownSeconds;
@@ -264,8 +266,15 @@ internal static class DiagnosticCapture
         // Preserve a pending hitch if the raid ends before its post-hitch window is complete.
         Save();
         PerformanceJournal.Finish();
+        DebugExport.FinishRaid(Task.WhenAll(_writer ?? Task.CompletedTask, PerformanceJournal.PendingWrite));
         _map = null; _enabled = _pending = false;
         Samples.Clear(); Wakes.Clear(); WakeDecisions.Clear(); WakeActivations.Clear(); Humans.Clear();
         TransitionPerformance.ResetCaptureWindow();
+    }
+
+    internal static Task PrepareExport()
+    {
+        Save();
+        return Task.WhenAll(_writer ?? Task.CompletedTask, PerformanceJournal.PrepareExport());
     }
 }

@@ -14,6 +14,7 @@ internal sealed class BufferedLogWriter
     private readonly int _maxMessages, _maxCharacters;
     private int _characters, _dropped, _failures;
     private bool _stopping;
+    private long _accepted, _processed;
 
     internal BufferedLogWriter(Action<string> write, int maxMessages = 8192, int maxCharacters = 2 * 1024 * 1024)
     {
@@ -37,6 +38,7 @@ internal sealed class BufferedLogWriter
                 return false;
             }
             _pending.Enqueue(message);
+            _accepted++;
             _characters += message.Length;
             if (_pending.Count == 1) _ready.Set();
             return true;
@@ -45,6 +47,24 @@ internal sealed class BufferedLogWriter
 
     internal int TakeDroppedCount() => Interlocked.Exchange(ref _dropped, 0);
     internal int TakeFailureCount() => Interlocked.Exchange(ref _failures, 0);
+
+    // Called only by debug-export workers, never by the Unity thread. Wait for messages
+    // already accepted, rather than for an empty queue that active logging may never leave.
+    internal bool Drain(int timeoutMilliseconds)
+    {
+        var timer = System.Diagnostics.Stopwatch.StartNew();
+        lock (_gate)
+        {
+            var target = _accepted;
+            while (_processed < target)
+            {
+                var remaining = timeoutMilliseconds - (int)timer.ElapsedMilliseconds;
+                if (remaining <= 0) return false;
+                Monitor.Wait(_gate, remaining);
+            }
+            return true;
+        }
+    }
 
     internal bool Stop(int timeoutMilliseconds)
     {
@@ -90,6 +110,7 @@ internal sealed class BufferedLogWriter
                     catch { Interlocked.Increment(ref _failures); }
                     batch[i] = null;
                 }
+                lock (_gate) { _processed += count; Monitor.PulseAll(_gate); }
                 // BepInEx already buffers disk writes. Keep individual events and their normal prefix.
                 if (count == batch.Length) Thread.Yield();
             }
