@@ -380,6 +380,7 @@ public class LootContainerAction(AgentData dataset, WaypointSystem waypointSyste
     {
         var squad = agent.Squad;
         if (squad == null || squad.ExtractRequested) return;
+        if (squad.Rush?.CollectingMarkedRoom == true) return;
         // A planned final camp takes precedence over routine wealth-based departures.
         if (MainObjective.HasPendingExtractCamp(squad.MainObjectives)) return;
 
@@ -435,6 +436,12 @@ public class LootContainerAction(AgentData dataset, WaypointSystem waypointSyste
         Log.Info($"{squad}: {agent} hit extract threshold ({totalLooted:N0}₽ >= {sumThreshold:N0}₽ = {perMemberSummary} from {resolvedCount} resolved + {unresolvedCount} pending members) — squad will bee-line to nearest eligible exfil");
     }
 
+    internal static void ReevaluateAfterMarkedRoom(Squad squad)
+    {
+        ReevaluateExtractForSquad(squad);
+        foreach (var member in squad.Members) CheckSoloLootExtract(member);
+    }
+
     /// <summary>
     /// Per-member solo extract on the loot threshold: when this agent's own looted value crosses its own
     /// threshold, roll once (exactly once per member, so repeated loots don't compound into a certainty); on a
@@ -444,6 +451,7 @@ public class LootContainerAction(AgentData dataset, WaypointSystem waypointSyste
     {
         if (agent == null || agent.SoloExtractRequested || agent.SoloLootThresholdRolled) return;
         if (agent.Squad == null || agent.Squad.ExtractRequested) return;
+        if (agent.Squad.Rush?.CollectingMarkedRoom == true) return;
         if (MainObjective.HasPendingExtractCamp(agent.Squad.MainObjectives)) return;
 
         // Respect "Extract allowed for" — None (or a set excluding this bot) blocks the solo loot-threshold
@@ -626,6 +634,8 @@ public class LootContainerAction(AgentData dataset, WaypointSystem waypointSyste
 
     private bool TryScavengeSweep(Agent agent, Waypoint justLooted)
     {
+        // The room planner owns the next pickup; an ordinary sweep may lead through floors or walls.
+        if (agent.Squad?.Rush?.CollectingMarkedRoom == true) return false;
         if (agent.Squad?.Camp.Active == true) return false;
         // A second live session may finish during an escort, but only the shared looter extends
         // that detour. Everyone else rejoins after releasing their current transfer normally.

@@ -113,7 +113,8 @@
                 @foreach (var floor in Floors) { <MudSelectItem Value="@floor.Id">@floor.Name</MudSelectItem> }
             </MudSelect>
             <OrbitSlider T="float" @bind-Value="selected.Radius" Label="@(Kind == "Sniper" ? "Post search radius" : "Search / loot radius")" Unit="m" Min="1" Max="200" Step="1" />
-            @if (Kind != "Sniper") { <OrbitSlider T="float" @bind-Value="selected.SearchSeconds" Label="Search / loot duration" Unit="s" Min="1" Max="600" Step="1" /> }
+            @if (Kind is not ("Sniper" or "Marked")) { <OrbitSlider T="float" @bind-Value="selected.SearchSeconds" Label="Search duration" Unit="s" Min="1" Max="600" Step="1" /> }
+            @if (Kind == "Marked") { <MudText Typo="Typo.caption">The squad searches the whole room before leaving. Other members try remaining loot if the first cannot carry it. Combat and urgent extraction still take priority. The radius is a fallback for rooms without a mapped interior.</MudText> }
             <OrbitSlider T="float" @bind-Value="selected.Weight" Label="@(Kind == "Spawn" ? "Sector eligibility (zero disables)" : "Selection weight (zero disables)")" Min="0" Max="10" Step="0.5f" />
             @if (Kind == "Sniper")
             {

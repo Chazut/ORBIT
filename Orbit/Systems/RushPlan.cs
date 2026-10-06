@@ -38,6 +38,9 @@ internal sealed class RushPlan : IObjectiveWork
     private Agent _actor;
     private string _lastSiteName;
     private Waypoint _loot;
+    private MarkedRoomScope _room;
+    private readonly HashSet<Agent> _roomLooters = new();
+    private float _roomIdle;
     private int _current = -1, _candidate, _best = -1, _visited, _processed, _skipped, _retries, _attempts;
     private string _lastFailure;
     private float _bestLength = float.MaxValue, _nextWork, _elapsed, _held, _lastTick, _nextRoam, _interactAt;
@@ -51,6 +54,9 @@ internal sealed class RushPlan : IObjectiveWork
 
     internal bool Owns(Agent agent) => Sniper != null ? Sniper.Owns(agent) : !Main.Completed && !_paused && !agent.SoloExtractRequested
         && (!_orders.TryGetValue(agent, out var point) || agent.Objective.Location == point);
+    internal bool CollectingMarkedRoom => Kind == "Marked" && !Main.Completed && _inside;
+    internal bool OwnsMarkedLoot(Agent agent, Waypoint point) => CollectingMarkedRoom && !_paused
+        && agent == _actor && point != null && point == _loot;
 
     internal bool Tick(Squad squad, WaypointSystem waypoints, bool combat)
     {
@@ -76,6 +82,7 @@ internal sealed class RushPlan : IObjectiveWork
             || _actor.SoloExtractRequested || (CorpseEscort.InFlight(_actor) && (_loot == null || _actor.Objective.Location != _loot)))
         {
             Release(squad, waypoints); _actor = null; _loot = null; _route.Reset();
+            if (CollectingMarkedRoom) _attempted.Clear();
             if (_current < 0) ResetRanking();
             var livingMember = false;
             foreach (var member in squad.Members)
@@ -88,10 +95,12 @@ internal sealed class RushPlan : IObjectiveWork
                 : End(squad, waypoints, "no remaining member");
         }
         if (_paused) { _paused = false; _route.Reset(); delta = 0; SetStatus(squad, _current < 0 ? "planning route" : "approach"); }
-        _elapsed += delta;
+        if (Status != "looting") _elapsed += delta;
         if (_elapsed > ServerConfig.Rush.TravelTimeout && Status != "searching" && Status != "looting")
             return Skip(squad, waypoints, "travel timeout");
         if (Status is "searching" or "looting") _held += delta;
+        if (Status == "looting" && _loot == null && (_roomIdle += delta) > ServerConfig.Rush.TravelTimeout)
+            return Skip(squad, waypoints, "room loot stalled");
         if (now < _nextWork) return true;
         if (_current < 0)
         {
@@ -104,24 +113,43 @@ internal sealed class RushPlan : IObjectiveWork
         if (Kind == "Marked" && door == null) return Skip(squad, waypoints, "door removed");
         if (_loot != null)
         {
-            if (_actor.Objective.Status is not (ObjectiveStatus.Finished or ObjectiveStatus.Failed)) return true;
+            if (_actor.Objective.Location == _loot && _actor.Objective.Status is not (ObjectiveStatus.Finished or ObjectiveStatus.Failed)) return true;
             _attempted.Add(_loot.Id); waypoints.ReleaseClaim(_loot.Id, _actor.Id); _loot = null;
+            _roomIdle = 0;
         }
         if (Status == "looting")
         {
-            if (_held >= site.SearchSeconds * _searchScale) return Visit(squad, waypoints);
             if (!waypoints.TryOperationWork(this)) return true;
             _nextWork = now + .1f;
-            _loot = waypoints.OperationLoot(_actor, LootPosition(site), _attempted, out var exhausted, site.Radius);
-            if (_loot != null) SetOrder(_actor, _loot, waypoints);
-            else if (exhausted) return Visit(squad, waypoints);
+            if (_room != null && !_room.Contains(_actor.Position))
+            {
+                Release(squad, waypoints); _route.Reset(); SetStatus(squad, "returning to room"); return true;
+            }
+            HoldRoomMembers(squad, waypoints);
+            _loot = waypoints.OperationLoot(_actor, RoomCenter(site), _attempted, out var exhausted, _room?.Radius ?? site.Radius, _room);
+            if (_loot != null) { _roomIdle = 0; SetOrder(_actor, _loot, waypoints); }
+            else if (exhausted)
+            {
+                _roomLooters.Add(_actor);
+                var remaining = waypoints.RemainingMarkedLoot(_room);
+                if (remaining > 0)
+                    foreach (var member in squad.Members)
+                        if (member.IsActive && !member.Bot.IsDead && !member.SoloExtractRequested && !_roomLooters.Contains(member))
+                        {
+                            _actor = member; _attempted.Clear(); Release(squad, waypoints); _route.Reset();
+                            SetStatus(squad, "entering room"); return true;
+                        }
+                Log.Info($"RUSH ROOM: {squad} site={site.Name} state=collection finished members={_roomLooters.Count} remaining={remaining}");
+                if (remaining > 0) return Skip(squad, waypoints, "room loot remaining: capacity or access");
+                return Visit(squad, waypoints);
+            }
             return true;
         }
         if (!_orders.ContainsKey(_actor))
         {
             if (!waypoints.TryOperationWork(this)) return true;
             _nextWork = now + .1f;
-            var target = _inside ? LootPosition(site) : Position(site);
+            var target = _inside ? RoomCenter(site) : Position(site);
             if (door != null && !_inside && _doorApproach) target = door.GetInteractionParameters(_actor.Position).InteractionPosition;
             if (!_route.Find(_actor.Position, target, out _anchor, out var final, _retries, _approachHistory))
             {
@@ -163,7 +191,7 @@ internal sealed class RushPlan : IObjectiveWork
             return true;
         }
         if (Status == "searching" && _held >= site.SearchSeconds * _searchScale) return Visit(squad, waypoints);
-        if (Status != "searching" && (_actor.Position - _anchor).sqrMagnitude > (door != null && !_inside ? 1f : 9f)) return true;
+        if (Status != "searching" && (_actor.Position - _anchor).sqrMagnitude > (door != null ? 1f : 9f)) return true;
         if (_partial) return true;
         if (door != null && !_inside && !_doorApproach)
         {
@@ -192,8 +220,10 @@ internal sealed class RushPlan : IObjectiveWork
     {
         if (door.DoorState == EDoorState.Open)
         {
+            _room ??= waypoints.MarkedRoom(site);
             _inside = true; Release(squad, waypoints); _route.Reset(); _elapsed = 0; _retries = 0; _approachHistory.Clear();
-            Main.Position = LootPosition(site); Main.CellCoords = waypoints.WorldToCell(Main.Position);
+            Main.Position = RoomCenter(site); Main.CellCoords = waypoints.WorldToCell(Main.Position);
+            Log.Info($"RUSH ROOM: {squad} site={site.Name} source={_room.Source} center={Main.Position}");
             SetStatus(squad, "entering room"); return true;
         }
         try
@@ -280,7 +310,7 @@ internal sealed class RushPlan : IObjectiveWork
     {
         SetStatus(squad, _states[_current]); Release(squad, waypoints); _processed++;
         _current = -1; _retries = _attempts = 0; ResetRanking();
-        _elapsed = _held = _interactAt = 0; _inside = _doorApproach = false; _loot = null; _attempted.Clear(); _route.Reset();
+        _elapsed = _held = _interactAt = _roomIdle = 0; _inside = _doorApproach = false; _loot = null; _room = null; _roomLooters.Clear(); _attempted.Clear(); _route.Reset();
         if (_visited >= Count || _processed >= _sites.Count) return End(squad, waypoints, FinishReason());
         SetStatus(squad, "planning route"); return true;
     }
@@ -319,6 +349,16 @@ internal sealed class RushPlan : IObjectiveWork
     }
     private static Vector3 Position(RushPoint p) => new(p.X, p.Y, p.Z);
     private static Vector3 LootPosition(RushPoint p) => new(p.LootX, p.LootY, p.LootZ);
+    private Vector3 RoomCenter(RushPoint site) => _room?.Center ?? LootPosition(site);
+    private void HoldRoomMembers(Squad squad, WaypointSystem waypoints)
+    {
+        foreach (var member in squad.Members)
+        {
+            if (member == _actor || !member.IsActive || member.SoloExtractRequested || CorpseEscort.InFlight(member)) continue;
+            if (!_orders.TryGetValue(member, out var order) || member.Objective.Location != order)
+                SetOrder(member, Point(waypoints, _room.Center, "Hold marked room"), waypoints);
+        }
+    }
     private static Waypoint Point(WaypointSystem w, Vector3 position, string name)
         => new(w.NewRuntimeWaypointId(), WaypointCategory.Synthetic, name, position, 1, new(), new(), null);
     private void SetOrder(Agent member, Waypoint point, WaypointSystem w)

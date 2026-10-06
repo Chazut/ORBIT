@@ -4,6 +4,7 @@ using EFT;
 using EFT.Interactive;
 using Orbit.Entities;
 using Orbit.Helpers;
+using Orbit.Navigation;
 using Orbit.Settings;
 using UnityEngine;
 using Object = UnityEngine.Object;
@@ -15,6 +16,7 @@ public partial class WaypointSystem
 {
     private List<RushPoint> _rushPoints;
     private Dictionary<string, Door> _rushDoors;
+    private readonly Dictionary<string, Audio.SpatialSystem.SpatialAudioPortal> _rushPortals = new();
     private readonly Dictionary<Corpse, string> _rushCorpses = new();
     internal static float RushRaidSeconds => (float)(Singleton<AbstractGame>.Instance?.GameTimer?.PastTime.TotalSeconds ?? double.PositiveInfinity);
 
@@ -25,10 +27,26 @@ public partial class WaypointSystem
         // Reuse the gatherer's scene inventory where possible; this scan is once per raid, never per squad.
         foreach (var door in Object.FindObjectsOfType<Door>(true))
             if (!string.IsNullOrEmpty(door.Id)) _rushDoors[door.Id] = door;
+        foreach (var portal in Object.FindObjectsOfType<Audio.SpatialSystem.SpatialAudioPortal>(true))
+            if (!string.IsNullOrEmpty(portal.DoorID) && _rushDoors.TryGetValue(portal.DoorID, out var door)
+                && (portal.transform.position - door.transform.position).sqrMagnitude < 225f)
+                _rushPortals[portal.DoorID] = portal;
     }
 
     internal Door RushDoor(string id) => _rushDoors.TryGetValue(id, out var door) ? door : null;
     internal System.Func<Agent, Door, bool> OpenRushDoor;
+    internal MarkedRoomScope MarkedRoom(RushPoint point)
+    {
+        SpatialAudioRoom selected = null;
+        if (_rushPortals.TryGetValue(point.DoorId, out var portal) && portal != null)
+        {
+            // The dedicated room is smaller than its adjoining corridor or outdoor volume.
+            foreach (var room in new[] { portal.FrontRoom, portal.BackRoom })
+                if (room != null && !room.IsOutdoor && room.Bounds.size.sqrMagnitude > 0
+                    && (selected == null || room.RoomSize < selected.RoomSize)) selected = room;
+        }
+        return new(new Vector3(point.LootX, point.LootY, point.LootZ), point.Radius, selected);
+    }
     internal void RegisterRushCorpse(Corpse corpse, string role)
     {
         if (corpse != null && RushDefaults.IsResident(_zoneKey, role)) _rushCorpses[corpse] = role;
@@ -92,7 +110,12 @@ public partial class WaypointSystem
         if (squad.Rush == null) return false;
         using var timing = PerformanceJournal.Measure(TransitionPhase.StrategyObjectives, "rush-objective", this, squad.Id);
         var result = squad.Rush.Tick(squad, this, combat);
-        if (squad.Rush.Main.Completed) squad.Rush = null;
+        if (squad.Rush.Main.Completed)
+        {
+            var marked = squad.Rush.Kind == "Marked";
+            squad.Rush = null;
+            if (marked) Orbit.Tasks.Actions.LootContainerAction.ReevaluateAfterMarkedRoom(squad);
+        }
         return result;
     }
 

@@ -159,7 +159,8 @@ public partial class WaypointSystem
         return search.Find(actor.Position, target, out point, out final);
     }
 
-    internal Waypoint OperationLoot(Agent agent, Vector3 center, HashSet<int> attempted, out bool exhausted, float radius = 15f)
+    internal Waypoint OperationLoot(Agent agent, Vector3 center, HashSet<int> attempted, out bool exhausted, float radius = 15f,
+        MarkedRoomScope room = null)
     {
         exhausted = true;
         var coords = WorldToCell(center);
@@ -171,14 +172,46 @@ public partial class WaypointSystem
             {
                 if (point.Category is not (WaypointCategory.ContainerLoot or WaypointCategory.LooseLoot)
                     || (point.Position - center).sqrMagnitude > radius * radius || Mathf.Abs(point.Position.y - center.y) > 2.5f
-                    || attempted.Contains(point.Id) || agent.Squad.CompletedPoiIds.Contains(point.Id)
-                    || IsClaimedByOther(point.Id, agent.Id)
+                    || room != null && !room.Contains(point.Position)
+                    || room != null && !MarkedLootRemains(point)
+                    || attempted.Contains(point.Id) || room == null && agent.Squad.CompletedPoiIds.Contains(point.Id)
                     || !Orbit.Tasks.Actions.GotoObjectiveAction.IsLootableForAgent(agent, point)) continue;
+                // A competing looter is not evidence that the room has been emptied.
+                if (IsClaimedByOther(point.Id, agent.Id)) { if (room != null) exhausted = false; continue; }
                 if (++paths > 3) { exhausted = false; return null; }
                 if (NavMesh.CalculatePath(agent.Position, point.Position, NavMesh.AllAreas, _operationPath)
-                    && _operationPath.status == NavMeshPathStatus.PathComplete && TryClaim(point.Id, agent.Id)) return point;
+                    && _operationPath.status == NavMeshPathStatus.PathComplete
+                    && (room == null || room.ContainsPath(_operationPath.corners)) && TryClaim(point.Id, agent.Id)) return point;
                 attempted.Add(point.Id);
             }
         return null;
+    }
+
+    private bool MarkedLootRemains(Waypoint point)
+    {
+        if (point.Category == WaypointCategory.LooseLoot) return !IsUnavailableLooseLoot(point);
+        if (point.Target is not LootableContainer container) return false;
+        if (container.ItemOwner?.RootItem is not EFT.InventoryLogic.CompoundItem root) return false;
+        if (root.Slots != null)
+            foreach (var slot in root.Slots)
+                if (slot?.ContainedItem != null) return true;
+        if (root.Grids != null)
+            foreach (var grid in root.Grids)
+                if (grid?.Items != null)
+                    foreach (var item in grid.Items)
+                        if (item != null) return true;
+        return false;
+    }
+
+    internal int RemainingMarkedLoot(MarkedRoomScope room)
+    {
+        var count = 0;
+        var coords = WorldToCell(room.Center);
+        var radius = Mathf.Max(1, Mathf.CeilToInt(room.Radius / _cellSize));
+        for (var x = Mathf.Max(0, coords.x - radius); x <= Mathf.Min(_gridSize.x - 1, coords.x + radius); x++)
+        for (var y = Mathf.Max(0, coords.y - radius); y <= Mathf.Min(_gridSize.y - 1, coords.y + radius); y++)
+            foreach (var point in _cells[x, y].Waypoints)
+                if (room.Contains(point.Position) && MarkedLootRemains(point)) count++;
+        return count;
     }
 }

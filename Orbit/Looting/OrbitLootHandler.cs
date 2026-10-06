@@ -334,6 +334,7 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
     {
         var agent = Singleton<BotRoster>.Instance?.GetAgent(_bot);
         if (agent == null) return DefaultMinPickupPrice;
+        if (agent.Squad?.Rush?.OwnsMarkedLoot(agent, agent.Objective.Location) == true) return 0f;
         var threshold = Orbit.Tasks.Actions.LootContainerAction.GetOrResolveAgentMiniLootThreshold(agent);
         return threshold > 0f ? threshold : DefaultMinPickupPrice;
     }
