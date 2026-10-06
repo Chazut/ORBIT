@@ -30,7 +30,7 @@ internal enum TransitionPhase
     GhostDeathDiagnosticReport,
     CampSearch, GhostWeather,
     LootResume, LootPrepare, LootEvaluate, NativeExtract, NativeExtractLeave, NativeExtractDeactivate,
-    NativeExtractDispose, NativeExtractDespawn, GhostPlayerDamage,
+    NativeExtractDispose, NativeExtractDespawn, GhostPlayerDamage, GhostWeaponVisuals,
     Count
 }
 

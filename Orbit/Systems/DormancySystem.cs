@@ -132,6 +132,7 @@ public partial class DormancySystem
 
     public static void ClearStatics()
     {
+        GhostWeaponVisuals.Clear();
         NativeGhostSystem.Clear();
         BotLandingGuard.Clear();
         Api.OrbitTelemetry.ClearGhostFights();
@@ -371,6 +372,7 @@ public partial class DormancySystem
     public void Update(List<Agent> liveAgents, List<Squad> squads)
     {
         if (!_enabled) return;
+        using (TransitionPerformance.Measure(TransitionPhase.GhostWeaponVisuals)) GhostWeaponVisuals.Tick();
         // Check before scheduled shots/kills: spectators must see live combat after waking.
         using (TransitionPerformance.Measure(TransitionPhase.GhostSpectator))
             if (UpdateSpectatorMode()) { ClearStagedWakes(); return; }
@@ -498,6 +500,7 @@ public partial class DormancySystem
     /// corpse or despawned bot is never left as an invisible inactive GameObject.</summary>
     public void OnAgentRemoved(Agent agent)
     {
+        GhostWeaponVisuals.Wake(agent.Player);
         ForgetStagedBot(agent.Bot);
         NativeAwakeGrenadeDiagnostics.Forget(agent.Bot);
         if (!agent.IsDormant) return;
@@ -965,6 +968,7 @@ public partial class DormancySystem
             bot.DecisionQueue.Clear();
             bot.Memory.GoalEnemy = null;
             bot.PatrollingData.Pause();
+            GhostWeaponVisuals.Sleep(agent.Player);
             using (TransitionPerformance.Measure(TransitionPhase.SleepBody))
                 bot.gameObject.SetActive(false);
             ThrottleBrain(bot);
@@ -1026,6 +1030,7 @@ public partial class DormancySystem
         if (agent.IsDormant) RecordWakeEvent(agent.Player, reason);
         var bot = agent.Bot;
         var player = agent.Player;
+        GhostWeaponVisuals.Wake(player);
 
         GhostWakeActivationDiagnostics.Track(bot);
         var wakePose = new GhostWakePose(player);
@@ -2409,6 +2414,7 @@ public partial class DormancySystem
             profile: victim.Player?.ProfileId, always: true, details: true);
         using (TransitionPerformance.Measure(TransitionPhase.GhostDeathPrepare))
         {
+            GhostWeaponVisuals.Wake(victim.Player);
             victim.IsDormant = false;
             _dormantAgents.Remove(victim);
             DormantProfileIds.Remove(victim.Player.ProfileId);
@@ -2440,6 +2446,7 @@ public partial class DormancySystem
         bool native;
         using (TransitionPerformance.Measure(TransitionPhase.GhostDeathPrepare))
         {
+            GhostWeaponVisuals.Wake(victim.GetPlayer);
             native = _nativeGhosts.Remove(victim);
             _vanillaDormant.Remove(victim);
             UnthrottleBrain(victim);
@@ -2507,6 +2514,7 @@ public partial class DormancySystem
                     NativeGhostDiagnostics.Forget(owner);
                     if (_vanillaDormant.Remove(owner))
                     {
+                        GhostWeaponVisuals.Wake(owner.GetPlayer);
                         _nativeGhosts.Remove(owner);
                         UnthrottleBrain(owner);
                         DormantProfileIds.Remove(player.ProfileId);
@@ -2656,6 +2664,7 @@ public partial class DormancySystem
                     bot.Memory.GoalEnemy = null;
                     bot.PatrollingData.Pause();
                 }
+                GhostWeaponVisuals.Sleep(bot.GetPlayer);
                 using (TransitionPerformance.Measure(TransitionPhase.SleepBody))
                     bot.gameObject.SetActive(false);
             }
@@ -2720,6 +2729,7 @@ public partial class DormancySystem
         UnthrottleBrain(bot);
         DormantProfileIds.Remove(bot.GetPlayer.ProfileId);
         _vanillaLastHp[bot] = VanillaHp(bot);
+        GhostWeaponVisuals.Wake(bot.GetPlayer);
         // A dead member also needs its body back, but must not reactivate its brain.
         if (bot.IsDead) { bot.gameObject.SetActive(true); return true; }
         try
@@ -2749,6 +2759,7 @@ public partial class DormancySystem
 
     public void OnVanillaRemoved(BotOwner bot)
     {
+        GhostWeaponVisuals.Wake(bot.GetPlayer);
         ForgetStagedBot(bot);
         NativeReloadRecovery.Forget(bot);
         NativePatrolDiagnostics.Forget(bot);
