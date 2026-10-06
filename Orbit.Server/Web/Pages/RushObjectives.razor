@@ -173,7 +173,7 @@
     private float Scale => 1000 / MathF.Abs(MapViews.Rot(View.X2, View.Z2, View.Rot).x - MapViews.Rot(View.X1, View.Z1, View.Rot).x);
     private float Height => MathF.Abs(MapViews.Rot(View.X2, View.Z2, View.Rot).z - MapViews.Rot(View.X1, View.Z1, View.Rot).z) * Scale;
     private IEnumerable<RushPoint> Visible => Points.Where(p => p.Kind == Kind && (_floor == "*" || FloorCatalog.Matches(_map, _floor, p.X, p.Y, p.Z)));
-    private IEnumerable<string> Bosses => new[] { "bossBully", "bossKilla", "bossTagilla", "bossKojaniy", "bossGluhar", "bossSanitar", "bossBoar", "bossKolontay", "bossZryachiy", "bossKillaAgro", "bossTagillaAgro" }.Where(b => RushDefaults.IsResident(_map, b));
+    private IEnumerable<string> Bosses => new[] { "bossBully", "bossKilla", "bossTagilla", "bossKojaniy", "bossGluhar", "bossSanitar", "bossBoar", "bossKolontay", "bossKillaAgro", "bossTagillaAgro" }.Where(b => RushDefaults.IsBossRushTarget(_map, b));
     private static string F(float n) => n.ToString("0.###", CultureInfo.InvariantCulture);
     private (float x, float y) ToMap(float x, float z)
     {

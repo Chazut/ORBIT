@@ -7,6 +7,10 @@ namespace Orbit.Settings;
 // Native SPT 4.1 spawn sectors and scene door interaction points. These are possible sites, not live spawns.
 public static class RushDefaults
 {
+    // Keep old catalogues valid, but never select the island guardian for a rush.
+    public static bool IsBossRushTarget(string map, string boss) =>
+        boss != "bossZryachiy" && IsResident(map, boss);
+
     public static bool IsResident(string map, string boss)
     {
         if (string.Equals(map, "Lighthouse@rework", StringComparison.OrdinalIgnoreCase))
@@ -352,7 +356,7 @@ public static class RushDefaults
         },
         ["Lighthouse"] = new()
         {
-            new() { Id = "bossZryachiy-Zone_Island-1", Name = "Zone_Island 1", Kind = "Boss", Boss = "bossZryachiy", X = 356.39f, Y = 15.519f, Z = 553.695f, Radius = 30f, SearchSeconds = 30f },
+            new() { Id = "bossZryachiy-Zone_Island-1", Name = "Zone_Island 1", Kind = "Boss", Enabled = false, Boss = "bossZryachiy", X = 356.39f, Y = 15.519f, Z = 553.695f, Radius = 30f, SearchSeconds = 30f },
             new() { Id = "door_Lighthouse_Complex_00009", Name = "Shared bedroom", Kind = "Marked", DoorId = "door_Lighthouse_Complex_00009", X = 327.197f, Y = 5.032f, Z = 487.072f, LootX = 328.422f, LootY = 5.032f, LootZ = 487.934f, Radius = 6f, SearchSeconds = 60f },
             new() { Id = "spawn-1", Name = "PMC spawn sector 1", Kind = "Spawn", X = 113.113f, Y = 4.995f, Z = 104.741f, Radius = 30f, SearchSeconds = 20f },
             new() { Id = "spawn-2", Name = "PMC spawn sector 2", Kind = "Spawn", X = 75.29f, Y = 9.556f, Z = 394.98f, Radius = 30f, SearchSeconds = 20f },
@@ -423,7 +427,7 @@ public static class RushDefaults
         },
         ["Lighthouse@rework"] = new()
         {
-            new() { Id = "bossZryachiy-Zone_Island-1", Name = "Zone_Island 1", Kind = "Boss", Boss = "bossZryachiy", X = 356.39f, Y = 15.519f, Z = 553.695f, Radius = 30f, SearchSeconds = 30f },
+            new() { Id = "bossZryachiy-Zone_Island-1", Name = "Zone_Island 1", Kind = "Boss", Enabled = false, Boss = "bossZryachiy", X = 356.39f, Y = 15.519f, Z = 553.695f, Radius = 30f, SearchSeconds = 30f },
             new() { Id = "door_ADD_Replace_Marked_room_EFT-58431_00001", Name = "Water treatment marked room", Kind = "Marked", DoorId = "door_ADD_Replace_Marked_room_EFT-58431_00001", X = -51.06758068026822f, Y = 2.049008533260272f, Z = -647.3886761022774f, LootX = -45.6285f, LootY = 2.0490084378928337f, LootZ = -650.142f, Radius = 6f, SearchSeconds = 60f },
             new() { Id = "spawn-1", Name = "PMC spawn sector 1", Kind = "Spawn", X = 113.113f, Y = 4.995f, Z = 104.741f, Radius = 30f, SearchSeconds = 20f },
             new() { Id = "spawn-2", Name = "PMC spawn sector 2", Kind = "Spawn", X = 75.29f, Y = 9.556f, Z = 394.98f, Radius = 30f, SearchSeconds = 20f },

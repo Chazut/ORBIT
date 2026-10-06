@@ -49,7 +49,7 @@ public partial class WaypointSystem
     }
     internal void RegisterRushCorpse(Corpse corpse, string role)
     {
-        if (corpse != null && RushDefaults.IsResident(_zoneKey, role)) _rushCorpses[corpse] = role;
+        if (corpse != null && RushDefaults.IsBossRushTarget(_zoneKey, role)) _rushCorpses[corpse] = role;
     }
 
     internal MainObjective RollRushMain(Squad squad)
@@ -69,7 +69,7 @@ public partial class WaypointSystem
             if (point.Kind == "Sniper" && !scoped) continue;
             var position = new Vector3(point.X, point.Y, point.Z);
             if (point.Kind == "Spawn" && (position - squad.SpawnPosition).sqrMagnitude < Mathf.Pow(cfg.OwnSpawnExclusion + point.Radius, 2)) continue;
-            if (point.Kind == "Boss" && !RushDefaults.IsResident(_zoneKey, point.Boss)) continue;
+            if (point.Kind == "Boss" && !RushDefaults.IsBossRushTarget(_zoneKey, point.Boss)) continue;
             if (point.Kind == "Marked" && (RushDoor(point.DoorId) == null || !MultiStepAccess.CanForceUnlock(RushDoor(point.DoorId)))) continue;
             if (!pools.TryGetValue(point.Kind, out var pool)) pools[point.Kind] = pool = new();
             pool.Add(point);
