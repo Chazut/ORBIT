@@ -17,8 +17,13 @@ internal sealed class ObjectiveWorkQueue
     {
         if (ReferenceEquals(_running, owner)) return true;
         if (_frame != frame && _pending.Count == 0) { _frame = frame; return true; }
-        if (!_pending.Contains(owner)) _pending.Add(owner);
+        Enqueue(owner);
         return false;
+    }
+
+    internal void Enqueue(IObjectiveWork owner)
+    {
+        if (!_pending.Contains(owner)) _pending.Add(owner);
     }
 
     internal void Cancel(IObjectiveWork owner) => _pending.Remove(owner);

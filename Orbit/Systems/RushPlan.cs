@@ -21,7 +21,8 @@ internal sealed class RushPlan : IObjectiveWork
     private string _status = "pending";
     internal string Status { get => Sniper?.Status ?? _status; private set => _status = value; }
     internal readonly SniperPlan Sniper;
-    internal string Step => Sniper != null ? Sniper.Step : _current < 0 ? _lastSiteName ?? "Choose nearest reachable sector" : _sites[_current].Name;
+    internal string Step => Sniper != null ? Sniper.Step : _current < 0
+        ? _lastSiteName ?? (Kind == "Spawn" ? "Choose nearby spawn" : "Choose nearest reachable sector") : _sites[_current].Name;
     internal int Index => _processed;
     internal int Count => Kind == "Spawn" ? Mathf.Min(ServerConfig.Rush.SpawnSectors, _sites.Count) : _sites.Count;
     internal string Name => Kind == "Sniper" ? "Sniper overwatch" : Kind + " rush";
@@ -34,6 +35,7 @@ internal sealed class RushPlan : IObjectiveWork
     private readonly List<Vector3> _approachHistory = new();
     private readonly OperationRouteSearch _route = new();
     private readonly RushRouteEstimate _ranker = new();
+    private const float NearbySpawnDistanceFactor = 1.5f;
     private readonly NavMeshPath _path = new();
     private Agent _actor;
     private string _lastSiteName;
@@ -46,6 +48,8 @@ internal sealed class RushPlan : IObjectiveWork
     private float _bestLength = float.MaxValue, _nextWork, _elapsed, _held, _lastTick, _nextRoam, _interactAt;
     private bool _paused, _partial, _inside, _doorApproach, _ranking;
     private string _bestRoute;
+    private int _nearbySpawnCandidates;
+    private float _nearbySpawnRadius;
     private Vector3 _anchor, _sortOrigin;
 
     internal RushPlan(string kind, List<RushPoint> sites, float searchScale, RushStyle style = null)
@@ -153,7 +157,7 @@ internal sealed class RushPlan : IObjectiveWork
             if (door != null && !_inside && _doorApproach) target = door.GetInteractionParameters(_actor.Position).InteractionPosition;
             if (!_route.Find(_actor.Position, target, out _anchor, out var final, _retries, _approachHistory))
             {
-                if (_route.Pending) return true;
+                if (_route.Pending) { ContinueSpawnSearch(waypoints); return true; }
                 Log.Info($"RUSH APPROACH: {squad} kind={Kind} site={site.Name} from={_actor.Position} target={target} samples={_route.Samples} partial={_route.PartialPaths} invalid={_route.InvalidPaths} attempt={_retries + 1}/3");
                 _route.Reset(); _nextWork = now + 2;
                 if (++_retries >= 3) return Skip(squad, waypoints, "unreachable");
@@ -266,20 +270,46 @@ internal sealed class RushPlan : IObjectiveWork
     private void ResetRanking()
     { _ranking = false; _candidate = 0; _best = -1; _bestLength = float.MaxValue; _bestRoute = null; _ranker.Reset(); }
 
-    // One route query per work tick, including staged estimates for distant sectors.
+    // Spawn rush rolls among nearby sectors; surveying every distant route defeats an opening rush.
+    // Other rush types retain one route query per work tick, including staged estimates.
     private bool SelectNext(Squad squad, WaypointSystem waypoints)
     {
         if (_visited >= Count) return End(squad, waypoints, FinishReason());
         if (!_ranking) { _ranking = true; _sortOrigin = _actor.Position; SetStatus(squad, "planning route"); }
-        while (_candidate < _sites.Count && _states[_candidate] != null) _candidate++;
-        if (_candidate < _sites.Count)
+        if (Kind == "Spawn")
         {
-            var index = _candidate; var site = _sites[index]; var target = Position(site);
-            if (!_ranker.Step(_sortOrigin, target, out var length, out var source)) return true;
-            ReportRoute(squad, site, length, source, false);
-            if (length < _bestLength) { _bestLength = length; _best = index; _bestRoute = source; }
-            _candidate++; _ranker.Reset();
-            return true;
+            var nearest = float.MaxValue;
+            for (var index = 0; index < _sites.Count; index++)
+            {
+                if (_states[index] != null) continue;
+                var distance = Vector3.Distance(_sortOrigin, Position(_sites[index]));
+                if (distance < nearest) nearest = distance;
+            }
+            _nearbySpawnCandidates = 0;
+            _nearbySpawnRadius = nearest * NearbySpawnDistanceFactor;
+            for (var index = 0; index < _sites.Count; index++)
+            {
+                if (_states[index] != null) continue;
+                var distance = Vector3.Distance(_sortOrigin, Position(_sites[index]));
+                if (distance > _nearbySpawnRadius) continue;
+                // Reservoir sampling gives every nearby sector the same chance without a sorted list.
+                if (UnityEngine.Random.Range(0, ++_nearbySpawnCandidates) == 0)
+                { _bestLength = distance; _best = index; }
+            }
+            _bestRoute = "nearby spawn random";
+        }
+        else
+        {
+            while (_candidate < _sites.Count && _states[_candidate] != null) _candidate++;
+            if (_candidate < _sites.Count)
+            {
+                var index = _candidate; var site = _sites[index]; var target = Position(site);
+                if (!_ranker.Step(_sortOrigin, target, out var length, out var source)) return true;
+                ReportRoute(squad, site, length, source, false);
+                if (length < _bestLength) { _bestLength = length; _best = index; _bestRoute = source; }
+                _candidate++; _ranker.Reset();
+                return true;
+            }
         }
         if (_best < 0) return End(squad, waypoints, FinishReason());
         ReportRoute(squad, _sites[_best], _bestLength, _bestRoute, true);
@@ -287,13 +317,22 @@ internal sealed class RushPlan : IObjectiveWork
         Main.Position = Position(_sites[_current]); Main.CellCoords = waypoints.WorldToCell(Main.Position);
         Main.ZoneFloorId = _sites[_current].FloorId;
         _elapsed = _held = 0; _route.Reset(); _approachHistory.Clear(); RememberApproach(_actor.Position); SetStatus(squad, "approach");
+        ContinueSpawnSearch(waypoints);
         return true;
+    }
+
+    private void ContinueSpawnSearch(WaypointSystem waypoints)
+    {
+        if (Kind != "Spawn") return;
+        _nextWork = Time.time;
+        waypoints.ContinueOperationWork(this);
     }
 
     private void ReportRoute(Squad squad, RushPoint site, float cost, string source, bool selected)
     {
         if (!Log.InfoEnabled && !PerformanceJournal.Enabled) return;
         var detail = $"kind={Kind} site={site.Name} cost={cost:F1}m source={source} origin={_sortOrigin}";
+        if (Kind == "Spawn") detail += $" candidates={_nearbySpawnCandidates} radius={_nearbySpawnRadius:F1}m";
         Log.Info($"{(selected ? "RUSH SELECT" : "RUSH ROUTE")}: {squad} {detail}");
         PerformanceJournal.Event(selected ? "rush-select" : "rush-route", squad.Leader?.Bot?.Profile?.Id, detail, squad.Id);
     }
