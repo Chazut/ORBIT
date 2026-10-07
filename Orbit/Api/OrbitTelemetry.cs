@@ -299,6 +299,8 @@ public static class OrbitTelemetry
                     CampElapsed = m.CampElapsed,
                     CampTargetDuration = m.KillAmbush ? m.KillsRoamTargetDuration : m.CampTargetDuration,
                     CampUntilTimeExtract = m.Type == MainObjectiveType.ExtractCamp,
+                    CampExtractRemainingSeconds = m.Type == MainObjectiveType.ExtractCamp && !m.Completed
+                        ? Orbit.Tasks.RaidTimeExtraction.SecondsUntilDeparture(squad) : null,
                     CampState = m.CampState,
                     CampFailure = m.CampFailure,
                     CampSearchAttempt = m.CampSearchAttempt,
@@ -400,6 +402,7 @@ public class OrbitMainObjective
     public float CampElapsed;
     public float CampTargetDuration;
     public bool CampUntilTimeExtract;
+    public float? CampExtractRemainingSeconds;
     public bool CampHolding;
     public string CampState;
     public string CampFailure;

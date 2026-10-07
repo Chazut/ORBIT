@@ -8,6 +8,16 @@ namespace Orbit.Tasks;
 
 internal static class RaidTimeExtraction
 {
+    // Read-only telemetry: never roll personality/random state while recording a snapshot.
+    internal static float? SecondsUntilDeparture(Squad squad)
+    {
+        if (squad == null || float.IsNaN(squad.TimeExtractThresholdSeconds)) return null;
+        var timer = Singleton<AbstractGame>.Instance?.GameTimer;
+        if (timer?.SessionTime == null || timer.SessionTime.Value.TotalSeconds <= 0) return null;
+        return System.Math.Max(0f, (float)(timer.SessionTime.Value.TotalSeconds - timer.PastTime.TotalSeconds)
+            - squad.TimeExtractThresholdSeconds);
+    }
+
     internal static void Check(Squad squad)
     {
         if (squad.ExtractRequested && squad.LootExtractSweep == null) return;

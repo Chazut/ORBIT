@@ -16,6 +16,12 @@ internal static class DeathCodePreparation
     {
         ("SAIN.Components.PlayerComponentSpace.PlayerSpawnTracker", new[] { "RemovePerson", "TryRemove" }),
         ("SAIN.Components.PlayerComponentSpace.PlayerComponent", new[] { "Dispose" }),
+        // These subscribers sit behind OnPlayerRemoved.Invoke, so ordinary IL call
+        // traversal cannot discover them from PlayerSpawnTracker.TryRemove.
+        ("SAIN.Components.BotController.BotSpawnController", new[] { "PlayerRemoved", "RemoveBot" }),
+        ("SAIN.Components.PlayerComponentSpace.OtherPlayersData", new[] { "PlayerRemoved", "Dispose" }),
+        ("SAIN.SAINComponent.Classes.EnemyClasses.EnemyListController", new[] { "RemoveEnemy" }),
+        ("SAIN.Components.BotComponent", new[] { "Dispose" }),
         ("SAIN.BotController.Classes.Squad", new[] { "memberWasKilled" }),
         ("SAIN.SAINComponent.Classes.EnemyClasses.EnemyControllerEvents", new[] { "enemyKilled" }),
         ("SAIN.SAINEnableClass", new[] { "ClearBot" }),

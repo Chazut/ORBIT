@@ -26,6 +26,7 @@ public partial class WaypointSystem
         internal readonly Vector3 RequestPosition, Origin;
         internal readonly Waypoint Previous, Objective;
         internal readonly bool Extract;
+        internal readonly bool Investigation;
         internal readonly int MainState, FirstFrame;
         internal readonly SquadObjectiveState ObjectiveState;
         internal IEnumerator<Waypoint> Steps;
@@ -34,14 +35,16 @@ public partial class WaypointSystem
         internal bool Done;
         internal float RequestedAt;
         internal int Queries, Slices;
-        internal DispatchSearch(WaypointSystem owner, Entity entity, Vector3 position, Waypoint previous)
+        internal DispatchSearch(WaypointSystem owner, Entity entity, Vector3 position, Waypoint previous, bool investigation = false)
         {
             Squad = entity as Squad; Leader = Squad?.Leader;
             RequestPosition = position; Previous = previous; Origin = Leader?.Position ?? position;
             Objective = Squad?.Objective.Location; ObjectiveState = Squad?.Objective.Status ?? default;
             Extract = Squad?.ExtractRequested ?? false; MainState = MainSignature(Squad);
             RequestedAt = Time.time; FirstFrame = Time.frameCount;
-            Steps = owner.SearchNear(this, entity, position, previous).GetEnumerator();
+            Investigation = investigation;
+            Steps = (investigation ? owner.SearchInvestigation(this, entity, position)
+                : owner.SearchNear(this, entity, position, previous)).GetEnumerator();
         }
         internal bool Valid => Time.time - RequestedAt < 3f && (Squad == null ||
             Leader != null && ReferenceEquals(Leader, Squad.Leader) && !Leader.Bot.IsDead
@@ -51,7 +54,7 @@ public partial class WaypointSystem
         public bool Step()
         {
             if (!Valid) { Dispose(); return false; }
-            using var timing = PerformanceJournal.Measure(TransitionPhase.WaypointSearch, "waypoint-search", "RequestNear slice", Squad?.Id ?? -1);
+            using var timing = PerformanceJournal.Measure(TransitionPhase.WaypointSearch, "waypoint-search", Investigation ? "Investigation slice" : "RequestNear slice", Squad?.Id ?? -1);
             Slices++;
             try
             {
@@ -63,7 +66,7 @@ public partial class WaypointSystem
                 Dispose();
                 if (PerformanceJournal.Enabled && (Slices > 4 || Queries > 4))
                 {
-                    var detail = $"squad={Squad?.Id ?? -1} frames={Time.frameCount - FirstFrame + 1} slices={Slices} paths={Queries} result={Result?.Id ?? -1}";
+                    var detail = $"squad={Squad?.Id ?? -1} frames={Time.frameCount - FirstFrame + 1} slices={Slices} paths={Queries} result={Result?.Id ?? -1} investigation={Investigation}";
                     Log.Always("PERF WAYPOINT SEARCH: " + detail);
                     PerformanceJournal.Event("waypoint-search-complete", detail: detail);
                 }
@@ -111,14 +114,17 @@ public partial class WaypointSystem
     }
 
     public Waypoint RequestNear(Entity entity, Vector3 worldPos, Waypoint previous)
+        => RequestDispatch(entity, worldPos, previous, investigation: false);
+
+    private Waypoint RequestDispatch(Entity entity, Vector3 worldPos, Waypoint previous, bool investigation)
     {
         if (_dispatchSearches.TryGetValue(entity, out var search)
-            && (!search.Valid || !ReferenceEquals(search.Previous, previous)
+            && (!search.Valid || search.Investigation != investigation || !ReferenceEquals(search.Previous, previous)
                 || (search.RequestPosition - worldPos).sqrMagnitude >= 25f))
         { CancelDispatch(entity); search = null; }
         if (search == null)
         {
-            search = new DispatchSearch(this, entity, worldPos, previous);
+            search = new DispatchSearch(this, entity, worldPos, previous, investigation);
             _dispatchSearches.Add(entity, search); _dispatchQueue.Add(search);
         }
         search.RequestedAt = Time.time;
@@ -143,7 +149,7 @@ public partial class WaypointSystem
         }
         finally { _cachedDispatchPick = false; }
         // A stale result is a new search, not evidence that the squad is stranded.
-        search = new DispatchSearch(this, entity, worldPos, previous);
+        search = new DispatchSearch(this, entity, worldPos, previous, investigation);
         _dispatchSearches.Add(entity, search); _dispatchQueue.Add(search);
         return null;
     }
@@ -205,6 +211,22 @@ public partial class WaypointSystem
         foreach (var cell in cells)
             foreach (var point in SearchCell(search, entity, cell))
             { yield return point; if (point != null) yield break; }
+    }
+    private IEnumerable<Waypoint> SearchInvestigation(DispatchSearch search, Entity entity, Vector3 position)
+    {
+        var center = WorldToCell(position);
+        if (!IsValidCell(center)) yield break;
+        ReleaseAssignment(entity);
+        for (var ring = 0; ring <= 1; ring++)
+            for (var dx = -ring; dx <= ring; dx++)
+                for (var dy = -ring; dy <= ring; dy++)
+                {
+                    if (ring == 1 && dx == 0 && dy == 0) continue;
+                    var coords = center + new Vector2Int(dx, dy);
+                    if (!IsValidCell(coords) || !_cells[coords.x, coords.y].HasWaypoints) continue;
+                    foreach (var point in SearchCell(search, entity, coords))
+                    { yield return point; if (point != null) yield break; }
+                }
     }
     private IEnumerable<Waypoint> SearchNear(DispatchSearch search, Entity entity, Vector3 worldPos, Waypoint previous)
     {

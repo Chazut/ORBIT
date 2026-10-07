@@ -132,6 +132,7 @@ public partial class DormancySystem
 
     public static void ClearStatics()
     {
+        AwakeVisionDiagnostics.Clear();
         GhostWeaponVisuals.Clear();
         NativeGhostSystem.Clear();
         BotLandingGuard.Clear();
@@ -503,6 +504,7 @@ public partial class DormancySystem
         GhostWeaponVisuals.Wake(agent.Player);
         ForgetStagedBot(agent.Bot);
         NativeAwakeGrenadeDiagnostics.Forget(agent.Bot);
+        AwakeVisionDiagnostics.Forget(agent.Bot);
         if (!agent.IsDormant) return;
         agent.IsDormant = false;
         _dormantAgents.Remove(agent);
@@ -2494,6 +2496,7 @@ public partial class DormancySystem
                 if (!player.AIData.IsAI) continue;
                 var owner = player.AIData.BotOwner;
                 if (owner == null) continue;
+                AwakeVisionDiagnostics.Observe(owner);
                 var agent = _botRoster.GetAgent(owner);
                 if (agent != null)
                 {
@@ -2762,6 +2765,7 @@ public partial class DormancySystem
         GhostWeaponVisuals.Wake(bot.GetPlayer);
         ForgetStagedBot(bot);
         NativeReloadRecovery.Forget(bot);
+        AwakeVisionDiagnostics.Forget(bot);
         NativePatrolDiagnostics.Forget(bot);
         var dormant = _vanillaDormant.Remove(bot);
         _nativeGhosts.Remove(bot);

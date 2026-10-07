@@ -581,36 +581,28 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
         }
     }
 
-    // Mirrors BSG's ActivateExfil flow: forces a still-gated exfil into a usable state right when the bot
-    // arrives. Without this, V-Ex / pay exfils stay at UncompleteRequirements and the BSG flow never lets the
-    // bot leave. OnItemTransferred starts the V-Ex car countdown.
+    // Register participants only for the supported SharedTimer car flow. Payment registration
+    // subscribes to despawn and closes an empty queue, so it must never be used by a foot exit.
     private static void ActivateExfilForBot(ExfiltrationPoint exfil, Agent agent)
     {
         if (Orbit.Systems.MultiStepAccess.IsConditional(exfil) || NoBackpackExfil.RequiresDrop(exfil)) return;
+        if (exfil.Settings?.ExfiltrationType != EExfiltrationType.SharedTimer)
+        {
+            if (exfil.Settings?.ExfiltrationType == EExfiltrationType.Manual
+                && exfil.Status == EExfiltrationStatus.UncompleteRequirements)
+            {
+                Log.Info($"{agent} reached unsupported Manual exfil {exfil.name}, failing objective");
+                agent.Objective.Status = ObjectiveStatus.Failed;
+            }
+            return;
+        }
         try
         {
-            // ProfileId overload — the IPlayer overload pulls in IDissonancePlayer which Orbit's csproj
-            // doesn't reference. BSG's string overload resolves the IPlayer for us.
+            // The string overload resolves the player without an IDissonancePlayer reference.
             exfil.OnItemTransferred(agent.Bot.GetPlayer.ProfileId);
 
             if (exfil.Status == EExfiltrationStatus.UncompleteRequirements)
-            {
-                switch (exfil.Settings.ExfiltrationType)
-                {
-                    case EExfiltrationType.Individual:
-                        exfil.SetStatusLogged(EExfiltrationStatus.RegularMode, "Orbit-Proceed-Ind");
-                        break;
-                    case EExfiltrationType.SharedTimer:
-                        exfil.SetStatusLogged(EExfiltrationStatus.Countdown, "Orbit-Proceed-VEx");
-                        break;
-                    case EExfiltrationType.Manual:
-                        // Manual exfils need a switch interaction (Lab keycard, Scav switch). Out of scope —
-                        // set the bot to Failed so it picks another objective.
-                        Log.Info($"{agent} reached Manual exfil {exfil.name}, no switch logic yet → failing objective");
-                        agent.Objective.Status = ObjectiveStatus.Failed;
-                        break;
-                }
-            }
+                exfil.SetStatusLogged(EExfiltrationStatus.Countdown, "Orbit-Proceed-VEx");
         }
         catch (System.Exception e)
         {

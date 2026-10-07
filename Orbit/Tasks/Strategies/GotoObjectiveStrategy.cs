@@ -327,7 +327,6 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
             if (squad.InvestigateNoisePosition.HasValue)
             {
                 var noisePos = squad.InvestigateNoisePosition.Value;
-                squad.InvestigateNoisePosition = null;
                 if (!squad.ExtractRequested
                     && squad.CombatCallerMemberIdx < 0
                     && squad.PreInterruptObjectiveLocation == null
@@ -335,6 +334,13 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                 {
                     var previous = squadObjective.Location;
                     var investigate = waypointSystem.RequestForInvestigation(squad, noisePos);
+                    if (investigate == null && waypointSystem.DispatchPending(squad))
+                    {
+                        // Keep the same sound while the shared path budget advances the search.
+                        UpdateAgents(squad, out _);
+                        continue;
+                    }
+                    squad.InvestigateNoisePosition = null;
                     if (investigate != null)
                     {
                         squadObjective.LocationPrevious = previous;
@@ -347,6 +353,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                     }
                     Log.Debug($"{squad} noise investigation: no usable waypoint around {noisePos}, staying on {previous}");
                 }
+                else squad.InvestigateNoisePosition = null;
             }
             // Do not re-arm Failed on a consumed loose item. Pending pickup sessions get their action
             // tick first, so their successful result and extraction checks are preserved.

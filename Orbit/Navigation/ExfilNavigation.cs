@@ -6,6 +6,30 @@ namespace Orbit.Navigation;
 
 internal static class ExfilNavigation
 {
+    // Loading-only fallback for triggers whose pivot/interior has no NavMesh. Keep
+    // the nearest approach on the same level; runtime still checks route and entry.
+    internal static bool TryApproachPoint(ExfiltrationPoint exfil, out Vector3 position)
+    {
+        position = default;
+        var collider = exfil.GetComponent<Collider>();
+        if (collider == null || collider.bounds.size.sqrMagnitude < .001f) return false;
+        var bounds = collider.bounds;
+        var best = float.MaxValue;
+        for (var point = 0; point < 25; point++)
+        {
+            var probe = new Vector3(bounds.center.x + (point % 5 - 2) * bounds.extents.x * .5f,
+                bounds.min.y + Mathf.Min(.5f, bounds.extents.y),
+                bounds.center.z + (point / 5 - 2) * bounds.extents.z * .5f);
+            if (!NavMesh.SamplePosition(probe, out var hit, 15f, NavMesh.AllAreas)) continue;
+            var edge = collider.ClosestPoint(hit.position);
+            if (Mathf.Abs(hit.position.y - probe.y) > 2.5f || DangerZones.IsInside(hit.position)) continue;
+            var distance = (hit.position - edge).sqrMagnitude;
+            if (distance > 225f || distance >= best) continue;
+            best = distance; position = hit.position;
+        }
+        return best < float.MaxValue;
+    }
+
     // Only called while gathering exits, not per bot or per frame. Broad samples can pick the
     // roof above a bunker; every candidate here must belong to the actual trigger volume.
     internal static bool TryInteriorPoint(ExfiltrationPoint exfil, out Vector3 position)

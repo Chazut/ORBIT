@@ -427,24 +427,7 @@ public partial class WaypointSystem
     /// reachability, faction filters).
     /// </summary>
     public Waypoint RequestForInvestigation(Entity entity, Vector3 worldPos)
-    {
-        var center = WorldToCell(worldPos);
-        if (!IsValidCell(center)) return null;
-        Return(entity);
-        for (var ring = 0; ring <= 1; ring++)
-        {
-            for (var dx = -ring; dx <= ring; dx++)
-            for (var dy = -ring; dy <= ring; dy++)
-            {
-                if (ring == 1 && dx == 0 && dy == 0) continue;
-                var coords = center + new Vector2Int(dx, dy);
-                if (!IsValidCell(coords) || !_cells[coords.x, coords.y].HasWaypoints) continue;
-                var pick = AssignWaypoint(entity, coords);
-                if (pick != null) return pick;
-            }
-        }
-        return null;
-    }
+        => RequestDispatch(entity, worldPos, null, investigation: true);
 
     // Tuning for the per-scav home-attraction force. 3.0 keeps the home vector decisively above momentum
     // (0.5) + randomization (0.5) so scavs that drift via neighbour-hopping get pulled back to their spawn

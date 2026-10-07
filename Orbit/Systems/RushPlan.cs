@@ -44,6 +44,8 @@ internal sealed class RushPlan : IObjectiveWork
     private MarkedRoomScope _room;
     private readonly HashSet<Agent> _roomLooters = new();
     private float _roomIdle;
+    private float _roomEntryIdle, _roomEntryBestDistance = float.MaxValue;
+    private const float RoomEntryStallSeconds = 45f;
     private int _current = -1, _candidate, _best = -1, _visited, _processed, _skipped, _retries, _attempts;
     private string _lastFailure;
     private float _bestLength = float.MaxValue, _nextWork, _elapsed, _held, _lastTick, _nextRoam, _interactAt;
@@ -111,6 +113,18 @@ internal sealed class RushPlan : IObjectiveWork
                 : End(squad, waypoints, "no remaining member");
         }
         if (_paused) { _paused = false; _route.Reset(); delta = 0; SetStatus(squad, _current < 0 ? "planning route" : "approach"); }
+        // Door access does not imply an interior NavMesh connection. Preserve this
+        // progress budget across combat pauses and actor changes at the same room.
+        if (Kind == "Marked" && _inside && Status != "looting" && _room != null
+            && !_room.Contains(_actor.Position))
+        {
+            var distance = Vector3.Distance(_actor.Position, _room.Center);
+            if (distance < _roomEntryBestDistance - .5f)
+            { _roomEntryBestDistance = distance; _roomEntryIdle = 0; }
+            else _roomEntryIdle += delta;
+            if (_roomEntryIdle >= RoomEntryStallSeconds)
+                return Skip(squad, waypoints, "room entrance stalled");
+        }
         if (Status != "looting") _elapsed += delta;
         if (_elapsed > ServerConfig.Rush.TravelTimeout && Status != "searching" && Status != "looting")
             return Skip(squad, waypoints, "travel timeout");
@@ -135,6 +149,7 @@ internal sealed class RushPlan : IObjectiveWork
         }
         if (Status == "looting")
         {
+            _roomEntryIdle = 0; _roomEntryBestDistance = float.MaxValue;
             if (!waypoints.TryOperationWork(this)) return true;
             _nextWork = now + .1f;
             if (_room != null && !_room.Contains(_actor.Position))
@@ -382,6 +397,7 @@ internal sealed class RushPlan : IObjectiveWork
         SetStatus(squad, _states[_current]); Release(squad, waypoints); _processed++;
         _current = -1; _retries = _attempts = 0; ResetRanking();
         _elapsed = _held = _interactAt = _roomIdle = 0; _inside = _doorApproach = false; _loot = null; _room = null; _roomLooters.Clear(); _attempted.Clear(); _route.Reset();
+        _roomEntryIdle = 0; _roomEntryBestDistance = float.MaxValue;
         if (_visited >= Count || _processed >= _sites.Count) return End(squad, waypoints, FinishReason());
         SetStatus(squad, "planning route"); return true;
     }

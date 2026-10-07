@@ -139,7 +139,11 @@ public class WaypointGatherer(float cellSize, BotsController botsController)
                 Log.Info($"EXFIL NAV: {exfil.Point.name} interior target={interior} approach={waypoint.Position}");
             }
             else
-                Log.Info($"EXFIL NAV: {exfil.Point.name} no interior NavMesh point; retaining approach and local extraction fallback");
+            {
+                if (collection.Count == before && ExfilNavigation.TryApproachPoint(exfil.Point, out var approach))
+                    collection.Add(CreateBuiltinWaypoint(WaypointCategory.Exfil, exfil.Point.name, approach, exfil.Point));
+                Log.Info($"EXFIL NAV: {exfil.Point.name} no interior NavMesh point; approach={(collection.Count > before ? collection[collection.Count - 1].Position.ToString() : "unavailable")}");
+            }
         }
 
         Log.Debug($"Collected {collection.Count} points of interest");
