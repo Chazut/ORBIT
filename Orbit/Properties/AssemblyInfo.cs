@@ -16,4 +16,4 @@ using Orbit;
 
 [assembly: AssemblyVersion(Plugin.OrbitVersion + ".*")]
 [assembly: AssemblyFileVersion(Plugin.OrbitVersion)]
-[assembly: AssemblyInformationalVersion(Plugin.OrbitVersion)]
+[assembly: AssemblyInformationalVersion(Plugin.ReleaseVersion)]

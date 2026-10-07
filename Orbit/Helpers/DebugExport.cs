@@ -6,7 +6,7 @@ namespace Orbit.Helpers;
 
 internal static class DebugExport
 {
-    private static readonly DebugArchive Archive = new(BepInEx.Paths.BepInExRootPath, Plugin.OrbitVersion);
+    private static readonly DebugArchive Archive = new(BepInEx.Paths.BepInExRootPath, Plugin.ReleaseVersion);
     private static Task<string> _export;
     internal static bool Busy => _export != null;
     internal static string Status { get; private set; } = "Create a ZIP to attach to your bug report.";

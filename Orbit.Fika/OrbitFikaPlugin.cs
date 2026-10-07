@@ -24,12 +24,13 @@ namespace Orbit.Fika;
 /// </summary>
 [BepInPlugin(PluginGuid, PluginName, PluginVersion)]
 [BepInDependency("com.fika.core")]
-[BepInDependency(Plugin.PluginGuid)]
+[BepInDependency(Plugin.PluginGuid, Plugin.OrbitVersion)]
 public class OrbitFikaPlugin : BaseUnityPlugin
 {
     public const string PluginGuid = "com.chazut.orbit.fika";
     public const string PluginName = "ORBIT Fika Bridge";
-    public const string PluginVersion = "1.1.0";
+    public const string PluginVersion = "1.2.0";
+    public const string ReleaseVersion = "1.2.0-rc.1";
     private DoorSyncBridge _doors;
 
     // Mirrors the limiter's own earshot gate, judged here against the LOCAL listener.
@@ -58,7 +59,7 @@ public class OrbitFikaPlugin : BaseUnityPlugin
         FikaEventDispatcher.SubscribeEvent<FikaNetworkManagerCreatedEvent>(OnNetworkManagerCreated);
         FikaEventDispatcher.SubscribeEvent<FikaNetworkManagerDestroyedEvent>(OnNetworkManagerDestroyed);
         OrbitEvents.GhostFightSoundsResolved += OnGhostFightResolved;
-        _log.LogInfo($"{PluginName} {PluginVersion} loaded");
+        _log.LogInfo($"{PluginName} {ReleaseVersion} loaded");
     }
 
     private static void OnNetworkManagerCreated(FikaNetworkManagerCreatedEvent e)

@@ -39,7 +39,8 @@ public class Plugin : BaseUnityPlugin
 {
     public const string PluginGuid = "com.chazut.orbit";
     public const string PluginName = "ORBIT";
-    public const string OrbitVersion = "2.1.1";
+    public const string OrbitVersion = "3.0.0";
+    public const string ReleaseVersion = "3.0.0-beta.1";
 
     public static ManualLogSource LogSource;
 
@@ -104,7 +105,7 @@ public class Plugin : BaseUnityPlugin
         // FIKA headless client skips, so we can't depend on it (issue #5).
         StartCoroutine(WaitForHandbook());
 
-        Log.Always($"ORBIT {OrbitVersion} initialised");
+        Log.Always($"ORBIT {ReleaseVersion} initialised");
 
         // Patches — wrap each in EnableSafe so one bad patch (wrong Harmony parameter name, missing target
         // method after a game update) can't collapse the rest of init. Without the guard a single failure
@@ -232,7 +233,7 @@ public class Plugin : BaseUnityPlugin
         brains.Add(nameof(BsgBrain.FollowerGluharScout));
         BrainManager.AddCustomLayer(typeof(OrbitBrainLayer), brains, 19);
 
-        Log.Always($"ORBIT {OrbitVersion} fully loaded — BrainManager wired");
+        Log.Always($"ORBIT {ReleaseVersion} fully loaded, BrainManager wired");
     }
 
     private IEnumerator WaitForHandbook()

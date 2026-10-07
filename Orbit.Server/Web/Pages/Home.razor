@@ -112,8 +112,7 @@
 </MudContainer>
 
 @code {
-    private static readonly string Version =
-        typeof(Home).Assembly.GetName().Version?.ToString(3) ?? "2.1.1";
+    private static readonly string Version = new OrbitServerMetadata().Version.ToString();
 
     private string? _exportHref;
     private string? _exportFileName;
