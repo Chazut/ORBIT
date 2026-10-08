@@ -42,11 +42,15 @@ internal static class NativeGhostBodyPatches
             Bind(harmony, typeof(PatrolLootPointsData), "ComeToLootPoint", "UpdateLootState");
             harmony.Patch(AccessTools.Method(typeof(PatrolLootPointsData), "UpdateLootState", Type.EmptyTypes),
                 postfix: new HarmonyMethod(typeof(NativeGhostBodyPatches), nameof(LootUpdatePostfix)));
+            Bind(harmony, typeof(BotDeadBodyWork), "ManualUpdate");
+            harmony.Patch(AccessTools.Method(typeof(BotDeadBodyWork), "ManualUpdate", Type.EmptyTypes),
+                postfix: new HarmonyMethod(typeof(NativeGhostBodyPatches), nameof(CorpseUpdatePostfix)));
             Bind(harmony, typeof(PatrollingAlternative), "UpdateNodeByBrain");
             harmony.Patch(AccessTools.Method(typeof(PatrollingAlternative), "UpdateNodeByBrain"),
                 transpiler: new HarmonyMethod(typeof(NativeGhostBodyPatches), nameof(GuardPatrolUpdate)));
             Bind(harmony, typeof(PatrolTakeItemsNode), "UpdateNodeByBrain");
             Bind(harmony, typeof(PatrolDropItemsNode), "UpdateNodeByBrain");
+            NativeGhostCorpse.Prepare();
             Ready = true;
             Log.Info($"NATIVE GHOST: body guards ready ({Owners.Count + 2} entry points)");
         }
@@ -96,6 +100,7 @@ internal static class NativeGhostBodyPatches
         if (__instance is PatrolLootPointsData)
             return __originalMethod.Name == "ComeToLootPoint"
                 ? !NativeGhostLoot.DeferArrival(bot) : !NativeGhostLoot.DeferUpdate(bot);
+        if (__instance is BotDeadBodyWork) return !NativeGhostCorpse.DeferUpdate(bot);
         if (__instance is PatrollingData) return !NativeGhostPatrol.DeferArrival(bot);
         if (__instance is PatrollingAlternative) return !NativeGhostPatrol.DeferUpdate(bot);
         return !NativeGhostSystem.DeferBodyOperation(bot,
@@ -126,6 +131,12 @@ internal static class NativeGhostBodyPatches
     private static void LootUpdatePostfix(PatrolLootPointsData __instance, MethodBase __originalMethod)
     {
         if (NativeGhostSystem.HasSleepers) NativeGhostLoot.AfterUpdate(Owners[__originalMethod](__instance));
+    }
+
+    private static void CorpseUpdatePostfix(MethodBase __originalMethod, object __instance, bool __runOriginal)
+    {
+        if (__runOriginal && NativeGhostSystem.HasSleepers)
+            NativeGhostCorpse.AfterUpdate(Owners[__originalMethod](__instance));
     }
 
     private static bool DoorStatusPrefix(BotDoorOpener __instance, ref DoorInteractionStatus __result)

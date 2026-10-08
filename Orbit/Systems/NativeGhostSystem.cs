@@ -86,6 +86,7 @@ public sealed partial class NativeGhostSystem
         foreach (var state in Sleepers.Values)
         {
             NativeGhostLoot.Forget(state.Bot);
+            NativeGhostCorpse.Forget(state.Bot);
             EndHearing(state, "raid cleanup", false);
             RestoreStandBy(state);
             try { state.Navigation.RestorePathReach(); }
@@ -183,7 +184,8 @@ public sealed partial class NativeGhostSystem
                     || NativeGhostMarksman.SupportsLay(bot, decision.Value),
                 NativeGhostMarksman.SupportsStandBy(bot, decision.Value), NativeGhostLoot.Supports(bot, decision.Value),
                 NativeGhostPolicy.IsBlackDivisionPatrol((int)bot.Profile.Info.Settings.Role, NativeGhostPartisan.Layer(bot)),
-                NativeGhostWarning.Supports(bot, decision.Value, _humanDistanceSqr, _humanWakeDistanceSqr)))
+                NativeGhostWarning.Supports(bot, decision.Value, _humanDistanceSqr, _humanWakeDistanceSqr),
+                NativeGhostCorpse.Supports(bot, decision.Value)))
             {
                 if (_reportedUnsupported.Add(bot.ProfileId + "|" + name))
                     Log.Info($"NATIVE GHOST: {bot.Profile.Nickname} kept awake: unsupported {name} (role={bot.Profile.Info.Settings.Role}, hunt={hunt})");
@@ -218,10 +220,13 @@ public sealed partial class NativeGhostSystem
         if (patrol != null) return patrol;
         var loot = NativeGhostLoot.BodyReason(bot);
         if (loot != null) return loot;
+        var corpse = NativeGhostCorpse.BodyReason(bot);
+        if (corpse != null) return corpse;
         var inventory = bot.GetPlayer?.InventoryController;
         if (inventory != null)
             foreach (var operation in inventory.SelectEvents<ItemEventArgs>())
-                if (!NativeGhostLoot.OwnsEvent(bot, operation)) return "inventory-operation";
+                if (!NativeGhostLoot.OwnsEvent(bot, operation) && !NativeGhostCorpse.OwnsEvent(bot, operation))
+                    return "inventory-operation";
         return null;
     }
 
@@ -272,6 +277,7 @@ public sealed partial class NativeGhostSystem
         if (ReferenceEquals(bot, null) || !Sleepers.TryGetValue(bot, out var state)) return false;
         PrepareHearingWake(state);
         NativeGhostLoot.Forget(bot);
+        NativeGhostCorpse.Forget(bot);
         Sleepers.Remove(bot);
         Brains.Remove(state.Brain);
         Movers.Remove(state.Mover);
@@ -529,6 +535,12 @@ public sealed partial class NativeGhostSystem
         if (strategy is not BaseBrain brain || brain._owner == null || !Sleepers.TryGetValue(brain._owner, out var state)) return;
         if (!result.HasValue) return;
         var decision = result.Value.Action;
+        if (decision != BotLogicDecision.deadBody && NativeGhostCorpse.HasPendingTransfer(state.Bot))
+        {
+            RequestWake(state, "native interaction requires its body: native-corpse-decision-change");
+            result = null;
+            return;
+        }
         if (decision != BotLogicDecision.goToLootPointNode && NativeGhostLoot.HasPendingTransfer(state.Bot))
         {
             RequestWake(state, "native interaction requires its body: native-loot-decision-change");
@@ -561,7 +573,8 @@ public sealed partial class NativeGhostSystem
                     || NativeGhostMarksman.SupportsLay(state.Bot, decision),
                 NativeGhostMarksman.CanKeepStandByDecision(state.Bot, decision), NativeGhostLoot.Supports(state.Bot, decision),
                 NativeGhostPolicy.IsBlackDivisionPatrol((int)state.Bot.Profile.Info.Settings.Role, NativeGhostPartisan.Layer(state.Bot)),
-                NativeGhostWarning.Supports(state.Bot, decision, state.HumanDistanceSqr, state.HumanWakeDistanceSqr))
+                NativeGhostWarning.Supports(state.Bot, decision, state.HumanDistanceSqr, state.HumanWakeDistanceSqr),
+                NativeGhostCorpse.Supports(state.Bot, decision))
             || CombatRequiresBody(state.Bot)
             || bodyReason != null
             || decision == BotLogicDecision.warnPlayer && !RetainsNativeState(state.Bot))
