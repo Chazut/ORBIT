@@ -25,9 +25,13 @@ public partial class WaypointSystem
     {
         _rushPoints = ServerConfig.Rush.Points(_zoneKey);
         _rushDoors = new();
+        _rawLockedDoors = new();
         // Reuse the gatherer's scene inventory where possible; this scan is once per raid, never per squad.
         foreach (var door in Object.FindObjectsOfType<Door>(true))
+        {
             if (!string.IsNullOrEmpty(door.Id)) _rushDoors[door.Id] = door;
+            if (door.DoorState == EDoorState.Locked) _rawLockedDoors.Add(door);
+        }
         foreach (var portal in Object.FindObjectsOfType<Audio.SpatialSystem.SpatialAudioPortal>(true))
             if (!string.IsNullOrEmpty(portal.DoorID) && _rushDoors.TryGetValue(portal.DoorID, out var door)
                 && (portal.transform.position - door.transform.position).sqrMagnitude < 225f)

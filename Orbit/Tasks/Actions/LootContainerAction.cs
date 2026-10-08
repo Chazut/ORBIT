@@ -673,9 +673,12 @@ public class LootContainerAction(AgentData dataset, WaypointSystem waypointSyste
             Log.Debug($"{agent} scavenge sweep coverage roll missed on {candidate} (coverage={coverage:P0}) — blacklisting and retrying");
         }
         if (next == null) return false;
-        if (!waypointSystem.TryPrepareMemberWaypoint(agent.Squad, next))
+        if (!waypointSystem.TryPrepareMemberWaypoint(agent, next, agent.Squad?.Objective.Location, out var accessPending))
         {
-            Log.Debug($"{agent} locked-door member assignment rejected: {next}; selecting another target");
+            // Finish this pickup once. The strategy resumes the selected sweep after its queued
+            // access check, so no claim or loot session can start through an unchecked door.
+            if (accessPending) return false;
+            Log.Debug($"{agent} member waypoint access rejected: {next}; selecting another target");
             return false;
         }
         if (!waypointSystem.TryClaim(next.Id, agent.Id)) return false;

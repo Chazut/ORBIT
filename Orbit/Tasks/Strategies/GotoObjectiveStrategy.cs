@@ -892,7 +892,9 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                 continue;
             var ownKillReroute = waypointSystem.TryGetNextOwnKillCorpseForAgent(squad, agent);
             var visibleAirdrop = ownKillReroute == null ? waypointSystem.TryFindOpportunisticAirdrop(agent) : null;
+            var hasPendingAccess = waypointSystem.TryResumeMemberWaypoint(agent, out var pendingPick, out var pendingParent);
             var aligned = !splinterAlreadyDone && !leaderFinishedAnchorInRoam
+                          && !hasPendingAccess
                           && visibleAirdrop == null
                           && (ownKillReroute == null || agentObjective.Location == ownKillReroute)
                           && (agentObjective.Location == squadObjective.Location
@@ -963,6 +965,12 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                     splinterParent = squadObjective.Location;
                     _splinterScratch.Add(targetLoc.Id);
                     Log.Info($"AIRDROP LOOT: {agent} spotted {targetLoc} at {targetLoc.Position}");
+                }
+                else if (hasPendingAccess)
+                {
+                    targetLoc = pendingPick;
+                    splinterParent = pendingParent;
+                    _splinterScratch.Add(targetLoc.Id);
                 }
                 else if (i == 0
                          && !anchorReservedForOwnKill
@@ -1094,9 +1102,10 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
 
                 // Splinters do not pass through the shared waypoint's assignment gate. Authorize the
                 // selected target's doors before either moving or taking the already-in-radius shortcut.
-                if (targetLoc != null && !waypointSystem.TryPrepareMemberWaypoint(squad, targetLoc))
+                if (targetLoc != null && !waypointSystem.TryPrepareMemberWaypoint(agent, targetLoc, splinterParent, out var accessPending))
                 {
-                    Log.Debug($"{agent} locked-door member assignment rejected: {targetLoc}; selecting another target");
+                    if (accessPending) continue;
+                    Log.Debug($"{agent} member waypoint access rejected: {targetLoc}; selecting another target");
                     targetLoc = null;
                     splinterParent = null;
                 }

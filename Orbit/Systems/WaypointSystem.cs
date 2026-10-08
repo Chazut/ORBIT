@@ -84,7 +84,8 @@ public partial class WaypointSystem
     // Lazy navmesh-reachability cache for waypoints. SPT can RNG-spawn loot items inside disconnected navmesh
     // islands (locked interiors, rooftops accessible only via leaked navmesh). Each is path-checked the first
     // time PickFromCell considers it, from the requesting squad leader's position (bots are navmesh-bound by
-    // BSG spawn). Results are cached so every waypoint is at most one NavMesh.CalculatePath per raid.
+    // BSG spawn). Shared planning caches the result; a selected member additionally validates
+    // access from its own position through the shared frame-search budget.
     private readonly HashSet<int> _pathReachable = new();
     // Per-squad negative cache. KEY = squad.Id, VALUE = set of waypoint ids that CalculatePath failed from
     // that squad's leader position. Used to be a single global HashSet but that was a real bug source: a
@@ -92,11 +93,8 @@ public partial class WaypointSystem
     // squad. Per-squad means each squad re- evaluates from its OWN leader position. Positive cache stays
     // global — if any squad reached a waypoint, the navmesh genuinely connects.
     private readonly Dictionary<int, HashSet<int>> _squadUnreachable = new();
-    // Cached list of every door that started the raid Locked. Built lazily on first call to
-    // IsWaypointReachable when a PathPartial is detected, so PMC squads can still be dispatched on waypoints
-    // behind locked doors (marked rooms etc.) — they roll for a force-unlock at arrival. Null until the first
-    // miss; never cleared (door state can change at runtime but the candidate set is fixed by what was locked
-    // at raid start).
+    // Captured alongside the raid's door inventory. Member checks reuse it without scanning
+    // scene objects while bots are active; each candidate's live locked state is rechecked.
     private List<Door> _rawLockedDoors;
     // Removal queue for unreachable waypoints detected during PickFromCell iteration. We can't mutate
     // cell.Waypoints mid-iteration so we drain this at the start of each PickFromCell call instead.
@@ -1897,7 +1895,7 @@ public partial class WaypointSystem
                 && !WasCorpseKilledBySquad(loc.Id, squad.Id)
                 && !HasLineOfSightToCorpse(squad, loc)) continue;
             if (RequiresReachabilityCheck(loc.Category) && !IsWaypointReachable(loc, squad)) continue;
-            if (loc.LockedDoorsOnPath != null && loc.LockedDoorsOnPath.Count > 0 && squadIsPmc != true) continue;
+            if (!CanSelectMemberDoorTarget(squad, loc)) continue;
             if (HasFailedDoorOnPath(squad, loc)) continue;
             if (!WithinLootDetourRange(loc, squad)) continue;
             if (!SquadCanUseWaypoint(squad, squadIsPmc, loc)) continue;
@@ -2014,8 +2012,7 @@ public partial class WaypointSystem
                 if (loc.Category == WaypointCategory.Quest && !SquadOwnsQuest(squad, loc)) continue;
                 if (hasBlacklist && squad.CompletedPoiIds.Contains(loc.Id)) continue;
                 if (_claims.ContainsKey(loc.Id)) continue;
-                if (loc.LockedDoorsOnPath != null && loc.LockedDoorsOnPath.Count > 0
-                    && squadIsPmc != true) continue;
+                if (!CanSelectMemberDoorTarget(squad, loc)) continue;
                 if (HasFailedDoorOnPath(squad, loc)) continue;
                 if (RequiresReachabilityCheck(loc.Category) && !IsWaypointReachable(loc, squad)) continue;
                 if (!SquadCanUseWaypoint(squad, squadIsPmc, loc)) continue;
@@ -2096,8 +2093,7 @@ public partial class WaypointSystem
                     skippedUnreachable++;
                     continue;
                 }
-                if (loc.LockedDoorsOnPath != null && loc.LockedDoorsOnPath.Count > 0
-                    && squadIsPmc != true)
+                if (!CanSelectMemberDoorTarget(squad, loc))
                 {
                     skippedUnreachable++;
                     continue;
@@ -2176,6 +2172,7 @@ public partial class WaypointSystem
                 if (IsSquadKnownUnreachable(squad, loc.Id)) continue;
                 if (_cachedDispatchPick && RequiresReachabilityCheck(loc.Category) && !_pathReachable.Contains(loc.Id)) continue;
                 if (!SquadCanUseWaypoint(squad, squadIsPmc, loc)) continue;
+                if (!CanSelectMemberDoorTarget(squad, loc)) continue;
                 if (HasFailedDoorOnPath(squad, loc)) continue;
                 var weight = ScopedWaypointWeight(squad, loc);
                 fallbackCandidates += weight;
@@ -2231,10 +2228,8 @@ public partial class WaypointSystem
         return NavMesh.CalculatePath(from, to, NavMesh.AllAreas, path);
     }
 
-    private bool IsWaypointReachable(Waypoint loc, Squad squad)
+    private bool IsWaypointReachable(Waypoint loc, Squad squad, Vector3? memberOrigin = null)
     {
-        if (_pathReachable.Contains(loc.Id)) return true;
-
         var squadId = squad?.Id ?? -1;
         HashSet<int> unreachableForSquad = null;
         if (squadId >= 0
@@ -2244,6 +2239,10 @@ public partial class WaypointSystem
             return false;
         }
 
+        // A shared positive result must not override a failure from this squad's current side.
+        // Members additionally validate their own route before granting access to a new pickup.
+        if (!memberOrigin.HasValue && _pathReachable.Contains(loc.Id)) return true;
+
         // A prepared cell is selected without starting new paths. Runtime additions or a
         // cache invalidation are handled by the next bounded search, never a surprise burst.
         if (_cachedDispatchPick) return false;
@@ -2252,10 +2251,31 @@ public partial class WaypointSystem
         if (leaderBot == null) return true; // can't verify yet — let the caller proceed
 
         var path = _reachabilityScratchPath;
-        var reachable = CalculateTimedPath(leaderBot.Position, loc.Position, path, TransitionPhase.WaypointPath, loc.Name, squadId)
+        var origin = memberOrigin ?? leaderBot.Position;
+        var reachable = CalculateTimedPath(origin, loc.Position, path, TransitionPhase.WaypointPath, loc.Name, squadId)
                         && path.status == NavMeshPathStatus.PathComplete;
+        // Unity can report Complete after snapping the destination to another surface. Both
+        // endpoints are ground positions: a route stopping below the target is not an arrival.
+        var corners = path.corners;
+        reachable = reachable && corners.Length > 0
+                    && (corners[corners.Length - 1] - loc.Position).sqrMagnitude <= 1f;
         if (reachable)
         {
+            if (CategoryAllowsLockedDoorBypass(loc.Category))
+            {
+                var nearby = CollectNearbyLockedDoors(loc.Position, LockedDoorDetectionRadius);
+                if (nearby != null)
+                    foreach (var door in nearby)
+                        if (LockedDoorPath.Crosses(door, corners))
+                        {
+                            loc.LockedDoorsOnPath ??= new List<Door>();
+                            if (!loc.LockedDoorsOnPath.Contains(door))
+                            {
+                                loc.LockedDoorsOnPath.Add(door);
+                                Log.Debug($"{loc} complete path crosses locked door {door.Id}; access decision required");
+                            }
+                        }
+            }
             _pathReachable.Add(loc.Id);
             return true;
         }
@@ -2263,14 +2283,14 @@ public partial class WaypointSystem
         // PathPartial / PathInvalid: the natural route is blocked. Before giving up, check whether the
         // waypoint is sitting behind one (or several) Locked doors. Detection is squad-agnostic; per-squad
         // filtering happens later in PickFromCell.
-        if (loc.LockedDoorsOnPath == null && CategoryAllowsLockedDoorBypass(loc.Category))
+        if (CategoryAllowsLockedDoorBypass(loc.Category))
         {
-            var nearbyLocked = CollectNearbyLockedDoors(loc.Position, LockedDoorDetectionRadius);
+            var nearbyLocked = loc.LockedDoorsOnPath ?? CollectNearbyLockedDoors(loc.Position, LockedDoorDetectionRadius);
             if (nearbyLocked != null && nearbyLocked.Count > 0)
             {
                 loc.LockedDoorsOnPath = nearbyLocked;
                 _pathReachable.Add(loc.Id);
-                Log.Debug($"{loc.Category} {loc} unreachable by direct path (status={path.status}) but {nearbyLocked.Count} Locked door(s) nearby — keeping as PMC force-unlock candidate (detected from {squad?.Leader})");
+                Log.Debug($"{loc.Category} {loc} unreachable by direct path (status={path.status}) but {nearbyLocked.Count} Locked door(s) nearby; keeping as PMC force-unlock candidate (origin={origin}, member={memberOrigin.HasValue}, squad={squadId}, endpoint={(corners.Length > 0 ? corners[corners.Length - 1].ToString() : "none")})");
                 return true;
             }
         }
@@ -2287,7 +2307,7 @@ public partial class WaypointSystem
             }
             unreachableForSquad.Add(loc.Id);
         }
-        Log.Debug($"{loc.Category} {loc} unreachable from {squad?.Leader} pos {leaderBot.Position} (path status={path.status}) — per-squad cache, not globally purged");
+        Log.Debug($"{loc.Category} {loc} unreachable from {squad?.Leader} pos {origin} (path status={path.status}, member={memberOrigin.HasValue}); per-squad cache, not globally purged");
         return false;
     }
 

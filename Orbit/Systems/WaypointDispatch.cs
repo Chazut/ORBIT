@@ -106,6 +106,7 @@ public partial class WaypointSystem
     private void PumpDispatchSearches()
     {
         PruneExfilSearches();
+        PruneMemberAccess();
         _expiredDispatches.Clear();
         foreach (var entry in _dispatchSearches)
             if (!entry.Value.Valid) _expiredDispatches.Add(entry.Key);

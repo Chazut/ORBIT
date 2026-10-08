@@ -52,12 +52,9 @@ public class Waypoint(
     internal bool IsAirdrop;
 
     /// <summary>
-    /// Locked doors detected on the natural navmesh route to this POI. Populated lazily the first time a PMC
-    /// squad tries to dispatch and finds <c>NavMesh.CalculatePath</c> returning anything other than
-    /// PathComplete. When non-null and non-empty, the POI is treated as reachable *if* the squad
-    /// force-unlocks the door(s) on arrival.
-    /// <see langword="null"/> means "never checked" or "no locked door
-    /// nearby"; the distinction is purely diagnostic.
+    /// Doors associated with access to this POI during shared or member route checks, including
+    /// complete paths crossing a still-locked leaf. Each squad must authorize the locked doors
+    /// before assignment; physical unlocking happens on arrival. Null means none discovered yet.
     /// </summary>
     public List<Door> LockedDoorsOnPath;
 
