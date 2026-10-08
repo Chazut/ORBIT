@@ -333,7 +333,7 @@ public class Plugin : BaseUnityPlugin
             "ON: records every frame over the 60 FPS budget (16.67 ms), slow bot decisions and Ghost transitions, even with Quiet logging. Automatically saves a performance journal in BepInEx/ORBIT/diagnostics during the raid and a final summary when it ends. Larger stalls also save a detailed JSON capture.",
             null, new ConfigurationManagerAttributes { Category = "", Order = -1 }));
         Config.Bind(essentials, "Debug report", string.Empty, new ConfigDescription(
-            "Creates a local ZIP with the BepInEx session log and the last raid's performance diagnostics, if available. During a raid, exports its current data. Saved in BepInEx/ORBIT/debug; attach it to your bug report. No upload is performed.",
+            "Creates a local ZIP with the BepInEx session log, the last raid's performance diagnostics and its Raid Review replay data, when available. During a raid, exports the data available so far. Saved in BepInEx/ORBIT/debug; attach it to your bug report. No upload is performed.",
             null, new ConfigurationManagerAttributes { Category = "", Order = -2, HideDefaultButton = true, CustomDrawer = DrawDebugExportButton }));
     }
 

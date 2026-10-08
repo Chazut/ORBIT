@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
+using System.Net.Http;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
 
@@ -16,6 +17,7 @@ internal sealed class DebugArchive
         public string Id, Map, Version;
         public DateTime StartedUtc;
         public DateTime? EndedUtc;
+        public RaidReviewDebug.Context RaidReview;
         public string[] Diagnostics = Array.Empty<string>();
     }
 
@@ -24,19 +26,21 @@ internal sealed class DebugArchive
     private RaidRecord _current;
     private Task _queue = Task.CompletedTask;
     private string _backgroundError;
+    private readonly RaidReviewDebug _raidReview;
 
-    internal DebugArchive(string bepinexRoot, string version)
+    internal DebugArchive(string bepinexRoot, string version, HttpClient raidReviewClient = null)
     {
-        _root = bepinexRoot; _version = version;
+        _root = Path.GetFullPath(bepinexRoot); _version = version;
         _folder = Path.Combine(_root, "ORBIT", "debug");
         _recordPath = Path.Combine(_folder, "last-raid.json");
+        _raidReview = new RaidReviewDebug(_folder, raidReviewClient);
     }
 
-    internal void BeginRaid(string map)
+    internal void BeginRaid(string map, RaidReviewDebug.Context raidReview = null)
     {
         _diagnostics.Clear();
         _current = new RaidRecord { Id = Guid.NewGuid().ToString("N"), Map = map,
-            Version = _version, StartedUtc = DateTime.UtcNow };
+            Version = _version, StartedUtc = DateTime.UtcNow, RaidReview = raidReview };
         Checkpoint();
     }
 
@@ -52,6 +56,7 @@ internal sealed class DebugArchive
     private RaidRecord Snapshot() => _current == null ? null : new RaidRecord {
         Id = _current.Id, Map = _current.Map, Version = _current.Version,
         StartedUtc = _current.StartedUtc, EndedUtc = _current.EndedUtc,
+        RaidReview = _current.RaidReview,
         Diagnostics = _diagnostics.ToArray() };
 
     private void Checkpoint()
@@ -70,11 +75,13 @@ internal sealed class DebugArchive
             flushLogs();
             SaveLog(record);
             Persist(record);
+            await _raidReview.Capture(record).ConfigureAwait(false);
+            PruneRaidReview(record);
         });
     }
 
     // Capture the record before dispatch so a new raid cannot change an in-progress export.
-    internal Task<string> Create(Task diagnosticsReady, Func<string> flushLogs)
+    internal Task<string> Create(Task diagnosticsReady, Func<string> flushLogs, RaidReviewDebug.Context raidReview = null)
     {
         var record = Snapshot();
         var result = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -101,7 +108,8 @@ internal sealed class DebugArchive
                     { warnings.Add("Could not refresh the raid log snapshot: " + error.Message); }
                     Persist(record);
                 }
-                result.SetResult(WriteZip(record, warnings));
+                var rr = await _raidReview.Capture(record, raidReview).ConfigureAwait(false);
+                result.SetResult(WriteZip(record, warnings, rr));
             }
             catch (Exception error) { result.SetException(error); }
         });
@@ -146,7 +154,19 @@ internal sealed class DebugArchive
             if (!string.Equals(old, destination, StringComparison.OrdinalIgnoreCase)) File.Delete(old);
     }
 
-    private string WriteZip(RaidRecord record, List<string> warnings)
+    private void PruneRaidReview(RaidRecord record)
+    {
+        var folder = Path.Combine(_folder, "last-raid");
+        if (!Directory.Exists(folder)) return;
+        foreach (var old in Directory.GetDirectories(folder, "*-rr"))
+        {
+            var name = Path.GetFileName(old);
+            if (name.Length == 35 && SafeId(name.Substring(0, 32)) && name != record.Id + "-rr")
+                Directory.Delete(old, true);
+        }
+    }
+
+    private string WriteZip(RaidRecord record, List<string> warnings, RaidReviewDebug.Snapshot raidReview)
     {
         Directory.CreateDirectory(_folder);
         var path = Path.Combine(_folder, "ORBIT-debug-" + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss-fff")
@@ -177,13 +197,21 @@ internal sealed class DebugArchive
                         "ORBIT/diagnostics/" + name, warnings)) count++;
                 }
                 if (count == 0) warnings.Add("No performance diagnostics for this raid. Performance logging may have been disabled.");
+                var rrFiles = new List<string>();
+                foreach (var name in raidReview.Files)
+                    if (record != null && RaidReviewDebug.IsExportFile(name)
+                        && AddFile(zip, _raidReview.FilePath(record.Id, name), "RaidReview/" + name, warnings)) rrFiles.Add(name);
+                if (rrFiles.Count != raidReview.Files.Length) raidReview.Status = "Partial";
+                raidReview.Files = rrFiles.ToArray();
                 WriteText(zip, "report.json", JsonConvert.SerializeObject(new {
                     CreatedUtc = DateTime.UtcNow, ExporterVersion = _version, Raid = record,
-                    DiagnosticFiles = count, Warnings = warnings,
+                    DiagnosticFiles = count, RaidReview = raidReview, Warnings = warnings,
                     LogScope = "BepInEx session log, including startup and any earlier raids in that session. Diagnostics belong only to the selected raid."
                 }, Formatting.Indented));
                 WriteText(zip, "README.txt", "ORBIT debug report\nAttach this ZIP to your bug report and describe what happened.\n"
                     + "The BepInEx log contains messages from installed mods and may include player names and local paths.\n"
+                    + "RaidReview/ contains JSON replay data for this raid when available: players, positions, inventories, loot, combat and objectives.\n"
+                    + "RR is read through its configured server. Cached end-of-raid data can be used if that server is offline.\n"
                     + "report.json identifies the selected raid and lists missing files. Nothing was uploaded automatically.\n");
             }
             File.Move(temporary, path);
