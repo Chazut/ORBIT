@@ -87,7 +87,7 @@ internal sealed class RushPlan : IObjectiveWork
             return Pause(squad, waypoints, "paused");
         // Recheck here as well as in the strategy: queued route work can resume between
         // strategy ticks. A kill's approach must survive the end of the combat pause.
-        if (Kind == "Spawn" && HasOwnKillDetour(squad, waypoints))
+        if (HasOwnKillDetour(squad, waypoints))
         {
             var anchor = squad.Objective.Location;
             Pause(squad, waypoints, "looting own kill");
@@ -286,8 +286,11 @@ internal sealed class RushPlan : IObjectiveWork
         return true;
     }
 
-    private static bool HasOwnKillDetour(Squad squad, WaypointSystem waypoints)
+    private bool HasOwnKillDetour(Squad squad, WaypointSystem waypoints)
     {
+        // A marked-room transfer belongs to this plan, not to a corpse detour.
+        // Finish it before yielding to a queued kill, keeping its claim and task intact.
+        if (_actor != null && OwnsMarkedLoot(_actor, _actor.Objective.Location) && CorpseEscort.InFlight(_actor)) return false;
         if (squad.CorpseEscort.Active) return true;
         foreach (var member in squad.Members)
         {
