@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.AI;
@@ -20,6 +21,7 @@ internal sealed class OperationRouteSearch
     private const int MaxApproachesPerKind = 8;
     private int _completePaths, _checks, _rejected, _invalidQueries;
     private int _noSample, _wrongFloor, _outsideTarget, _noCorners, _tooClose, _noProgress, _visited;
+    private int _outsideScope, _blockedInteraction;
     private Vector3 _lastRejected;
     private Vector3 _target;
     private string _lastRejection = "none";
@@ -33,7 +35,7 @@ internal sealed class OperationRouteSearch
 
     internal string Diagnostics => $"complete={_completePaths} invalidQueries={_invalidQueries} approachChecks={_checks} approachRejected={_rejected}"
         + $" searchTarget={_target} lastRejected={_lastRejected} lastRejection={_lastRejection}"
-        + $" filters=[no-sample:{_noSample},floor:{_wrongFloor},outside-target:{_outsideTarget},no-corners:{_noCorners},near:{_tooClose},no-progress:{_noProgress},visited:{_visited}]";
+        + $" filters=[no-sample:{_noSample},floor:{_wrongFloor},outside-target:{_outsideTarget},no-corners:{_noCorners},near:{_tooClose},no-progress:{_noProgress},visited:{_visited},scope:{_outsideScope},interaction:{_blockedInteraction}]";
 
     internal void Reset()
     {
@@ -41,12 +43,14 @@ internal sealed class OperationRouteSearch
         _complete.Clear(); _partial.Clear();
         _completePaths = _checks = _rejected = _invalidQueries = 0;
         _noSample = _wrongFloor = _outsideTarget = _noCorners = _tooClose = _noProgress = _visited = 0;
+        _outsideScope = _blockedInteraction = 0;
         _lastRejected = _target = default; _lastRejection = "none";
         Pending = false;
     }
 
     internal bool Find(Vector3 origin, Vector3 target, out Vector3 point, out bool final,
-        int expansion = 0, IReadOnlyList<Vector3> avoided = null, bool floorAware = false, float finalHeightTolerance = 2.5f)
+        int expansion = 0, IReadOnlyList<Vector3> avoided = null, bool floorAware = false, float finalHeightTolerance = 2.5f,
+        Func<Vector3, bool> allowedPoint = null, Func<Vector3, bool> finalPoint = null)
     {
         point = default;
         _target = target;
@@ -121,14 +125,21 @@ internal sealed class OperationRouteSearch
             if (floorAware && !local && Mathf.Abs(hit.position.y - sample.y) > 2.5f) { _wrongFloor++; continue; }
             if (local && Mathf.Abs(hit.position.y - target.y) > finalHeightTolerance) { _wrongFloor++; continue; }
             if (local && HorizontalDistance(hit.position, target) > 3f) { _outsideTarget++; continue; }
+            if (allowedPoint != null && !allowedPoint(hit.position)) { _outsideScope++; continue; }
+            if (local && finalPoint != null && !finalPoint(hit.position)) { _blockedInteraction++; continue; }
             Samples++;
             if (!NavMesh.CalculatePath(origin, hit.position, NavMesh.AllAreas, _path)
                 || _path.status == NavMeshPathStatus.PathInvalid) { InvalidPaths++; _invalidQueries++; continue; }
             if (_path.status == NavMeshPathStatus.PathComplete) _completePaths++;
-            if (_path.status == NavMeshPathStatus.PathComplete && local)
-            { point = hit.position; final = true; return true; }
             if (_path.status == NavMeshPathStatus.PathPartial) PartialPaths++;
             var corners = _path.corners;
+            if (!OperationRoutePolicy.AllowsPath(corners, allowedPoint)) { _outsideScope++; continue; }
+            if (_path.status == NavMeshPathStatus.PathComplete && local)
+            {
+                if (corners == null || corners.Length == 0
+                    || Vector3.Distance(corners[corners.Length - 1], hit.position) > 1f) { _noCorners++; continue; }
+                point = hit.position; final = true; return true;
+            }
             if (corners == null || corners.Length < 2) { _noCorners++; continue; }
             var end = corners[corners.Length - 1];
             var gap = Vector3.Distance(end, target);
@@ -158,7 +169,11 @@ internal sealed class OperationRouteSearch
             _checks++;
             var calculated = NavMesh.CalculatePath(origin, approach, NavMesh.AllAreas, _path);
             if (calculated && _path.status == NavMeshPathStatus.PathComplete)
-            { point = approach; return true; }
+            {
+                if (!OperationRoutePolicy.AllowsPath(_path.corners, allowedPoint))
+                { _outsideScope++; RejectApproach(approach, "outside-scope"); continue; }
+                point = approach; return true;
+            }
             InvalidPaths++;
             RejectApproach(approach, !calculated ? "query-failed"
                 : _path.status == NavMeshPathStatus.PathPartial ? "partial-endpoint" : "invalid-endpoint");

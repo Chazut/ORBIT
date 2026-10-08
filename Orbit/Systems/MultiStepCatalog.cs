@@ -17,6 +17,11 @@ internal sealed class OperationStep
     internal WorldInteractiveObject WaitAt;
     internal Waypoint Exit;
     internal bool OptionalAlarm;
+    internal bool Underground;
+    internal Vector3 Entry;
+    private Func<Vector3, bool> _interactionCheck;
+    internal Func<Vector3, bool> InteractionCheck => _interactionCheck ??= CanInteract;
+    private bool CanInteract(Vector3 feet) => OperationSwitchReach.CanReach(feet, Object);
     internal Vector3 Position => WaitAt?.transform.position ?? Exit?.ExfilInteriorPosition ?? Exit?.Position
         ?? (Kind == OperationStepKind.Access && Object is KeycardDoor card && card.DoorState == EDoorState.Locked
             && card.Proxies?.Length > 0 ? card.Proxies[0].transform.position : Object.transform.position);
@@ -118,6 +123,9 @@ internal sealed class MultiStepCatalog
             RequiresCredential = id is "kiba" or "ultra" or "object21ws" or "saferoom-loot"
                 or "object14" or "saferoom-extract" or "zb013" };
         definition.Steps.AddRange(steps);
+        if (id == "d2")
+            for (var i = 1; i < steps.Length; i++)
+            { steps[i].Underground = true; steps[i].Entry = sw.transform.position; }
         Operations.Add(definition);
         foreach (var step in steps)
         {

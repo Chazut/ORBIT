@@ -156,7 +156,33 @@ public partial class WaypointSystem
             target = card.Proxies[0].transform.position; // 11SR reader is upstairs, far from its door.
         else if (step.Kind is OperationStepKind.Access or OperationStepKind.Switch)
             target = step.Object.GetInteractionParameters(actor.Position).InteractionPosition;
-        return search.Find(actor.Position, target, out point, out final, expansion, history, floorAware: true);
+        // If another squad already powered D2, approach the bunker entry before restricting travel.
+        // Reaching this anchor must never activate the distant gate button.
+        var entering = step.Underground && !OperationRoutePolicy.InD2Bunker(actor.Position);
+        if (entering) target = step.Entry;
+        var found = search.Find(actor.Position, target, out point, out final, expansion, history, floorAware: true,
+            allowedPoint: step.Underground && !entering ? OperationRoutePolicy.D2 : null,
+            finalPoint: step.Kind == OperationStepKind.Switch && !entering ? step.InteractionCheck : null);
+        if (entering) final = false;
+        return found;
+    }
+
+    internal Door OperationAccessDoor(Agent actor, OperationStep step, ISet<Door> attempted = null)
+    {
+        if (step.Kind != OperationStepKind.Switch || _rushDoors == null) return null;
+        Door nearest = null;
+        var gap = 16f;
+        foreach (var door in _rushDoors.Values)
+        {
+            if (door == null || attempted?.Contains(door) == true || door.GetType() != typeof(Door) || !door.Operatable
+                || door.DoorState != EDoorState.Shut || door.InteractingPlayer != null
+                || !MultiStepAccess.CanForceUnlock(door)
+                || (door.transform.position - step.Position).sqrMagnitude > 144f) continue;
+            var distance = (actor.Position - door.transform.position).sqrMagnitude;
+            if (distance >= gap || !OperationSwitchReach.CanReach(actor.Position, door)) continue;
+            nearest = door; gap = distance;
+        }
+        return nearest;
     }
 
     internal Waypoint OperationLoot(Agent agent, Vector3 center, HashSet<int> attempted, out bool exhausted, float radius = 15f,
