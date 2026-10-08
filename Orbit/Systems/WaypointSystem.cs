@@ -965,7 +965,7 @@ public partial class WaypointSystem
                     if (!ok) continue;
                     if (excludeIds != null && excludeIds.Contains(loc.Id)) continue;
                     if (squad != null && squad.CompletedPoiIds.Contains(loc.Id)) continue;
-                    if (HasFailedDoorOnPath(squad, loc)) continue;
+                    if (!CanSelectMemberDoorTarget(squad, loc)) continue;
                     if (_claims.ContainsKey(loc.Id)) continue;
                     if (IsSquadKnownUnreachable(squad, loc.Id)) continue;
                     // XZ-only distance: the main anchor is Y=0 (CellToWorld / custom zones) while waypoints
@@ -1084,7 +1084,7 @@ public partial class WaypointSystem
                     if (loc.Id == mainObjective.Id) continue;
                     if (excludeIds != null && excludeIds.Contains(loc.Id)) continue;
                     if (squad != null && squad.CompletedPoiIds.Contains(loc.Id)) continue;
-                    if (HasFailedDoorOnPath(squad, loc)) continue;
+                    if (!CanSelectMemberDoorTarget(squad, loc)) continue;
                     if (_claims.ContainsKey(loc.Id)) continue;
                     if (IsSquadKnownUnreachable(squad, loc.Id)) continue;
                     var distSqr = (loc.Position - mainObjective.Position).sqrMagnitude;
@@ -1275,7 +1275,7 @@ public partial class WaypointSystem
                     // A pooled LootItem (picked up, Item restored to null) is not a sweep target.
                     if (loc.Target is LootItem li && li.Item == null) continue;
                     if (squad != null && squad.CompletedPoiIds.Contains(loc.Id)) continue;
-                    if (HasFailedDoorOnPath(squad, loc)) continue;
+                    if (!CanSelectMemberDoorTarget(squad, loc)) continue;
                     if (agentSkips != null && agentSkips.Contains(loc.Id)) continue;
                     if (_claims.ContainsKey(loc.Id)) continue;
                     if (IsSquadKnownUnreachable(squad, loc.Id)) continue;
@@ -1660,6 +1660,27 @@ public partial class WaypointSystem
         return pick;
     }
 
+    // Member loot bypasses CommitWaypoint. Prepare its own doors before assigning or claiming it,
+    // using the same per-squad decision as a shared destination, without reserving another cell.
+    internal bool TryPrepareMemberWaypoint(Squad squad, Waypoint pick)
+    {
+        if (!CanSelectMemberDoorTarget(squad, pick)) return false;
+        return !IsSquadPmc(squad) || RollForceUnlockForPick(squad, pick);
+    }
+
+    private static bool CanSelectMemberDoorTarget(Squad squad, Waypoint pick)
+    {
+        if (HasFailedDoorOnPath(squad, pick)) return false;
+        var doors = pick.LockedDoorsOnPath;
+        if (doors == null) return true;
+        foreach (var door in doors)
+        {
+            if (door == null || door.DoorState != EDoorState.Locked) continue;
+            if (!IsSquadPmc(squad) || !MultiStepAccess.CanForceUnlock(door)) return false;
+        }
+        return true;
+    }
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private bool RollForceUnlockForPick(Squad squad, Waypoint pick)
     {
@@ -1716,7 +1737,12 @@ public partial class WaypointSystem
             var door = doors[i];
             if (door == null || door.DoorState != EDoorState.Locked) continue;
             var doorId = door.GetInstanceID();
-            if (DoorNavMesh.IsCarverOpened(doorId)) continue;
+            if (DoorNavMesh.IsCarverOpened(doorId))
+            {
+                // Track this squad's need even if another squad already prepared the shared passage.
+                if (!squad.OpenCarverDoors.Contains(door)) squad.OpenCarverDoors.Add(door);
+                continue;
+            }
             DoorRoutingDiag.LogBefore(squad, pick, door);
             var carverOpened = DoorNavMesh.OpenCarver(door);
             if (carverOpened && !squad.OpenCarverDoors.Contains(door)) squad.OpenCarverDoors.Add(door);

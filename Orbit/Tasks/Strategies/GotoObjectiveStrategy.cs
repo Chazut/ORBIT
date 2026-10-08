@@ -162,35 +162,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                 }
             }
 
-            // Force-unlock carver hygiene: a carver stays open only while the squad is actively (non-combat)
-            // heading to the pick behind that door. On a SAIN-combat retreat or a re-dispatch elsewhere, re-close
-            // it so the navmesh cut is restored and bots route AROUND the still-locked door instead of phasing
-            // through it (keycard / switch doors on Labs especially). RollForceUnlockForPick re-opens it when the
-            // squad commits back to a pick behind the door.
-            if (squad.OpenCarverDoors.Count > 0)
-            {
-                var suppressCarvers = SquadAnyMemberInCombat(squad) || squadObjective.Location == null;
-                var neededDoors = suppressCarvers ? null : squadObjective.Location.LockedDoorsOnPath;
-                for (var d = squad.OpenCarverDoors.Count - 1; d >= 0; d--)
-                {
-                    var carverDoor = squad.OpenCarverDoors[d];
-                    if (carverDoor == null || carverDoor.DoorState != EFT.Interactive.EDoorState.Locked)
-                    {
-                        squad.OpenCarverDoors.RemoveAt(d); // unlocked / opened — BSG owns the navmesh now
-                        continue;
-                    }
-                    if (neededDoors != null && neededDoors.Contains(carverDoor))
-                    {
-                        // Still heading behind it — keep the carver open (another squad's retreat may have re-closed it).
-                        if (!DoorNavMesh.IsCarverOpened(carverDoor.GetInstanceID())) DoorNavMesh.OpenCarver(carverDoor);
-                    }
-                    else
-                    {
-                        DoorNavMesh.CloseCarver(carverDoor);
-                        squad.OpenCarverDoors.RemoveAt(d);
-                    }
-                }
-            }
+            MaintainDoorCarvers(squad);
 
             // Rolling per-squad unreachability refresh. _squadUnreachable is populated from the leader's
             // CURRENT position via NavMesh.CalculatePath; verdicts cached when the leader was
@@ -669,7 +641,50 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
         return false;
     }
 
-    // True if any alive member is outside ORBIT control (IsActive=false — SAIN combat / healing has the bot).
+    private static void MaintainDoorCarvers(Squad squad)
+    {
+        if (squad.OpenCarverDoors.Count == 0) return;
+        var suppressCarvers = SquadAnyMemberInCombat(squad);
+        for (var d = squad.OpenCarverDoors.Count - 1; d >= 0; d--)
+        {
+            var door = squad.OpenCarverDoors[d];
+            if (door == null || door.DoorState != EFT.Interactive.EDoorState.Locked)
+            {
+                squad.OpenCarverDoors.RemoveAt(d); // Native navigation owns an unlocked door.
+                continue;
+            }
+            if (!NeedsLockedDoor(squad, door))
+            {
+                DoorNavMesh.CloseCarver(door);
+                squad.OpenCarverDoors.RemoveAt(d);
+            }
+            else if (suppressCarvers)
+            {
+                // Keep the grant tracked while combat pauses a target, so resuming that same target
+                // restores its route without another assignment or probability roll.
+                DoorNavMesh.CloseCarver(door);
+            }
+            else if (!DoorNavMesh.IsCarverOpened(door.GetInstanceID()))
+            {
+                DoorNavMesh.OpenCarver(door);
+            }
+        }
+    }
+
+    private static bool NeedsLockedDoor(Squad squad, EFT.Interactive.Door door)
+    {
+        if (squad.Objective.Location?.LockedDoorsOnPath?.Contains(door) == true) return true;
+        foreach (var member in squad.Members)
+        {
+            if (member?.Player?.HealthController is not { IsAlive: true }) continue;
+            var objective = member.Objective;
+            if (objective.Status is ObjectiveStatus.Finished or ObjectiveStatus.Failed) continue;
+            if (objective.Location?.LockedDoorsOnPath?.Contains(door) == true) return true;
+        }
+        return false;
+    }
+
+    // True if any alive member is outside ORBIT control (IsActive=false, SAIN combat / healing has the bot).
     private static bool SquadAnyMemberInCombat(Squad squad)
     {
         if (squad?.Members == null) return false;
@@ -1075,6 +1090,15 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                             splinterParent = null;
                         }
                     }
+                }
+
+                // Splinters do not pass through the shared waypoint's assignment gate. Authorize the
+                // selected target's doors before either moving or taking the already-in-radius shortcut.
+                if (targetLoc != null && !waypointSystem.TryPrepareMemberWaypoint(squad, targetLoc))
+                {
+                    Log.Debug($"{agent} locked-door member assignment rejected: {targetLoc}; selecting another target");
+                    targetLoc = null;
+                    splinterParent = null;
                 }
 
                 // Keep searching on later ticks (claims can be released and corpses can appear), but do not

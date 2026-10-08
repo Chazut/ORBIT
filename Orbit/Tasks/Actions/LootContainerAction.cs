@@ -673,6 +673,11 @@ public class LootContainerAction(AgentData dataset, WaypointSystem waypointSyste
             Log.Debug($"{agent} scavenge sweep coverage roll missed on {candidate} (coverage={coverage:P0}) — blacklisting and retrying");
         }
         if (next == null) return false;
+        if (!waypointSystem.TryPrepareMemberWaypoint(agent.Squad, next))
+        {
+            Log.Debug($"{agent} locked-door member assignment rejected: {next}; selecting another target");
+            return false;
+        }
         if (!waypointSystem.TryClaim(next.Id, agent.Id)) return false;
 
         // Hijack the squad objective so UpdateAgents doesn't snap the agent back to the old POI on the next
