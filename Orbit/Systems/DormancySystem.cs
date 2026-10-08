@@ -261,6 +261,9 @@ public partial class DormancySystem
         public object VanillaKey;    // vanilla units
         public readonly List<Agent> Agents = new();        // ORBIT members (empty for vanilla units)
         public readonly List<BotOwner> VanillaBots = new(); // vanilla members (empty for ORBIT units)
+        // Capture installed campers before combat releases their camp orders. Only these members
+        // can bypass sight while this fight runs; dormancy and distance are checked live.
+        public HashSet<BotOwner> ExtractCampers;
         public int Count => Agents.Count + VanillaBots.Count;
     }
 
@@ -1303,14 +1306,15 @@ public partial class DormancySystem
                 // A unit mid-fight can't be pulled into a second one until its window closes.
                 if (UnitInFight(a) || UnitInFight(b)) continue;
 
-                if (!TryFindGhostContact(a, b, out var posA, out var posB, out var distSqr, out var reach, out var sniperDetection, out var acquisition)) continue;
+                if (!TryFindGhostContact(a, b, out var posA, out var posB, out var distSqr, out var reach, out var sniperDetection, out var acquisition, out var extractContact)) continue;
                 var dist = Mathf.Sqrt(distSqr);
 
                 // Terrain/structure LoS between the closest members, THREE rays that must ALL be
                 // clear (head height, chest height, laterally offset): a single torso-height ray can
                 // slip between tree trunks on forest maps and start fights between units that could
-                // never actually see each other. No cooldown is burned on a block.
-                if (!ClearFightLos(posA, posB)) continue;
+                // never actually see each other. Installed extract campers instead hear nearby
+                // arrivals. No cooldown is burned on a block.
+                if (!extractContact && !ClearFightLos(posA, posB)) continue;
 
                 var pairKey = string.CompareOrdinal(a.Key, b.Key) < 0 ? a.Key + "|" + b.Key : b.Key + "|" + a.Key;
                 if (_skirmishPairSeenAt.TryGetValue(pairKey, out var seenAt) && Time.time - seenAt < _skirmishCooldown)
@@ -1320,7 +1324,7 @@ public partial class DormancySystem
                 // it falls with distance, shaded
                 // by how eager both sides are to engage (a Cautious/Rat squad shadows, a GigaChad pushes).
                 float contactChance;
-                if (dist <= SkirmishGuaranteedContactRange)
+                if (extractContact || dist <= SkirmishGuaranteedContactRange)
                     contactChance = 1f;
                 else
                 {
@@ -1339,6 +1343,8 @@ public partial class DormancySystem
                 _skirmishPairSeenAt[pairKey] = Time.time;
 
                 var fightDistance = sniperDetection ? Vector3.Distance(posA, posB) : dist;
+                if (extractContact)
+                    Log.Info($"GHOST EXTRACT CONTACT: {a.Label} vs {b.Label} distance={dist:F1}m radius={ExtractCampContactRadius:F0}m");
                 if (sniperDetection)
                     Log.Info($"GHOST SNIPER CONTACT: {a.Label} vs {b.Label} horizontal={dist:F0}m actual={fightDistance:F0}m reach={reach:F0}m");
                 if (_fightsMode == GhostFightsMode.Real)
@@ -1452,6 +1458,8 @@ public partial class DormancySystem
             for (var m = 0; m < squad.Members.Count; m++)
             {
                 unit.Agents.Add(squad.Members[m]);
+                if (squad.Camp.IsExtractCamper(squad.Members[m]))
+                    (unit.ExtractCampers ??= new()).Add(squad.Members[m].Bot);
                 var memberReach = MemberVisibility(squad.Members[m].Bot, null, sniper: false).Reach;
                 unit.Reach = Mathf.Max(unit.Reach, memberReach);
                 if (SniperDetectionReach(squad.Members[m].Bot, 0) > 0)
@@ -1845,7 +1853,7 @@ public partial class DormancySystem
                 // permit contact. Always drop the remaining scripted casualties and wear.
                 if (UnitWokeMidFight(fight.Winner) || UnitWokeMidFight(fight.Loser))
                 {
-                    if (TryFindGhostContact(fight.Winner, fight.Loser, out var a, out var b, out _, out _, out _, out _)
+                    if (TryFindGhostContact(fight.Winner, fight.Loser, out var a, out var b, out _, out _, out _, out _, out _, allowExtractContact: false)
                         && ClearFightLos(a, b))
                     {
                         Log.Info($"GHOST SKIRMISH: {fight.Winner.Label} vs {fight.Loser.Label} escalated to a REAL fight (a side woke mid-window)");
@@ -1923,7 +1931,7 @@ public partial class DormancySystem
         {
             if (Random.value > woundChance) continue;
             var agent = unit.Agents[i];
-            if (!agent.IsDormant || !HasVisibleAttacker(opposing, agent.Bot)) continue; // no invisible wounds on awake bots or through fog
+            if (!agent.IsDormant || !HasEligibleAttacker(opposing, unit, agent.Bot)) continue;
             if (!WoundSurvivor(agent.Player, perMemberDamage)) continue;
             // Rebase the damage-wake baselines so fight wear never wakes the squad (the whole point of
             // the limiter). Real enemy damage still compares against the NEW baseline and wakes as usual.
@@ -1936,7 +1944,7 @@ public partial class DormancySystem
         {
             if (Random.value > woundChance) continue;
             var bot = unit.VanillaBots[i];
-            if (!_vanillaDormant.Contains(bot) || !HasVisibleAttacker(opposing, bot)) continue; // same visibility rule for native members
+            if (!_vanillaDormant.Contains(bot) || !HasEligibleAttacker(opposing, unit, bot)) continue;
             var beforeHp = VanillaHp(bot);
             if (!WoundSurvivor(bot.GetPlayer, perMemberDamage)) continue;
             _vanillaHpBaseline[bot] = VanillaHp(bot);
@@ -2291,7 +2299,7 @@ public partial class DormancySystem
                 ? unit.Agents[idx].IsDormant
                 : _vanillaDormant.Contains(unit.VanillaBots[idx - unit.Agents.Count]);
             if (!stillDormant) continue;
-            var killer = PickVisibleKiller(opposing, MemberBot(unit, idx));
+            var killer = PickEligibleKiller(opposing, unit, MemberBot(unit, idx));
             if (killer == null) continue;
             if (idx < unit.Agents.Count)
             {
@@ -2330,10 +2338,11 @@ public partial class DormancySystem
 
     /// <summary>Credited killer for a simulated casualty: a weighted random draw among the opposing
     /// survivors whose gun can plausibly make the shot (a buckshot shotgun never gets a 300m kill even
-    /// when its SVD squadmate is dead) and who have a clear line of sight. Weighted by gun fitness at
+    /// when its SVD squadmate is dead) and who have a clear line of sight, or form a nearby extract
+    /// camper contact. Weighted by gun fitness at
     /// that distance, not "the closest", so kills spread across the squad: with nearest-wins every
     /// simulated kill of a squad landed on whoever walked in front (release-raid logs).</summary>
-    private Player PickVisibleKiller(GhostUnit unit, BotOwner target)
+    private Player PickEligibleKiller(GhostUnit unit, GhostUnit targets, BotOwner target)
     {
         _killerCandidates.Clear();
         var targetPos = target.GetPlayer.Position;
@@ -2344,7 +2353,7 @@ public partial class DormancySystem
             if (p == null) continue;
             var d = Vector3.Distance(p.Position, targetPos);
             var maxShot = WeaponKillRange(p) * 1.3f;
-            if (d > maxShot || !CanSeeGhostTarget(MemberBot(unit, i), target)) continue;
+            if (d > maxShot || !CanEngageGhostTarget(unit, MemberBot(unit, i), targets, target)) continue;
             // Same fitness curve as the fight roll: a gun comfortably inside its reach is favoured,
             // one at the edge of it still gets a share.
             var weight = Mathf.Lerp(0.3f, 1f, Mathf.Clamp01(maxShot / Mathf.Max(d, 10f) - 1f));

@@ -29,8 +29,6 @@ internal sealed class AmbushSite
     internal bool CoversReady;
     internal float CoversRadius;
     internal int CoverProbe;
-    internal bool SightlineReady;
-    internal Vector3 SightlineTarget;
 }
 
 public partial class WaypointSystem
@@ -337,14 +335,10 @@ public partial class WaypointSystem
         if (!NavMesh.CalculatePath(agent.Position, hit.position, NavMesh.AllAreas, _campPath)
             || _campPath.status != NavMeshPathStatus.PathComplete
             || PathHelper.TotalLength(_campPath.corners) > Mathf.Max(rule.SearchRadius, distanceMax) * 1.5f + 50f) return budget.Reject("incomplete or excessive path");
-        if (!site.SightlineReady)
-        {
-            site.SightlineReady = true;
-            site.SightlineTarget = site.Kind == CampSiteKind.Extract
-                && NavMesh.SamplePosition(site.Position, out var target, 6f, NavMesh.AllAreas) ? target.position : site.Position;
-        }
-        // Require a sightline toward the target; a closed room behind it is not a useful ambush position.
-        if (Physics.Linecast(hit.position + Vector3.up * 1.4f, site.SightlineTarget + Vector3.up * 1.2f,
+        // Extract campers can hear arrivals from cover without seeing the exit trigger.
+        // Hotspots and airdrops retain their sightline requirement.
+        if (site.Kind != CampSiteKind.Extract
+            && Physics.Linecast(hit.position + Vector3.up * 1.4f, site.Position + Vector3.up * 1.2f,
                 LayersMaskController.HighPolyWithTerrainMask)) return budget.Reject("blocked sightline");
         position = hit.position;
         return true;

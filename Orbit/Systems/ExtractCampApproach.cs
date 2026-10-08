@@ -12,6 +12,7 @@ internal sealed class ExtractCampApproach(MainObjective main) : IObjectiveWork
 {
     private readonly OperationRouteSearch _route = new();
     private readonly Dictionary<Agent, Waypoint> _orders = new();
+    private readonly List<Vector3> _approachHistory = new();
     private Squad _squad;
     private WaypointSystem _waypoints;
     private Agent _actor;
@@ -80,17 +81,25 @@ internal sealed class ExtractCampApproach(MainObjective main) : IObjectiveWork
         if (_orders.ContainsKey(_actor))
         {
             if ((_actor.Position - _anchor).sqrMagnitude <= 9f)
-            { Release(squad, waypoints); _idle = 0; return true; }
+            {
+                OperationRouteSearch.Remember(_approachHistory, _actor.Position);
+                Release(squad, waypoints); _failures = 0; return true;
+            }
             if (_actor.Objective.Status == ObjectiveStatus.Failed)
-            { Release(squad, waypoints); return Retry(squad, waypoints, "leg failed"); }
+            {
+                OperationRouteSearch.Remember(_approachHistory, _anchor);
+                Release(squad, waypoints); return Retry(squad, waypoints, "leg failed");
+            }
             return true;
         }
         if (now < _retryAt || !waypoints.TryOperationWork(this)) return true;
         // Stop on the approach side, where local cover can be selected, rather than on the trigger.
         var target = Vector3.MoveTowards(main.Position, _actor.Position, ServerConfig.Ambush.Extracts.DistanceMax);
-        if (!_route.Find(_actor.Position, target, out _anchor, out var final))
+        // Retry navigation around obstacles, without enlarging the destination's cover ring.
+        OperationRouteSearch.Remember(_approachHistory, _actor.Position);
+        if (!_route.Find(_actor.Position, target, out _anchor, out var final, _failures, _approachHistory))
         {
-            if (_route.Pending) return true;
+            if (_route.Pending) { waypoints.ContinueOperationWork(this); return true; }
             _route.Reset();
             return Retry(squad, waypoints, "no advancing route");
         }

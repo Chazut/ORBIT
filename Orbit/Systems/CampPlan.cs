@@ -38,6 +38,10 @@ internal sealed class CampPlan
 
     internal bool Owns(Agent agent) => Active && Slots.TryGetValue(agent, out var point) && agent.Objective.Location == point;
 
+    internal bool IsExtractCamper(Agent agent) => Holding && Site?.Kind == CampSiteKind.Extract
+        && Main is { Completed: false } && Owns(agent) && agent.Objective.Status == ObjectiveStatus.Finished
+        && (agent.Position - Slots[agent].Position).sqrMagnitude <= 9f;
+
     internal Orbit.Api.OrbitMainObjective GetAirdropObjective()
     {
         var target = AirdropTarget;

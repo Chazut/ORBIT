@@ -6,6 +6,7 @@ namespace Orbit.Systems;
 public partial class DormancySystem
 {
     private readonly GhostVisibility _visibility = new();
+    private const float ExtractCampContactRadius = 30f;
     private const float SniperMinimumDetectRange = 200f;
     private static float SniperDetectionReach(BotOwner bot, float weaponReach)
         => bot?.Profile?.Info?.Settings?.Role == WildSpawnType.marksman
@@ -19,10 +20,11 @@ public partial class DormancySystem
         return _visibility.Read(observer, target, raw, _darkness, HasNightVision(observer));
     }
     private bool TryFindGhostContact(GhostUnit a, GhostUnit b, out Vector3 closestA, out Vector3 closestB,
-        out float distanceSqr, out float reach, out bool sniperDetection, out float acquisition)
+        out float distanceSqr, out float reach, out bool sniperDetection, out float acquisition,
+        out bool extractContact, bool allowExtractContact = true)
     {
         distanceSqr = float.MaxValue; reach = acquisition = 0;
-        closestA = closestB = default; sniperDetection = false;
+        closestA = closestB = default; sniperDetection = extractContact = false;
         for (var i = 0; i < a.Count; i++)
         {
             var botA = MemberBot(a, i);
@@ -33,8 +35,19 @@ public partial class DormancySystem
                 var botB = MemberBot(b, j);
                 if (botB == null || botB.IsDead || botB.GetPlayer == null) continue;
                 var pb = botB.GetPlayer.Position;
+                var delta = pa - pb;
+                if (allowExtractContact && IsExtractCampContact(a, botA, b, botB))
+                {
+                    if (extractContact && delta.sqrMagnitude >= distanceSqr) continue;
+                    distanceSqr = delta.sqrMagnitude; closestA = pa; closestB = pb;
+                    reach = ExtractCampContactRadius; acquisition = 1f;
+                    sniperDetection = false; extractContact = true;
+                    continue;
+                }
+                // A nearby heard contact takes priority over a visual candidate elsewhere.
+                if (extractContact) continue;
                 var va = MemberVisibility(botA, botB); var vb = MemberVisibility(botB, botA);
-                var delta = pa - pb; var flat = delta.x * delta.x + delta.z * delta.z;
+                var flat = delta.x * delta.x + delta.z * delta.z;
                 var sniperA = SniperDetectionReach(botA, 0) > 0;
                 var sniperB = SniperDetectionReach(botB, 0) > 0;
                 var seesA = va.Reach > 0 && (sniperA ? flat : delta.sqrMagnitude) <= va.Reach * va.Reach;
@@ -60,12 +73,29 @@ public partial class DormancySystem
         var distance = SniperDetectionReach(observer, 0) > 0 ? delta.x * delta.x + delta.z * delta.z : delta.sqrMagnitude;
         return reach > 0 && distance <= reach * reach && ClearFightLos(observer.GetPlayer.Position, target.GetPlayer.Position);
     }
-    private bool HasVisibleAttacker(GhostUnit opposing, BotOwner target)
+    private bool IsExtractCampContact(GhostUnit a, BotOwner botA, GhostUnit b, BotOwner botB)
+    {
+        if (a.ExtractCampers?.Contains(botA) != true && b.ExtractCampers?.Contains(botB) != true) return false;
+        if (botA == null || botB == null || botA.IsDead || botB.IsDead
+            || botA.GetPlayer == null || botB.GetPlayer == null) return false;
+        return (botA.GetPlayer.Position - botB.GetPlayer.Position).sqrMagnitude <= ExtractCampContactRadius * ExtractCampContactRadius
+            && IsGhostMember(a, botA) && IsGhostMember(b, botB);
+    }
+    private bool IsGhostMember(GhostUnit unit, BotOwner bot)
+    {
+        foreach (var agent in unit.Agents)
+            if (agent.Bot == bot) return agent.IsDormant;
+        return unit.VanillaBots.Contains(bot) && _vanillaDormant.Contains(bot);
+    }
+    private bool CanEngageGhostTarget(GhostUnit observers, BotOwner observer, GhostUnit targets, BotOwner target)
+        => IsExtractCampContact(observers, observer, targets, target) || CanSeeGhostTarget(observer, target);
+
+    private bool HasEligibleAttacker(GhostUnit opposing, GhostUnit targets, BotOwner target)
     {
         for (var i = 0; i < opposing.Count; i++)
         {
             var attacker = MemberBot(opposing, i);
-            if (CanSeeGhostTarget(attacker, target)
+            if (CanEngageGhostTarget(opposing, attacker, targets, target)
                 && Vector3.Distance(attacker.GetPlayer.Position, target.GetPlayer.Position) <= WeaponKillRange(attacker.GetPlayer) * 1.3f) return true;
         }
         return false;
