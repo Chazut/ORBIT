@@ -65,6 +65,7 @@ public partial class MovementSystem
 
             if (!agent.IsActive)
             {
+                agent.Movement.Failures.Reset();
                 agent.Stuck.IdleRescueSince = -1f;
                 agent.Stuck.IdleRescueIntent = false;
                 agent.Stuck.LocalEscape.Reset();
@@ -204,6 +205,7 @@ public partial class MovementSystem
         if (agent.Movement.Retry >= RetryLimit)
         {
             Log.Debug($"{agent} movement failed due to exhausting the retry limits");
+            agent.Movement.Failures.FailedRoute(agent.Position);
             agent.Movement.Status = MovementStatus.Failed;
             return;
         }
@@ -282,6 +284,7 @@ public partial class MovementSystem
     {
         if (job.Status == NavMeshPathStatus.PathInvalid)
         {
+            agent.Movement.Failures.FailedRoute(agent.Position);
             Log.Debug($"{agent} movement failed due to an invalid path");
             agent.Movement.Target = job.Target;
             ResetPath(agent, MovementStatus.Failed);
@@ -657,7 +660,18 @@ public partial class MovementSystem
         }
 
         if (!movement.HasPath || movement.Status == MovementStatus.Failed || movement.Status == MovementStatus.Stopped)
+        {
+            StopAwakeInput(agent);
             return;
+        }
+
+        // Gravity and native vault animation continue, but no stale travel input or new jump is added.
+        if (player.MovementContext?.IsGrounded != true)
+        {
+            StopAwakeInput(agent);
+            agent.Stuck.Soft.Reset();
+            return;
+        }
 
         if (movement.VoxelUpdatePacing.Allowed())
             bot.AIData.SetPosToVoxel(agent.Position);
@@ -691,13 +705,6 @@ public partial class MovementSystem
         var shouldSprint = WantsTravelSprint(agent, movement.Sprint) && CanSprint(agent) && !doorsNearby;
         if (player.Physical.Sprinting != shouldSprint)
             player.EnableSprint(shouldSprint);
-
-        // Run stuck remediation before movement logic
-        _stuckRemediation.Update(agent);
-
-        // The stuck remediation might've nulled out the path
-        if (movement.Path == null)
-            return;
 
         // Path handling
         var moveVector = movement.Path[movement.CurrentCorner] - agent.Position;
@@ -764,6 +771,14 @@ public partial class MovementSystem
         moveVector += pathDeviationSpring;
         moveVector.Normalize();
 
+        var revision = movement.PathRevision;
+        var beforeRecovery = agent.Position;
+        _stuckRemediation.Update(agent);
+        // Recovery can replace the route or body position. Recompute steering on the next tick.
+        if (movement.Path == null || movement.PathRevision != revision
+            || (agent.Position - beforeRecovery).sqrMagnitude > .04f)
+        { StopAwakeInput(agent); return; }
+
         var moveDir = CalcMoveDirection(moveVector, player.Rotation);
         player.CharacterController.SetSteerDirection(moveVector);
         player.Move(moveDir);
@@ -795,9 +810,14 @@ public partial class MovementSystem
         var backVector = holdTarget - agent.Position;
         backVector.y = 0f;
         if (backVector.sqrMagnitude < 0.09f)
+        {
+            StopAwakeInput(agent);
             return;
+        }
 
         backVector.Normalize();
+        if (player.MovementContext?.IsGrounded != true)
+        { StopAwakeInput(agent); return; }
         agent.Bot.Mover.SetTargetMoveSpeed(DoorHoldMoveSpeed);
         player.CharacterController.SetSteerDirection(backVector);
         player.Move(CalcMoveDirection(backVector, player.Rotation));
@@ -1374,6 +1394,7 @@ public partial class MovementSystem
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void ResetPath(Agent agent, MovementStatus status = MovementStatus.Stopped, bool invalidatePending = true)
     {
+        StopAwakeInput(agent);
         EndTravelObservation(agent);
         agent.Movement.Travel = null;
         // A queued result belongs to the old route even if the executor finishes after this reset.
@@ -1516,7 +1537,8 @@ public partial class MovementSystem
             stuck.LocalEscape.Reset();
             return;
         }
-        if (Time.time - stuck.IdleRescueSince < IdleRescueThresholdSeconds || !stuck.Recovery.ProbeDue(pos)) return;
+        var threshold = agent.Movement.Failures.RepeatedFailures(pos) ? 8f : IdleRescueThresholdSeconds;
+        if (Time.time - stuck.IdleRescueSince < threshold || !stuck.Recovery.ProbeDue(pos)) return;
 
         var goal = objective?.Location;
         Vector3? target = goal == null ? null : goal.ExfilInteriorPosition ?? goal.Position;
@@ -1585,6 +1607,7 @@ public partial class MovementSystem
 
     private void ResetAfterRescue(Agent agent, bool resume = true)
     {
+        agent.Movement.Failures.Reset();
         ResetPath(agent);
         agent.Movement.Retry = 0;
         agent.Movement.DoorInteractHoldUntil = -1f;
@@ -1665,7 +1688,7 @@ public partial class MovementSystem
 
                 if (!CompleteLocalRescue(agent, point)) continue;
                 var dest = agent.Position;
-                Log.Info($"{agent} idle-island rescue: teleported {Vector3.Distance(pos, dest):F0}m to a navmesh point connected to its objective (stranded {IdleRescueThresholdSeconds:F0}s), bounded local rescue from={pos} to={dest}");
+                Log.Info($"{agent} idle-island rescue: teleported {Vector3.Distance(pos, dest):F0}m to a navmesh point connected to its objective, bounded local rescue from={pos} to={dest}");
                 return true;
             }
         }

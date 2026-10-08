@@ -753,7 +753,8 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
         var trackLootExhaustion = useRoam && activeType == MainObjectiveType.LootValue
                                  && activeMain.LootValueEnteredAt > 0f
                                  && squadObjective.Location != null
-                                 && IsLootPoi(squadObjective.Location.Category);
+                                 && (IsLootPoi(squadObjective.Location.Category)
+                                     || squadObjective.Location.Category == WaypointCategory.Synthetic);
 
         for (var i = 0; i < squad.Size; i++)
         {
@@ -885,6 +886,9 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                               || splinterStickyAcrossAnchor);
             if (leaderFinishedAnchorInRoam)
             {
+                if (agentObjective.Location.Category == WaypointCategory.Synthetic)
+                    squad.RecentlyVisitedPoiCooldowns[agentObjective.Location.Id] =
+                        Time.time + ServerConfig.MainObjectives.SyntheticVisitCooldownSeconds;
                 Log.Debug($"{agent} leader roam continuation: finished anchor {agentObjective.Location}, picking a splinter instead of guarding");
             }
 
@@ -948,6 +952,8 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                 else if (i == 0
                          && !anchorReservedForOwnKill
                          && squadObjective.Location != null
+                         && !(leaderFinishedAnchorInRoam
+                              && squadObjective.Location.Category == WaypointCategory.Synthetic)
                          && !squad.CompletedPoiIds.Contains(squadObjective.Location.Id)
                          && !agent.ValueSkippedPoiIds.Contains(squadObjective.Location.Id)
                          // A synthetic anchor still under its visit cooldown was just patrolled (by this
@@ -990,7 +996,8 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                         _splinterScratch.Add(roamSplinter.Id);
                     }
                     else if (squadObjective.Location != null
-                             && (squadObjective.Location.Position - agent.Position).sqrMagnitude <= squadObjective.Location.RadiusSqr)
+                             && (leaderFinishedAnchorInRoam
+                                 || (squadObjective.Location.Position - agent.Position).sqrMagnitude <= squadObjective.Location.RadiusSqr))
                     {
                         // This search, rather than an arbitrary null objective, proves local exhaustion.
                         // Once all members settle, re-evaluate the wider cell instead of waiting at this POI.
@@ -1208,7 +1215,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
     private bool TryAdvanceExhaustedLoot(Squad squad, int finishedCount, int locallyExhaustedCount)
     {
         // UpdateAgents reports exhaustion only after a LootValue local search found no eligible target
-        // while the member was already at a loot anchor. Unknown nulls and failed travel do not qualify.
+        // after reaching a loot or patrol anchor. Unknown nulls and failed travel do not qualify.
         if (locallyExhaustedCount == 0 || finishedCount + locallyExhaustedCount != squad.Size
             || squad.ExtractRequested || squad.CombatCallerMemberIdx >= 0
             || squad.PreInterruptObjectiveLocation != null || Time.time < squad.GhostFightUntil
