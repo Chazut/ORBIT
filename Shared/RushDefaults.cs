@@ -11,6 +11,12 @@ public static class RushDefaults
     public static bool IsBossRushTarget(string map, string boss) =>
         boss != "bossZryachiy" && IsResident(map, boss);
 
+    // Mysterious needs crouched passages and a breached exit that Rush cannot execute yet.
+    // Check the scene door, so renamed or duplicated entries in older presets stay excluded.
+    public static bool IsMarkedRushTarget(string map, string doorId) =>
+        !string.Equals(map?.Split('@')[0], "TarkovStreets", StringComparison.OrdinalIgnoreCase)
+        || doorId != "door_City_SW_01_B_Chekannaya_13_indoor_00000";
+
     public static bool IsResident(string map, string boss)
     {
         if (string.Equals(map, "Lighthouse@rework", StringComparison.OrdinalIgnoreCase))
@@ -266,7 +272,7 @@ public static class RushDefaults
             new() { Id = "bossKolontay-ZoneClimova-1", Name = "ZoneClimova 1", Kind = "Boss", Boss = "bossKolontay", X = -123.55f, Y = 5.103f, Z = -31.51f, Radius = 40f, SearchSeconds = 30f },
             new() { Id = "bossKolontay-ZoneMvd-1", Name = "ZoneMvd 1", Kind = "Boss", Boss = "bossKolontay", X = -253.99f, Y = 3.09f, Z = 125.36f, Radius = 40f, SearchSeconds = 30f },
             new() { Id = "door_City_SE_02_Nikitskaya_6_indoor_00010", Name = "Abandoned factory", Kind = "Marked", DoorId = "door_City_SE_02_Nikitskaya_6_indoor_00010", X = -132.729f, Y = 8.873f, Z = 271.698f, LootX = -134.329f, LootY = 8.873f, LootZ = 272.448f, Radius = 6f, SearchSeconds = 60f },
-            new() { Id = "door_City_SW_01_B_Chekannaya_13_indoor_00000", Name = "Mysterious room", Kind = "Marked", DoorId = "door_City_SW_01_B_Chekannaya_13_indoor_00000", X = 186.14f, Y = 0.83f, Z = 228.248f, LootX = 186.29f, LootY = 0.83f, LootZ = 228.248f, Radius = 6f, SearchSeconds = 60f },
+            new() { Id = "door_City_SW_01_B_Chekannaya_13_indoor_00000", Name = "Mysterious room", Kind = "Marked", Enabled = false, DoorId = "door_City_SW_01_B_Chekannaya_13_indoor_00000", X = 186.14f, Y = 0.83f, Z = 228.248f, LootX = 186.29f, LootY = 0.83f, LootZ = 228.248f, Radius = 6f, SearchSeconds = 60f },
             new() { Id = "spawn-1", Name = "PMC spawn sector 1", Kind = "Spawn", X = -178.507f, Y = 2.451f, Z = 415.023f, Radius = 30f, SearchSeconds = 20f },
             new() { Id = "spawn-2", Name = "PMC spawn sector 2", Kind = "Spawn", X = 184.824f, Y = 2.528f, Z = 186.987f, Radius = 30f, SearchSeconds = 20f },
             new() { Id = "spawn-3", Name = "PMC spawn sector 3", Kind = "Spawn", X = 100.71f, Y = -1.854f, Z = -162.53f, Radius = 30f, SearchSeconds = 20f },

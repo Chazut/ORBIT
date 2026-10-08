@@ -73,7 +73,7 @@
                 }
                 @foreach (var point in Visible)
                 {
-                    var p = ToMap(point.X, point.Z); var color = point.Enabled ? point.Id == _selected ? "#fff" : "#ffb74d" : "#64748b";
+                    var p = ToMap(point.X, point.Z); var color = point.Enabled && !BlockedMarked(point) ? point.Id == _selected ? "#fff" : "#ffb74d" : "#64748b";
                     <g @key="point.Id">
                         <circle cx="@F(p.x)" cy="@F(p.y)" r="@F(point.Radius * Scale)" fill="@color" fill-opacity=".08" stroke="@color" stroke-opacity=".4" />
                         <circle cx="@F(p.x)" cy="@F(p.y)" r="@F(6 / _zoom)" fill="@color"><title>@point.Name (@point.Kind), height @F(point.Y) m</title></circle>
@@ -97,12 +97,16 @@
             </svg>
         </div>
         <MudSelect T="string" @bind-Value="_selected" Label="Selected point" Variant="Variant.Outlined" Margin="Margin.Dense">
-            @foreach (var point in Points.Where(p => p.Kind == Kind)) { <MudSelectItem Value="@point.Id">@point.Name @(point.Enabled ? "" : "(disabled)")</MudSelectItem> }
+            @foreach (var point in Points.Where(p => p.Kind == Kind)) { <MudSelectItem Value="@point.Id">@point.Name @(BlockedMarked(point) ? "(unavailable)" : point.Enabled ? "" : "(disabled)")</MudSelectItem> }
         </MudSelect>
         @if (Selected is { } selected)
         {
             <MudTextField @bind-Value="selected.Name" Label="Name" Immediate="true" />
-            <OrbitSwitch @bind-Value="selected.Enabled" Label="Enabled" />
+            @if (BlockedMarked(selected))
+            {
+                <MudAlert Severity="Severity.Warning">Mysterious room is temporarily excluded from Marked Rush, even when enabled in a preset. Its crouched passages and breached exit are not supported yet.</MudAlert>
+            }
+            else { <OrbitSwitch @bind-Value="selected.Enabled" Label="Enabled" /> }
             <MudStack Row="true" Wrap="Wrap.Wrap">
                 <MudNumericField T="float" Immediate="true" @bind-Value="selected.X" Label="X" Step="1" />
                 <MudNumericField T="float" Immediate="true" @bind-Value="selected.Y" Label="Height (Y)" Step="0.1f" />
@@ -167,6 +171,7 @@
     private string Kind => Kinds[_tab];
     private List<RushPoint> Points => Cfg.Rush.Points(_map);
     private RushPoint? Selected => Points.FirstOrDefault(p => p.Id == _selected);
+    private bool BlockedMarked(RushPoint point) => point.Kind == "Marked" && !RushDefaults.IsMarkedRushTarget(_map, point.DoorId);
     private MapView View => MapViews.Views[_map];
     private MapFloor[] Floors => FloorCatalog.For(_map)!.Floors;
     private MapFloor Background => Floors.FirstOrDefault(f => f.Id == _floor) ?? Floors[0];

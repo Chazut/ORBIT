@@ -75,7 +75,8 @@ public partial class WaypointSystem
             var position = new Vector3(point.X, point.Y, point.Z);
             if (point.Kind == "Spawn" && (position - squad.SpawnPosition).sqrMagnitude < Mathf.Pow(cfg.OwnSpawnExclusion + point.Radius, 2)) continue;
             if (point.Kind == "Boss" && !RushDefaults.IsBossRushTarget(_zoneKey, point.Boss)) continue;
-            if (point.Kind == "Marked" && (RushDoor(point.DoorId) == null || !MultiStepAccess.CanForceUnlock(RushDoor(point.DoorId)))) continue;
+            if (point.Kind == "Marked" && (!RushDefaults.IsMarkedRushTarget(_zoneKey, point.DoorId)
+                || RushDoor(point.DoorId) == null || !MultiStepAccess.CanForceUnlock(RushDoor(point.DoorId)))) continue;
             if (!pools.TryGetValue(point.Kind, out var pool)) pools[point.Kind] = pool = new();
             pool.Add(point);
         }
