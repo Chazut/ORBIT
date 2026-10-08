@@ -73,6 +73,8 @@ public class Agent(int id, BotOwner bot, float[] taskScores) : Entity(id, taskSc
 
     public readonly ArrivalFailureHistory ArrivalFailures = new();
     internal readonly Systems.QuestArrival QuestArrival = new();
+    internal Systems.SniperReturnRecovery SniperReturn;
+    internal float NextSniperRelocationDiagnosticAt;
 
     /// <summary>
     /// Corpses credited to this agent, kept across combat and normal extraction detours.

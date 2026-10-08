@@ -42,6 +42,7 @@ public partial class MovementSystem
         _humanPlayers = humanPlayers;
         _waypointSystem = waypointSystem;
         _waypointSystem.OpenRushDoor = OpenObjectiveDoor;
+        _waypointSystem.TrySniperRelocation = TryEnterSniperPost;
         _travelWorld = new TravelRouteWorld(waypointSystem);
         _navJobExecutor.TravelPlanner = new TravelRoutePlanner(_travelWorld);
     }
@@ -75,6 +76,7 @@ public partial class MovementSystem
             }
 
             if (HoldForTravelObservation(agent)) continue;
+            if (agent.SniperReturn?.Tick(this, _waypointSystem) == true) continue;
 
             // Dormant body: the GameObject is disabled, so the mover / doors / stuck machinery below has
             // nothing to drive. The ghost follower advances the transform along the planned path instead

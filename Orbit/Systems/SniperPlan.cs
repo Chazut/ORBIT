@@ -11,7 +11,7 @@ using Random = UnityEngine.Random;
 namespace Orbit.Systems;
 
 // One survey/path per shared objective work slot. Geometry is retained for this plan/raid.
-// No global search for enemies, no role changes, and no body operations on sleepers.
+// Local mesh-gap recovery uses the movement system's guarded placement for awake and sleeping bots.
 internal sealed class SniperPlan : IObjectiveWork
 {
     private Squad _squad;
@@ -32,6 +32,8 @@ internal sealed class SniperPlan : IObjectiveWork
     private Vector3 _post, _leg;
     private float _lastTick, _travel, _held, _nextWork, _nextEquipment, _pose = 1;
     private int _candidate, _retries;
+    private int _relocationMember;
+    private float _nextRelocation;
     private bool _resolved, _partial, _arrived, _paused;
     internal string Status { get; private set; } = "pending";
     internal string Step => _site.Name;
@@ -119,6 +121,7 @@ internal sealed class SniperPlan : IObjectiveWork
             SetStatus(squad, "approach");
             return true;
         }
+        if (TryLocalRelocation(squad, w, now)) return true;
         if (!_orders.ContainsKey(_actor))
         {
             if (!w.TryOperationWork(this)) return true;
@@ -194,6 +197,38 @@ internal sealed class SniperPlan : IObjectiveWork
             break;
         }
         return true;
+    }
+
+    private bool TryLocalRelocation(Squad squad, WaypointSystem w, float now)
+    {
+        if (w.TrySniperRelocation == null || now < _nextRelocation || squad.Size == 0) return false;
+        // Round-robin the actor and followers, at most one local check per shared work slot.
+        for (var i = 0; i < squad.Size; i++)
+        {
+            var member = squad.Members[(_relocationMember + i) % squad.Size];
+            if (!member.IsActive || member.SoloExtractRequested || CorpseEscort.InFlight(member)) continue;
+            var target = _post;
+            if (member == _actor) { if (_arrived) continue; }
+            else if (!_orders.TryGetValue(member, out var order) || member.Objective.Location != order
+                || member.Objective.Status == ObjectiveStatus.Finished) continue;
+            else target = order.Position;
+            if (!SniperReturnRecovery.Near(member.Position, target) || Near(member.Position, target, 1.5f)) continue;
+            if (!w.TryOperationWork(this)) return true;
+            _relocationMember = (_relocationMember + i + 1) % squad.Size;
+            _nextRelocation = now + 1f;
+            if (w.TrySniperRelocation(member, target, _main))
+            {
+                if (member == _actor)
+                {
+                    _partial = false; _leg = _post; _retries = 0; _route.Reset();
+                    Assign(member, _post, w, "Sniper approach");
+                    squad.Objective.Location = _orders[member]; squad.Objective.Status = SquadObjectiveState.Active;
+                }
+                member.Objective.Status = ObjectiveStatus.Finished;
+            }
+            return true;
+        }
+        return false;
     }
 
     private bool ApproachSite(Squad squad, WaypointSystem w, Vector3 site, float now)
