@@ -222,7 +222,7 @@ internal sealed class OperationPlan : IObjectiveWork
         if (!Log.InfoEnabled && !PerformanceJournal.Enabled) return;
         var detail = $"operation={Definition.Id} step={step.Label} from={_actor.Position} target={step.Position}";
         if (found) detail += $" approach={_anchor} final={!_approachOnly}";
-        detail += $" samples={_route.Samples} partial={_route.PartialPaths} invalid={_route.InvalidPaths} attempt={_retries + 1} heightGap={step.Position.y - _actor.Position.y:F2}m";
+        detail += $" samples={_route.Samples} partial={_route.PartialPaths} invalid={_route.InvalidPaths} attempt={_retries + 1} heightGap={step.Position.y - _actor.Position.y:F2}m {_route.Diagnostics}";
         Log.Info($"MULTISTEP ROUTE: {squad} {detail}");
         PerformanceJournal.Event("multistep-route", _actor.Player?.ProfileId, detail, squad.Id);
     }
