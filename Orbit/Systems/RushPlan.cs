@@ -182,7 +182,9 @@ internal sealed class RushPlan : IObjectiveWork
             _nextWork = now + .1f;
             var target = _inside ? RoomCenter(site) : Position(site);
             if (door != null && !_inside && _doorApproach) target = door.GetInteractionParameters(_actor.Position).InteractionPosition;
-            if (!_route.Find(_actor.Position, target, out _anchor, out var final, _retries, _approachHistory))
+            // A marked room on another floor may require a detour to distant stairs.
+            if (!_route.Find(_actor.Position, target, out _anchor, out var final, _retries, _approachHistory,
+                floorAware: Kind == "Marked" && Mathf.Abs(_actor.Position.y - target.y) > 2.5f))
             {
                 if (_route.Pending) { ContinueSpawnSearch(waypoints); return true; }
                 Log.Info($"RUSH APPROACH: {squad} kind={Kind} site={site.Name} from={_actor.Position} target={target} samples={_route.Samples} partial={_route.PartialPaths} invalid={_route.InvalidPaths} attempt={_retries + 1}/3");
