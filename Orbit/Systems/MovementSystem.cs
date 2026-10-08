@@ -50,6 +50,7 @@ public partial class MovementSystem
     public void Update(List<Agent> liveAgents)
     {
         _recoveryAgents = liveAgents;
+        PruneSpawnWaypointSearches();
         using (MeasureMovement(TransitionPhase.MovementDoorWatch, "door watches"))
             TickDoorOpenWatches();
         using (MeasureMovement(TransitionPhase.MovementPendingDoors, "pending Ghost doors"))
@@ -1502,7 +1503,7 @@ public partial class MovementSystem
     private const float SpawnIslandMoveRadiusSqr = 20f * 20f;      // got >this from spawn => not islanded, stop
     private const float SpawnIslandMinReferenceDistSqr = 15f * 15f; // ignore reference agents basically on top of us
     private const float SpawnIslandBotSafetyRadiusSqr = 5f * 5f;   // keep the TP destination clear of players/bots
-    private const float SpawnIslandWaypointSearchRadius = 80f;     // look this far from the bot for a player-reachable waypoint
+    private const float SpawnIslandWaypointSearchRadius = 80f;     // look this far from the bot for an externally connected waypoint
 
     private void TryIdleIslandRescue(Agent agent)
     {
@@ -1609,6 +1610,7 @@ public partial class MovementSystem
 
     private void ResetAfterRescue(Agent agent, bool resume = true)
     {
+        CancelSpawnWaypointSearch(agent);
         agent.Movement.Failures.Reset();
         ResetPath(agent);
         agent.Movement.Retry = 0;
@@ -1737,23 +1739,22 @@ public partial class MovementSystem
     // catch this: the bot still "arrives" at its few on-island waypoints, so it never reads as stranded-far.
     // Detect directly (parked near spawn past a grace window AND can't path to any other live agent, since the
     // rest sit on the main mesh), then teleport once onto the main mesh, clear of humans and bots.
-    // A probe pass costs up to N_agents + ~40 synchronous CalculatePath calls; without a backoff a bot that
-    // can never be rescued re-paid that EVERY FRAME (a major 1.2.0 perf regression — Streets fps tanking ~30s
-    // after raid start). Bad spawns are a raid-START problem, so retries are front-loaded: the point is to
-    // unstick the bot within seconds, then settle into a cheap steady probe for the rest of the raid — never
-    // give up outright (doors open, carvers flip, players move, fresh spawns appear as references).
+    // Disconnection probes back off between attempts. The distant candidate search runs in
+    // the shared frame queue, without repeating the disconnection probe while it is pending.
+    // Retries continue throughout the raid as doors, players and reference bots can change.
     private static float SpawnIslandRetryDelay(int attempts)
         => attempts < 10 ? 3f : attempts < 20 ? 5f : 10f;
 
     private void TrySpawnIslandRescue(Agent agent, List<Agent> liveAgents)
     {
         var stuck = agent.Stuck;
-        if (stuck.SpawnIslandRescued) return; // one-shot; also set once the bot proves it can reach the map
+        if (stuck.SpawnIslandRescued) { CancelSpawnWaypointSearch(agent); return; } // one-shot; also set once the bot proves it can reach the map
 
         var pos = agent.Position;
         if (stuck.SpawnProgress.Observe(pos, Time.time))
         {
             // Stairs can make nearby candidates valid again without ever leaving the spawn radius.
+            CancelSpawnWaypointSearch(agent);
             stuck.SpawnIslandWaypointCursor = 0;
             stuck.SpawnIslandDisconnectedSince = -1f;
         }
@@ -1768,6 +1769,7 @@ public partial class MovementSystem
         if ((pos - stuck.SpawnIslandPos).sqrMagnitude > SpawnIslandMoveRadiusSqr)
         {
             stuck.SpawnIslandRescued = true;
+            CancelSpawnWaypointSearch(agent);
             return;
         }
 
@@ -1775,10 +1777,17 @@ public partial class MovementSystem
         if (agent.Objective.Status is ObjectiveStatus.Looting or ObjectiveStatus.Extracting)
         {
             stuck.SpawnIslandDisconnectedSince = -1f;
+            CancelSpawnWaypointSearch(agent);
             return;
         }
-        if (!stuck.SpawnProgress.Stalled(Time.time)) return;
+        if (!stuck.SpawnProgress.Stalled(Time.time)) { CancelSpawnWaypointSearch(agent); return; }
         if (Time.time < stuck.SpawnIslandNextProbeAt) return; // scheduled backoff after a failed attempt
+
+        if (_spawnWaypointSearches.ContainsKey(agent))
+        {
+            ContinueSpawnWaypointRescue(agent, liveAgents);
+            return;
+        }
 
         // Continue a budgeted nearby search without repeating every cross-map disconnection probe.
         // Once it exhausts, refresh those references before permitting the distant fallback.
@@ -1832,35 +1841,7 @@ public partial class MovementSystem
             return;
         }
         if (ContinueSpawnEscape(agent)) return;
-        // Anchor reachability on the alive human player (main mesh) if there is one, else the nearest agent.
-        var anchorPos = reference.Position;
-        for (var i = 0; i < _humanPlayers.Count; i++)
-        {
-            var p = _humanPlayers[i];
-            if (p?.HealthController is { IsAlive: true }) { anchorPos = p.Position; break; }
-        }
-        if (TryFindReachableWaypoint(agent, liveAgents, agent.Position, anchorPos, SpawnIslandWaypointSearchRadius, out var wpDest)
-            && !BotLandingGuard.IsRejected(agent.Bot, wpDest))
-        {
-            var fromPos = agent.Position;
-            if (!BotLandingGuard.TryPlace(agent.Bot, wpDest, "spawn-rescue", () => ResumeGroundPlacement(agent)))
-            {
-                stuck.SpawnIslandNextProbeAt = Time.time + SpawnIslandRetryDelay(++stuck.SpawnIslandAttempts);
-                return;
-            }
-            ResetAfterRescue(agent, resume: false);
-            agent.Stuck.SpawnIslandRescued = true;
-            Log.Info($"{agent} spawn-island rescue: teleported {Vector3.Distance(fromPos, wpDest):F0}m to a reachable waypoint (off the disconnected spawn chunk) from={fromPos} to={wpDest}");
-            RefreshSquadAfterIslandRescue(agent, wpDest);
-            return;
-        }
-
-        // Full attempt failed (no reachable waypoint). Schedule the next one — 3s cadence for the first 10
-        // tries (unstick a badly-spawned PMC fast), 5s for the next 10, then a steady 10s for the raid.
-        stuck.SpawnIslandAttempts++;
-        var delay = SpawnIslandRetryDelay(stuck.SpawnIslandAttempts);
-        stuck.SpawnIslandNextProbeAt = Time.time + delay;
-        Log.Debug($"{agent} spawn-island rescue: attempt {stuck.SpawnIslandAttempts} found no reachable waypoint — next probe in {delay:F0}s");
+        ContinueSpawnWaypointRescue(agent, liveAgents);
     }
 
     // How long the squad idles before its first post-relocation dispatch, giving BSG time to re-anchor the
@@ -1922,80 +1903,53 @@ public partial class MovementSystem
         Log.Info($"{squad} spawn-island relocation: spawn pos re-anchored, mains re-rolled, objective reset (re-dispatch in {PostIslandRescueCooldownSeconds:F0}s)");
     }
 
-    // Nearest waypoint to fromPos that is reachable from anchorPos and clear of players/bots, so the bot lands
-    // on a real POI rather than next to another bot.
-    private bool TryFindReachableWaypoint(Agent agent, List<Agent> liveAgents, Vector3 fromPos, Vector3 anchorPos, float maxRadius, out Vector3 dest)
+    // Search a stable batch of nearby POIs against multiple sampled external references.
+    private bool TryFindReachableWaypoint(Agent agent, List<Agent> liveAgents, Vector3 fromPos,
+        float maxRadius, out Vector3 dest, out bool pending)
     {
-        dest = Vector3.zero;
-        if (_waypointSystem == null) return false;
-
-        var cells = _waypointSystem.Cells;
-        var w = cells.GetLength(0);
-        var h = cells.GetLength(1);
-        var center = _waypointSystem.WorldToCell(fromPos);
-        var range = Mathf.CeilToInt(maxRadius / _waypointSystem.CellSize);
-        var maxRadSqr = maxRadius * maxRadius;
-        _wpScratch.Clear();
-        for (var dx = -range; dx <= range; dx++)
-        for (var dy = -range; dy <= range; dy++)
+        dest = default;
+        pending = false;
+        if (!_spawnWaypointSearches.TryGetValue(agent, out var search))
         {
-            var cx = center.x + dx;
-            var cy = center.y + dy;
-            if (cx < 0 || cy < 0 || cx >= w || cy >= h) continue;
-            var wps = cells[cx, cy].Waypoints;
-            for (var k = 0; k < wps.Count; k++)
+            var cells = _waypointSystem.Cells;
+            var w = cells.GetLength(0);
+            var h = cells.GetLength(1);
+            var center = _waypointSystem.WorldToCell(fromPos);
+            var range = Mathf.CeilToInt(maxRadius / _waypointSystem.CellSize);
+            var maxRadSqr = maxRadius * maxRadius;
+            _wpScratch.Clear();
+            for (var dx = -range; dx <= range; dx++)
+            for (var dy = -range; dy <= range; dy++)
             {
-                var wp = wps[k];
-                if ((wp.Position - fromPos).sqrMagnitude <= maxRadSqr) _wpScratch.Add(wp);
+                var cx = center.x + dx;
+                var cy = center.y + dy;
+                if (cx < 0 || cy < 0 || cx >= w || cy >= h) continue;
+                var wps = cells[cx, cy].Waypoints;
+                for (var k = 0; k < wps.Count; k++)
+                {
+                    var wp = wps[k];
+                    if ((wp.Position - fromPos).sqrMagnitude <= maxRadSqr) _wpScratch.Add(wp);
+                }
             }
+            // Keep ordering stable while the bot shuffles on its island. Each retry advances past the
+            // previous batch, so farther usable POIs are not starved by the same 40 nearest failures.
+            var spawn = agent.Stuck.SpawnIslandPos;
+            _wpScratch.Sort((x, y) =>
+            {
+                var distanceOrder = (x.Position - spawn).sqrMagnitude.CompareTo((y.Position - spawn).sqrMagnitude);
+                return distanceOrder != 0 ? distanceOrder : x.Id.CompareTo(y.Id);
+            });
+            search = new SpawnWaypointSearch(this, agent, liveAgents, _wpScratch, maxRadius);
+            _spawnWaypointSearches.Add(agent, search);
+            _waypointSystem.ScheduleFrameSearch(search);
         }
-        // Keep ordering stable while the bot shuffles on its island. Each retry advances past the
-        // previous batch, so farther usable POIs are not starved by the same 40 nearest failures.
-        var spawn = agent.Stuck.SpawnIslandPos;
-        _wpScratch.Sort((x, y) =>
-        {
-            var distanceOrder = (x.Position - spawn).sqrMagnitude.CompareTo((y.Position - spawn).sqrMagnitude);
-            return distanceOrder != 0 ? distanceOrder : x.Id.CompareTo(y.Id);
-        });
-        var count = _wpScratch.Count;
-        var start = count > 0 ? agent.Stuck.SpawnIslandWaypointCursor % count : 0;
-        // Spend half of a continued search rechecking nearby points before extending farther.
-        // The total remains bounded at forty candidates per probe.
-        var nearCount = start >= 40 ? Mathf.Min(20, count) : 0;
-        var end = Mathf.Min(count, start + 40 - nearCount);
-        var mesh = 0;
-        var height = 0;
-        var rangeRejected = 0;
-        var occupied = 0;
-        var visible = 0;
-        var unreachable = 0;
-        var recent = 0;
-        var tested = 0;
-        var found = false;
-        for (var step = 0; step < nearCount + end - start; step++)
-        {
-            var i = step < nearCount ? step : start + step - nearCount;
-            tested++;
-            if (step >= nearCount) agent.Stuck.SpawnIslandWaypointCursor = i + 1 < count ? i + 1 : 0;
-            var wp = _wpScratch[i];
-            if (!NavMesh.SamplePosition(wp.Position, out var hit, 2f, NavMesh.AllAreas)
-                || !OrbitMovementRecovery.TrySample(hit.position, out var point)) { mesh++; continue; }
-            if (Mathf.Abs(point.y - fromPos.y) > 2f) { height++; continue; }
-            if ((point - fromPos).sqrMagnitude > maxRadSqr) { rangeRejected++; continue; }
-            if ((point - fromPos).sqrMagnitude < 9f
-                || agent.Stuck.Recovery.RecentlyRescuedAt(point)) { recent++; continue; }
-            if (!IsClearOfPlayersAndBots(point, agent, liveAgents)) { occupied++; continue; }
-            if (!IsRescueDestinationHidden(point)) { visible++; continue; }
-            // Test the actual landing, not the loot transform that may be above or beside it.
-            if (!_waypointSystem.IsReachableFromPosition(anchorPos, point)) { unreachable++; continue; }
-            if (!BotLandingGuard.Accepts(agent.Bot, point)) { occupied++; continue; }
-            dest = point;
-            found = true;
-            break;
-        }
-        if (count == 0) agent.Stuck.SpawnIslandWaypointCursor = 0;
-        Log.Debug($"{agent} spawn-island candidates: total={count} start={start} tested={tested} next={agent.Stuck.SpawnIslandWaypointCursor} mesh={mesh} height={height} range={rangeRejected} occupied={occupied} visible={visible} unreachable={unreachable} recent={recent} found={found}");
-        return found;
+        if (!search.Valid) { CancelSpawnWaypointSearch(agent); return false; }
+        _waypointSystem.PumpFrameSearches();
+        if (!search.Done) { pending = true; return false; }
+        CancelSpawnWaypointSearch(agent);
+        if (!search.Found || !search.Valid || !search.ReferenceStillValid) return false;
+        dest = search.Destination;
+        return true;
     }
 
     private bool IsPathComplete(Vector3 from, Vector3 to)
