@@ -1,5 +1,12 @@
 # ORBIT Fika addon
 
+PiP Disabler scoped wake support requires the updated ORBIT client and addon on the host or
+headless and playing clients. PiP itself is only needed on players using it. While PiP handles
+the player's active optic, the addon reports its zoom and field of view to the host at most four
+times per second. Reports expire after 1.5 seconds and are cleared when PiP stops handling the
+optic or the player disconnects. Normal scope behavior remains unchanged for other players.
+This capability is negotiated through the existing handshake; older addons receive no new packets.
+
 Version 1.2.0-rc.1 adds synchronization of switches activated by ORBIT's multi-step objectives,
 alongside door synchronization and Ghost fight audio. It requires ORBIT 3.0.0 or newer. Use the
 matching ORBIT 3.0 beta client and addon on the host or headless and every playing client.

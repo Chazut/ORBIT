@@ -36,6 +36,7 @@ internal sealed class DoorSyncBridge : IDisposable
     }
 
     private readonly ManualLogSource _log;
+    private readonly ScopeSyncBridge _scopes;
     private readonly Dictionary<string, Watch> _watches = new();
     private readonly Dictionary<string, Door> _known = new();
     private readonly HashSet<NetPeer> _peers = new();
@@ -51,9 +52,10 @@ internal sealed class DoorSyncBridge : IDisposable
     private ulong _revision;
     private static DoorSyncBridge _active;
 
-    internal DoorSyncBridge(ManualLogSource log)
+    internal DoorSyncBridge(ManualLogSource log, ScopeSyncBridge scopes = null)
     {
         _log = log;
+        _scopes = scopes;
         if (!DoorStateReceiver.Supported)
             throw new NotSupportedException("Door interaction fields do not match this SPT version");
         _active = this;
@@ -174,6 +176,9 @@ internal sealed class DoorSyncBridge : IDisposable
             {
                 _peers.Add(peer);
                 var welcome = Packet(DoorMessage.Welcome, packet.Session);
+                var scopes = _scopes != null && (packet.Token & ScopeSyncBridge.Capability) != 0;
+                welcome.Token = scopes ? ScopeSyncBridge.Capability : 0;
+                _scopes?.HostReady(peer, _session, scopes);
                 Send(welcome, peer);
                 // Resolve current objects, never replay cached Open snapshots over a later human close.
                 foreach (var entry in _known)
@@ -194,6 +199,7 @@ internal sealed class DoorSyncBridge : IDisposable
             if (_session == null && packet.DoorId == _hello && packet.Session?.Length == 32)
             {
                 _session = packet.Session;
+                _scopes?.ClientReady(_session, (packet.Token & ScopeSyncBridge.Capability) != 0);
                 _log.LogInfo("DOOR SYNC: host handshake complete");
             }
             return;
@@ -319,6 +325,7 @@ internal sealed class DoorSyncBridge : IDisposable
             _helloAt = Time.time;
             var hello = Packet(DoorMessage.Hello);
             hello.Session = _hello;
+            hello.Token = _scopes != null ? ScopeSyncBridge.Capability : 0;
             Send(hello);
         }
         if (!_host && _helloSent && _session == null && !_warned && Time.time > _helloAt + 10f)

@@ -32,6 +32,7 @@ public class OrbitFikaPlugin : BaseUnityPlugin
     public const string PluginVersion = "1.2.0";
     public const string ReleaseVersion = "1.2.0-rc.1";
     private DoorSyncBridge _doors;
+    private ScopeSyncBridge _scopes;
 
     // Mirrors the limiter's own earshot gate, judged here against the LOCAL listener.
     private const float EarshotMeters = 1500f;
@@ -54,7 +55,8 @@ public class OrbitFikaPlugin : BaseUnityPlugin
     private void Awake()
     {
         _log = Logger;
-        try { _doors = new DoorSyncBridge(Logger); }
+        _scopes = new ScopeSyncBridge(Logger);
+        try { _doors = new DoorSyncBridge(Logger, _scopes); }
         catch (System.Exception e) { Logger.LogError($"Door sync unavailable: {e}"); }
         FikaEventDispatcher.SubscribeEvent<FikaNetworkManagerCreatedEvent>(OnNetworkManagerCreated);
         FikaEventDispatcher.SubscribeEvent<FikaNetworkManagerDestroyedEvent>(OnNetworkManagerDestroyed);
@@ -229,6 +231,7 @@ public class OrbitFikaPlugin : BaseUnityPlugin
     private void Update()
     {
         _doors?.Tick();
+        _scopes?.Tick();
         if (_pending.Count == 0) return;
 
         var gameWorld = Singleton<GameWorld>.Instance;
@@ -272,6 +275,7 @@ public class OrbitFikaPlugin : BaseUnityPlugin
     private void OnDestroy()
     {
         _doors?.Dispose();
+        _scopes?.Dispose();
         OrbitEvents.GhostFightSoundsResolved -= OnGhostFightResolved;
     }
 }

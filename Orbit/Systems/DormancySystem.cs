@@ -4,6 +4,7 @@ using Comfort.Common;
 using EFT;
 using EFT.CameraControl;
 using EFT.InventoryLogic;
+using Orbit.Api;
 using Orbit.Core;
 using Orbit.Entities;
 using Orbit.Helpers;
@@ -1145,8 +1146,8 @@ public partial class DormancySystem
     /// <summary>
     /// Once per poll: if the local player is aiming through a rendering optic, derive a forward wake
     /// distance from the optic camera's FOV (magnification = tan(baseFov/2) / tan(opticFov/2), so any
-    /// modded scope scales correctly) and a test cone wider than the scope view. Headless clients have
-    /// no camera and the whole feature stays inert.
+    /// modded scope scales correctly) and a test cone wider than the scope view. PiP Disabler supplies
+    /// its own zoom only while active. Remote humans use replicated PiP data or the existing fallback.
     /// </summary>
     private void UpdateScopeState()
     {
@@ -1166,7 +1167,23 @@ public partial class DormancySystem
                 {
                     var opticManager = cameraManager.OpticCameraManager;
                     var scoped = opticManager != null && opticManager.IsAnyOpticCameraRendering;
-                    if (!scoped)
+                    if (OrbitScopeViews.TryReadLocal(_gameWorld.MainPlayer, out var pipView))
+                    {
+                        // Do not cache PiP's zoomed main-camera FOV as an unscoped reference.
+                        // A handled 1x sight also skips the mounted-optics maximum-zoom fallback.
+                        localCameraActive = true;
+                        if (pipView.Zoom >= 1.5f)
+                        {
+                            var dist = Mathf.Clamp(wakeBase * pipView.Zoom, wakeBase, _scopedWakeMax);
+                            _scopeSources.Add(new ScopeSource
+                            {
+                                Pos = mainCamera.transform.position, Fwd = mainCamera.transform.forward,
+                                DistSqr = dist * dist,
+                                ConeCos = Mathf.Cos((pipView.FieldOfView * 0.5f + ScopedWakeConeMarginDeg) * Mathf.Deg2Rad),
+                            });
+                        }
+                    }
+                    else if (!scoped)
                     {
                         // Cache the base FOV while unscoped: some sights zoom the MAIN camera too, so
                         // reading it mid-ADS would understate the magnification (ABC does the same).
@@ -1216,6 +1233,21 @@ public partial class DormancySystem
 
                 var firearm = player.HandsController as Player.FirearmController;
                 if (firearm == null || !firearm.IsAiming) continue;
+
+                if (OrbitScopeViews.TryReadRemote(player, out var pipView))
+                {
+                    if (pipView.Zoom < 1.5f) continue;
+                    var direction = player.LookDirection;
+                    if (direction.sqrMagnitude < 0.01f) continue;
+                    var distance = Mathf.Clamp(wakeBase * pipView.Zoom, wakeBase, _scopedWakeMax);
+                    _scopeSources.Add(new ScopeSource
+                    {
+                        Pos = player.Position + new Vector3(0f, 1.5f, 0f), Fwd = direction.normalized,
+                        DistSqr = distance * distance,
+                        ConeCos = Mathf.Cos((pipView.FieldOfView * 0.5f + ScopedWakeConeMarginDeg) * Mathf.Deg2Rad),
+                    });
+                    continue;
+                }
 
                 var magnification = 1f;
                 var weapon = firearm.Item;

@@ -106,6 +106,7 @@ public class Plugin : BaseUnityPlugin
         StartCoroutine(WaitForHandbook());
 
         Log.Always($"ORBIT {ReleaseVersion} initialised");
+        PipDisablerCompat.Initialize();
 
         // Patches — wrap each in EnableSafe so one bad patch (wrong Harmony parameter name, missing target
         // method after a game update) can't collapse the rest of init. Without the guard a single failure
