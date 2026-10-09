@@ -93,7 +93,11 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
 
             // Scoring still runs while SAIN owns the bot. Clear here as well as on deactivation:
             // an internal action may have displaced Goto before the later handover to SAIN.
-            if (!agent.IsActive) _stuckEnRouteTracker.Remove(agent.Id);
+            if (!agent.IsActive)
+            {
+                _stuckEnRouteTracker.Remove(agent.Id);
+                NoBackpackExfil.PauseRecovery(agent);
+            }
 
             // Keep navigation active until its arrival update validates the objective. A score that
             // decays to zero at the target can prevent that update or let cover steal the arrival.
@@ -112,6 +116,18 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
             var objective = agent.Objective;
 
             if (objective.Location == null) continue;
+
+            if (objective.Location.Target is ExfiltrationPoint backpackExit && NoBackpackExfil.RequiresDrop(backpackExit))
+            {
+                if (!agent.IsActive || MovementSystem.IsTravelPaused(agent)) NoBackpackExfil.PauseRecovery(agent);
+                else
+                {
+                    var preparation = NoBackpackExfil.Prepare(agent, objective.Location);
+                    if (preparation == NoBackpackExfil.Preparation.Rejected)
+                    { ExfilArrival.Abandon(agent, objective.Location); continue; }
+                    if (ExtractAction.TryRecoverNoBackpack(agent)) continue;
+                }
+            }
 
             switch (objective.Status)
             {
@@ -167,6 +183,7 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                         _stuckEnRouteTracker.Remove(agent.Id);
                         if (objective.Location.Category == WaypointCategory.Exfil)
                         {
+                            if (NoBackpackExfil.RetainAfterDrop(agent, objective.Location)) break;
                             // Exfils get the 3-strike treatment instead of a one-shot blacklist: a
                             // partial-path trip legitimately stalls where the mesh ends, and conditions can
                             // change between tries. Keep an available foot exit while local recovery runs;
@@ -344,6 +361,7 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                                 }
                                 else if (outsideWait >= ExfilOutsideTriggerForceExtractSeconds)
                                 {
+                                    if (NoBackpackExfil.RetainAfterDrop(agent, objective.Location)) break;
                                     if (Orbit.Systems.MultiStepAccess.IsConditional(exfil) || NoBackpackExfil.RequiresDrop(exfil))
                                     { objective.Status = ObjectiveStatus.Failed; break; }
                                     if (ExfilArrival.IsSharedTimer(exfil))

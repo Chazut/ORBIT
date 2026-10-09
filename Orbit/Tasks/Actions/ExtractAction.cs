@@ -100,11 +100,17 @@ public class ExtractAction(AgentData dataset, float hysteresis) : Task<Agent>(hy
             var preparation = NoBackpackExfil.Prepare(agent, loc);
             if (preparation == NoBackpackExfil.Preparation.Rejected)
             { _footExtractStartTime.Remove(agent.Id); ExfilArrival.Abandon(agent, loc); return; }
+            if (TryRecoverNoBackpack(agent)) return;
             if (preparation != NoBackpackExfil.Preparation.Ready || !NoBackpackExfil.CanFinish(agent, loc))
             {
                 _footExtractStartTime.Remove(agent.Id);
-                agent.Objective.Status = ObjectiveStatus.None;
-                agent.Objective.DispatchTime = Time.time;
+                // Stay committed while native backpack bookkeeping catches up. If displaced,
+                // resume the same approach instead of releasing the exit to normal dispatch.
+                if (!ExfilArrival.IsInside(agent, loc))
+                {
+                    agent.Objective.Status = ObjectiveStatus.None;
+                    agent.Objective.DispatchTime = Time.time;
+                }
                 return;
             }
         }
@@ -340,10 +346,21 @@ public class ExtractAction(AgentData dataset, float hysteresis) : Task<Agent>(hy
         }
     }
 
-    private static void DespawnAgent(Agent agent)
+    internal static bool TryRecoverNoBackpack(Agent agent)
+    {
+        if (!NoBackpackExfil.RecoveryDue(agent, agent.Objective.Location)) return false;
+        Log.Warning($"{agent} NO-BACKPACK: recovery despawn at {agent.Objective.Location} after confirmed drop and local wait");
+        NoBackpackExfil.PauseRecovery(agent);
+        agent.Objective.Status = ObjectiveStatus.Extracting;
+        DespawnAgent(agent, recoverNoBackpack: true);
+        return true;
+    }
+
+    private static void DespawnAgent(Agent agent, bool recoverNoBackpack = false)
     {
         // Also protects emergency watchdog and arrival-fallback callers from bypassing backpack requirements.
-        if (!NoBackpackExfil.CanFinish(agent, agent.Objective.Location))
+        if (!(recoverNoBackpack ? NoBackpackExfil.CanRecover(agent, agent.Objective.Location)
+                : NoBackpackExfil.CanFinish(agent, agent.Objective.Location)))
         {
             agent.Objective.Status = ObjectiveStatus.None;
             agent.Objective.DispatchTime = Time.time;
@@ -369,7 +386,8 @@ public class ExtractAction(AgentData dataset, float hysteresis) : Task<Agent>(hy
         catch (System.Exception e)
         {
             Log.Error($"{agent} ExtractAction.RemoveFromMap failed: {e}");
-            agent.Objective.Status = ObjectiveStatus.Failed;
+            agent.Objective.Status = NoBackpackExfil.RetainAfterDrop(agent, agent.Objective.Location)
+                ? ObjectiveStatus.Extracting : ObjectiveStatus.Failed;
             return;
         }
 
@@ -384,6 +402,7 @@ public class ExtractAction(AgentData dataset, float hysteresis) : Task<Agent>(hy
 
     protected override void Deactivate(Agent entity)
     {
+        NoBackpackExfil.PauseRecovery(entity);
         // Combat takeover or external state change mid-extract — drop the per-agent foot tracker. The V-Ex
         // squad timer is intentionally NOT cleared here: if a member temporarily exits Extracting (combat,
         // takeover), the squad-wide countdown keeps ticking so the rest of the squad isn't stranded.
