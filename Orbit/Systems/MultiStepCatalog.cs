@@ -19,10 +19,20 @@ internal sealed class OperationStep
     internal bool OptionalAlarm;
     internal bool Underground;
     internal Vector3 Entry;
+    internal Vector3? SwitchApproach;
     private Func<Vector3, bool> _interactionCheck;
     private OperationSwitchReach.Result _lastReach;
-    internal Func<Vector3, bool> InteractionCheck => _interactionCheck ??= CanInteract;
+    private OperationSwitchReach.Result _candidateRejection;
+    private Vector3 _rejectedFeet;
+    internal Func<Vector3, bool> InteractionCheck => _interactionCheck ??= CanStand;
     internal string ReachDiagnostics => _lastReach.Diagnostics;
+    internal string CandidateDiagnostics => $"feet={_rejectedFeet} {_candidateRejection.Diagnostics}";
+    private bool CanStand(Vector3 feet)
+    {
+        var reach = OperationSwitchReach.Evaluate(feet, Object);
+        if (!reach.Reachable) { _candidateRejection = reach; _rejectedFeet = feet; }
+        return reach.Reachable;
+    }
     internal bool CanInteract(Vector3 feet)
     {
         _lastReach = OperationSwitchReach.Evaluate(feet, Object);
@@ -43,7 +53,7 @@ internal sealed class OperationDefinition
     internal readonly List<OperationStep> Steps = new();
 }
 
-/// <summary>Scene IDs from the shipped SPT 4.1 levels, never map coordinates or display names.</summary>
+/// <summary>Operations bound to scene IDs, with optional ground approaches for confined switches.</summary>
 internal sealed class MultiStepCatalog
 {
     internal readonly List<OperationDefinition> Operations = new();
@@ -88,22 +98,29 @@ internal sealed class MultiStepCatalog
                 Wait("Wait for D-2 gate", "00454", "00453"),
                 ExitStep("Wait for gate and extract", "EXFIL_Bunker_D2", OperationStepKind.Extract));
             Add("hermetic", "Bunker Hermetic Door", true, "autoId_00632_EXFIL",
-                Step("Hermetic lever", "autoId_00632_EXFIL"),
+                Step("Hermetic lever", "autoId_00632_EXFIL", approach: new Vector3(-60.083f, -7.042f, 76.826f)),
                 ExitStep("Reach active exit", "EXFIL_Bunker", OperationStepKind.Extract));
         }
         else
         {
             Add("zb013", "ZB-013", true, "custom_DesignStuff_00034",
-                Step("Warehouse power", "custom_DesignStuff_00034"),
+                Step("Warehouse power", "custom_DesignStuff_00034", approach: new Vector3(352.395f, 1.231f, -39.127f)),
                 Step("Unlock Factory door", "door_Custom_Construction_Factory_00000"),
                 ExitStep("Extract", "EXFIL_ZB013", OperationStepKind.Extract));
         }
         Log.Info($"MULTISTEP: catalog map={map} operations={Operations.Count}");
     }
 
-    private OperationStep Step(string label, string id, bool alarm = false)
+    private OperationStep Step(string label, string id, bool alarm = false, Vector3? approach = null)
         => _objects.TryGetValue(id, out var obj) ? new OperationStep
-        { Label = label, Object = obj, Kind = obj is Switch ? OperationStepKind.Switch : OperationStepKind.Access, OptionalAlarm = alarm } : null;
+        {
+            Label = label, Object = obj, Kind = obj is Switch ? OperationStepKind.Switch : OperationStepKind.Access,
+            OptionalAlarm = alarm,
+            // A map variant may relocate this object. Keep the generic search in that case.
+            SwitchApproach = obj is Switch && approach is { } point
+                && (point - obj.transform.position).sqrMagnitude <= 16f
+                && Mathf.Abs(point.y - obj.transform.position.y) <= 2f ? approach : null
+        } : null;
 
     private OperationStep Loot(string id) => _objects.TryGetValue(id, out var obj)
         ? new OperationStep { Label = "Loot area", Object = obj, Kind = OperationStepKind.Loot } : null;

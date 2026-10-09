@@ -54,7 +54,8 @@ internal sealed class OperationPlan : IObjectiveWork
                 _steps.Add(new OperationStep
                 {
                     Label = step.Label, Kind = step.Kind, Object = step.Object, WaitAt = step.WaitAt,
-                    Exit = step.Exit, OptionalAlarm = step.OptionalAlarm, Underground = step.Underground, Entry = step.Entry
+                    Exit = step.Exit, OptionalAlarm = step.OptionalAlarm, Underground = step.Underground, Entry = step.Entry,
+                    SwitchApproach = step.SwitchApproach
                 });
     }
 
@@ -296,7 +297,8 @@ internal sealed class OperationPlan : IObjectiveWork
         var detail = $"operation={Definition.Id} step={step.Label} from={_actor.Position} target={step.Position}";
         if (found) detail += $" approach={_anchor} final={!_approachOnly}";
         detail += $" samples={_route.Samples} partial={_route.PartialPaths} invalid={_route.InvalidPaths} attempt={_retries + 1} heightGap={step.Position.y - _actor.Position.y:F2}m {_route.Diagnostics} underground={step.Underground} {_progress.Diagnostics}";
-        if (step.Kind == OperationStepKind.Switch) detail += $" reach=[{step.ReachDiagnostics}]";
+        if (step.Kind == OperationStepKind.Switch)
+            detail += $" reach=[{step.ReachDiagnostics}] candidateReject=[{step.CandidateDiagnostics}]";
         Log.Info($"MULTISTEP ROUTE: {squad} {detail}");
         PerformanceJournal.Event("multistep-route", _actor.Player?.ProfileId, detail, squad.Id);
     }

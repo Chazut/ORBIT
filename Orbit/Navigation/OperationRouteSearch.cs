@@ -24,7 +24,7 @@ internal sealed class OperationRouteSearch
     private int _outsideScope, _blockedInteraction;
     private Vector3 _lastRejected;
     private Vector3 _target;
-    private bool _localAccess;
+    private bool _localAccess, _groundedTarget;
     private string _lastRejection = "none";
     internal bool Pending { get; private set; }
     internal int Samples { get; private set; }
@@ -36,7 +36,7 @@ internal sealed class OperationRouteSearch
 
     internal string Diagnostics => $"complete={_completePaths} invalidQueries={_invalidQueries} approachChecks={_checks} approachRejected={_rejected}"
         + $" searchTarget={_target} lastRejected={_lastRejected} lastRejection={_lastRejection}"
-        + $" filters=[no-sample:{_noSample},floor:{_wrongFloor},outside-target:{_outsideTarget},no-corners:{_noCorners},near:{_tooClose},no-progress:{_noProgress},visited:{_visited},scope:{_outsideScope},interaction:{_blockedInteraction}] localAccess={_localAccess}";
+        + $" filters=[no-sample:{_noSample},floor:{_wrongFloor},outside-target:{_outsideTarget},no-corners:{_noCorners},near:{_tooClose},no-progress:{_noProgress},visited:{_visited},scope:{_outsideScope},interaction:{_blockedInteraction}] localAccess={_localAccess} groundedTarget={_groundedTarget}";
 
     internal void Reset()
     {
@@ -46,16 +46,18 @@ internal sealed class OperationRouteSearch
         _noSample = _wrongFloor = _outsideTarget = _noCorners = _tooClose = _noProgress = _visited = 0;
         _outsideScope = _blockedInteraction = 0;
         _lastRejected = _target = default; _lastRejection = "none";
-        _localAccess = false;
+        _localAccess = _groundedTarget = false;
         Pending = false;
     }
 
     internal bool Find(Vector3 origin, Vector3 target, out Vector3 point, out bool final,
         int expansion = 0, IReadOnlyList<Vector3> avoided = null, bool floorAware = false, float finalHeightTolerance = 2.5f,
-        Func<Vector3, bool> allowedPoint = null, Func<Vector3, bool> finalPoint = null, bool localAccess = false)
+        Func<Vector3, bool> allowedPoint = null, Func<Vector3, bool> finalPoint = null, bool localAccess = false,
+        bool groundedTarget = false)
     {
         point = default;
         _target = target;
+        _groundedTarget = groundedTarget;
         final = false;
         Pending = false;
         expansion = Mathf.Clamp(expansion, 0, 2);
@@ -77,12 +79,20 @@ internal sealed class OperationRouteSearch
             var local = index < LocalCandidates;
             var sampleRadius = local ? 1.25f : 3f;
             Vector3 sample;
-            if (index < 4) sample = target + Vector3.down * (index * .6f);
+            if (index < 4 && groundedTarget)
+            {
+                // Probe the standing point and small horizontal alternatives, not the switch's pivot.
+                sample = target + (index == 1 ? new Vector3(.25f, 0, 0)
+                    : index == 2 ? new Vector3(-.25f, 0, 0)
+                    : index == 3 ? new Vector3(0, 0, -.25f) : Vector3.zero);
+                sampleRadius = .6f;
+            }
+            else if (index < 4) sample = target + Vector3.down * (index * .6f);
             else if (local)
             {
                 var angle = (index - 4) % 8 * Mathf.PI / 4f;
                 var radius = index < 12 ? 1.25f : 2.25f;
-                sample = target + new Vector3(Mathf.Cos(angle) * radius, -1f, Mathf.Sin(angle) * radius);
+                sample = target + new Vector3(Mathf.Cos(angle) * radius, groundedTarget ? 0 : -1f, Mathf.Sin(angle) * radius);
             }
             else if (index < DirectCandidates)
             {
@@ -98,7 +108,7 @@ internal sealed class OperationRouteSearch
                 var slot = index - DirectCandidates;
                 var angle = slot % 8 * Mathf.PI / 4f;
                 var radius = slot < 8 ? 4f : 7f;
-                sample = target + new Vector3(Mathf.Cos(angle) * radius, -1.4f, Mathf.Sin(angle) * radius);
+                sample = target + new Vector3(Mathf.Cos(angle) * radius, groundedTarget ? 0 : -1.4f, Mathf.Sin(angle) * radius);
                 sampleRadius = 1.25f;
             }
             else if (floorAware)
@@ -139,7 +149,8 @@ internal sealed class OperationRouteSearch
             }
             if (!NavMesh.SamplePosition(sample, out var hit, sampleRadius, NavMesh.AllAreas)) { _noSample++; continue; }
             if (floorAware && !local && Mathf.Abs(hit.position.y - sample.y) > 2.5f) { _wrongFloor++; continue; }
-            if (local && Mathf.Abs(hit.position.y - target.y) > finalHeightTolerance) { _wrongFloor++; continue; }
+            if (local && Mathf.Abs(hit.position.y - target.y) > (groundedTarget ? .6f : finalHeightTolerance))
+            { _wrongFloor++; continue; }
             if (local && HorizontalDistance(hit.position, target) > 3f) { _outsideTarget++; continue; }
             if (allowedPoint != null && !allowedPoint(hit.position)) { _outsideScope++; continue; }
             if (local && finalPoint != null && !finalPoint(hit.position)) { _blockedInteraction++; continue; }
