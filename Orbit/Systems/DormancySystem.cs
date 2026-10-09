@@ -73,10 +73,9 @@ public partial class DormancySystem
     private const float SkirmishChanceClose = 0.85f;
     private const float SkirmishChanceFar = 0.25f;
     // Under this distance two hostile units ALWAYS make contact (raid 8: two ghosts crossed at arm's
-    // length on a 54% roll and walked on). A failed roll beyond it only burns the short cooldown below,
+    // length on a 54% roll and walked on). A failed roll beyond it only burns a short cooldown,
     // not the full pair cooldown, so units travelling together re-roll within seconds, not minutes.
-    private const float SkirmishGuaranteedContactRange = 20f;
-    private const float SkirmishShadowCooldownSeconds = 30f;
+    private const float SkirmishGuaranteedContactRange = GhostContactHistory.GuaranteedRange;
     private const float GhostHealDelaySeconds = 30f;  // wounded sleepers wait this long before self-patching
     private const float GhostHealPerSecond = 1.2f;    // ~70 HP/min once patching starts
 
@@ -227,7 +226,7 @@ public partial class DormancySystem
     private readonly List<PendingShot> _pendingShots = new();
 
     // Ghost-skirmish bookkeeping. Pair keys are ordered profile-id pairs (squad ids are recycled).
-    private readonly Dictionary<string, float> _skirmishPairSeenAt = new();
+    private readonly GhostContactHistory _ghostContacts = new();
 
     // A resolved skirmish plays out over a WINDOW instead of an instant: both squads hold position,
     // the gunfire spans the whole window, casualties drop mid-window and the survivors' wear lands at
@@ -1349,30 +1348,31 @@ public partial class DormancySystem
                 if (!extractContact && !ClearFightLos(posA, posB)) continue;
 
                 var pairKey = string.CompareOrdinal(a.Key, b.Key) < 0 ? a.Key + "|" + b.Key : b.Key + "|" + a.Key;
-                if (_skirmishPairSeenAt.TryGetValue(pairKey, out var seenAt) && Time.time - seenAt < _skirmishCooldown)
+                var guaranteed = extractContact || dist <= SkirmishGuaranteedContactRange;
+                if (!_ghostContacts.CanAttempt(pairKey, Time.time, _skirmishCooldown, guaranteed))
                     continue;
 
-                // Point-blank contact starts at full chance before weather acquisition. Beyond that
-                // it falls with distance, shaded
+                // Close contact stays guaranteed after geometry checks. Beyond that the chance
+                // falls with distance and weather acquisition, shaded
                 // by how eager both sides are to engage (a Cautious/Rat squad shadows, a GigaChad pushes).
                 float contactChance;
-                if (extractContact || dist <= SkirmishGuaranteedContactRange)
+                if (guaranteed)
                     contactChance = 1f;
                 else
                 {
                     var t = (dist - SkirmishGuaranteedContactRange) / Mathf.Max(1f, reach - SkirmishGuaranteedContactRange);
                     contactChance = Mathf.Min(0.95f, _contactChanceMul * ContactAggressionMul(a, b) * Mathf.Lerp(SkirmishChanceClose, SkirmishChanceFar, t));
                 }
-                contactChance *= acquisition;
+                contactChance = GhostContactHistory.Chance(guaranteed, contactChance, acquisition);
                 if (Random.value > contactChance)
                 {
                     // A failed roll burns only a SHORT cooldown: the pair re-rolls within seconds while
                     // still in range, instead of ghosting through each other for 3 minutes.
-                    _skirmishPairSeenAt[pairKey] = Time.time - Mathf.Max(0f, _skirmishCooldown - SkirmishShadowCooldownSeconds);
+                    _ghostContacts.Record(pairKey, Time.time, fought: false);
                     Log.Debug($"GHOST SKIRMISH: {a.Label} and {b.Label} shadowed each other at {dist:F0}m, no contact (chance {contactChance:P0})");
                     continue;
                 }
-                _skirmishPairSeenAt[pairKey] = Time.time;
+                _ghostContacts.Record(pairKey, Time.time, fought: true);
 
                 var fightDistance = sniperDetection ? Vector3.Distance(posA, posB) : dist;
                 if (extractContact)
