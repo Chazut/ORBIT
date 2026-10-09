@@ -301,7 +301,7 @@ public partial class DormancySystem
         {
             var squad = squads[s];
             if (squad == null || squad.Members.Count == 0 || !IsSquadDormant(squad)) continue;
-            if (squad.ExtractRequested || squad.InvestigateNoisePosition.HasValue) continue;
+            if (GhostNoiseInvestigation.Committed(squad) || squad.InvestigateNoisePosition.HasValue) continue;
             if (now < squad.GhostFightUntil || now - squad.LastNoiseReactionAt < NoiseReactionCooldownSeconds) continue;
             var curiosity = NoiseCuriosity(squad);
             if (curiosity <= 0f) continue;
@@ -327,6 +327,7 @@ public partial class DormancySystem
                     continue;
                 }
                 squad.InvestigateNoisePosition = sourcePosition;
+                squad.InvestigateNoiseExpiresAt = Mathf.Min(now + 10f, noise.LastShotAt + NoiseLingerSeconds);
                 squad.LastNoiseReactionAt = now;
                 _windowNoiseReactions++;
                 Log.Info($"GHOST HEARING: {squad} ({HearingLabel(squad)}) heard {(noise.Simulated ? "a ghost fight" : $"real gunfire ({noise.Shots} shots)")} {dist:F0}m away (audible to {sourceRange:F0}m) and goes to look (chance {chance:P0}) source={sourcePosition}");

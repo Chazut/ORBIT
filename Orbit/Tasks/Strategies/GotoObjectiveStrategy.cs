@@ -85,6 +85,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
             var squad = ActiveEntities[i];
             using var timing = PerformanceJournal.Measure(TransitionPhase.StrategySquad, "strategy-squad", this, squad.Id);
             var squadObjective = squad.Objective;
+            GhostNoiseInvestigation.Revalidate(squad, waypointSystem);
 
             if (squad.Camp.Active)
             {
@@ -220,6 +221,8 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                 continue;
             }
             TickMainObjectives(squad);
+            // Entering a local Kill main this tick can make a previously accepted sound irrelevant.
+            GhostNoiseInvestigation.Revalidate(squad, waypointSystem);
 
             var escortingCorpse = squad.CorpseEscort.Maintain(squad, waypointSystem, SquadAnyMemberInCombat(squad));
             if (TryContinueLootExtractSweep(squad)) continue;

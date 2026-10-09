@@ -88,6 +88,12 @@ public partial class WaypointSystem
 
     internal bool DispatchPending(Entity entity) => _dispatchSearches.ContainsKey(entity);
 
+    internal void CancelNoiseInvestigation(Squad squad)
+    {
+        if (_dispatchSearches.TryGetValue(squad, out var search) && search.Investigation)
+            CancelDispatch(squad);
+    }
+
     internal void RefreshLootEntry(Squad squad, Vector2Int cell)
     {
         // Discard searches started at a distant origin before clearing their cached failures.

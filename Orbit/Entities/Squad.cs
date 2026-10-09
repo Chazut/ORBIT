@@ -111,6 +111,7 @@ public class Squad(int id, float[] taskScores, int targetMembersCount) : Entity(
     /// <summary>Ghost hearing: where the sleeping squad decided to go and look after hearing a firefight.
     /// Set by DormancySystem, consumed (and cleared) by GotoObjectiveStrategy on its next tick.</summary>
     public Vector3? InvestigateNoisePosition;
+    internal float InvestigateNoiseExpiresAt;
 
     /// <summary>Time.time of the last noise this squad reacted to, paces the next reaction.</summary>
     public float LastNoiseReactionAt = -999f;
