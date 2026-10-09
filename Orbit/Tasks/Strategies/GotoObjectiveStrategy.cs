@@ -863,13 +863,13 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
             var splinterAlreadyDone = agentObjective.SplinterParent != null
                                       && (agentObjective.Status == ObjectiveStatus.Finished
                                           || agentObjective.Status == ObjectiveStatus.Failed);
-            // Roam continuation for the leader: anchor-first parks i=0 on the squad anchor, and
+            // Roam continuation: anchor-first parks the leader on the squad anchor, and
             // "Location == squad objective" keeps them aligned forever once Finished — the leader stood
             // guarding beside his completed patrol point for a minute while followers walked out their
             // splinters (observed during Kills roam). During roam, a leader who has
-            // FINISHED the anchor is treated as misaligned so he falls into the splinter branches like
-            // everyone else; followers' targets are untouched.
-            var leaderFinishedAnchorInRoam = i == 0 && useRoam
+            // FINISHED the anchor is treated as misaligned so he falls into the splinter branches.
+            // Kill roam also releases followers who fell back to that exhausted anchor.
+            var finishedAnchorInRoam = (i == 0 || activeType == MainObjectiveType.Kills) && useRoam
                                              && agentObjective.SplinterParent == null
                                              && agentObjective.Location != null
                                              && agentObjective.Location == squadObjective.Location
@@ -896,7 +896,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
             var ownKillReroute = waypointSystem.TryGetNextOwnKillCorpseForAgent(squad, agent);
             var visibleAirdrop = ownKillReroute == null ? waypointSystem.TryFindOpportunisticAirdrop(agent) : null;
             var hasPendingAccess = waypointSystem.TryResumeMemberWaypoint(agent, out var pendingPick, out var pendingParent);
-            var aligned = !splinterAlreadyDone && !leaderFinishedAnchorInRoam
+            var aligned = !splinterAlreadyDone && !finishedAnchorInRoam
                           && !hasPendingAccess
                           && visibleAirdrop == null
                           && (ownKillReroute == null || agentObjective.Location == ownKillReroute)
@@ -904,12 +904,12 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                               || (agentObjective.SplinterParent != null
                                   && agentObjective.SplinterParent == squadObjective.Location)
                               || splinterStickyAcrossAnchor);
-            if (leaderFinishedAnchorInRoam)
+            if (finishedAnchorInRoam)
             {
                 if (agentObjective.Location.Category == WaypointCategory.Synthetic)
                     squad.RecentlyVisitedPoiCooldowns[agentObjective.Location.Id] =
                         Time.time + ServerConfig.MainObjectives.SyntheticVisitCooldownSeconds;
-                Log.Debug($"{agent} leader roam continuation: finished anchor {agentObjective.Location}, picking a splinter instead of guarding");
+                Log.Debug($"{agent} roam continuation: finished anchor {agentObjective.Location}, picking a splinter instead of guarding");
             }
 
             if (aligned && agentObjective.Location != null)
@@ -978,7 +978,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                 else if (i == 0
                          && !anchorReservedForOwnKill
                          && squadObjective.Location != null
-                         && !(leaderFinishedAnchorInRoam
+                         && !(finishedAnchorInRoam
                               && squadObjective.Location.Category == WaypointCategory.Synthetic)
                          && !squad.CompletedPoiIds.Contains(squadObjective.Location.Id)
                          && !agent.ValueSkippedPoiIds.Contains(squadObjective.Location.Id)
@@ -1015,20 +1015,27 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                     var roamSplinter = waypointSystem.FindRoamSplinterForMember(
                         agent.Position, searchCenter, squad, excludeForRoam, roamRadius,
                         roamLooseLoot, roamContainerLoot, roamCorpse, roamSynthetic);
+                    var localKillRoam = roamSplinter == null && waypointSystem.IsLocalKillRoam(agent, activeMain);
+                    if (localKillRoam)
+                    {
+                        roamSplinter = waypointSystem.FindKillPatrolForMember(agent, activeMain, out var patrolPending);
+                        if (patrolPending) continue;
+                    }
                     if (roamSplinter != null)
                     {
                         targetLoc = roamSplinter;
                         splinterParent = squadObjective.Location;
                         _splinterScratch.Add(roamSplinter.Id);
                     }
-                    else if (squadObjective.Location != null
-                             && (leaderFinishedAnchorInRoam
+                    else if (localKillRoam || squadObjective.Location != null
+                             && (finishedAnchorInRoam
                                  || (squadObjective.Location.Position - agent.Position).sqrMagnitude <= squadObjective.Location.RadiusSqr))
                     {
                         // This search, rather than an arbitrary null objective, proves local exhaustion.
                         // Once all members settle, re-evaluate the wider cell instead of waiting at this POI.
                         targetLoc = null;
                         splinterParent = null;
+                        locallyExhausted = localKillRoam;
                         if (trackLootExhaustion)
                         {
                             locallyExhausted = true;
