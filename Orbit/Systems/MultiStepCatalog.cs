@@ -20,8 +20,14 @@ internal sealed class OperationStep
     internal bool Underground;
     internal Vector3 Entry;
     private Func<Vector3, bool> _interactionCheck;
+    private OperationSwitchReach.Result _lastReach;
     internal Func<Vector3, bool> InteractionCheck => _interactionCheck ??= CanInteract;
-    private bool CanInteract(Vector3 feet) => OperationSwitchReach.CanReach(feet, Object);
+    internal string ReachDiagnostics => _lastReach.Diagnostics;
+    internal bool CanInteract(Vector3 feet)
+    {
+        _lastReach = OperationSwitchReach.Evaluate(feet, Object);
+        return _lastReach.Reachable;
+    }
     internal Vector3 Position => WaitAt?.transform.position ?? Exit?.ExfilInteriorPosition ?? Exit?.Position
         ?? (Kind == OperationStepKind.Access && Object is KeycardDoor card && card.DoorState == EDoorState.Locked
             && card.Proxies?.Length > 0 ? card.Proxies[0].transform.position : Object.transform.position);

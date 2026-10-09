@@ -154,7 +154,9 @@ public partial class WaypointSystem
         if (step.Kind == OperationStepKind.Access && step.Object is KeycardDoor card
             && card.DoorState == EDoorState.Locked && card.Proxies?.Length > 0)
             target = card.Proxies[0].transform.position; // 11SR reader is upstairs, far from its door.
-        else if (step.Kind is OperationStepKind.Access or OperationStepKind.Switch)
+        else if (step.Kind == OperationStepKind.Switch)
+            target = OperationSwitchReach.TargetPosition(step.Object);
+        else if (step.Kind == OperationStepKind.Access)
             target = step.Object.GetInteractionParameters(actor.Position).InteractionPosition;
         // If another squad already powered D2, approach the bunker entry before restricting travel.
         // Reaching this anchor must never activate the distant gate button.
@@ -162,7 +164,8 @@ public partial class WaypointSystem
         if (entering) target = step.Entry;
         var found = search.Find(actor.Position, target, out point, out final, expansion, history, floorAware: true,
             allowedPoint: step.Underground && !entering ? OperationRoutePolicy.D2 : null,
-            finalPoint: step.Kind == OperationStepKind.Switch && !entering ? step.InteractionCheck : null);
+            finalPoint: step.Kind == OperationStepKind.Switch && !entering ? step.InteractionCheck : null,
+            localAccess: step.Kind == OperationStepKind.Switch && !entering);
         if (entering) final = false;
         return found;
     }

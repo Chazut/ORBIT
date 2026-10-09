@@ -38,15 +38,24 @@ internal sealed class OperationPlan : IObjectiveWork
     private readonly OperationRouteSearch _route = new();
     private readonly List<Vector3> _approachHistory = new();
     private bool _approachOnly;
+    private float _approachRadiusSqr = 4f;
     private readonly OperationProgress _progress = new();
     private readonly HashSet<Door> _triedAccessDoors = new();
     private Door _accessDoor;
     private float _accessDoorAt;
+    private float _nextReachCheck;
 
     internal OperationPlan(OperationDefinition definition, bool alarm)
     {
         Definition = definition;
-        foreach (var step in definition.Steps) if (!step.OptionalAlarm || alarm) _steps.Add(step);
+        // Scene objects remain shared; cached reach callbacks/diagnostics belong to this plan.
+        foreach (var step in definition.Steps)
+            if (!step.OptionalAlarm || alarm)
+                _steps.Add(new OperationStep
+                {
+                    Label = step.Label, Kind = step.Kind, Object = step.Object, WaitAt = step.WaitAt,
+                    Exit = step.Exit, OptionalAlarm = step.OptionalAlarm, Underground = step.Underground, Entry = step.Entry
+                });
     }
 
     internal void Begin(Squad squad)
@@ -126,6 +135,15 @@ internal sealed class OperationPlan : IObjectiveWork
         }
         if (step.Kind is OperationStepKind.Switch or OperationStepKind.Access)
         {
+            // A short leg can pass the exposed lever before its destination. Recheck locally
+            // under the shared work budget instead of walking past a usable interaction.
+            if (step.Kind == OperationStepKind.Switch && _orders.ContainsKey(_actor) && _accessDoor == null
+                && now >= _nextReachCheck && (_actor.Position - step.Position).sqrMagnitude <= 36f)
+            {
+                if (!waypoints.TryOperationWork(this)) return true;
+                _nextReachCheck = now + .25f;
+                if (TryNearbySwitch(squad, waypoints, "passing within reach")) return true;
+            }
             if (_progress.Observe(_actor.Position, step.Position, _elapsed)) _retries = 0;
             if (!_interactionPending && _accessDoor == null && _progress.Stalled(_elapsed))
                 return End(squad, waypoints, "no advancing route");
@@ -145,7 +163,7 @@ internal sealed class OperationPlan : IObjectiveWork
                 else { _accessDoor = null; _route.Reset(); _retries++; }
             }
             if (TryNearbySwitch(squad, waypoints, "local reach")) return true;
-            OperationRouteSearch.Remember(_approachHistory, _actor.Position);
+            OperationRouteSearch.Remember(_approachHistory, _actor.Position, step.Kind == OperationStepKind.Switch ? 2f : 5f);
             if (!waypoints.TryOperationPoint(_actor, step, _route, out _anchor, out var final, _retries, _approachHistory))
             {
                 if (_route.Pending)
@@ -160,10 +178,16 @@ internal sealed class OperationPlan : IObjectiveWork
                 return true;
             }
             _approachOnly = !final;
+            var localSwitchLeg = _approachOnly && step.Kind == OperationStepKind.Switch
+                && (_anchor - step.Position).sqrMagnitude <= 100f;
+            _approachRadiusSqr = localSwitchLeg ? 1f : 4f;
+            // Preserve ordinary closed-door recovery before leaving for another local leg.
+            // Static/open scenery, such as Hermetic's entrance, is not an access door.
+            if (_approachOnly && TryAccessDoor(squad, waypoints)) return true;
             ReportRoute(squad, step, true);
             waypoints.CollectCorpseEscortCover(_anchor, _covers);
             _occupied.Clear();
-            SetOrder(_actor, Point(waypoints, _anchor, step.Label, _approachOnly ? 2f : 1f), waypoints);
+            SetOrder(_actor, Point(waypoints, _anchor, step.Label, _approachOnly && !localSwitchLeg ? 2f : 1f), waypoints);
             if (Main != null) { Main.Position = step.Position; Main.CellCoords = waypoints.WorldToCell(step.Position); }
             squad.Objective.Location = _orders[_actor];
             squad.Objective.Status = SquadObjectiveState.Active;
@@ -189,9 +213,9 @@ internal sealed class OperationPlan : IObjectiveWork
         }
         // BSG may stop just outside a one-metre anchor. Finish an approach leg before
         // counting that as a route failure, then recalculate the remaining local path.
-        if (_approachOnly && (_actor.Position - _anchor).sqrMagnitude <= 4f)
+        if (_approachOnly && (_actor.Position - _anchor).sqrMagnitude <= _approachRadiusSqr)
         {
-            OperationRouteSearch.Remember(_approachHistory, _actor.Position);
+            OperationRouteSearch.Remember(_approachHistory, _actor.Position, step.Kind == OperationStepKind.Switch ? 2f : 5f);
             ReleaseOrders(squad, waypoints);
             _actor = null;
             _progress.ReachedLeg();
@@ -202,7 +226,7 @@ internal sealed class OperationPlan : IObjectiveWork
         {
             if (TryNearbySwitch(squad, waypoints, "arrival failed")) return true;
             if (TryAccessDoor(squad, waypoints)) return true;
-            OperationRouteSearch.Remember(_approachHistory, _anchor);
+            OperationRouteSearch.Remember(_approachHistory, _anchor, step.Kind == OperationStepKind.Switch ? 2f : 5f);
             ReleaseOrders(squad, waypoints);
             _actor = null;
             _route.Reset();
@@ -228,8 +252,9 @@ internal sealed class OperationPlan : IObjectiveWork
             return Advance(squad, waypoints);
         }
         if ((_actor.Position - _anchor).sqrMagnitude > 1f) return true;
-        if (step.Kind == OperationStepKind.Switch && !OperationSwitchReach.CanReach(_actor.Position, step.Object))
+        if (step.Kind == OperationStepKind.Switch && !step.CanInteract(_actor.Position))
         {
+            Log.Info($"MULTISTEP REACH: {squad} operation={Definition.Id} step={step.Label} {step.ReachDiagnostics}");
             // A valid NavMesh endpoint can still be on the other side of a wall.
             if (TryAccessDoor(squad, waypoints)) return true;
             ReleaseOrders(squad, waypoints); _route.Reset(); _actor = null;
@@ -256,9 +281,11 @@ internal sealed class OperationPlan : IObjectiveWork
     {
         if (Current.Kind != OperationStepKind.Switch || Current.Object is not Switch sw
             || Current.Underground && !OperationRoutePolicy.InD2Bunker(_actor.Position)
-            || !OperationSwitchReach.CanReach(_actor.Position, sw)) return false;
+            || !Current.CanInteract(_actor.Position)) return false;
         // Use the native interaction, including linked power, gate and extraction callbacks.
         // Assigning DoorState directly would show an open lever without powering its circuit.
+        ReleaseOrders(squad, waypoints);
+        _route.Reset();
         Interact(squad, waypoints, reason);
         return true;
     }
@@ -269,6 +296,7 @@ internal sealed class OperationPlan : IObjectiveWork
         var detail = $"operation={Definition.Id} step={step.Label} from={_actor.Position} target={step.Position}";
         if (found) detail += $" approach={_anchor} final={!_approachOnly}";
         detail += $" samples={_route.Samples} partial={_route.PartialPaths} invalid={_route.InvalidPaths} attempt={_retries + 1} heightGap={step.Position.y - _actor.Position.y:F2}m {_route.Diagnostics} underground={step.Underground} {_progress.Diagnostics}";
+        if (step.Kind == OperationStepKind.Switch) detail += $" reach=[{step.ReachDiagnostics}]";
         Log.Info($"MULTISTEP ROUTE: {squad} {detail}");
         PerformanceJournal.Event("multistep-route", _actor.Player?.ProfileId, detail, squad.Id);
     }
@@ -371,6 +399,7 @@ internal sealed class OperationPlan : IObjectiveWork
         _actor = null; _loot = null; _elapsed = 0; _regroupAt = -1; _retries = 0; _interactionRetries = 0; _interactionPending = false;
         _route.Reset(); _approachOnly = false; _approachHistory.Clear();
         _progress.Reset(); _accessDoor = null; _triedAccessDoors.Clear();
+        _nextReachCheck = 0;
         _attemptedLoot.Clear();
         Status = "approach";
         if (Main != null) { Main.Position = Current.Position; Main.CellCoords = waypoints.WorldToCell(Current.Position); }

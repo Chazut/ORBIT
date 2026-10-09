@@ -24,6 +24,7 @@ internal sealed class OperationRouteSearch
     private int _outsideScope, _blockedInteraction;
     private Vector3 _lastRejected;
     private Vector3 _target;
+    private bool _localAccess;
     private string _lastRejection = "none";
     internal bool Pending { get; private set; }
     internal int Samples { get; private set; }
@@ -35,7 +36,7 @@ internal sealed class OperationRouteSearch
 
     internal string Diagnostics => $"complete={_completePaths} invalidQueries={_invalidQueries} approachChecks={_checks} approachRejected={_rejected}"
         + $" searchTarget={_target} lastRejected={_lastRejected} lastRejection={_lastRejection}"
-        + $" filters=[no-sample:{_noSample},floor:{_wrongFloor},outside-target:{_outsideTarget},no-corners:{_noCorners},near:{_tooClose},no-progress:{_noProgress},visited:{_visited},scope:{_outsideScope},interaction:{_blockedInteraction}]";
+        + $" filters=[no-sample:{_noSample},floor:{_wrongFloor},outside-target:{_outsideTarget},no-corners:{_noCorners},near:{_tooClose},no-progress:{_noProgress},visited:{_visited},scope:{_outsideScope},interaction:{_blockedInteraction}] localAccess={_localAccess}";
 
     internal void Reset()
     {
@@ -45,12 +46,13 @@ internal sealed class OperationRouteSearch
         _noSample = _wrongFloor = _outsideTarget = _noCorners = _tooClose = _noProgress = _visited = 0;
         _outsideScope = _blockedInteraction = 0;
         _lastRejected = _target = default; _lastRejection = "none";
+        _localAccess = false;
         Pending = false;
     }
 
     internal bool Find(Vector3 origin, Vector3 target, out Vector3 point, out bool final,
         int expansion = 0, IReadOnlyList<Vector3> avoided = null, bool floorAware = false, float finalHeightTolerance = 2.5f,
-        Func<Vector3, bool> allowedPoint = null, Func<Vector3, bool> finalPoint = null)
+        Func<Vector3, bool> allowedPoint = null, Func<Vector3, bool> finalPoint = null, bool localAccess = false)
     {
         point = default;
         _target = target;
@@ -60,7 +62,13 @@ internal sealed class OperationRouteSearch
         // Vertical objectives need access routes on several floors, including stairs behind us.
         // Enumeration is still resumed in slices of at most three navigation calls.
         var expandedCandidates = floorAware ? 128 : ExpandedCandidates;
-        var totalCandidates = DirectCandidates + expansion * expandedCandidates;
+        // Once beside a switch, search the entrance and corners of its small enclosure.
+        // Complete final paths may still take any necessary detour around the building.
+        var nearbyAccess = localAccess && HorizontalDistance(origin, target) <= 15f
+            && Mathf.Abs(origin.y - target.y) <= 2.5f;
+        _localAccess = nearbyAccess;
+        var totalCandidates = DirectCandidates + (nearbyAccess ? 16 : expansion * expandedCandidates);
+        var separation = nearbyAccess ? 2f : 5f;
         var work = 0;
         while (_candidate < totalCandidates && work < 3)
         {
@@ -84,6 +92,14 @@ internal sealed class OperationRouteSearch
                 var length = index == LocalCandidates ? 80f : index == LocalCandidates + 1 ? 40f : 20f;
                 sample = Vector3.MoveTowards(origin, target, Mathf.Min(length, distance * .65f));
                 sample.y = origin.y;
+            }
+            else if (nearbyAccess)
+            {
+                var slot = index - DirectCandidates;
+                var angle = slot % 8 * Mathf.PI / 4f;
+                var radius = slot < 8 ? 4f : 7f;
+                sample = target + new Vector3(Mathf.Cos(angle) * radius, -1.4f, Mathf.Sin(angle) * radius);
+                sampleRadius = 1.25f;
             }
             else if (floorAware)
             {
@@ -146,10 +162,10 @@ internal sealed class OperationRouteSearch
             var originGap = Vector3.Distance(origin, target);
             // Require actual, useful progress; a wall endpoint beside the bot cannot create a retry loop.
             var score = gap + (floorAware ? Mathf.Abs(end.y - target.y) * 2f : 0);
-            if (Vector3.Distance(origin, end) < 5f) { _tooClose++; continue; }
-            var detour = floorAware && expansion > 0 ? expansion * 60f : expansion >= 2 ? 20f : -3f;
+            if (Vector3.Distance(origin, end) < separation) { _tooClose++; continue; }
+            var detour = nearbyAccess ? 6f : floorAware && expansion > 0 ? expansion * 60f : expansion >= 2 ? 20f : -3f;
             if (gap > originGap + detour) { _noProgress++; continue; }
-            if (Visited(end, avoided)) { _visited++; continue; }
+            if (Visited(end, avoided, separation)) { _visited++; continue; }
             RememberApproach(end, score, _path.status == NavMeshPathStatus.PathComplete);
         }
         if (_candidate < totalCandidates) { Pending = true; return false; }
@@ -164,8 +180,8 @@ internal sealed class OperationRouteSearch
             var approach = candidates[0].Point;
             candidates.RemoveAt(0);
             // The actor or its approach history may have advanced while this search was queued.
-            if (Vector3.Distance(origin, approach) < 5f) { RejectApproach(approach, "too-close"); continue; }
-            if (Visited(approach, avoided)) { RejectApproach(approach, "visited"); continue; }
+            if (Vector3.Distance(origin, approach) < separation) { RejectApproach(approach, "too-close"); continue; }
+            if (Visited(approach, avoided, separation)) { RejectApproach(approach, "visited"); continue; }
             _checks++;
             var calculated = NavMesh.CalculatePath(origin, approach, NavMesh.AllAreas, _path);
             if (calculated && _path.status == NavMeshPathStatus.PathComplete)
@@ -205,18 +221,18 @@ internal sealed class OperationRouteSearch
     private void RejectApproach(Vector3 point, string reason)
     { _rejected++; _lastRejected = point; _lastRejection = reason; }
 
-    internal static void Remember(List<Vector3> history, Vector3 point)
+    internal static void Remember(List<Vector3> history, Vector3 point, float separation = 5f)
     {
-        if (Visited(point, history)) return;
+        if (Visited(point, history, separation)) return;
         if (history.Count >= 64) history.RemoveAt(0);
         history.Add(point);
     }
 
-    private static bool Visited(Vector3 point, IReadOnlyList<Vector3> avoided)
+    private static bool Visited(Vector3 point, IReadOnlyList<Vector3> avoided, float separation = 5f)
     {
         if (avoided == null) return false;
         for (var i = 0; i < avoided.Count; i++)
-            if ((point - avoided[i]).sqrMagnitude < 25f) return true;
+            if ((point - avoided[i]).sqrMagnitude < separation * separation) return true;
         return false;
     }
 
