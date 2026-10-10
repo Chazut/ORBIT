@@ -30,6 +30,7 @@ internal sealed class OperationRouteSearch
     internal int Samples { get; private set; }
     internal int PartialPaths { get; private set; }
     internal int InvalidPaths { get; private set; }
+    internal Vector3[] RouteCorners { get; private set; }
     private const int LocalCandidates = 20;
     private const int DirectCandidates = LocalCandidates + 3;
     private const int ExpandedCandidates = 42;
@@ -48,6 +49,7 @@ internal sealed class OperationRouteSearch
         _lastRejected = _target = default; _lastRejection = "none";
         _localAccess = _groundedTarget = false;
         Pending = false;
+        RouteCorners = null;
     }
 
     internal bool Find(Vector3 origin, Vector3 target, out Vector3 point, out bool final,
@@ -61,6 +63,8 @@ internal sealed class OperationRouteSearch
         final = false;
         Pending = false;
         expansion = Mathf.Clamp(expansion, 0, 2);
+        if (floorAware && Mathf.Abs(origin.y - target.y) > 2.5f && HorizontalDistance(origin, target) < 80f)
+            expansion = Mathf.Max(1, expansion);
         // Vertical objectives need access routes on several floors, including stairs behind us.
         // Enumeration is still resumed in slices of at most three navigation calls.
         var expandedCandidates = floorAware ? 128 : ExpandedCandidates;
@@ -165,6 +169,7 @@ internal sealed class OperationRouteSearch
             {
                 if (corners == null || corners.Length == 0
                     || Vector3.Distance(corners[corners.Length - 1], hit.position) > 1f) { _noCorners++; continue; }
+                RouteCorners = corners;
                 point = hit.position; final = true; return true;
             }
             if (corners == null || corners.Length < 2) { _noCorners++; continue; }
@@ -173,6 +178,10 @@ internal sealed class OperationRouteSearch
             var originGap = Vector3.Distance(origin, target);
             // Require actual, useful progress; a wall endpoint beside the bot cannot create a retry loop.
             var score = gap + (floorAware ? Mathf.Abs(end.y - target.y) * 2f : 0);
+            // A reachable stair landing is more useful than another endpoint beneath the target.
+            // Do not reject temporary descents: real staircases and bunker corridors can go both ways.
+            if (floorAware && Mathf.Abs(end.y - target.y) < Mathf.Abs(origin.y - target.y) - 1f)
+                score -= 120f;
             if (Vector3.Distance(origin, end) < separation) { _tooClose++; continue; }
             var detour = nearbyAccess ? 6f : floorAware && expansion > 0 ? expansion * 60f : expansion >= 2 ? 20f : -3f;
             if (gap > originGap + detour) { _noProgress++; continue; }
@@ -186,7 +195,7 @@ internal sealed class OperationRouteSearch
         {
             if (work >= 3) { Pending = true; return false; }
             work++;
-            var candidates = _partial.Count == 0 || _complete.Count > 0 && _complete[0].Score <= _partial[0].Score
+            var candidates = _partial.Count == 0 || _complete.Count > 0 && (floorAware || _complete[0].Score <= _partial[0].Score)
                 ? _complete : _partial;
             var approach = candidates[0].Point;
             candidates.RemoveAt(0);
@@ -199,6 +208,7 @@ internal sealed class OperationRouteSearch
             {
                 if (!OperationRoutePolicy.AllowsPath(_path.corners, allowedPoint))
                 { _outsideScope++; RejectApproach(approach, "outside-scope"); continue; }
+                RouteCorners = _path.corners;
                 point = approach; return true;
             }
             InvalidPaths++;

@@ -27,6 +27,7 @@ internal sealed class SniperPlan : IObjectiveWork
     private readonly OperationRouteSearch _route = new();
     private readonly List<Vector3> _approachHistory = new();
     private readonly List<Vector3> _rejectedPosts = new();
+    private readonly OperationProgress _progress = new();
     private Agent _actor;
     private MainObjective _main;
     private Vector3 _post, _leg;
@@ -55,7 +56,7 @@ internal sealed class SniperPlan : IObjectiveWork
         if (!ServerConfig.Rush.Allows(squad.Leader?.BotCategory) || squad.ExtractRequested)
             return End(squad, w, "cancelled for extraction or settings");
         if (_actor != null && (!squad.Members.Contains(_actor) || _actor.Bot.IsDead || _actor.SoloExtractRequested))
-        { Release(squad, w); _actor = null; _arrived = false; _route.Reset(); _approachHistory.Clear(); _retries = 0; }
+        { Release(squad, w); _actor = null; _arrived = false; _route.Reset(); _progress.Reset(); _approachHistory.Clear(); _retries = 0; }
         if (_actor != null && now >= _nextEquipment)
         {
             _nextEquipment = now + 5;
@@ -115,6 +116,7 @@ internal sealed class SniperPlan : IObjectiveWork
                 return true;
             }
             _resolved = true;
+            _progress.Reset();
             _route.Reset(); _approachHistory.Clear(); _retries = 0;
             main.Position = _post; main.CellCoords = w.WorldToCell(_post);
             main.ZoneFloorId = _site.Elevated ? null : _site.FloorId;
@@ -122,6 +124,12 @@ internal sealed class SniperPlan : IObjectiveWork
             return true;
         }
         if (TryLocalRelocation(squad, w, now)) return true;
+        if (!_arrived)
+        {
+            _progress.Observe(_actor.Position, _post, _travel);
+            if (_orders.ContainsKey(_actor)) _progress.ObserveLeg(_actor.Position, _travel);
+            if (_progress.Stalled(_travel) && !_progress.AdvancingAlongLeg(_travel)) return RetryPost(squad, w);
+        }
         if (!_orders.ContainsKey(_actor))
         {
             if (!w.TryOperationWork(this)) return true;
@@ -138,6 +146,8 @@ internal sealed class SniperPlan : IObjectiveWork
             }
             _partial = !final;
             ReportRoute(squad, _post, final ? "final leg" : "staged leg");
+            _progress.BeginLeg(_route.RouteCorners, _travel);
+            _progress.ObserveLeg(_actor.Position, _travel);
             Assign(_actor, _leg, w, "Sniper approach");
             squad.Objective.Location = _orders[_actor]; squad.Objective.Status = SquadObjectiveState.Active;
             return true;
@@ -146,6 +156,7 @@ internal sealed class SniperPlan : IObjectiveWork
         if (_partial && Near(_actor.Position, _leg, 2.5f))
         {
             OperationRouteSearch.Remember(_approachHistory, _actor.Position);
+            _progress.ReachedLeg();
             Release(squad, w); _route.Reset(); _retries = 0; return true;
         }
         if (_actor.Objective.Status == ObjectiveStatus.Failed)
@@ -282,6 +293,7 @@ internal sealed class SniperPlan : IObjectiveWork
     {
         ReportRoute(squad, _post, "post rejected; survey continues");
         _rejectedPosts.Add(_post);
+        _progress.Reset();
         Release(squad, w); _route.Reset(); _approachHistory.Clear();
         _resolved = _arrived = false; _retries = 0;
         if (_candidate >= 25) return End(squad, w, "no reachable post");

@@ -40,6 +40,8 @@ internal sealed class OperationPlan : IObjectiveWork
     private bool _approachOnly;
     private float _approachRadiusSqr = 4f;
     private readonly OperationProgress _progress = new();
+    private readonly RecordedApproach _recorded = new();
+    private bool _usingRecorded, _searchingRecorded;
     private readonly HashSet<Door> _triedAccessDoors = new();
     private Door _accessDoor;
     private float _accessDoorAt;
@@ -105,7 +107,8 @@ internal sealed class OperationPlan : IObjectiveWork
             if (!_paused) { ReleaseOrders(squad, waypoints); _paused = true; Status = "paused"; LogStep(squad); }
             return false;
         }
-        if (_paused) { _paused = false; _actor = null; _route.Reset(); Status = "approach"; LogStep(squad); }
+        if (_paused)
+        { _paused = false; _actor = null; _route.Reset(); _recorded.Reset(); _searchingRecorded = false; Status = "approach"; LogStep(squad); }
         _elapsed += delta;
         PauseOtherMains(squad, delta);
         if (_elapsed >= ServerConfig.MultiStep.StepTimeout
@@ -130,6 +133,7 @@ internal sealed class OperationPlan : IObjectiveWork
             ReleaseOrders(squad, waypoints);
             _actor = null;
             _route.Reset();
+            _recorded.Reset(); _searchingRecorded = false;
             foreach (var member in squad.Members)
                 if (member.IsActive && !member.SoloExtractRequested && !CorpseEscort.InFlight(member)) { _actor = member; break; }
             if (_actor == null) return End(squad, waypoints, "no available operator");
@@ -146,8 +150,15 @@ internal sealed class OperationPlan : IObjectiveWork
                 if (TryNearbySwitch(squad, waypoints, "passing within reach")) return true;
             }
             if (_progress.Observe(_actor.Position, step.Position, _elapsed)) _retries = 0;
-            if (!_interactionPending && _accessDoor == null && _progress.Stalled(_elapsed))
-                return End(squad, waypoints, "no advancing route");
+            if (_orders.ContainsKey(_actor)) _progress.ObserveLeg(_actor.Position, _elapsed);
+            if (!_interactionPending && _accessDoor == null && _progress.Stalled(_elapsed)
+                && !_progress.AdvancingAlongLeg(_elapsed))
+            {
+                if (!step.Underground || _usingRecorded) return End(squad, waypoints, "no advancing route");
+                ReleaseOrders(squad, waypoints); _route.Reset(); _recorded.Reset(); _progress.Reset();
+                _usingRecorded = true;
+                Log.Info($"MULTISTEP FALLBACK: {squad} operation={Definition.Id} step={step.Label} reason=autonomous progress exhausted");
+            }
         }
         if (!_orders.ContainsKey(_actor))
         {
@@ -165,7 +176,23 @@ internal sealed class OperationPlan : IObjectiveWork
             }
             if (TryNearbySwitch(squad, waypoints, "local reach")) return true;
             OperationRouteSearch.Remember(_approachHistory, _actor.Position, step.Kind == OperationStepKind.Switch ? 2f : 5f);
-            if (!waypoints.TryOperationPoint(_actor, step, _route, out _anchor, out var final, _retries, _approachHistory))
+            var final = false;
+            var found = !_searchingRecorded && waypoints.TryOperationPoint(_actor, step, _route, out _anchor, out final, _retries, _approachHistory);
+            if (_searchingRecorded)
+            {
+                found = _recorded.Find(_actor.Position, step.Position, _approachHistory, out _anchor);
+                if (_recorded.Pending)
+                { _nextWork = now; waypoints.ContinueOperationWork(this); return true; }
+                if (!found) return End(squad, waypoints, "recorded fallback unreachable");
+                _searchingRecorded = false;
+                Log.Info($"MULTISTEP FALLBACK: {squad} operation={Definition.Id} step={step.Label} leg={_anchor}");
+            }
+            else if (_usingRecorded && !_route.Pending && (!found || !final))
+            {
+                _searchingRecorded = true; _recorded.Reset();
+                _nextWork = now; waypoints.ContinueOperationWork(this); return true;
+            }
+            if (!found)
             {
                 if (_route.Pending)
                 { _nextWork = now; waypoints.ContinueOperationWork(this); return true; }
@@ -175,7 +202,12 @@ internal sealed class OperationPlan : IObjectiveWork
                 _actor = null;
                 _route.Reset();
                 _nextWork = now + 3f;
-                if (++_retries >= 3) return End(squad, waypoints, "unreachable step");
+                if (++_retries >= 3)
+                {
+                    if (!step.Underground || _usingRecorded) return End(squad, waypoints, "unreachable step");
+                    _usingRecorded = true; _retries = 0; _progress.Reset();
+                    Log.Info($"MULTISTEP FALLBACK: {squad} operation={Definition.Id} step={step.Label} reason=autonomous search exhausted");
+                }
                 return true;
             }
             _approachOnly = !final;
@@ -186,6 +218,8 @@ internal sealed class OperationPlan : IObjectiveWork
             // Static/open scenery, such as Hermetic's entrance, is not an access door.
             if (_approachOnly && TryAccessDoor(squad, waypoints)) return true;
             ReportRoute(squad, step, true);
+            _progress.BeginLeg(_usingRecorded && !final ? _recorded.RouteCorners : _route.RouteCorners, _elapsed);
+            _progress.ObserveLeg(_actor.Position, _elapsed);
             waypoints.CollectCorpseEscortCover(_anchor, _covers);
             _occupied.Clear();
             SetOrder(_actor, Point(waypoints, _anchor, step.Label, _approachOnly && !localSwitchLeg ? 2f : 1f), waypoints);
@@ -401,6 +435,7 @@ internal sealed class OperationPlan : IObjectiveWork
         _actor = null; _loot = null; _elapsed = 0; _regroupAt = -1; _retries = 0; _interactionRetries = 0; _interactionPending = false;
         _route.Reset(); _approachOnly = false; _approachHistory.Clear();
         _progress.Reset(); _accessDoor = null; _triedAccessDoors.Clear();
+        _usingRecorded = _searchingRecorded = false; _recorded.Reset();
         _nextReachCheck = 0;
         _attemptedLoot.Clear();
         Status = "approach";
