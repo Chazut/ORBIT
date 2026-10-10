@@ -48,6 +48,8 @@ internal sealed class OperationPlan : IObjectiveWork
     private Door _accessDoor;
     private float _accessDoorAt;
     private float _nextReachCheck;
+    private Agent _interactionLookActor;
+    private Vector3 _interactionLookPoint;
 
     internal OperationPlan(OperationDefinition definition, bool alarm)
     {
@@ -158,12 +160,12 @@ internal sealed class OperationPlan : IObjectiveWork
         {
             // A short leg can pass the exposed lever before its destination. Recheck locally
             // under the shared work budget instead of walking past a usable interaction.
-            if (step.Kind == OperationStepKind.Switch && _orders.ContainsKey(_actor) && _accessDoor == null
-                && now >= _nextReachCheck && (_actor.Position - step.Position).sqrMagnitude <= 36f)
+            if (step.Kind is OperationStepKind.Switch or OperationStepKind.Access && _orders.ContainsKey(_actor) && _accessDoor == null
+                && now >= _nextReachCheck)
             {
                 if (!waypoints.TryOperationWork(this)) return true;
                 _nextReachCheck = now + .25f;
-                if (TryNearbySwitch(squad, waypoints, "passing within reach")) return true;
+                if (TryNearbyInteraction(squad, waypoints, "passing within reach")) return true;
             }
             if (_progress.Observe(_actor.Position, step.Position, _elapsed)) _retries = 0;
             if (_orders.ContainsKey(_actor)) _progress.ObserveLeg(_actor.Position, _elapsed);
@@ -188,7 +190,7 @@ internal sealed class OperationPlan : IObjectiveWork
                 else if (_elapsed - _accessDoorAt < 8f) return true;
                 else { _accessDoor = null; _route.Reset(); _retries++; }
             }
-            if (TryNearbySwitch(squad, waypoints, "local reach")) return true;
+            if (TryNearbyInteraction(squad, waypoints, "local reach")) return true;
             OperationRouteSearch.Remember(_approachHistory, _actor.Position, step.Kind == OperationStepKind.Switch ? 2f : 5f);
             var final = false;
             var found = !_searchingRecorded && waypoints.TryOperationPoint(_actor, step, _route, out _anchor, out final, _retries, _approachHistory);
@@ -210,7 +212,7 @@ internal sealed class OperationPlan : IObjectiveWork
             {
                 if (_route.Pending)
                 { _nextWork = now; waypoints.ContinueOperationWork(this); return true; }
-                if (TryNearbySwitch(squad, waypoints, "no complete path")) return true;
+                if (TryNearbyInteraction(squad, waypoints, "no complete path")) return true;
                 if (TryAccessDoor(squad, waypoints)) return true;
                 ReportRoute(squad, step, false);
                 _actor = null;
@@ -272,7 +274,7 @@ internal sealed class OperationPlan : IObjectiveWork
         }
         if (_actor.Objective.Status == ObjectiveStatus.Failed)
         {
-            if (TryNearbySwitch(squad, waypoints, "arrival failed")) return true;
+            if (TryNearbyInteraction(squad, waypoints, "arrival failed")) return true;
             if (TryAccessDoor(squad, waypoints)) return true;
             OperationRouteSearch.Remember(_approachHistory, _anchor, step.Kind == OperationStepKind.Switch ? 2f : 5f);
             ReleaseOrders(squad, waypoints);
@@ -304,7 +306,7 @@ internal sealed class OperationPlan : IObjectiveWork
             return Advance(squad, waypoints);
         }
         if ((_actor.Position - _anchor).sqrMagnitude > 1f) return true;
-        if (step.Kind == OperationStepKind.Switch && !step.CanInteract(_actor.Position))
+        if (step.Kind is OperationStepKind.Switch or OperationStepKind.Access && !step.CanInteract(_actor.Position))
         {
             Log.Info($"MULTISTEP REACH: {squad} operation={Definition.Id} step={step.Label} {step.ReachDiagnostics}");
             // A valid NavMesh endpoint can still be on the other side of a wall.
@@ -364,9 +366,9 @@ internal sealed class OperationPlan : IObjectiveWork
         return true;
     }
 
-    private bool TryNearbySwitch(Squad squad, WaypointSystem waypoints, string reason)
+    private bool TryNearbyInteraction(Squad squad, WaypointSystem waypoints, string reason)
     {
-        if (Current.Kind != OperationStepKind.Switch || Current.Object is not Switch sw
+        if (Current.Kind is not (OperationStepKind.Switch or OperationStepKind.Access) || Current.Object == null
             || Current.Underground && !OperationRoutePolicy.InD2Bunker(_actor.Position)
             || !Current.CanInteract(_actor.Position)) return false;
         // Use the native interaction, including linked power, gate and extraction callbacks.
@@ -383,7 +385,7 @@ internal sealed class OperationPlan : IObjectiveWork
         var detail = $"operation={Definition.Id} step={step.Label} from={_actor.Position} target={step.Position}";
         if (found) detail += $" approach={_anchor} final={!_approachOnly}";
         detail += $" samples={_route.Samples} partial={_route.PartialPaths} invalid={_route.InvalidPaths} attempt={_retries + 1} heightGap={step.Position.y - _actor.Position.y:F2}m {_route.Diagnostics} underground={step.Underground} {_progress.Diagnostics}";
-        if (step.Kind == OperationStepKind.Switch)
+        if (step.Kind is OperationStepKind.Switch or OperationStepKind.Access)
             detail += $" reach=[{step.ReachDiagnostics}] candidateReject=[{step.CandidateDiagnostics}]";
         Log.Info($"MULTISTEP ROUTE: {squad} {detail}");
         PerformanceJournal.Event("multistep-route", _actor.Player?.ProfileId, detail, squad.Id);
@@ -407,8 +409,13 @@ internal sealed class OperationPlan : IObjectiveWork
         try
         {
             if (recovery != null)
-                Log.Info($"MULTISTEP SWITCH: {squad} operation={Definition.Id} step={step.Label} nearby recovery reason={recovery} distance={Vector3.Distance(_actor.Position, step.Position):F2}m");
-            _actor.Look.Target = step.Object.transform.position;
+                Log.Info($"MULTISTEP SWITCH: {squad} operation={Definition.Id} step={step.Label} nearby recovery reason={recovery} distance={Vector3.Distance(_actor.Position, step.InteractionPoint):F2}m");
+            _interactionLookActor = _actor;
+            _interactionLookPoint = step.InteractionPoint;
+            _actor.Look.Target = _interactionLookPoint;
+            _actor.Look.Type = LookType.Position;
+            if (!_actor.IsDormant) LookSystem.LookToPoint(_actor, _interactionLookPoint, 360f);
+            Log.Info($"MULTISTEP SURFACE: {squad} operation={Definition.Id} step={step.Label} target={step.Object.Id} {step.ReachDiagnostics}");
             if (step.Object is Door locked && locked.DoorState == EDoorState.Locked)
             {
                 var interaction = locked.GetInteractionParameters(_actor.Position); // Selects the real remote card reader.
@@ -564,6 +571,9 @@ internal sealed class OperationPlan : IObjectiveWork
 
     private void ReleaseOrders(Squad squad, WaypointSystem waypoints)
     {
+        if (_interactionLookActor != null && _interactionLookActor.Look.Target == _interactionLookPoint)
+            _interactionLookActor.Look.Target = null;
+        _interactionLookActor = null;
         foreach (var pair in _orders)
         {
             if (pair.Key.Objective.Location == pair.Value)

@@ -28,17 +28,28 @@ internal sealed class OperationStep
     private Vector3 _rejectedFeet;
     internal Func<Vector3, bool> InteractionCheck => _interactionCheck ??= CanStand;
     internal string ReachDiagnostics => _lastReach.Diagnostics;
+    internal Vector3 InteractionPoint => _lastReach.Point;
     internal string CandidateDiagnostics => $"feet={_rejectedFeet} {_candidateRejection.Diagnostics}";
     private bool CanStand(Vector3 feet)
     {
-        var reach = OperationSwitchReach.Evaluate(feet, Object);
+        var reach = Evaluate(feet);
         if (!reach.Reachable) { _candidateRejection = reach; _rejectedFeet = feet; }
         return reach.Reachable;
     }
     internal bool CanInteract(Vector3 feet)
     {
-        _lastReach = OperationSwitchReach.Evaluate(feet, Object);
+        _lastReach = Evaluate(feet);
         return _lastReach.Reachable;
+    }
+    private OperationSwitchReach.Result Evaluate(Vector3 feet)
+    {
+        if (Kind == OperationStepKind.Access && Object != null)
+        {
+            var standing = Object.GetInteractionParameters(feet).InteractionPosition;
+            if ((feet - standing).sqrMagnitude > 4f || Mathf.Abs(feet.y - standing.y) > 1.5f)
+                return new(false, "interaction-position", standing);
+        }
+        return OperationSwitchReach.Evaluate(feet, Object);
     }
     internal Vector3 Position => WaitAt?.transform.position ?? Exit?.ExfilInteriorPosition ?? Exit?.Position
         ?? (Kind == OperationStepKind.Access && Object is KeycardDoor card && card.DoorState == EDoorState.Locked
@@ -69,6 +80,7 @@ internal sealed class MultiStepCatalog
         _exits = exits;
         _mapKey = mapKey ?? map;
         MultiStepAccess.Reset();
+        OperationSwitchReach.Reset();
         map = map.ToLowerInvariant();
         if (map != "interchange" && map != "rezervbase" && map != "bigmap") return;
         foreach (var obj in UnityEngine.Object.FindObjectsOfType<WorldInteractiveObject>(true))

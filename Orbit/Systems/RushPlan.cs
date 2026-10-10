@@ -44,6 +44,7 @@ internal sealed class RushPlan : IObjectiveWork
     private string _lastSiteName;
     private Waypoint _loot;
     private MarkedRoomScope _room;
+    private OperationStep _doorStep;
     private readonly HashSet<Agent> _roomLooters = new();
     private float _roomIdle;
     private float _roomEntryIdle, _roomEntryBestDistance = float.MaxValue;
@@ -188,7 +189,9 @@ internal sealed class RushPlan : IObjectiveWork
             // Marked rooms and boss areas on another floor may need distant stairs.
             var final = false;
             var found = !_searchingRecorded && _route.Find(_actor.Position, target, out _anchor, out final, _retries, _approachHistory,
-                floorAware: (Kind is "Marked" or "Boss") && Mathf.Abs(_actor.Position.y - target.y) > 2.5f);
+                floorAware: (Kind is "Marked" or "Boss") && Mathf.Abs(_actor.Position.y - target.y) > 2.5f,
+                finalPoint: door != null && !_inside && _doorApproach ? DoorStep(door).InteractionCheck : null,
+                localAccess: door != null && !_inside && _doorApproach);
             if (_searchingRecorded)
             {
                 found = _recorded.Find(_actor.Position, out _anchor);
@@ -263,6 +266,9 @@ internal sealed class RushPlan : IObjectiveWork
         return true;
     }
 
+    private OperationStep DoorStep(Door door)
+        => _doorStep?.Object == door ? _doorStep : _doorStep = new() { Kind = OperationStepKind.Access, Object = door };
+
     private bool InteractDoor(Squad squad, WaypointSystem waypoints, RushPoint site, Door door)
     {
         if (door.DoorState == EDoorState.Open)
@@ -282,7 +288,18 @@ internal sealed class RushPlan : IObjectiveWork
                 if (++_retries >= 3) return Skip(squad, waypoints, "door interaction point unreachable");
                 return true;
             }
-            _actor.Look.Target = door.transform.position;
+            var reach = OperationSwitchReach.Evaluate(_actor.Position, door);
+            if (!reach.Reachable)
+            {
+                Log.Info($"RUSH REACH: {squad} door={door.Id} {reach.Diagnostics}");
+                RememberApproach(_actor.Position);
+                Release(squad, waypoints); _route.Reset(); _nextWork = Time.time + 2f;
+                if (++_retries >= 3) return Skip(squad, waypoints, "door interaction blocked");
+                return true;
+            }
+            _actor.Look.Target = reach.Point;
+            _actor.Look.Type = LookType.Position;
+            if (!_actor.IsDormant) LookSystem.LookToPoint(_actor, reach.Point, 360f);
             var now = Time.time;
             if (now < _interactAt || !door.Operatable || door.DoorState == EDoorState.Interacting || door.InteractingPlayer != null) return true;
             _interactAt = now + 5;

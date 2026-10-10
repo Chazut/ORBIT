@@ -157,8 +157,8 @@ public partial class WaypointSystem
         if (entering) target = step.Entry;
         var found = search.Find(actor.Position, target, out point, out final, expansion, history, floorAware: true,
             allowedPoint: step.Underground && !entering ? OperationRoutePolicy.D2 : null,
-            finalPoint: step.Kind == OperationStepKind.Switch && !entering ? step.InteractionCheck : null,
-            localAccess: step.Kind == OperationStepKind.Switch && !entering,
+            finalPoint: step.Kind is OperationStepKind.Switch or OperationStepKind.Access && !entering ? step.InteractionCheck : null,
+            localAccess: step.Kind is OperationStepKind.Switch or OperationStepKind.Access && !entering,
             groundedTarget: step.Kind == OperationStepKind.Switch && step.SwitchApproach.HasValue && !entering);
         if (entering) final = false;
         return found;

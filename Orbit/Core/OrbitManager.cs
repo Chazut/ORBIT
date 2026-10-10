@@ -130,6 +130,7 @@ public class OrbitManager
 
     public void Dispose()
     {
+        Orbit.Navigation.OperationSwitchReach.Reset();
         SniperCombat.Clear();
         Orbit.Patches.AirdropLandedPatch.OnAirdropLanded -= WaypointSystem.RegisterLandedAirdrop;
         Orbit.Patches.AirdropReleasedPatch.OnAirdropReleased -= OnAirdropReleased;
