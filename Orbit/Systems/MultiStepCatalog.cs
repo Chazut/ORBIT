@@ -94,7 +94,8 @@ internal sealed class MultiStepCatalog
         else if (map == "rezervbase")
         {
             Add("d2", "D-2", true, "autoId_00000_D2_LEVER",
-                Step("Bunker power", "autoId_00000_D2_LEVER"), Step("D-2 gate button", "00453"),
+                Step("Bunker power", "autoId_00000_D2_LEVER"),
+                Step("D-2 gate button", "00453", approach: new Vector3(-116.3f, -18.4f, 169.3f)),
                 Wait("Wait for D-2 gate", "00454", "00453"),
                 ExitStep("Wait for gate and extract", "EXFIL_Bunker_D2", OperationStepKind.Extract));
             Add("hermetic", "Bunker Hermetic Door", true, "autoId_00632_EXFIL",
