@@ -83,6 +83,11 @@ public partial class WaypointSystem
             || (_claims.TryGetValue(pick.Id, out var claimant) && claimant != member.Id))
         {
             CancelMemberAccess(member);
+            // A finished/value-skipped anchor must not be offered again on every member tick.
+            // Let the shared dispatcher choose a target another member can actually use.
+            if (squad != null && (squad.CompletedPoiIds.Contains(pick.Id)
+                || IsUnavailableLooseLoot(pick) || AllAliveMembersValueSkipped(squad, pick.Id)))
+                RejectMemberAnchor(squad, pick);
             return false;
         }
         if (!CanSelectMemberDoorTarget(squad, pick))

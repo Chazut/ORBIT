@@ -67,6 +67,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
         {
             operatingSquad.Rush?.End(operatingSquad, waypointSystem, "strategy deactivated");
             operatingSquad.Operation?.End(operatingSquad, waypointSystem, "strategy deactivated");
+            operatingSquad.MainApproach.End(operatingSquad, waypointSystem);
             if (operatingSquad.MainObjectives != null)
                 foreach (var main in operatingSquad.MainObjectives) main.CampApproach?.Release(operatingSquad, waypointSystem);
         }
@@ -138,7 +139,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                         squad.CorpseWatchdogLocId = corpseObj.Id;
                         squad.CorpseWatchdogSince = Time.time;
                     }
-                    else if (squad.CorpseEscort.Active || SquadAnyMemberInCombat(squad)
+                    else if (Time.time < squad.GhostFightUntil || squad.CorpseEscort.Active || SquadAnyMemberInCombat(squad)
                              || SquadAnyMemberPursuingCorpse(squad, corpseObj))
                     {
                         // Pause only while there is genuine progress: SAIN combat / healing, or a member
@@ -254,6 +255,12 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
             }
 
             if (waypointSystem.TickExtractCampApproach(squad))
+            {
+                UpdateAgents(squad, out _);
+                continue;
+            }
+
+            if (squad.MainApproach.Tick(squad, waypointSystem, SquadAnyMemberInCombat(squad)))
             {
                 UpdateAgents(squad, out _);
                 continue;
@@ -849,7 +856,8 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
 
             if (squad.CorpseEscort.UpdateMember(squad, agent, i, waypointSystem)) continue;
             if (squad.Camp.PendingAirdrop != null || squad.Camp.RetryMain != null || squad.Camp.Owns(agent)) continue;
-            if (squad.Operation?.Owns(agent) == true || squad.Rush?.Owns(agent) == true || ExtractCampApproach.Owns(squad, agent)) continue;
+            if (squad.Operation?.Owns(agent) == true || squad.Rush?.Owns(agent) == true
+                || squad.MainApproach.Owns(agent) || ExtractCampApproach.Owns(squad, agent)) continue;
 
             // An agent is "aligned" with the squad if their location IS the squad's main objective, OR if
             // they're working a splinter that was picked around the squad's current main objective. Without

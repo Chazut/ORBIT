@@ -185,10 +185,10 @@ internal sealed class RushPlan : IObjectiveWork
             _nextWork = now + .1f;
             var target = _inside ? RoomCenter(site) : Position(site);
             if (door != null && !_inside && _doorApproach) target = door.GetInteractionParameters(_actor.Position).InteractionPosition;
-            // A marked room on another floor may require a detour to distant stairs.
+            // Marked rooms and boss areas on another floor may need distant stairs.
             var final = false;
             var found = !_searchingRecorded && _route.Find(_actor.Position, target, out _anchor, out final, _retries, _approachHistory,
-                floorAware: Kind == "Marked" && Mathf.Abs(_actor.Position.y - target.y) > 2.5f);
+                floorAware: (Kind is "Marked" or "Boss") && Mathf.Abs(_actor.Position.y - target.y) > 2.5f);
             if (_searchingRecorded)
             {
                 found = _recorded.Find(_actor.Position, out _anchor);
@@ -305,6 +305,11 @@ internal sealed class RushPlan : IObjectiveWork
         // A marked-room transfer belongs to this plan, not to a corpse detour.
         // Finish it before yielding to a queued kill, keeping its claim and task intact.
         if (_actor != null && OwnsMarkedLoot(_actor, _actor.Objective.Location) && CorpseEscort.InFlight(_actor)) return false;
+        return HasPendingOwnKill(squad, waypoints);
+    }
+
+    internal static bool HasPendingOwnKill(Squad squad, WaypointSystem waypoints)
+    {
         if (squad.CorpseEscort.Active) return true;
         foreach (var member in squad.Members)
         {

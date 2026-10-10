@@ -131,14 +131,7 @@ public partial class WaypointSystem
         }
         else if (squad.MainObjectives != null)
         {
-            MainObjective nearest = null;
-            var distance = float.MaxValue;
-            foreach (var main in squad.MainObjectives)
-            {
-                if (!main.CanPursue(squad.MainObjectives)) continue;
-                var d = (main.Position - squad.Leader.Position).sqrMagnitude;
-                if (d < distance) { nearest = main; distance = d; }
-            }
+            var nearest = squad.MainApproach.Select(squad);
             if (nearest?.Operation != null) squad.Operation = nearest.Operation;
         }
         if (squad.Operation == null) return false;

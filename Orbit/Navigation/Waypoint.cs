@@ -46,7 +46,7 @@ public class Waypoint(
     /// The EFT interactable this POI refers to, when applicable. For lootable categories the target is an
     /// InteractableObject (LootableContainer / LootItem / Corpse). For Exfil it's an ExfiltrationPoint (a
     /// MonoBehaviour, not an InteractableObject — that's why this field is typed at the common base). For
-    /// Quest / Synthetic it's null.
+    /// Quest retains its TriggerWithId for arrival containment; Synthetic has no target.
     /// </summary>
     public readonly MonoBehaviour Target = target;
     internal bool IsAirdrop;

@@ -49,7 +49,8 @@ public partial class WaypointSystem
         var squad = agent?.Squad;
         // Managed destinations own their floor, even where unrelated global zones overlap.
         if (target != null && (squad?.Camp?.Owns(agent) == true
-            || squad?.Rush?.Owns(agent) == true || squad?.Operation?.Owns(agent) == true))
+            || squad?.Rush?.Owns(agent) == true || squad?.Operation?.Owns(agent) == true
+            || squad?.MainApproach.Owns(agent) == true))
         {
             var floor = FloorCatalog.For(_zoneKey)?.Resolve(target.Position.x, target.Position.y, target.Position.z);
             return floor == null || MatchesZoneFloorAtTarget(floor, target.Position, position);

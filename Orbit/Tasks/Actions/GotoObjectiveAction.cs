@@ -17,6 +17,16 @@ namespace Orbit.Tasks.Actions;
 /// </summary>
 public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSystem, WaypointSystem waypointSystem, float hysteresis) : Task<Agent>(hysteresis)
 {
+    private static bool QuestArrivalAllowed(Agent agent, Waypoint point, out string refusal)
+    {
+        if (!agent.QuestArrival.Check(agent.Position, point.Position, out refusal)) return false;
+        if (point.Target is not TriggerWithId trigger) return true;
+        var volume = trigger.GetComponent<Collider>();
+        if (volume == null || QuestWaypointPlacement.Contains(volume, agent.Position)) return true;
+        refusal = "outside quest trigger";
+        return false;
+    }
+
     private const float UtilityBase = 0.5f;
     private const float UtilityBoost = 0.15f;
     private const float UtilityBoostMaxDistSqr = 50f * 50f;
@@ -116,6 +126,15 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
             var objective = agent.Objective;
 
             if (objective.Location == null) continue;
+
+            // A simulated fight deliberately pins the body until its sound/combat window ends.
+            // A casualty can be registered earlier. Keep its loot order, without charging that
+            // imposed pause to the movement watchdog or starting an arrival/interaction.
+            if (agent.IsDormant && agent.Squad != null && Time.time < agent.Squad.GhostFightUntil)
+            {
+                _stuckEnRouteTracker.Remove(agent.Id);
+                continue;
+            }
 
             if (objective.Location.Target is ExfiltrationPoint backpackExit && NoBackpackExfil.RequiresDrop(backpackExit))
             {
@@ -247,7 +266,7 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                         // its existing head-based gate, skipped while the physical body is inactive.
                         if (objective.Location.Category == WaypointCategory.Quest)
                         {
-                            inRadius = agent.QuestArrival.Check(agent.Position, objective.Location.Position, out arrivalRefusal);
+                            inRadius = QuestArrivalAllowed(agent, objective.Location, out arrivalRefusal);
                             if (inRadius) ClearLoSBlockedTracking(agent);
                             else if (TrackLoSBlocked(agent, objective.Location, arrivalRefusal)) continue;
                         }
@@ -278,7 +297,7 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                              && RequiresArrivalLoSCheck(objective.Location.Category))
                     {
                         var arrivalClear = objective.Location.Category == WaypointCategory.Quest
-                            ? agent.QuestArrival.Check(agent.Position, objective.Location.Position, out arrivalRefusal)
+                            ? QuestArrivalAllowed(agent, objective.Location, out arrivalRefusal)
                             : HasArrivalLineOfSight(agent, objective.Location.Position);
                         if (arrivalClear)
                         {

@@ -97,6 +97,21 @@ internal sealed class SniperPlan : IObjectiveWork
             if (_arrived && _actor != null) SniperCombat.Refresh(_actor, _post, now + 2);
             return false;
         }
+        if (!_arrived && !_departing && RushPlan.HasPendingOwnKill(squad, w))
+        {
+            w.CancelOperationWork(this);
+            if (!_paused)
+            {
+                var anchor = squad.Objective.Location;
+                Release(squad, w);
+                squad.Objective.Location ??= anchor;
+                _paused = true;
+                _rescueIdleAt = -1f;
+                SetStatus(squad, "looting own kill");
+            }
+            // Keep the chosen post, elapsed approach and rescue cursor for the return trip.
+            return false;
+        }
         if (_paused)
         { _paused = false; _route.Reset(); _recorded.ResetSearch(); _searchingRecorded = false; SetStatus(squad, "approach"); }
         if (!_arrived || _actor == null || !Near(_actor.Position, _post, 4)) _travel += dt;

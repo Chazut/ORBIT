@@ -21,6 +21,7 @@ public class Squad(int id, float[] taskScores, int targetMembersCount) : Entity(
     internal readonly Orbit.Systems.CampPlan Camp = new();
     internal Orbit.Systems.OperationPlan Operation;
     internal Orbit.Systems.RushPlan Rush;
+    internal readonly Orbit.Systems.MainObjectiveApproach MainApproach = new();
     internal bool OperationExtractRolled;
     internal bool OperationExtractCommitted;
     internal float OperationExtractRetryAt;

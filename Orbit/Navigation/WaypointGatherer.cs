@@ -35,27 +35,20 @@ public class WaypointGatherer(float cellSize, BotsController botsController)
             if (trigger.transform == null)
                 continue;
 
-            // trigger.transform.position is often in mid-air or off-mesh (the anchor point of a tall trigger
-            // volume), which makes the 2 m navmesh sample fail. Prefer the collider's bounds.center, biased
-            // toward the floor for tall volumes (the floor inside is where a bot would actually stand), and
-            // widen the sample radius for big volumes so long quest zones (Customs office building, Streets
-            // sectors…) stay usable.
-            var position = trigger.transform.position;
-            var maxNavDist = 2f;
-            var triggerCollider = trigger.GetComponent<Collider>();
-            if (triggerCollider != null)
+            if (QuestWaypointPlacement.IsEliminationZone(trigger.Id)
+                || QuestWaypointPlacement.IsEliminationZone(trigger.name))
             {
-                var bounds = triggerCollider.bounds;
-                position = bounds.center;
-                // Tall volume → snap toward the floor.
-                if (bounds.extents.y > 1.5f)
-                {
-                    position.y = bounds.min.y + 0.75f;
-                }
-                // Big volume → wider sample.
-                if (bounds.size.sqrMagnitude > 100f) maxNavDist = 10f;
+                Log.Debug($"QUEST POINT: id={trigger.name} state=excluded reason=elimination zone");
+                continue;
             }
-            ValidateAndAddWaypoint(collection, WaypointCategory.Quest, trigger.name, position, maxNavDist);
+            var volume = trigger.GetComponent<Collider>();
+            if (!QuestWaypointPlacement.TryFind(trigger.transform.position, volume, out var position))
+            {
+                Log.Debug($"QUEST POINT: id={trigger.name} state=excluded reason=no walkable point inside trigger");
+                continue;
+            }
+            collection.Add(CreateBuiltinWaypoint(WaypointCategory.Quest, trigger.name, position, trigger));
+            Log.Debug($"QUEST POINT: id={trigger.name} state=placed point={position} bounds={volume?.bounds}");
         }
         Log.Debug($"Quest POIs collected: {collection.Count - beforeQuest}");
 
