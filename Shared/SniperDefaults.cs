@@ -18,7 +18,7 @@ public static class SniperDefaults
             WatchPitch = -5f, Elevated = false
         });
         Add("Interchange", new RushPoint {
-            Id = "1e7132bc704c48e1acdb02f9e769708a", Name = "Sniper point", Enabled = true,
+            Id = "1e7132bc704c48e1acdb02f9e769708a", Name = "Sniper point", Enabled = false,
             Boss = "bossKilla", DoorId = "", X = -174.90305f,
             Y = 21.452f, Z = -348.70786f, LootX = -174.90305f,
             LootY = 21.452f, LootZ = -348.70786f, Radius = 20f,
