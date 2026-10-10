@@ -12,9 +12,16 @@ public partial class WaypointSystem
     private Dictionary<string, string> CollectNativeZoneFloors()
     {
         var result = new Dictionary<string, string>();
+        var hasCatalog = !string.IsNullOrEmpty(_zoneKey) && FloorCatalog.For(_zoneKey) != null;
         foreach (var zone in _botsController.BotSpawner._allBotZones)
         {
             if (zone == null) continue;
+            if (!hasCatalog)
+            {
+                // Keep an unrestricted entry for every native zone used by advection.
+                result[zone.name] = null;
+                continue;
+            }
             var points = new List<NativeFloorPoint>();
             foreach (var spawn in zone.SpawnPoints)
             {
@@ -43,6 +50,11 @@ public partial class WaypointSystem
             result[zone.name] = floors;
             if (floors == null) Log.Warning($"ZONE NATIVE: map={_zoneKey} zone={zone.name} floors=unknown points={points.Count}");
             else Log.Info($"ZONE NATIVE: map={_zoneKey} zone={zone.name} floors={floors} points={points.Count}");
+        }
+        if (!hasCatalog)
+        {
+            Log.Info($"ZONE NATIVE: map={_zoneKey} editor sync skipped (no floor catalog)");
+            return result;
         }
         // Only immutable JSON crosses to the HTTP continuation; no Unity objects on background threads.
         _ = ReportNativeZoneFloors(JsonConvert.SerializeObject(new

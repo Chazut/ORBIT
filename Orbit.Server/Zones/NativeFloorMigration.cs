@@ -89,8 +89,16 @@ public partial class ZoneStoreService
     // Scene metadata is separate from user tuning. Updating it must preserve pending editor changes.
     public void RecordNativeFloors(string mapId, Dictionary<string, string?> floors, int? catalogRevision = null)
     {
-        if (!MapIds.Contains(mapId) || floors == null || floors.Count > 1000)
+        if (string.IsNullOrWhiteSpace(mapId) || floors == null || floors.Count > 1000)
             throw new InvalidDataException("Invalid native floor report");
+        // Older clients also report modded maps without an editor floor catalog.
+        // Acknowledge this optional metadata without creating files or changing saved zones.
+        if (!MapIds.Contains(mapId) || FloorCatalog.For(mapId) == null)
+        {
+            if (floors.Keys.Any(name => string.IsNullOrWhiteSpace(name) || name.Length > 200))
+                throw new InvalidDataException("Invalid native floor selection");
+            return;
+        }
         // An older client can still talk to this server, but its geometry cannot replace current metadata.
         var revision = catalogRevision ?? FloorCatalog.RevisionFor(mapId);
         if (revision != FloorCatalog.RevisionFor(mapId)) return;
