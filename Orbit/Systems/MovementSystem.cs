@@ -43,6 +43,7 @@ public partial class MovementSystem
         _waypointSystem = waypointSystem;
         _waypointSystem.OpenRushDoor = OpenObjectiveDoor;
         _waypointSystem.TrySniperRelocation = TryEnterSniperPost;
+        _waypointSystem.TrySniperTransit = TryRecordedSniperTransit;
         _travelWorld = new TravelRouteWorld(waypointSystem);
         _navJobExecutor.TravelPlanner = new TravelRoutePlanner(_travelWorld);
     }

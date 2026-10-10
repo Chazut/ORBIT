@@ -18,6 +18,8 @@ internal sealed class OperationStep
     internal Waypoint Exit;
     internal bool OptionalAlarm;
     internal bool Underground;
+    internal bool RetryNavigation;
+    internal bool BestEffort;
     internal Vector3 Entry;
     internal Vector3? SwitchApproach;
     private Func<Vector3, bool> _interactionCheck;
@@ -45,7 +47,7 @@ internal sealed class OperationStep
 
 internal sealed class OperationDefinition
 {
-    internal string Id, Name;
+    internal string Id, Name, MapKey;
     internal bool Extraction;
     internal bool RequiresCredential;
     internal bool AllowsCategory(string category) => category != "PlayerScav" || !RequiresCredential;
@@ -59,11 +61,13 @@ internal sealed class MultiStepCatalog
     internal readonly List<OperationDefinition> Operations = new();
     private readonly Dictionary<string, WorldInteractiveObject> _objects = new(StringComparer.Ordinal);
     private readonly List<Waypoint> _exits;
+    private readonly string _mapKey;
     internal const string Mall = "Shopping_Mall_DesignStuff_";
 
-    internal MultiStepCatalog(string map, List<Waypoint> exits)
+    internal MultiStepCatalog(string map, List<Waypoint> exits, string mapKey = null)
     {
         _exits = exits;
+        _mapKey = mapKey ?? map;
         MultiStepAccess.Reset();
         map = map.ToLowerInvariant();
         if (map != "interchange" && map != "rezervbase" && map != "bigmap") return;
@@ -72,24 +76,32 @@ internal sealed class MultiStepCatalog
         if (map == "interchange")
         {
             Add("kiba", "KIBA", false, Mall + "00055",
-                Step("Mall power", Mall + "00055"), Step("Disable KIBA alarm", Mall + "00059", alarm: true),
+                Step("Mall power", Mall + "00055"), Step("Disable mall alarm", Mall + "00058", alarm: true),
                 Step("Unlock outer door", Mall + "00050"), Step("Unlock inner door", Mall + "00049"), Loot(Mall + "00049"));
             Add("ultra", "ULTRA Medical", false, Mall + "00055",
                 Step("Mall power", Mall + "00055"), Step("Unlock medical room", Mall + "00052"), Loot(Mall + "00052"));
             Add("object21ws", "Object 21WS", false, Mall + "00055",
                 Step("Mall power", Mall + "00055"), Step("21WS card reader", Mall + "00063"), Loot(Mall + "00063"));
             Add("saferoom-loot", "Saferoom loot", false, Mall + "00055",
-                Step("Mall power", Mall + "00055"), Step("Move urinal", Mall + "00064"),
+                Step("Mall power", Mall + "00055"), Step("Disable mall alarm", Mall + "00058", alarm: true),
+                Step("Move urinal", Mall + "00064"),
                 Step("11SR card reader", Mall + "00051"), Loot(Mall + "00051"));
             Add("object14", "Object 14", false, Mall + "00055",
-                Step("Mall power", Mall + "00055"), Step("Move urinal", Mall + "00064"),
+                Step("Mall power", Mall + "00055"), Step("Disable mall alarm", Mall + "00058", alarm: true),
+                Step("Move urinal", Mall + "00064"),
                 Step("11SR card reader", Mall + "00051"), Step("Object 14 lever", Mall + "00061"),
                 Wait("Wait for Object 14 door", Mall + "00048", Mall + "00048"), Loot(Mall + "00048"));
             Add("saferoom-extract", "Saferoom extraction", true, Mall + "00055",
-                Step("Mall power", Mall + "00055"), Step("Move urinal", Mall + "00064"),
+                Step("Mall power", Mall + "00055"), Step("Disable mall alarm", Mall + "00058", alarm: true),
+                Step("Move urinal", Mall + "00064"),
                 Step("11SR card reader", Mall + "00051"), Loot(Mall + "00051"),
                 ExitStep("Regroup inside Saferoom", "Saferoom Exfil", OperationStepKind.Regroup),
-                Step("Close Saferoom", Mall + "00060"), ExitStep("Extract", "Saferoom Exfil", OperationStepKind.Extract));
+                Step("Close Saferoom", Mall + "00060", bestEffort: true) ?? new OperationStep
+                {
+                    Label = "Close Saferoom", Kind = OperationStepKind.Switch, BestEffort = true,
+                    WaitAt = _objects.TryGetValue(Mall + "00051", out var saferoomDoor) ? saferoomDoor : null
+                },
+                ExitStep("Extract", "Saferoom Exfil", OperationStepKind.Extract));
         }
         else if (map == "rezervbase")
         {
@@ -112,15 +124,17 @@ internal sealed class MultiStepCatalog
         Log.Info($"MULTISTEP: catalog map={map} operations={Operations.Count}");
     }
 
-    private OperationStep Step(string label, string id, bool alarm = false, Vector3? approach = null)
+    private OperationStep Step(string label, string id, bool alarm = false, Vector3? approach = null, bool bestEffort = false)
         => _objects.TryGetValue(id, out var obj) ? new OperationStep
         {
             Label = label, Object = obj, Kind = obj is Switch ? OperationStepKind.Switch : OperationStepKind.Access,
             OptionalAlarm = alarm,
+            BestEffort = bestEffort,
+            RetryNavigation = id == Mall + "00064" || id == Mall + "00058" || id == Mall + "00051",
             // A map variant may relocate this object. Keep the generic search in that case.
-            SwitchApproach = obj is Switch && approach is { } point
+            SwitchApproach = obj is Switch && (RecordedRouteLibrary.Interaction(_mapKey, id) ?? approach) is { } point
                 && (point - obj.transform.position).sqrMagnitude <= 16f
-                && Mathf.Abs(point.y - obj.transform.position.y) <= 2f ? approach : null
+                && Mathf.Abs(point.y - obj.transform.position.y) <= 2f ? point : null
         } : null;
 
     private OperationStep Loot(string id) => _objects.TryGetValue(id, out var obj)
@@ -143,7 +157,7 @@ internal sealed class MultiStepCatalog
         if (!_objects.TryGetValue(power, out var source) || source is not Switch sw) return;
         foreach (var step in steps)
             if (step == null) { Log.Warning($"MULTISTEP: unavailable operation={id}: required scene object missing"); return; }
-        var definition = new OperationDefinition { Id = id, Name = name, Extraction = extraction, Power = sw,
+        var definition = new OperationDefinition { Id = id, Name = name, MapKey = _mapKey, Extraction = extraction, Power = sw,
             RequiresCredential = id is "kiba" or "ultra" or "object21ws" or "saferoom-loot"
                 or "object14" or "saferoom-extract" or "zb013" };
         definition.Steps.AddRange(steps);
@@ -167,8 +181,9 @@ internal static class MultiStepAccess
     internal static void Protect(Door door, Switch power) => Protected[door] = power;
     internal static void Protect(ExfiltrationPoint exit) => Exits.Add(exit);
     internal static bool IsConditional(ExfiltrationPoint exit) => Exits.Contains(exit);
-    internal static bool ExitActive(ExfiltrationPoint exit)
-        => exit != null && exit.Status is EExfiltrationStatus.RegularMode or EExfiltrationStatus.Countdown;
+    internal static bool ExitActive(ExfiltrationPoint exit, Orbit.Entities.Agent agent = null)
+        => exit != null && (exit.Status is EExfiltrationStatus.RegularMode or EExfiltrationStatus.Countdown
+            || agent?.Squad?.Operation?.CanExtractOpenSaferoom(agent, exit) == true);
     // Generic key bypass must never skip a powered room's actual access sequence.
     internal static bool CanForceUnlock(Door door) => !Protected.ContainsKey(door);
     internal static bool HasPower(Door door) => !Protected.TryGetValue(door, out var power) || power != null && power.DoorState == EDoorState.Open;

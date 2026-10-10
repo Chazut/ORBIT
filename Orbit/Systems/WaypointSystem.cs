@@ -54,6 +54,7 @@ public partial class WaypointSystem
     private readonly Vector2[,] _advectionField;
     private readonly string _mapId;
     private readonly string _zoneKey;
+    internal string RecordedMap => _zoneKey;
 
     // Player convergence: a per-cell pull toward the living human player(s), refreshed every 30s as
     // they move. Folded into RequestNear's preferred-direction sum alongside advection / home / main.

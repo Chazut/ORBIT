@@ -15,6 +15,7 @@ namespace Orbit.Systems;
 public partial class WaypointSystem
 {
     internal System.Func<Agent, Vector3, MainObjective, bool> TrySniperRelocation;
+    internal System.Func<Agent, Vector3, bool> TrySniperTransit;
     private List<RushPoint> _rushPoints;
     private Dictionary<string, Door> _rushDoors;
     private readonly Dictionary<string, Audio.SpatialSystem.SpatialAudioPortal> _rushPortals = new();

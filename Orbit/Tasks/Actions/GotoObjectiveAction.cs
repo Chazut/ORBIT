@@ -338,7 +338,7 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                                 if (preparation == NoBackpackExfil.Preparation.Waiting) break;
                             }
                             if (Orbit.Systems.MultiStepAccess.IsConditional(exfil)
-                                && !Orbit.Systems.MultiStepAccess.ExitActive(exfil))
+                                && !Orbit.Systems.MultiStepAccess.ExitActive(exfil, agent))
                             { objective.Status = ObjectiveStatus.Failed; break; }
                             if (ExfilArrival.IsSharedTimer(exfil) && ExfilArrival.IsUnavailable(exfil))
                             {

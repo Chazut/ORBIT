@@ -123,7 +123,7 @@ public class ExtractAction(AgentData dataset, float hysteresis) : Task<Agent>(hy
         }
 
         if (Orbit.Systems.MultiStepAccess.IsConditional(exfil)
-            && (!Orbit.Systems.MultiStepAccess.ExitActive(exfil) || !ExfilArrival.IsInside(agent, loc)))
+            && (!Orbit.Systems.MultiStepAccess.ExitActive(exfil, agent) || !ExfilArrival.IsInside(agent, loc)))
         {
             _footExtractStartTime.Remove(agent.Id);
             agent.Objective.Status = ObjectiveStatus.None;

@@ -21,7 +21,7 @@ public partial class WaypointSystem
         foreach (var cell in _cells)
             foreach (var point in cell.Waypoints)
                 if (point.Category == WaypointCategory.Exfil) exits.Add(point);
-        _operations = new MultiStepCatalog(_mapId, exits);
+        _operations = new MultiStepCatalog(_mapId, exits, _zoneKey);
     }
 
     internal MainObjective RollOperationMain(Squad squad)
@@ -153,7 +153,7 @@ public partial class WaypointSystem
         var target = step.Position;
         if (step.Kind == OperationStepKind.Access && step.Object is KeycardDoor card
             && card.DoorState == EDoorState.Locked && card.Proxies?.Length > 0)
-            target = card.Proxies[0].transform.position; // 11SR reader is upstairs, far from its door.
+            target = card.GetInteractionParameters(actor.Position).InteractionPosition; // Reader standing point, not the distant door.
         else if (step.Kind == OperationStepKind.Switch)
             target = step.SwitchApproach ?? OperationSwitchReach.TargetPosition(step.Object);
         else if (step.Kind == OperationStepKind.Access)

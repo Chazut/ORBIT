@@ -40,8 +40,10 @@ internal sealed class OperationPlan : IObjectiveWork
     private bool _approachOnly;
     private float _approachRadiusSqr = 4f;
     private readonly OperationProgress _progress = new();
-    private readonly RecordedApproach _recorded = new();
-    private bool _usingRecorded, _searchingRecorded;
+    private readonly RecordedRouteSearch _recorded = new();
+    private bool _persistent, _searchingRecorded;
+    private bool _saferoomAccessGranted;
+    private float _stepActiveElapsed;
     private readonly HashSet<Door> _triedAccessDoors = new();
     private Door _accessDoor;
     private float _accessDoorAt;
@@ -57,7 +59,7 @@ internal sealed class OperationPlan : IObjectiveWork
                 {
                     Label = step.Label, Kind = step.Kind, Object = step.Object, WaitAt = step.WaitAt,
                     Exit = step.Exit, OptionalAlarm = step.OptionalAlarm, Underground = step.Underground, Entry = step.Entry,
-                    SwitchApproach = step.SwitchApproach
+                    SwitchApproach = step.SwitchApproach, RetryNavigation = step.RetryNavigation, BestEffort = step.BestEffort
                 });
     }
 
@@ -75,7 +77,11 @@ internal sealed class OperationPlan : IObjectiveWork
         var previous = Index;
         // Timed power (for example Hermetic) may expire before this plan starts.
         if (Index > 0 && Definition.Power != null && Definition.Power.DoorState == EDoorState.Shut) Index = 0;
-        while (Index + 1 < Count && Current.Kind is OperationStepKind.Switch or OperationStepKind.Access && Satisfied(Current)) Index++;
+        while (Index + 1 < Count && Current.Kind is OperationStepKind.Switch or OperationStepKind.Access && Satisfied(Current))
+        {
+            RememberSaferoomAccess();
+            Index++;
+        }
         var targetChanged = false;
         if (Main != null)
         {
@@ -108,17 +114,27 @@ internal sealed class OperationPlan : IObjectiveWork
             return false;
         }
         if (_paused)
-        { _paused = false; _actor = null; _route.Reset(); _recorded.Reset(); _searchingRecorded = false; Status = "approach"; LogStep(squad); }
+        { _paused = false; _actor = null; _route.Reset(); _recorded.ResetSearch(); _searchingRecorded = false; Status = "approach"; LogStep(squad); }
         _elapsed += delta;
+        _stepActiveElapsed += delta;
+        if (Current.BestEffort && _stepActiveElapsed >= 12f)
+        {
+            Log.Info($"MULTISTEP OPTIONAL: {squad} operation={Definition.Id} step={Current.Label} skipped after local attempt budget");
+            return Advance(squad, waypoints);
+        }
+        _persistent |= Current.RetryNavigation;
         PauseOtherMains(squad, delta);
         if (_elapsed >= ServerConfig.MultiStep.StepTimeout
             && Status != "looting"
             && (_actor == null || !CorpseEscort.InFlight(_actor)))
-            return End(squad, waypoints, "step timeout");
+            {
+                if (!_persistent && !EnableRescue(squad, "step timeout")) return End(squad, waypoints, "step timeout");
+                RetryNavigation(squad, waypoints); return true;
+            }
         if (now < _nextWork) return true;
         if (Index > 0 && Definition.Power.DoorState == EDoorState.Shut)
         {
-            if (++_powerRetries > 1) return End(squad, waypoints, "power expired twice");
+            if (++_powerRetries > 1 && !_persistent) return End(squad, waypoints, "power expired twice");
             ResetStep(squad, waypoints, 0);
         }
         var step = Current;
@@ -133,12 +149,12 @@ internal sealed class OperationPlan : IObjectiveWork
             ReleaseOrders(squad, waypoints);
             _actor = null;
             _route.Reset();
-            _recorded.Reset(); _searchingRecorded = false;
+            _recorded.ResetSearch(); _searchingRecorded = false;
             foreach (var member in squad.Members)
                 if (member.IsActive && !member.SoloExtractRequested && !CorpseEscort.InFlight(member)) { _actor = member; break; }
             if (_actor == null) return End(squad, waypoints, "no available operator");
         }
-        if (step.Kind is OperationStepKind.Switch or OperationStepKind.Access)
+        if (step.Kind is OperationStepKind.Switch or OperationStepKind.Access or OperationStepKind.Loot or OperationStepKind.Extract or OperationStepKind.Regroup)
         {
             // A short leg can pass the exposed lever before its destination. Recheck locally
             // under the shared work budget instead of walking past a usable interaction.
@@ -154,10 +170,8 @@ internal sealed class OperationPlan : IObjectiveWork
             if (!_interactionPending && _accessDoor == null && _progress.Stalled(_elapsed)
                 && !_progress.AdvancingAlongLeg(_elapsed))
             {
-                if (!step.Underground || _usingRecorded) return End(squad, waypoints, "no advancing route");
-                ReleaseOrders(squad, waypoints); _route.Reset(); _recorded.Reset(); _progress.Reset();
-                _usingRecorded = true;
-                Log.Info($"MULTISTEP FALLBACK: {squad} operation={Definition.Id} step={step.Label} reason=autonomous progress exhausted");
+                if (!EnableRescue(squad, "autonomous progress exhausted") && !_persistent) return End(squad, waypoints, "no advancing route");
+                RetryNavigation(squad, waypoints); return true;
             }
         }
         if (!_orders.ContainsKey(_actor))
@@ -180,16 +194,16 @@ internal sealed class OperationPlan : IObjectiveWork
             var found = !_searchingRecorded && waypoints.TryOperationPoint(_actor, step, _route, out _anchor, out final, _retries, _approachHistory);
             if (_searchingRecorded)
             {
-                found = _recorded.Find(_actor.Position, step.Position, _approachHistory, out _anchor);
+                found = _recorded.Find(_actor.Position, out _anchor, step.Underground && OperationRoutePolicy.InD2Bunker(_actor.Position) ? OperationRoutePolicy.D2 : null);
                 if (_recorded.Pending)
                 { _nextWork = now; waypoints.ContinueOperationWork(this); return true; }
-                if (!found) return End(squad, waypoints, "recorded fallback unreachable");
+                if (!found) { RetryNavigation(squad, waypoints); return true; }
                 _searchingRecorded = false;
                 Log.Info($"MULTISTEP FALLBACK: {squad} operation={Definition.Id} step={step.Label} leg={_anchor}");
             }
-            else if (_usingRecorded && !_route.Pending && (!found || !final))
+            else if (_recorded.Active && !_route.Pending && (!found || !final))
             {
-                _searchingRecorded = true; _recorded.Reset();
+                _searchingRecorded = true; _recorded.Enable(Definition.MapKey, RescueKey(), _actor.Position); _recorded.ResetSearch();
                 _nextWork = now; waypoints.ContinueOperationWork(this); return true;
             }
             if (!found)
@@ -204,9 +218,8 @@ internal sealed class OperationPlan : IObjectiveWork
                 _nextWork = now + 3f;
                 if (++_retries >= 3)
                 {
-                    if (!step.Underground || _usingRecorded) return End(squad, waypoints, "unreachable step");
-                    _usingRecorded = true; _retries = 0; _progress.Reset();
-                    Log.Info($"MULTISTEP FALLBACK: {squad} operation={Definition.Id} step={step.Label} reason=autonomous search exhausted");
+                    if (!EnableRescue(squad, "autonomous search exhausted") && !_persistent) return End(squad, waypoints, "unreachable step");
+                    RetryNavigation(squad, waypoints);
                 }
                 return true;
             }
@@ -218,7 +231,7 @@ internal sealed class OperationPlan : IObjectiveWork
             // Static/open scenery, such as Hermetic's entrance, is not an access door.
             if (_approachOnly && TryAccessDoor(squad, waypoints)) return true;
             ReportRoute(squad, step, true);
-            _progress.BeginLeg(_usingRecorded && !final ? _recorded.RouteCorners : _route.RouteCorners, _elapsed);
+            _progress.BeginLeg(_recorded.Active && !final ? _recorded.RouteCorners : _route.RouteCorners, _elapsed);
             _progress.ObserveLeg(_actor.Position, _elapsed);
             waypoints.CollectCorpseEscortCover(_anchor, _covers);
             _occupied.Clear();
@@ -265,7 +278,11 @@ internal sealed class OperationPlan : IObjectiveWork
             ReleaseOrders(squad, waypoints);
             _actor = null;
             _route.Reset();
-            if (++_retries >= 3) return End(squad, waypoints, "operator route failed");
+            if (++_retries >= 3)
+            {
+                if (!EnableRescue(squad, "operator route failed") && !_persistent) return End(squad, waypoints, "operator route failed");
+                RetryNavigation(squad, waypoints);
+            }
             return true;
         }
         if (_approachOnly) return true;
@@ -283,7 +300,7 @@ internal sealed class OperationPlan : IObjectiveWork
             foreach (var member in squad.Members)
                 if (member.IsActive && !member.SoloExtractRequested && !ExfilArrival.IsInside(member, step.Exit))
                     return (_regroupAt < 0 || now - _regroupAt < ServerConfig.MultiStep.RegroupTimeout)
-                        || End(squad, waypoints, "regroup timeout");
+                        || _persistent || End(squad, waypoints, "regroup timeout");
             return Advance(squad, waypoints);
         }
         if ((_actor.Position - _anchor).sqrMagnitude > 1f) return true;
@@ -293,11 +310,46 @@ internal sealed class OperationPlan : IObjectiveWork
             // A valid NavMesh endpoint can still be on the other side of a wall.
             if (TryAccessDoor(squad, waypoints)) return true;
             ReleaseOrders(squad, waypoints); _route.Reset(); _actor = null;
-            if (++_retries >= 3) return End(squad, waypoints, "switch access blocked");
+            if (++_retries >= 3)
+            {
+                if (!EnableRescue(squad, "switch access blocked") && !_persistent) return End(squad, waypoints, "switch access blocked");
+                RetryNavigation(squad, waypoints);
+            }
             _nextWork = now + 3f;
             return true;
         }
         return Interact(squad, waypoints);
+    }
+
+    private string RescueKey()
+    {
+        var id = Current.Object?.Id;
+        if (Definition.Id == "d2") return Index == 0 ? "d2-power" : Current.Kind == OperationStepKind.Extract ? "d2-exit" : "d2-gate";
+        if (Definition.Id == "hermetic") return Index == 0 ? "hermetic-lever" : "hermetic-exit";
+        if (Definition.Id == "zb013") return Index == 0 ? "warehouse-power" : Current.Kind == OperationStepKind.Extract ? "zb013-exit" : "zb013-door";
+        if (id == MultiStepCatalog.Mall + "00058") return "mall-alarm";
+        if (id == MultiStepCatalog.Mall + "00064") return "mall-urinal";
+        if (id == MultiStepCatalog.Mall + "00051")
+            return Current.Kind == OperationStepKind.Access && Current.Object.DoorState == EDoorState.Locked ? "mall-urinal" : "mall-saferoom";
+        if (Definition.Id == "kiba") return "mall-kiba";
+        if (Definition.Id == "saferoom-extract") return "mall-saferoom-inside";
+        return null;
+    }
+
+    private bool EnableRescue(Squad squad, string reason)
+    {
+        var origin = _actor?.Position ?? squad.Leader.Position;
+        if (!_recorded.Enable(Definition.MapKey, RescueKey(), origin)) return false;
+        _persistent = true;
+        Log.Info($"MULTISTEP FALLBACK: {squad} operation={Definition.Id} step={Current.Label} reason={reason}");
+        return true;
+    }
+
+    private void RetryNavigation(Squad squad, WaypointSystem waypoints)
+    {
+        ReleaseOrders(squad, waypoints); _route.Reset(); _recorded.ResetSearch(); _progress.Reset();
+        _approachHistory.Clear(); _triedAccessDoors.Clear(); _accessDoor = null; _retries = 0;
+        _searchingRecorded = false; _elapsed = 0; _nextWork = Time.time + 3f;
     }
 
     private bool TryAccessDoor(Squad squad, WaypointSystem waypoints)
@@ -347,7 +399,11 @@ internal sealed class OperationPlan : IObjectiveWork
         if (!step.Object.Operatable) return true;
         if (step.Object is Door door && !MultiStepAccess.HasPower(door)) return true;
         if (step.Object is Switch sw && sw.DoorState == EDoorState.Locked) return true;
-        if (++_interactionRetries > 3) return End(squad, waypoints, "interaction failed");
+        if (++_interactionRetries > 3)
+        {
+            if (!_persistent) return End(squad, waypoints, "interaction failed");
+            _interactionRetries = 0; _interactionPending = false; _nextWork = now + 3f; return true;
+        }
         try
         {
             if (recovery != null)
@@ -355,7 +411,17 @@ internal sealed class OperationPlan : IObjectiveWork
             _actor.Look.Target = step.Object.transform.position;
             if (step.Object is Door locked && locked.DoorState == EDoorState.Locked)
             {
-                locked.GetInteractionParameters(_actor.Position); // Selects the real remote card reader.
+                var interaction = locked.GetInteractionParameters(_actor.Position); // Selects the real remote card reader.
+                if (locked is KeycardDoor)
+                {
+                    var gap = interaction.InteractionPosition - _actor.Position;
+                    if (gap.sqrMagnitude > 4f || Mathf.Abs(gap.y) > 1.5f)
+                    { RetryNavigation(squad, waypoints); return true; }
+                    // KeycardDoor's successful scan opens only from an interacting/unlocked state.
+                    // Invoke its native success coroutine without creating or consuming an inventory key.
+                    locked.LockForInteraction();
+                    Log.Info($"MULTISTEP CARD: {squad} operation={Definition.Id} reader={locked.Id} scan requested without inventory card");
+                }
                 locked.Unlock();
                 Orbit.Api.OrbitDoorEvents.Raise(locked, Orbit.Api.OrbitDoorEvents.Operation.Unlock);
             }
@@ -403,7 +469,7 @@ internal sealed class OperationPlan : IObjectiveWork
         var exit = (ExfiltrationPoint)Current.Exit.Target;
         if (exit.Status is EExfiltrationStatus.NotPresent or EExfiltrationStatus.Hidden)
             return End(squad, waypoints, "exit unavailable");
-        if (exit.Status is not (EExfiltrationStatus.RegularMode or EExfiltrationStatus.Countdown)) return true;
+        if (!MultiStepAccess.ExitActive(exit, _actor)) return true;
         foreach (var member in squad.Members)
             if (member.IsActive && !member.SoloExtractRequested && member.Objective.Location != Current.Exit)
                 SetOrder(member, Current.Exit, waypoints);
@@ -412,6 +478,21 @@ internal sealed class OperationPlan : IObjectiveWork
     }
 
     internal bool IsExit(Waypoint point) => Active && Current.Kind == OperationStepKind.Extract && Current.Exit == point;
+
+    internal bool CanExtractOpenSaferoom(Agent agent, ExfiltrationPoint exit)
+    {
+        if (!Active || Definition.Id != "saferoom-extract" || Current.Kind != OperationStepKind.Extract
+            || Current.Exit?.Target != exit || _regroup != Current.Exit || agent?.Squad?.Operation != this
+            || exit.Status is EExfiltrationStatus.Hidden or EExfiltrationStatus.NotPresent
+            || Definition.Power == null || Definition.Power.DoorState != EDoorState.Open
+            || !ExfilArrival.IsInside(agent, Current.Exit)) return false;
+        var inside = Current.Exit.ExfilInteriorPosition ?? Current.Exit.Position;
+        if (Mathf.Abs(agent.Position.y - inside.y) > 1f || (agent.Position - inside).sqrMagnitude > 16f) return false;
+        if (!_saferoomAccessGranted) return false;
+        // Only these bots may leave after completing card access and regrouping inside.
+        // Keep the shared door, switch and human extraction state untouched.
+        return true;
+    }
 
     private static bool Satisfied(OperationStep step)
     {
@@ -423,19 +504,27 @@ internal sealed class OperationPlan : IObjectiveWork
 
     private bool Advance(Squad squad, WaypointSystem waypoints)
     {
+        RememberSaferoomAccess();
         if (Index + 1 >= _steps.Count) return End(squad, waypoints, "completed");
         ResetStep(squad, waypoints, Index + 1);
         return true;
+    }
+
+    private void RememberSaferoomAccess()
+    {
+        if (Current.Kind == OperationStepKind.Access && Current.Object?.Id == MultiStepCatalog.Mall + "00051" && Satisfied(Current))
+            _saferoomAccessGranted = true;
     }
 
     private void ResetStep(Squad squad, WaypointSystem waypoints, int index)
     {
         ReleaseOrders(squad, waypoints);
         Index = index;
+        _stepActiveElapsed = 0;
         _actor = null; _loot = null; _elapsed = 0; _regroupAt = -1; _retries = 0; _interactionRetries = 0; _interactionPending = false;
         _route.Reset(); _approachOnly = false; _approachHistory.Clear();
         _progress.Reset(); _accessDoor = null; _triedAccessDoors.Clear();
-        _usingRecorded = _searchingRecorded = false; _recorded.Reset();
+        _searchingRecorded = false; _recorded.Reset();
         _nextReachCheck = 0;
         _attemptedLoot.Clear();
         Status = "approach";
@@ -445,6 +534,12 @@ internal sealed class OperationPlan : IObjectiveWork
 
     internal bool End(Squad squad, WaypointSystem waypoints, string reason)
     {
+        if (Current.BestEffort && reason is "step timeout" or "no advancing route" or "unreachable step"
+            or "operator route failed" or "switch access blocked" or "interaction failed" or "target removed")
+        {
+            Log.Info($"MULTISTEP OPTIONAL: {squad} operation={Definition.Id} step={Current.Label} skipped reason={reason}");
+            return Advance(squad, waypoints);
+        }
         waypoints.CancelOperationWork(this);
         ReleaseOrders(squad, waypoints);
         Active = false; Status = reason;

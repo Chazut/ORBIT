@@ -44,6 +44,16 @@ public partial class MovementSystem
         return true;
     }
 
+    private bool TryRecordedSniperTransit(Agent agent, Vector3 target)
+    {
+        if (!SniperRelocationAllowed(agent) || !SniperReturnRecovery.Near(agent.Position, target)) return false;
+        if (NavMesh.CalculatePath(agent.Position, target, NavMesh.AllAreas, _sniperPath)
+            && _sniperPath.status == NavMeshPathStatus.PathComplete) return false;
+        // The existing ground, visibility, wall, closed-door and body checks apply unchanged.
+        if (!TrySniperPlacement(agent, target, "recorded-transit")) return false;
+        ResumeAfterRescue(agent); return true;
+    }
+
     private bool TrySniperPlacement(Agent agent, Vector3 target, string stage)
     {
         using var timing = PerformanceJournal.Measure(TransitionPhase.SniperPlanning, "sniper-relocation", stage,

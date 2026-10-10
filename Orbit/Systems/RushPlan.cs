@@ -35,6 +35,8 @@ internal sealed class RushPlan : IObjectiveWork
     private readonly HashSet<int> _attempted = new();
     private readonly List<Vector3> _approachHistory = new();
     private readonly OperationRouteSearch _route = new();
+    private readonly RecordedRouteSearch _recorded = new();
+    private bool _searchingRecorded;
     private readonly RushRouteEstimate _ranker = new();
     private const float NearbySpawnDistanceFactor = 1.5f;
     private readonly NavMeshPath _path = new();
@@ -73,7 +75,7 @@ internal sealed class RushPlan : IObjectiveWork
         var now = Time.time;
         var delta = _lastTick > 0 ? Mathf.Clamp(now - _lastTick, 0, 1) : 0;
         _lastTick = now;
-        if (!ServerConfig.Rush.Allows(squad.Leader?.BotCategory) || squad.ExtractRequested)
+        if (!ServerConfig.Rush.Allows(squad.Leader?.BotCategory) || squad.ExtractRequested && !_recorded.Active)
             return End(squad, waypoints, "cancelled for extraction or settings");
         if (Kind == "Spawn" && WaypointSystem.RushRaidSeconds > ServerConfig.Rush.SpawnDeadline)
             return End(squad, waypoints, "opening window expired");
@@ -100,6 +102,7 @@ internal sealed class RushPlan : IObjectiveWork
             || _actor.SoloExtractRequested || (CorpseEscort.InFlight(_actor) && (_loot == null || _actor.Objective.Location != _loot)))
         {
             Release(squad, waypoints); _actor = null; _loot = null; _route.Reset();
+            _recorded.ResetSearch(); _searchingRecorded = false;
             if (CollectingMarkedRoom) _attempted.Clear();
             if (_current < 0) ResetRanking();
             var livingMember = false;
@@ -112,7 +115,7 @@ internal sealed class RushPlan : IObjectiveWork
             if (_actor == null) return livingMember ? Pause(squad, waypoints, "waiting for available member")
                 : End(squad, waypoints, "no remaining member");
         }
-        if (_paused) { _paused = false; _route.Reset(); delta = 0; SetStatus(squad, _current < 0 ? "planning route" : "approach"); }
+        if (_paused) { _paused = false; _route.Reset(); _recorded.ResetSearch(); _searchingRecorded = false; delta = 0; SetStatus(squad, _current < 0 ? "planning route" : "approach"); }
         // Door access does not imply an interior NavMesh connection. Preserve this
         // progress budget across combat pauses and actor changes at the same room.
         if (Kind == "Marked" && _inside && Status != "looting" && _room != null
@@ -183,8 +186,19 @@ internal sealed class RushPlan : IObjectiveWork
             var target = _inside ? RoomCenter(site) : Position(site);
             if (door != null && !_inside && _doorApproach) target = door.GetInteractionParameters(_actor.Position).InteractionPosition;
             // A marked room on another floor may require a detour to distant stairs.
-            if (!_route.Find(_actor.Position, target, out _anchor, out var final, _retries, _approachHistory,
-                floorAware: Kind == "Marked" && Mathf.Abs(_actor.Position.y - target.y) > 2.5f))
+            var final = false;
+            var found = !_searchingRecorded && _route.Find(_actor.Position, target, out _anchor, out final, _retries, _approachHistory,
+                floorAware: Kind == "Marked" && Mathf.Abs(_actor.Position.y - target.y) > 2.5f);
+            if (_searchingRecorded)
+            {
+                found = _recorded.Find(_actor.Position, out _anchor);
+                if (_recorded.Pending) return true;
+                _searchingRecorded = false;
+                if (!found) return RetryRecorded(squad, waypoints);
+            }
+            else if (_recorded.Active && !_route.Pending && (!found || !final))
+            { _searchingRecorded = true; _recorded.ResetSearch(); return true; }
+            if (!found)
             {
                 if (_route.Pending) { ContinueSpawnSearch(waypoints); return true; }
                 Log.Info($"RUSH APPROACH: {squad} kind={Kind} site={site.Name} from={_actor.Position} target={target} samples={_route.Samples} partial={_route.PartialPaths} invalid={_route.InvalidPaths} attempt={_retries + 1}/3");
@@ -358,6 +372,9 @@ internal sealed class RushPlan : IObjectiveWork
                 var index = _candidate; var site = _sites[index]; var target = Position(site);
                 if (!_ranker.Step(_sortOrigin, target, out var length, out var source)) return true;
                 ReportRoute(squad, site, length, source, false);
+                if (Kind == "Marked" && site.DoorId == "door_Reserve_Base_Casarms_00042"
+                    && RecordedRouteLibrary.Has(waypoints.RecordedMap, "reserve-marked") && length == float.MaxValue)
+                    length = Vector3.Distance(_sortOrigin, target);
                 if (length < _bestLength) { _bestLength = length; _best = index; _bestRoute = source; }
                 _candidate++; _ranker.Reset();
                 return true;
@@ -393,6 +410,18 @@ internal sealed class RushPlan : IObjectiveWork
     { _states[_current] = "visited"; _visited++; return Advance(squad, waypoints); }
     private bool Skip(Squad squad, WaypointSystem waypoints, string reason)
     {
+        var navigationFailure = reason is "room entrance stalled" or "travel timeout" or "unreachable"
+            or "movement failed" or "door interaction point unreachable" or "door interaction failed";
+        if (navigationFailure && _current >= 0 && Kind == "Marked"
+            && _sites[_current].DoorId == "door_Reserve_Base_Casarms_00042")
+        {
+            var active = _recorded.Active;
+            if (_recorded.Enable(waypoints.RecordedMap, "reserve-marked", _actor.Position))
+            {
+                if (!active) Log.Info($"RUSH FALLBACK: {squad} site={Step} reason={reason}");
+                return RetryRecorded(squad, waypoints);
+            }
+        }
         if (_current < 0) return End(squad, waypoints, "failed: " + reason);
         _lastFailure = reason; _skipped++;
         _states[_current] = "skipped: " + reason; return Advance(squad, waypoints);
@@ -401,10 +430,18 @@ internal sealed class RushPlan : IObjectiveWork
     {
         SetStatus(squad, _states[_current]); Release(squad, waypoints); _processed++;
         _current = -1; _retries = _attempts = 0; ResetRanking();
+        _recorded.Reset(); _searchingRecorded = false;
         _elapsed = _held = _interactAt = _roomIdle = 0; _inside = _doorApproach = false; _loot = null; _room = null; _roomLooters.Clear(); _attempted.Clear(); _route.Reset();
         _roomEntryIdle = 0; _roomEntryBestDistance = float.MaxValue;
         if (_visited >= Count || _processed >= _sites.Count) return End(squad, waypoints, FinishReason());
         SetStatus(squad, "planning route"); return true;
+    }
+
+    private bool RetryRecorded(Squad squad, WaypointSystem waypoints)
+    {
+        Release(squad, waypoints); _route.Reset(); _recorded.ResetSearch(); _approachHistory.Clear();
+        _retries = _attempts = 0; _elapsed = _roomEntryIdle = 0; _searchingRecorded = false;
+        _nextWork = Time.time + 3f; return true;
     }
 
     private string FinishReason() => Kind == "Boss"
