@@ -40,7 +40,7 @@ public class Plugin : BaseUnityPlugin
     public const string PluginGuid = "com.chazut.orbit";
     public const string PluginName = "ORBIT";
     public const string OrbitVersion = "3.0.0";
-    public const string ReleaseVersion = "3.0.0-beta.3";
+    public const string ReleaseVersion = "3.0.0-beta.4";
 
     public static ManualLogSource LogSource;
 
