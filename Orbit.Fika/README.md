@@ -7,7 +7,7 @@ times per second. Reports expire after 1.5 seconds and are cleared when PiP stop
 optic or the player disconnects. Normal scope behavior remains unchanged for other players.
 This capability is negotiated through the existing handshake; older addons receive no new packets.
 
-Version 1.2.0-rc.1 adds synchronization of switches activated by ORBIT's multi-step objectives,
+Version 1.2.0-rc.2 adds PiP Disabler scoped wake synchronization. It also includes synchronization of switches activated by ORBIT's multi-step objectives,
 alongside door synchronization and Ghost fight audio. It requires ORBIT 3.0.0 or newer. Use the
 matching ORBIT 3.0 beta client and addon on the host or headless and every playing client.
 Older addons do not synchronize these switch interactions. Door compatibility is requested once

@@ -30,7 +30,7 @@ public class OrbitFikaPlugin : BaseUnityPlugin
     public const string PluginGuid = "com.chazut.orbit.fika";
     public const string PluginName = "ORBIT Fika Bridge";
     public const string PluginVersion = "1.2.0";
-    public const string ReleaseVersion = "1.2.0-rc.1";
+    public const string ReleaseVersion = "1.2.0-rc.2";
     private DoorSyncBridge _doors;
     private ScopeSyncBridge _scopes;
 
