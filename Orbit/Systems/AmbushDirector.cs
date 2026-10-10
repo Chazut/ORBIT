@@ -210,6 +210,11 @@ internal sealed class AmbushDirector(WaypointSystem waypoints)
         // An interrupted calculation is not an exhausted cover attempt.
         if (search.Main != null)
         {
+            if (search.TimedOut && search.Main.Type == MainObjectiveType.ExtractCamp)
+            {
+                (search.Main.CampApproach ??= new ExtractCampApproach(search.Main)).Fail(squad, waypoints, "cover search timeout");
+                return;
+            }
             if (search.Main.Type == MainObjectiveType.ExtractCamp)
                 search.Main.CampSearchAttempt = System.Math.Max(0, search.Main.CampSearchAttempt - 1);
             search.Main.CampRetryAt = Time.time + 1;

@@ -25,6 +25,7 @@ internal sealed class CampFormationSearch : IFrameSearch, IDisposable
     private readonly int _firstFrame;
     private int _slices;
     internal bool Done, Success, DirectLoot, Cancelled;
+    internal bool TimedOut => Time.time - _started >= ServerConfig.Ambush.TravelTimeout;
     internal string Rejections => _budget.Rejections;
     internal bool Valid
     {

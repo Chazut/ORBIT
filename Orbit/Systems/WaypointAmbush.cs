@@ -233,21 +233,18 @@ public partial class WaypointSystem
         if (distanceMax > site.CoversRadius + .1f)
         { site.CoversRadius = distanceMax; site.CoversReady = false; site.CoverProbe = 0; }
         // A shared target can be queried by several squads. Publish readiness only after all probes.
-        while (!site.CoversReady && site.CoverProbe < 8 && site.Covers.Count < 512 && budget.Remaining > 0)
+        while (!site.CoversReady && site.Covers.Count < 512 && budget.Remaining > 0)
         {
             yield return null;
-            if (site.CoverProbe >= 8) break;
-            budget.Remaining--;
-            var angle = site.CoverProbe++ * Mathf.PI / 4f;
-            var radius = (rule.DistanceMin + site.CoversRadius) * .5f;
-            var sample = site.Position + new Vector3(Mathf.Cos(angle), 0, Mathf.Sin(angle)) * radius;
+            if (site.CoverProbe >= 256 || !AmbushCoverProbe.Sample(site.Position, site.CoversRadius, site.CoverProbe++, out var sample))
+            { site.CoversReady = true; break; }
             if (site.Kind == CampSiteKind.Extract && NavMesh.SamplePosition(sample, out var ground, 12f, NavMesh.AllAreas))
                 sample = ground.position;
-            CollectCorpseEscortCover(sample, _campCoverScratch);
+            CollectCorpseEscortCover(sample, _campCoverScratch, ambush: true);
             foreach (var cover in _campCoverScratch)
                 if (!site.Covers.Contains(cover) && site.Covers.Count < 512) site.Covers.Add(cover);
         }
-        site.CoversReady = site.CoverProbe >= 8 || site.Covers.Count >= 512;
+        if (site.Covers.Count >= 512) site.CoversReady = true;
         var covers = site.Covers.ToArray();
         var firstCover = covers.Length > 0 ? UnityEngine.Random.Range(0, covers.Length) : 0;
         for (var category = CoverCategory.Hard; category <= CoverCategory.Soft; category++)
@@ -257,10 +254,28 @@ public partial class WaypointSystem
                 if ((i & 31) == 0) yield return null;
                 var cover = covers[(firstCover + i) % covers.Length];
                 if (cover.Category != category) continue;
+                // Keep a few path queries for physical cover when baked hints are disconnected.
+                if (site.Kind == CampSiteKind.Extract && budget.Remaining <= 4) break;
                 yield return null;
                 if (ValidateAmbushPosition(agent, site, rule, cover.Position, occupied, budget, out var position, distanceMax))
                 { yield return new CoverPoint(position, cover.Direction, cover.Category, cover.Level); yield break; }
             }
+        // Some scenes have sparse or missing baked cover hints. Discover nearby physical shelter
+        // only after native candidates fail, and validate it with the same floor/path/spacing rules.
+        if (site.Kind == CampSiteKind.Extract)
+            for (var probe = 0; probe < 256 && budget.Remaining > 0
+                && AmbushCoverProbe.Sample(site.Position, distanceMax, probe, out var sample); probe++)
+                for (var heading = 0; heading < 4 && budget.Remaining > 0; heading++)
+                {
+                    yield return null;
+                    if (!AmbushCoverProbe.Geometry(sample, heading, out var cover)) continue;
+                    yield return null;
+                    if (!ValidateAmbushPosition(agent, site, rule, cover.Position, occupied, budget, out var position, distanceMax)) continue;
+                    if (site.Covers.Count < 512 && !site.Covers.Contains(cover)) site.Covers.Add(cover);
+                    Log.Info($"AMBUSH COVER: {agent.Squad} source=geometry category={cover.Category} position={position}");
+                    yield return new CoverPoint(position, cover.Direction, cover.Category, cover.Level);
+                    yield break;
+                }
         if (!ServerConfig.Ambush.RequireCover)
             for (var i = 0; i < 12 && budget.Remaining > 0; i++)
             {

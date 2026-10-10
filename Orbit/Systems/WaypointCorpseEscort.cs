@@ -20,7 +20,7 @@ public partial class WaypointSystem
         => new(NewRuntimeWaypointId(), WaypointCategory.Synthetic, "CorpseEscort", position,
             1f, new List<Door>(), new List<CoverPoint>(), null);
 
-    internal void CollectCorpseEscortCover(Vector3 center, List<CoverPoint> result)
+    internal void CollectCorpseEscortCover(Vector3 center, List<CoverPoint> result, bool ambush = false)
     {
         result.Clear();
         var data = _botsController?.CoversData;
@@ -34,7 +34,8 @@ public partial class WaypointSystem
             {
                 var point = points[p];
                 var delta = point.Position - center;
-                if (delta.sqrMagnitude < 16f || delta.sqrMagnitude > 225f || Mathf.Abs(delta.y) > 2f) continue;
+                if ((!ambush && delta.sqrMagnitude < 16f) || delta.sqrMagnitude > 225f
+                    || Mathf.Abs(delta.y) > (ambush ? 4f : 2f)) continue;
                 var cover = new CoverPoint(point.Position, point.WallDirection, point.CoverType, point.CoverLevel);
                 if (cover.Category != CoverCategory.None && !result.Contains(cover)) result.Add(cover);
                 if (result.Count >= 64) return;
