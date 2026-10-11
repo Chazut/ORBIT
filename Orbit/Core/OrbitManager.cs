@@ -299,9 +299,15 @@ public class OrbitManager
             {
                 target = squadExfil;
             }
-            if (target == null) continue;
+            if (target == null || agent.Objective.Location != target)
+            {
+                agent.EmergencyExtractStillSince = now;
+                agent.EmergencyExtractLastPos = agent.Position;
+                continue;
+            }
             var bot = agent.Bot;
-            var inCombat = bot?.Memory != null && (bot.Memory.HaveEnemy || bot.Memory.IsUnderFire);
+            var inCombat = bot?.Memory != null && (bot.Memory.HaveEnemy || bot.Memory.IsUnderFire)
+                || agent.Squad != null && now < agent.Squad.GhostFightUntil;
             var atExfil = target != null && (agent.Position - target.Position).sqrMagnitude <= EmergencyExtractExfilProximitySqr;
             var moved = (agent.Position - agent.EmergencyExtractLastPos).sqrMagnitude > EmergencyExtractStuckMoveRadiusSqr;
             // Any state other than sitting still at the exfil resets the clock, so it's never despawned elsewhere.
@@ -319,8 +325,16 @@ public class OrbitManager
         for (var i = 0; i < _emergencyExtractDespawn.Count; i++)
         {
             var agent = _emergencyExtractDespawn[i];
-            Log.Info($"{agent} extract watchdog: stuck at exfil {(object)agent.SoloExtractTarget ?? agent.Objective.Location} for {now - agent.EmergencyExtractStillSince:F0}s without extracting — force-despawning (counts as extracted)");
-            ExtractAction.ForceDespawn(agent);
+            var identity = agent.ToString();
+            var target = agent.Objective.Location;
+            var waited = now - agent.EmergencyExtractStillSince;
+            // Restart the wait even when removal is refused. Conditional exits can
+            // need more movement or a bag drop; never retry at the frame rate.
+            agent.EmergencyExtractStillSince = now;
+            if (ExtractAction.ForceDespawn(agent))
+                Log.Info($"{identity} extract watchdog: removed at exfil {target} after {waited:F0}s stuck (counts as extracted)");
+            else
+                Log.Info($"{identity} extract watchdog: deferred at exfil {target} after {waited:F0}s; keeping approach and exit requirements");
         }
         _emergencyExtractDespawn.Clear();
     }

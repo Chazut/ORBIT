@@ -356,15 +356,18 @@ public class ExtractAction(AgentData dataset, float hysteresis) : Task<Agent>(hy
         return true;
     }
 
-    private static void DespawnAgent(Agent agent, bool recoverNoBackpack = false)
+    private static bool DespawnAgent(Agent agent, bool recoverNoBackpack = false, bool preserveApproach = false)
     {
         // Also protects emergency watchdog and arrival-fallback callers from bypassing backpack requirements.
         if (!(recoverNoBackpack ? NoBackpackExfil.CanRecover(agent, agent.Objective.Location)
                 : NoBackpackExfil.CanFinish(agent, agent.Objective.Location)))
         {
-            agent.Objective.Status = ObjectiveStatus.None;
-            agent.Objective.DispatchTime = Time.time;
-            return;
+            if (!preserveApproach)
+            {
+                agent.Objective.Status = ObjectiveStatus.None;
+                agent.Objective.DispatchTime = Time.time;
+            }
+            return false;
         }
         // BotOwner already torn down on BSG's side (died / despawned / left while we were counting down):
         // there is nothing left to remove from the map — drop our agent instead of NRE-retrying every cycle
@@ -373,7 +376,7 @@ public class ExtractAction(AgentData dataset, float hysteresis) : Task<Agent>(hy
         {
             Log.Warning($"{agent} ExtractAction: BotOwner/LeaveData already gone — dropping agent without RemoveFromMap");
             Singleton<OrbitManager>.Instance?.RemoveAgent(agent);
-            return;
+            return true;
         }
 
         try
@@ -386,19 +389,31 @@ public class ExtractAction(AgentData dataset, float hysteresis) : Task<Agent>(hy
         catch (System.Exception e)
         {
             Log.Error($"{agent} ExtractAction.RemoveFromMap failed: {e}");
-            agent.Objective.Status = NoBackpackExfil.RetainAfterDrop(agent, agent.Objective.Location)
-                ? ObjectiveStatus.Extracting : ObjectiveStatus.Failed;
-            return;
+            if (!preserveApproach)
+                agent.Objective.Status = NoBackpackExfil.RetainAfterDrop(agent, agent.Objective.Location)
+                    ? ObjectiveStatus.Extracting : ObjectiveStatus.Failed;
+            return false;
         }
 
         var manager = Singleton<OrbitManager>.Instance;
         manager?.RemoveAgent(agent);
+        return true;
     }
 
     // Despawn immediately, bypassing the Status==Extracting / IsActive gating. Used by the emergency-extract
     // watchdog for a committed extracter that can never reach the exfil — e.g. it started healing, which detaches
     // ORBIT so this action otherwise never runs for it.
-    internal static void ForceDespawn(Agent agent) => DespawnAgent(agent);
+    internal static bool ForceDespawn(Agent agent)
+    {
+        if (agent.Objective.Location?.Target is not ExfiltrationPoint exit
+            || ExfilArrival.IsSharedTimer(exit) || ExfilArrival.IsUnavailable(exit)) return false;
+        if (Orbit.Systems.MultiStepAccess.IsConditional(exit)
+            && (!Orbit.Systems.MultiStepAccess.ExitActive(exit, agent)
+                || !ExfilArrival.IsInside(agent, agent.Objective.Location))) return false;
+        // A refused watchdog attempt must not invalidate the path still taking us to
+        // the trigger or the entrance where a backpack can actually be dropped.
+        return DespawnAgent(agent, preserveApproach: true);
+    }
 
     protected override void Deactivate(Agent entity)
     {

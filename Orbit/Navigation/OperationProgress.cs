@@ -51,7 +51,8 @@ internal sealed class OperationProgress
         return true;
     }
     internal void ReachedLeg() { _stalledLegs++; _leg = null; }
-    internal bool Stalled(float activeElapsed) => _stalledLegs >= 6
-        || _stalledLegs >= 2 && activeElapsed - _progressAt >= 90f;
+    internal bool Stalled(float activeElapsed, bool interactionApproach = false) => _stalledLegs >= 6
+        || _stalledLegs >= 2 && activeElapsed - _progressAt >= 90f
+        || interactionApproach && activeElapsed - _progressAt >= 30f;
     internal string Diagnostics => $"bestGap={_bestGap:F2}m stalledLegs={_stalledLegs}";
 }

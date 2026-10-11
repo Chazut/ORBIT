@@ -16,12 +16,20 @@ internal sealed class RecordedRouteSearch
     private readonly List<Vector3> _history = new();
     private Vector3 _arrival;
     private bool _hasArrival;
+    private readonly Func<Vector3, bool> _acceptEndpoint;
+    internal RecordedRouteSearch() => _acceptEndpoint = AcceptEndpoint;
     internal bool Active { get; private set; }
     internal bool Pending => _search.Pending;
     internal Vector3[] RouteCorners => _search.RouteCorners;
     internal Vector3 Target => _route == null ? default : _route.Points[_cursor];
     internal string Key => _key;
     internal int Cursor => _cursor;
+
+    private bool AcceptEndpoint(Vector3 point)
+        // Sampling a recorded interior point can repeatedly land at our feet outside.
+        // Accept that only when it really reaches the hint, otherwise seek another leg.
+        => (point - _lastOrigin).sqrMagnitude >= 2.25f
+            || (point - _route.Points[_cursor]).sqrMagnitude <= 1.5625f;
 
     internal void Reset()
     { Active = false; _route = null; _map = _key = null; _cursor = _failures = 0; _hasArrival = false; _history.Clear(); _search.Reset(); }
@@ -74,7 +82,7 @@ internal sealed class RecordedRouteSearch
             OperationRouteSearch.Remember(_history, origin, 2f);
         }
         if (_search.Find(origin, points[_cursor], out point, out var final, Mathf.Min(2, _failures), _history,
-            floorAware: true, finalHeightTolerance: 1.25f, allowedPoint: allowed))
+            floorAware: true, finalHeightTolerance: 1.25f, allowedPoint: allowed, finalPoint: _acceptEndpoint))
         { _failures = 0; _hasArrival = final; _arrival = point; return true; }
         if (!_search.Pending)
         {

@@ -9,9 +9,10 @@ using UnityEngine;
 
 namespace Orbit.Systems;
 
-/// <summary>A persistent squad plan. All interactions occur at a reachable local point; combat pauses it.</summary>
+/// <summary>A persistent squad plan with local interaction checks and bounded Hermetic recovery; combat pauses it.</summary>
 internal sealed class OperationPlan : IObjectiveWork
 {
+    private readonly HermeticSwitchRecovery _hermeticRecovery = new();
     private Squad _squad;
     private WaypointSystem _waypoints;
     void IObjectiveWork.ResumeObjectiveWork() => Tick(_squad, _waypoints, WaypointSystem.ObjectiveCombat(_squad));
@@ -110,6 +111,7 @@ internal sealed class OperationPlan : IObjectiveWork
         // Paused orders may be replaced by the combat rally. Rebuild from current positions on resume.
         if (combat || now < squad.GhostFightUntil)
         {
+            _hermeticRecovery.Reset();
             waypoints.CancelOperationWork(this);
             if (_regroupAt >= 0) _regroupAt += delta;
             if (!_paused) { ReleaseOrders(squad, waypoints); _paused = true; Status = "paused"; LogStep(squad); }
@@ -169,7 +171,8 @@ internal sealed class OperationPlan : IObjectiveWork
             }
             if (_progress.Observe(_actor.Position, step.Position, _elapsed)) _retries = 0;
             if (_orders.ContainsKey(_actor)) _progress.ObserveLeg(_actor.Position, _elapsed);
-            if (!_interactionPending && _accessDoor == null && _progress.Stalled(_elapsed)
+            if (!_interactionPending && _accessDoor == null
+                && _progress.Stalled(_elapsed, step.Kind is OperationStepKind.Switch or OperationStepKind.Access)
                 && !_progress.AdvancingAlongLeg(_elapsed))
             {
                 if (!EnableRescue(squad, "autonomous progress exhausted") && !_persistent) return End(squad, waypoints, "no advancing route");
@@ -263,12 +266,19 @@ internal sealed class OperationPlan : IObjectiveWork
         }
         // BSG may stop just outside a one-metre anchor. Finish an approach leg before
         // counting that as a route failure, then recalculate the remaining local path.
-        if (_approachOnly && (_actor.Position - _anchor).sqrMagnitude <= _approachRadiusSqr)
+        if (_approachOnly && ((_actor.Position - _anchor).sqrMagnitude <= _approachRadiusSqr
+            || _actor.Objective.Status == ObjectiveStatus.Finished))
         {
+            // A small native movement after Goto validated arrival must not strand
+            // a Finished operator. Replan larger displacements without advancing.
+            var reached = (_actor.Position - _anchor).magnitude <= Mathf.Sqrt(_approachRadiusSqr) + .5f
+                && Mathf.Abs(_actor.Position.y - _anchor.y) <= 1.25f;
+            if ((_actor.Position - _anchor).sqrMagnitude > _approachRadiusSqr)
+                Log.Info($"MULTISTEP ARRIVAL: {squad} operation={Definition.Id} step={step.Label} finished outside approach radius; resume reached={reached}");
             OperationRouteSearch.Remember(_approachHistory, _actor.Position, step.Kind == OperationStepKind.Switch ? 2f : 5f);
             ReleaseOrders(squad, waypoints);
             _actor = null;
-            _progress.ReachedLeg();
+            if (reached) _progress.ReachedLeg();
             _route.Reset();
             return true;
         }
@@ -305,7 +315,15 @@ internal sealed class OperationPlan : IObjectiveWork
                         || _persistent || End(squad, waypoints, "regroup timeout");
             return Advance(squad, waypoints);
         }
-        if ((_actor.Position - _anchor).sqrMagnitude > 1f) return true;
+        if ((_actor.Position - _anchor).sqrMagnitude > 1f)
+        {
+            if (_actor.Objective.Status == ObjectiveStatus.Finished)
+            {
+                Log.Info($"MULTISTEP ARRIVAL: {squad} operation={Definition.Id} step={step.Label} finished outside interaction approach; replan");
+                ReleaseOrders(squad, waypoints); _route.Reset(); _nextWork = now + .25f;
+            }
+            return true;
+        }
         if (step.Kind is OperationStepKind.Switch or OperationStepKind.Access && !step.CanInteract(_actor.Position))
         {
             Log.Info($"MULTISTEP REACH: {squad} operation={Definition.Id} step={step.Label} {step.ReachDiagnostics}");
@@ -369,8 +387,17 @@ internal sealed class OperationPlan : IObjectiveWork
     private bool TryNearbyInteraction(Squad squad, WaypointSystem waypoints, string reason)
     {
         if (Current.Kind is not (OperationStepKind.Switch or OperationStepKind.Access) || Current.Object == null
-            || Current.Underground && !OperationRoutePolicy.InD2Bunker(_actor.Position)
-            || !Current.CanInteract(_actor.Position)) return false;
+            || Current.Underground && !OperationRoutePolicy.InD2Bunker(_actor.Position)) return false;
+        if (!Current.CanInteract(_actor.Position))
+        {
+            if (Index != 0 || Current.Kind != OperationStepKind.Switch || Current.Object is not Switch
+                || !_hermeticRecovery.Ready(_actor, Definition.Id, Current.Object.Id, _actor.Position,
+                    Current.Position, Current.SwitchApproach, _stepActiveElapsed)) return false;
+            _hermeticRecovery.Reset();
+            reason = "hermetic proximity fallback after 20s without local progress";
+            Log.Info($"MULTISTEP LOCAL RECOVERY: {squad} operation={Definition.Id} step={Current.Label} range=5m same-floor=True");
+        }
+        else _hermeticRecovery.Reset();
         // Use the native interaction, including linked power, gate and extraction callbacks.
         // Assigning DoorState directly would show an open lever without powering its circuit.
         ReleaseOrders(squad, waypoints);
@@ -525,6 +552,7 @@ internal sealed class OperationPlan : IObjectiveWork
 
     private void ResetStep(Squad squad, WaypointSystem waypoints, int index)
     {
+        _hermeticRecovery.Reset();
         ReleaseOrders(squad, waypoints);
         Index = index;
         _stepActiveElapsed = 0;
