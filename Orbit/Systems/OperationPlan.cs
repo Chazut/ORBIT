@@ -528,6 +528,20 @@ internal sealed class OperationPlan : IObjectiveWork
         return true;
     }
 
+    internal static float RemainingDistance(OperationDefinition definition, Vector3 from)
+    {
+        var distance = 0f;
+        foreach (var step in definition.Steps)
+        {
+            if (step.OptionalAlarm || step.BestEffort
+                || step.Kind is OperationStepKind.Switch or OperationStepKind.Access && Satisfied(step)) continue;
+            var target = step.Kind == OperationStepKind.Switch ? step.SwitchApproach ?? step.Position : step.Position;
+            distance += Vector3.Distance(from, target);
+            from = target;
+        }
+        return distance;
+    }
+
     private static bool Satisfied(OperationStep step)
     {
         if (step.Object == null || step.Object.DoorState != EDoorState.Open) return false;

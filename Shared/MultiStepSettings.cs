@@ -12,6 +12,8 @@ public sealed class MultiStepSettings
     public float StepTimeout { get; set; } = 600;
     public float LootDuration { get; set; } = 90;
     public float RegroupTimeout { get; set; } = 45;
+    public float CustomsExtractionMultiplier { get; set; } = .5f;
+    public float CustomsNearbyExitDistance { get; set; } = 50f;
     public MultiStepStyle Timmy { get; set; } = new(.15f, .25f, .8f);
     public MultiStepStyle Cautious { get; set; } = new(.40f, .5f, 1f);
     public MultiStepStyle Average { get; set; } = new(.35f, .5f, .65f);
@@ -37,6 +39,8 @@ public sealed class MultiStepSettings
         MapBehaviorOverride.Range(StepTimeout, 30, 900, "Multi-step travel timeout");
         MapBehaviorOverride.Range(LootDuration, 10, 600, "Multi-step loot duration");
         MapBehaviorOverride.Range(RegroupTimeout, 10, 180, "Multi-step regroup timeout");
+        MapBehaviorOverride.Range(CustomsExtractionMultiplier, 0, 1, "Customs prepared extraction multiplier");
+        MapBehaviorOverride.Range(CustomsNearbyExitDistance, 0, 150, "Customs nearby exit distance");
         if (Weights == null) throw new ArgumentException("Multi-step weights must be an object.");
         foreach (var value in Weights.Values) MapBehaviorOverride.Range(value, 0, 100, "Multi-step weight");
         foreach (var style in new[] { Timmy, Cautious, Average, Aggressive, VeryAggressive, PlayerScavStyle })

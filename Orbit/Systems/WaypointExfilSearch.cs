@@ -30,6 +30,7 @@ public partial class WaypointSystem
         internal bool Done;
         internal float RequestedAt;
         internal Waypoint Result => _search.Result;
+        internal float CompleteRouteLength = float.PositiveInfinity;
         internal bool Valid => Time.time - RequestedAt < 5f && !Agent.Bot.IsDead
             && Squad.Members.Contains(Agent) && (Solo != null || ReferenceEquals(Squad.Leader, Agent))
             && (Agent.Position - Origin).sqrMagnitude < 100f;
@@ -87,7 +88,19 @@ public partial class WaypointSystem
                 return new(false, float.MaxValue);
             _queries++;
             var found = CalculateTimedPath(Origin, point.Position, _path, TransitionPhase.ExfilPath, point.Name, Squad.Id);
-            if (found && _path.status == NavMeshPathStatus.PathComplete) return new(true, 0);
+            if (found && _path.status == NavMeshPathStatus.PathComplete)
+            {
+                if (string.Equals(_owner._mapId, "bigmap", StringComparison.OrdinalIgnoreCase))
+                {
+                    var completeCorners = _path.corners;
+                    CompleteRouteLength = 0f;
+                    var previous = Origin;
+                    foreach (var corner in completeCorners)
+                    { CompleteRouteLength += Vector3.Distance(previous, corner); previous = corner; }
+                    CompleteRouteLength += Vector3.Distance(previous, point.Position);
+                }
+                return new(true, 0);
+            }
             var corners = _path.corners;
             var gap = !found || _path.status == NavMeshPathStatus.PathInvalid || corners == null || corners.Length == 0
                 ? float.MaxValue : (corners[corners.Length - 1] - point.Position).sqrMagnitude;
@@ -100,6 +113,12 @@ public partial class WaypointSystem
 
     internal bool ExfilSearchPending(Squad squad, Agent solo = null)
         => _exfilSearches.TryGetValue((Entity)solo ?? squad, out var search) && !search.Done;
+
+    internal float CompleteExfilRouteLength(Squad squad, Waypoint point)
+        => point != null && _exfilSearches.TryGetValue(squad, out var search)
+            && search.Done && search.Valid && search.ResultValid && ReferenceEquals(search.Result, point)
+            ? search.CompleteRouteLength + Vector3.Distance(squad.Leader.Position, search.Origin)
+            : float.PositiveInfinity;
 
     private void CancelExfilSearch(Entity key)
     {

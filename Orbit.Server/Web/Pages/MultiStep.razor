@@ -14,7 +14,13 @@
         <OrbitSlider T="float" @bind-Value="Cfg.MultiStep.LootDuration" Label="Maximum time looting the destination" Unit="s" Min="10" Max="600" Step="10" />
         <OrbitSlider T="float" @bind-Value="Cfg.MultiStep.RegroupTimeout" Label="Wait for squad inside Saferoom" Unit="s" Min="10" Max="180" Step="5" />
     </SettingsCard>
-    <SettingsCard Title="Operations" Subtitle="Relative selection weights within the available loot or extraction pool. Zero disables that chain. For PMCs, keys and cards are simulated; PlayerScavs cannot select chains that require them. Bots must still reach the real reader or door and activate the power. Labs and Labyrinth are excluded.">
+    <SettingsCard Title="Customs extraction choices" Subtitle="Reduce ZB-013 trips when leaving the raid. Longer detours compared with a usable ordinary exit further reduce its chance. Power and doors already opened are skipped in the estimate.">
+        <OrbitSlider T="float" @bind-Value="Cfg.MultiStep.CustomsExtractionMultiplier" Label="Prepared extraction chance multiplier" Fmt="P0" Min="0" Max="1" Step="0.05f"
+                     Tooltip="Multiplies the personality's prepared extraction chance on Customs and its variants. At 50%, a personality with 50% has at most a 25% chance. Zero disables choosing the ZB-013 preparation chain; an already usable ZB-013 can still be used as a normal exit." />
+        <OrbitSlider T="float" @bind-Value="Cfg.MultiStep.CustomsNearbyExitDistance" Label="Prefer a nearby usable exit" Unit="m" Min="0" Max="150" Step="5"
+                     Tooltip="Prioritize an eligible exit within this walking distance when preparing ZB-013 would add over 25 metres. Uses a complete navigation route, so a close exit across an impassable wall does not qualify. Zero disables this proximity priority." />
+    </SettingsCard>
+    <SettingsCard Title="Operations" Subtitle="Relative selection weights within the available loot or extraction pool. Zero disables that chain. Customs has only one extraction chain, so use the Customs chance multiplier to reduce its frequency. For PMCs, keys and cards are simulated; PlayerScavs cannot select chains that require them. Bots must still reach the real reader or door and activate the power. Labs and Labyrinth are excluded.">
         @foreach (var item in Operations)
         {
             <OrbitSlider T="float" Value="Cfg.MultiStep.Weight(item.Key)" ValueChanged="@(value => Cfg.MultiStep.Weights[item.Key] = value)"

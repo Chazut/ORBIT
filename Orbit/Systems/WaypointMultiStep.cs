@@ -90,8 +90,10 @@ public partial class WaypointSystem
         {
             if (!squad.OperationExtractRolled)
             {
+                var chance = OperationStyle(squad).ExtractionChance;
+                if (!TryPreparedExtractionChance(squad, chance, out chance)) return true;
                 squad.OperationExtractRolled = true;
-                squad.OperationExtractCommitted = UnityEngine.Random.value < OperationStyle(squad).ExtractionChance;
+                squad.OperationExtractCommitted = UnityEngine.Random.value < chance;
             }
             var reserveFallback = string.Equals(_mapId, "RezervBase", System.StringComparison.OrdinalIgnoreCase)
                 && squad.Leader?.BotCategory == "PMC";
@@ -138,6 +140,33 @@ public partial class WaypointSystem
         _nextOperationPlan = Time.time + .5f;
         squad.Operation.Begin(squad);
         return squad.Operation.Tick(squad, this, combat);
+    }
+
+    private bool TryPreparedExtractionChance(Squad squad, float personalityChance, out float chance)
+    {
+        chance = personalityChance;
+        if (!string.Equals(_mapId, "bigmap", System.StringComparison.OrdinalIgnoreCase) || personalityChance <= 0)
+            return true;
+        chance *= ServerConfig.MultiStep.CustomsExtractionMultiplier;
+        if (chance <= 0) return true;
+        OperationDefinition prepared = null;
+        if (_operations != null)
+            foreach (var definition in _operations.Operations)
+                if (definition.Id == "zb013" && ServerConfig.MultiStep.Weight(definition.Id) > 0
+                    && !squad.FailedOperationExits.Contains(definition.Id) && definition.AllowsCategory(squad.Leader?.BotCategory)
+                    && OperationExitEligible(squad, definition.Steps[definition.Steps.Count - 1].Exit))
+                { prepared = definition; break; }
+        if (prepared == null) { chance = 0; return true; }
+
+        // Reuse the normal bounded, cached exfil search. Pending is not evidence of no exit.
+        var ordinary = FindNearestEligibleExfil(squad);
+        if (ExfilSearchPending(squad)) return false;
+        var ordinaryRoute = CompleteExfilRouteLength(squad, ordinary);
+        var preparedEstimate = OperationPlan.RemainingDistance(prepared, squad.Leader.Position);
+        chance = PreparedExtractionChoice.Chance(personalityChance, ServerConfig.MultiStep.CustomsExtractionMultiplier,
+            ServerConfig.MultiStep.CustomsNearbyExitDistance, ordinaryRoute, preparedEstimate);
+        Log.Info($"MULTISTEP EXTRACT CHOICE: {squad} map={_mapId} ordinary={ordinary?.Name ?? "none"} route={ordinaryRoute:F1}m preparedEstimate={preparedEstimate:F1}m baseChance={personalityChance:F3} chance={chance:F3}");
+        return true;
     }
 
     internal bool TryOperationPoint(Agent actor, OperationStep step, OperationRouteSearch search,
