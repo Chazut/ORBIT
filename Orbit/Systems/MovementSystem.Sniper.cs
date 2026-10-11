@@ -46,9 +46,13 @@ public partial class MovementSystem
 
     private bool TryRecordedSniperTransit(Agent agent, Vector3 target)
     {
-        if (!SniperRelocationAllowed(agent) || !SniperReturnRecovery.Near(agent.Position, target)) return false;
+        if (!SniperRelocationAllowed(agent)) return DeferSniperPlacement(agent, "recorded-transit", "actor-busy-or-unsafe");
+        if (!SniperReturnRecovery.Near(agent.Position, target))
+            return DeferSniperPlacement(agent, "recorded-transit", "distance-or-height");
         if (NavMesh.CalculatePath(agent.Position, target, NavMesh.AllAreas, _sniperPath)
-            && _sniperPath.status == NavMeshPathStatus.PathComplete) return false;
+            && _sniperPath.status == NavMeshPathStatus.PathComplete
+            && RecordedSniperRoute.LocalPath(agent.Position, target, _sniperPath.corners))
+            return DeferSniperPlacement(agent, "recorded-transit", "connected-local-route");
         // The existing ground, visibility, wall, closed-door and body checks apply unchanged.
         if (!TrySniperPlacement(agent, target, "recorded-transit")) return false;
         ResumeAfterRescue(agent); return true;
