@@ -141,6 +141,7 @@ public static class WeaponSwapper
 
     public static async Task<Outcome> TryHandleAsync(BotOwner bot, Weapon candidate, Item rootSource, CancellationToken ct, bool dormant = false)
     {
+        LootActorGuard.RequireCurrent(bot, ct);
         if (ServerConfig.Loot.KeepSpawnWeapons) return Outcome.NotApplicable;
         if (bot == null || candidate == null) return Outcome.NotApplicable;
         var player = bot.GetPlayer;
@@ -154,6 +155,7 @@ public static class WeaponSwapper
         var outcome = isBotScav
             ? await TryEquipIntoFirstEmptySlotAsync(bot, candidate, nick, ct)
             : await EvaluateAndPerformAsync(bot, candidate, rootSource, nick, ct, dormant);
+        LootActorGuard.RequireCurrent(bot, ct);
         if (outcome == Outcome.Swapped)
         {
             if (dormant) RegisterDormantEquip(bot, candidate, nick);
@@ -219,6 +221,7 @@ public static class WeaponSwapper
     /// secondary if the swap is refused.</summary>
     public static async Task PromotePendingAsync(BotOwner bot, CancellationToken ct)
     {
+        LootActorGuard.RequireCurrent(bot, ct);
         var agent = Singleton<BotRoster>.Instance?.GetAgent(bot);
         var candidate = agent?.GhostPendingPromotion;
         if (candidate == null || agent.IsDormant) return;
@@ -260,10 +263,12 @@ public static class WeaponSwapper
     /// </summary>
     public static async Task<Outcome> TryEquipOnlyAsync(BotOwner bot, Weapon candidate, CancellationToken ct, bool dormant = false)
     {
+        LootActorGuard.RequireCurrent(bot, ct);
         if (ServerConfig.Loot.KeepSpawnWeapons) return Outcome.NotApplicable;
         if (bot == null || candidate == null) return Outcome.NotApplicable;
         var nick = bot.Profile?.Nickname ?? "(no-nick)";
         var outcome = await TryEquipIntoFirstEmptySlotAsync(bot, candidate, nick, ct);
+        LootActorGuard.RequireCurrent(bot, ct);
         if (outcome == Outcome.Swapped)
         {
             if (dormant) RegisterDormantEquip(bot, candidate, nick);
@@ -274,6 +279,7 @@ public static class WeaponSwapper
 
     private static async Task<Outcome> TryEquipIntoFirstEmptySlotAsync(BotOwner bot, Weapon candidate, string nick, CancellationToken ct)
     {
+        LootActorGuard.RequireCurrent(bot, ct);
         var equipment = bot.GetPlayer.Inventory.Equipment;
         foreach (var slotKind in WeaponSlotsPrimaryFirst)
         {
@@ -282,6 +288,7 @@ public static class WeaponSwapper
             if (!slot.CheckCompatibility(candidate)) continue;
             Log.Info($"WeaponSwap.Scav({nick}): equip {candidate.LocalizedName()} → {slotKind}");
             var moved = await MoveIntoSlotAsync(bot, candidate, slot, nick, ct);
+            LootActorGuard.RequireCurrent(bot, ct);
             return moved ? Outcome.Swapped : Outcome.Skipped;
         }
         return Outcome.Skipped;
@@ -290,6 +297,7 @@ public static class WeaponSwapper
 
     private static async Task<Outcome> EvaluateAndPerformAsync(BotOwner bot, Weapon candidate, Item rootSource, string nick, CancellationToken ct, bool dormant = false)
     {
+        LootActorGuard.RequireCurrent(bot, ct);
         var equipment = bot.GetPlayer.Inventory.Equipment;
         var primary1Slot = equipment.GetSlot(EquipmentSlot.FirstPrimaryWeapon);
         var primary2Slot = equipment.GetSlot(EquipmentSlot.SecondPrimaryWeapon);
@@ -332,6 +340,7 @@ public static class WeaponSwapper
         List<Item> inventoryItems, WeaponWeights weights, float margin,
         float candidateScore, Item rootSource, string nick, CancellationToken ct, bool dormant = false)
     {
+        LootActorGuard.RequireCurrent(bot, ct);
         var current = holsterSlot.ContainedItem as Weapon;
         if (dormant && current != null && IsInHands(bot, current))
         {
@@ -342,6 +351,7 @@ public static class WeaponSwapper
         {
             Log.Info($"WeaponSwap({nick}): holster empty — equip {candidate.LocalizedName()} (score {candidateScore:F1})");
             var moved = await MoveIntoSlotAsync(bot, candidate, holsterSlot, nick, ct);
+            LootActorGuard.RequireCurrent(bot, ct);
             return moved ? Outcome.Swapped : Outcome.Skipped;
         }
         var currentScore = WeaponScorer.Score(current, inventoryItems, weights, $"{nick}:HOLSTER");
@@ -353,7 +363,9 @@ public static class WeaponSwapper
             // Phase 5 — strip valuable mods off the holster weapon before it leaves. Post-swap loadout will
             // be the bot's primaries (unchanged) + candidate in holster.
             await StripValuableModsBeforeDiscardAsync(bot, current, GatherPostSwapWeapons(bot, candidate, EquipmentSlot.Holster), nick, ct);
+            LootActorGuard.RequireCurrent(bot, ct);
             var ok = await SwapInPlaceAsync(bot, candidate, current, nick, ct);
+            LootActorGuard.RequireCurrent(bot, ct);
             return ok ? Outcome.Swapped : Outcome.Skipped;
         }
         Log.Debug($"WeaponSwap({nick}): holster keep {current.LocalizedName()}({currentScore:F1}) — candidate {candidate.LocalizedName()}({candidateScore:F1}) below margin {margin:F2}");
@@ -365,6 +377,7 @@ public static class WeaponSwapper
         List<Item> inventoryItems, WeaponWeights weights, float margin,
         float candidateScore, Item rootSource, string nick, CancellationToken ct, bool dormant = false)
     {
+        LootActorGuard.RequireCurrent(bot, ct);
         var current1 = primary1Slot?.ContainedItem as Weapon;
         var current2 = primary2Slot?.ContainedItem as Weapon;
         // Ghost: every branch below only ever displaces primary2 (primary1 is promoted through a slot swap), so
@@ -380,6 +393,7 @@ public static class WeaponSwapper
         {
             Log.Info($"WeaponSwap({nick}): primary1 empty — equip {candidate.LocalizedName()} (score {candidateScore:F1})");
             var moved = await MoveIntoSlotAsync(bot, candidate, primary1Slot, nick, ct);
+            LootActorGuard.RequireCurrent(bot, ct);
             return moved ? Outcome.Swapped : Outcome.Skipped;
         }
 
@@ -409,6 +423,7 @@ public static class WeaponSwapper
             }
             Log.Info($"WeaponSwap({nick}): primary2 empty — equip {candidate.LocalizedName()}({candidateScore:F1}) as secondary (slot1 {current1.LocalizedName()}={score1:F1})");
             var movedSecondary = await MoveIntoSlotAsync(bot, candidate, primary2Slot, nick, ct);
+            LootActorGuard.RequireCurrent(bot, ct);
             return movedSecondary ? Outcome.Swapped : Outcome.Skipped;
         }
 
@@ -426,6 +441,7 @@ public static class WeaponSwapper
             // atomic Swap moves it. After the full rotate, the bot will hold the candidate (PRI1) + the
             // demoted current1 (PRI2); current2 is gone, taking any un-stripped mods with it.
             await StripValuableModsBeforeDiscardAsync(bot, current2, new[] { candidate, current1 }, nick, ct);
+            LootActorGuard.RequireCurrent(bot, ct);
             if (!await SwapInPlaceAsync(bot, candidate, current2, nick, ct)) return Outcome.Skipped;
             if (dormant)
             {
@@ -434,6 +450,7 @@ public static class WeaponSwapper
             }
             SyncBotBetweenSwaps(bot, nick);
             await WaitForIsChangingWeaponAsync(bot, nick, ct);
+            LootActorGuard.RequireCurrent(bot, ct);
             if (!await SwapInPlaceAsync(bot, candidate, current1, nick, ct))
             {
                 Log.Info($"WeaponSwap({nick}): second atomic swap fallback — candidate stays as secondary, primary1 unchanged");
@@ -449,7 +466,9 @@ public static class WeaponSwapper
             Log.Info($"WeaponSwap({nick}): primary2 swap — atomic {candidate.LocalizedName()}({candidateScore:F1}) ↔ {current2.LocalizedName()}({score2:F1})");
             // Phase 5 — strip current2 before it leaves. Bot keeps current1 in PRI1 + candidate in PRI2.
             await StripValuableModsBeforeDiscardAsync(bot, current2, new[] { candidate, current1 }, nick, ct);
+            LootActorGuard.RequireCurrent(bot, ct);
             var ok = await SwapInPlaceAsync(bot, candidate, current2, nick, ct);
+            LootActorGuard.RequireCurrent(bot, ct);
             return ok ? Outcome.Swapped : Outcome.Skipped;
         }
 
@@ -468,43 +487,40 @@ public static class WeaponSwapper
     internal static async Task<bool> RunGuardedTransactionAsync<T>(BotOwner bot, OperationResult<T> op, string label, string nick, CancellationToken ct)
         where T : IOperationResult
     {
-        var ic = bot.GetPlayer?.InventoryController;
-        if (ic == null) return false;
-
+        LootActorGuard.RequireCurrent(bot, ct);
+        var ic = bot.GetPlayer.InventoryController;
         Log.Debug($"WeaponSwap.{label}({nick}): tx STARTED (awaiting TryRunNetworkTransaction)");
-
         using var timeoutCts = new CancellationTokenSource(NetworkTransactionTimeoutMs);
-        var networkTask = ic.TryRunNetworkTransaction(op, null);
-        var winner = await Task.WhenAny(networkTask, Task.Delay(System.Threading.Timeout.Infinite, timeoutCts.Token), Task.Delay(System.Threading.Timeout.Infinite, ct));
-
-        if (winner != networkTask)
-        {
-            // Timed out (or cancelled). Fast-forward to release any pending hands-controller op that the
-            // network call was waiting on, then bail.
-            Log.Warning($"WeaponSwap.{label}({nick}): tx TIMEOUT after {NetworkTransactionTimeoutMs}ms — fast-forwarding hands controller");
-            try { bot.GetPlayer?.FastForwardCurrentOperations(); }
-            catch (System.Exception ffEx) { Log.Warning($"WeaponSwap.{label}({nick}): FastForward THREW {ffEx.Message}"); }
-            return false;
-        }
-
+        using var waitCts = CancellationTokenSource.CreateLinkedTokenSource(ct, timeoutCts.Token);
         try
         {
-            var result = await networkTask;
+            var result = await LootActorGuard.AwaitTransaction(ic.TryRunNetworkTransaction(op, null), waitCts.Token);
+            LootActorGuard.RequireCurrent(bot, ct);
             if (!result.Succeed)
             {
-                Log.Warning($"WeaponSwap.{label}({nick}): tx FAILED — {result.Error}");
+                Log.Warning($"WeaponSwap.{label}({nick}): tx FAILED, {result.Error}");
                 if (result.Error == "Can not execute")
                     Log.Warning($"WeaponSwap.{label}({nick}): refusal detail: {DescribeRefusal(bot, op.Value)}");
                 return false;
             }
             Log.Debug($"WeaponSwap.{label}({nick}): tx DONE (succeeded), settling {PostTransactionSettleMs}ms");
-            bot.GetPlayer?.gameObject?.GetComponent<OrbitLootHandler>()?.ReportInventoryProgress(ct);
+            Singleton<BotRoster>.Instance?.GetAgent(bot)?.LootHandler?.ReportInventoryProgress(ct);
             await Task.Delay(PostTransactionSettleMs, ct);
+            LootActorGuard.RequireCurrent(bot, ct);
             return true;
+        }
+        catch (System.OperationCanceledException) when (!ct.IsCancellationRequested && timeoutCts.IsCancellationRequested)
+        {
+            LootActorGuard.RequireCurrent(bot, ct);
+            Log.Warning($"WeaponSwap.{label}({nick}): tx TIMEOUT after {NetworkTransactionTimeoutMs}ms, fast-forwarding hands controller");
+            try { bot.GetPlayer.FastForwardCurrentOperations(); }
+            catch (System.Exception ffEx) { Log.Warning($"WeaponSwap.{label}({nick}): FastForward THREW {ffEx.Message}"); }
+            return false;
         }
         catch (System.OperationCanceledException) { throw; }
         catch (System.Exception e)
         {
+            LootActorGuard.RequireCurrent(bot, ct);
             Log.Warning($"WeaponSwap.{label}({nick}): tx THREW {e}");
             return false;
         }
@@ -549,6 +565,7 @@ public static class WeaponSwapper
 
     internal static async Task<bool> SwapInPlaceAsync(BotOwner bot, Item itemA, Item itemB, string nick, CancellationToken ct)
     {
+        LootActorGuard.RequireCurrent(bot, ct);
         var ic = bot.GetPlayer?.InventoryController;
         if (ic == null || itemA == null || itemB == null) return false;
         var addrA = itemA.CurrentAddress;
@@ -661,6 +678,7 @@ public static class WeaponSwapper
 
     internal static async Task<bool> MoveIntoSlotAsync(BotOwner bot, Item item, Slot slot, string nick, CancellationToken ct)
     {
+        LootActorGuard.RequireCurrent(bot, ct);
         var ic = bot.GetPlayer?.InventoryController;
         if (ic == null || item == null || slot == null) return false;
         var destSlotId = slot.ID ?? "?";
@@ -729,6 +747,7 @@ public static class WeaponSwapper
     // blind-delayed so the typical sub-1s case doesn't hold up the bot.
     private static async Task WaitForIsChangingWeaponAsync(BotOwner bot, string nick, CancellationToken ct)
     {
+        LootActorGuard.RequireCurrent(bot, ct);
         const int maxWaitMs = 5000;
         const int pollIntervalMs = 100;
         var ic = bot?.GetPlayer?.InventoryController;
@@ -741,6 +760,7 @@ public static class WeaponSwapper
             catch { changing = false; }
             if (!changing) return;
             await Task.Delay(pollIntervalMs, ct);
+            LootActorGuard.RequireCurrent(bot, ct);
             elapsed += pollIntervalMs;
         }
         Log.Warning($"WeaponSwap.WaitForIsChangingWeapon({nick}): hit {maxWaitMs}ms cap — proceeding");
@@ -750,9 +770,11 @@ public static class WeaponSwapper
     // discarded gun, so the bot "fires" a dead reference until BSG re-selects; ChangeToMain forces the re-draw.
     private static async Task FinalizeWeaponSwapAsync(BotOwner bot, string nick, CancellationToken ct)
     {
+        LootActorGuard.RequireCurrent(bot, ct);
         try
         {
             await WaitForIsChangingWeaponAsync(bot, nick, ct);
+            LootActorGuard.RequireCurrent(bot, ct);
             var selector = bot?.WeaponManager?.Selector;
             if (selector == null) return;
             selector.UpdateWeaponsList();
@@ -760,6 +782,7 @@ public static class WeaponSwapper
             try { bot.AIData?.CalcPower(); } catch { }
             Log.Debug($"WeaponSwap.Finalize({nick}): refreshed weapon list + re-drew main weapon so SAIN fires the new gun");
         }
+        catch (System.OperationCanceledException) { throw; }
         catch (System.Exception e)
         {
             Log.Warning($"WeaponSwap.Finalize({nick}): THREW {e.Message}");
@@ -789,6 +812,7 @@ public static class WeaponSwapper
     private static async Task StripValuableModsBeforeDiscardAsync(
         BotOwner bot, Weapon weaponToDiscard, IList<Weapon> postSwapWeapons, string nick, CancellationToken ct)
     {
+        LootActorGuard.RequireCurrent(bot, ct);
         if (weaponToDiscard?.Slots == null || weaponToDiscard.Slots.Length == 0) return;
         var ic = bot.GetPlayer?.InventoryController;
         if (ic == null) return;
@@ -858,8 +882,10 @@ public static class WeaponSwapper
                 }
                 Log.Info($"WeaponStrip({nick}): strip {slot.ID}={mod.LocalizedName()} → bot grids ({reason})");
                 var ok = await RunGuardedTransactionAsync(bot, place, $"WeaponStrip({mod.LocalizedName()})", nick, ct);
+                LootActorGuard.RequireCurrent(bot, ct);
                 if (!ok) Log.Debug($"WeaponStrip({nick}): network tx failed for {mod.LocalizedName()} — leaving on weapon");
             }
+            catch (System.OperationCanceledException) { throw; }
             catch (System.Exception ex)
             {
                 Log.Debug($"WeaponStrip({nick}): strip {mod.LocalizedName()} threw — {ex.Message}");

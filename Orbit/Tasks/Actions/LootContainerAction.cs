@@ -126,7 +126,7 @@ public class LootContainerAction(AgentData dataset, WaypointSystem waypointSyste
 
         if (state.Success)
         {
-            var stats = agent.Player?.gameObject?.GetComponent<OrbitLootHandler>()?.Stats;
+            var stats = agent.LootHandler?.Stats;
             switch (location.Category)
             {
                 case WaypointCategory.LooseLoot:
@@ -295,7 +295,7 @@ public class LootContainerAction(AgentData dataset, WaypointSystem waypointSyste
             if (m == null) continue;
             var go = m.Player?.gameObject;
             if (go == null) continue;
-            var handler = go.GetComponent<OrbitLootHandler>();
+            var handler = m.LootHandler;
             var looted = handler?.Stats?.TotalGained ?? 0f;
             total += looted;
             aliveCount++;
@@ -366,7 +366,7 @@ public class LootContainerAction(AgentData dataset, WaypointSystem waypointSyste
         // Skip if the dead member had ~nothing (no point pulling survivors off their mains for empty
         // kit recovery).
         if (deadAgent?.Player == null) return;
-        var deadHandler = deadAgent.Player.gameObject?.GetComponent<OrbitLootHandler>();
+        var deadHandler = deadAgent.LootHandler;
         var deadValue = deadHandler?.Stats?.TotalGained ?? 0f;
         if (deadValue < 100_000f) return; // not worth the detour
         var deadProfileId = deadAgent.Player.ProfileId;
@@ -465,8 +465,7 @@ public class LootContainerAction(AgentData dataset, WaypointSystem waypointSyste
         var ownThreshold = GetOrResolveAgentExtractThreshold(agent);
         if (ownThreshold <= 0f) return; // not resolved yet / feature disabled — retry on the next loot
 
-        var go = agent.Player?.gameObject;
-        var ownLooted = go != null ? (go.GetComponent<OrbitLootHandler>()?.Stats?.TotalGained ?? 0f) : 0f;
+        var ownLooted = agent.LootHandler?.Stats?.TotalGained ?? 0f;
         if (ownLooted < ownThreshold) return;
 
         agent.SoloLootThresholdRolled = true;
@@ -775,19 +774,19 @@ internal class BotLootState
         _agent = agent;
         _location = location;
 
-        var go = agent.Player.gameObject;
-        var handler = go.GetComponent<OrbitLootHandler>();
-        if (handler == null)
-        {
-            handler = go.AddComponent<OrbitLootHandler>();
-            handler.Init(agent.Bot);
-        }
+        var handler = OrbitLootHandler.ForBot(agent.Bot);
         _brain = handler;
         agent.LootHandler = handler;
     }
 
     public void Begin()
     {
+        if (!LootActorGuard.IsCurrent(_agent.Bot, _agent.Player))
+        {
+            IsDone = true;
+            Success = false;
+            return;
+        }
         // Ghost looting OFF: the sleeping squad walks its route but never opens anything. Success=false
         // routes through the failed-loot path, which blacklists the POI for the squad so the strategy
         // re-picks instead of looping on it.
@@ -928,7 +927,8 @@ internal class BotLootState
         // If combat or any other task is hijacking the bot mid-loot, the container we cracked open stays
         // visually open forever — looks weird and confuses both players and the squad blacklist heuristic (a
         // passing teammate would see "already opened, must be empty"). Close it explicitly before bailing.
-        if (_brain.CurrentTarget is LootableContainer container)
+        if (LootActorGuard.IsCurrent(_agent.Bot, _agent.Player)
+            && _brain.CurrentTarget is LootableContainer container)
         {
             try
             {

@@ -130,6 +130,7 @@ public class OrbitManager
 
     public void Dispose()
     {
+        foreach (var agent in _liveAgents) agent.LootHandler?.Retire();
         Orbit.Navigation.OperationSwitchReach.Reset();
         SniperCombat.Clear();
         Orbit.Patches.AirdropLandedPatch.OnAirdropLanded -= WaypointSystem.RegisterLandedAirdrop;
@@ -228,6 +229,8 @@ public class OrbitManager
         // brain swaps), but the teardown below is not idempotent (id slots get recycled). Bail unless this agent
         // is still the live registration; the first pass nulls the roster slot and later passes no-op.
         if (_botRoster.GetAgent(agent.Bot) != agent) return;
+
+        agent.LootHandler?.Retire();
 
         // First, so a dormant body is re-activated before teardown (corpses must never stay hidden
         // inside an inactive GameObject).

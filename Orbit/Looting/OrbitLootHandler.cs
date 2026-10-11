@@ -76,7 +76,7 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
     {
         // Equipment swaps can transfer many items before returning to the main loot loop.
         // Only successful work for the current, still-running session resets its watchdog.
-        if (!LootTaskRunning || _cts == null || sessionToken != _cts.Token || sessionToken.IsCancellationRequested)
+        if (!LootTaskRunning || !HasLiveOwner || !OwnsSession(sessionToken) || sessionToken.IsCancellationRequested)
             return;
         BumpLootActivity();
     }
@@ -121,11 +121,19 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
     /// <summary>See <see cref="ILootHandler.DormantMode"/>. Set per session by BotLootState.</summary>
     public bool DormantMode { get; set; }
 
-    private string Nick => _bot?.GetPlayer?.Profile?.Nickname ?? "(no-bot)";
+    private string _nickname = "(no-bot)";
+    private string Nick => _nickname;
 
     public void Init(BotOwner bot)
     {
+        if (!ReferenceEquals(_bot, null))
+        {
+            if (!_retired && ReferenceEquals(_bot, bot) && ReferenceEquals(_player, bot.GetPlayer)) return;
+            throw new System.InvalidOperationException("A loot handler belongs to one bot spawn. Use ForBot for a recycled body.");
+        }
         _bot = bot;
+        _player = bot.GetPlayer;
+        _nickname = _player.Profile?.Nickname ?? "(no-bot)";
         Stats.SpawnValue = ItemPriceLookup.SumInventoryWorth(bot);
         Stats.InventoryValue = Stats.SpawnValue;
         Stats.TotalGained = 0f;
@@ -141,6 +149,7 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
     /// </summary>
     private void Update()
     {
+        if (!HasLiveOwner) { Retire(); return; }
         if (!LootTaskRunning) return;
         var elapsedSinceActivity = Time.realtimeSinceStartup - _lastLootActivityTime;
         if (elapsedSinceActivity < LootSessionInactivityTimeoutSeconds) return;
@@ -156,6 +165,7 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
 
     public void StartLooting()
     {
+        if (!HasLiveOwner) { Retire(); return; }
         if (LootTaskRunning)
         {
             Log.Debug($"OrbitLootHandler.StartLooting({Nick}): IGNORED — already running");
@@ -175,6 +185,7 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
         Stats.LastMaxPerSlotSeen = 0f;
         Stats.LastHadBypassItem = false;
         _swappedWeaponIds.Clear();
+        _allowWeaponSwapPath = false;
         BumpLootActivity();
 
         Log.Debug($"OrbitLootHandler.StartLooting({Nick}): kind={CurrentTargetKind}, target={CurrentTarget.name}, minPrice={GetMinPickupPrice():N0}₽");
@@ -188,18 +199,21 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
 
     private async Task RunAsync(InteractableObject loot, LootKind kind, CancellationToken ct)
     {
+        var session = _cts;
+        var targetName = loot != null ? loot.name : "(missing)";
         var sw = Time.realtimeSinceStartup;
         var takenBefore = Stats.LastItemsTaken;
         // Pin the bot stationary for the loot session. BSG's BotMover.SetPlayerToNavMesh ticks in LateUpdate
         // and can throw on a bot whose movement state is in flux while weapon slots are being mutated; pose=0
         // + Mover.Pause keeps it quiescent.
-        if (!DormantMode)
-        {
-            FreezeBotForLootSession();
-            LookAtLootTarget(loot);
-        }
         try
         {
+            CheckSession(ct);
+            if (!DormantMode)
+            {
+                FreezeBotForLootSession();
+                LookAtLootTarget(loot);
+            }
             // A better weapon parked in primary2 while the bot slept is promoted here, at the start of any
             // awake session: the bot is pinned and calm. Hooking it on phase 4 missed every session that ends
             // early with nothing to take, which is most of them (Shoreline raid: a parked Benelli went through
@@ -208,6 +222,7 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
             {
                 using var body = _bodyGate.Enter(true);
                 await WeaponSwapper.PromotePendingAsync(_bot, ct);
+                CheckSession(ct);
             }
             switch (kind)
             {
@@ -230,10 +245,12 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
                         Log.Warning($"OrbitLootHandler.RunAsync({Nick}): kind=Item but target is {loot?.GetType().Name}");
                     break;
             }
+            CheckSession(ct);
         }
         catch (System.OperationCanceledException)
         {
-            Log.Debug($"OrbitLootHandler.RunAsync({Nick}): CANCELLED ({kind}, target={loot?.name})");
+            if (OwnsSession(ct)) LastSessionCancelled = true;
+            Log.Debug($"OrbitLootHandler.RunAsync({Nick}): CANCELLED ({kind}, target={targetName})");
         }
         catch (System.Exception e)
         {
@@ -244,16 +261,12 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
             // Session-end weapon-draw animation. Mid-drain we only refresh internal data; the animation-side
             // switch (SetSlotItem) is deferred here so it doesn't collide with the loot animation and stall
             // the main thread.
-            if (!DormantMode)
+            if (FinishSession(ct))
             {
-                if (_swappedWeaponIds.Count > 0)
-                    SyncBotWeaponStateAtSessionEnd();
-                // A dormant session must NOT unfreeze: the sleep recipe owns PatrollingData/Mover state.
-                UnfreezeBotAfterLootSession();
+                var elapsed = Time.realtimeSinceStartup - sw;
+                Log.Debug($"OrbitLootHandler.RunAsync({Nick}): done in {elapsed:F1}s, kind={kind}, target={targetName}, ItemsTaken={Stats.LastItemsTaken} (was {takenBefore})");
             }
-            LootTaskRunning = false;
-            var elapsed = Time.realtimeSinceStartup - sw;
-            Log.Debug($"OrbitLootHandler.RunAsync({Nick}): done in {elapsed:F1}s, kind={kind}, target={loot?.name}, ItemsTaken={Stats.LastItemsTaken} (was {takenBefore})");
+            session.Dispose();
         }
     }
 
@@ -263,7 +276,7 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
     /// </summary>
     private void LookAtLootTarget(InteractableObject loot)
     {
-        if (_bot == null || loot == null) return;
+        if (!HasLiveOwner || loot == null) return;
         try
         {
             var target = loot.transform?.position;
@@ -280,7 +293,7 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
     {
         try
         {
-            if (_bot == null) return;
+            if (!HasLiveOwner) return;
             // PatrollingData ticks nav recalcs in LateUpdate; pausing it prevents them from racing with
             // weapon-slot mutations during the loot session.
             try { _bot.PatrollingData?.Pause(); } catch (System.Exception e) { Log.Warning($"OrbitLootHandler.FreezeBotForLootSession({Nick}): PatrollingData.Pause THREW {e.Message}"); }
@@ -299,7 +312,7 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
     {
         try
         {
-            if (_bot == null || _bot.IsDead || DormantMode) return;
+            if (!HasLiveOwner || DormantMode) return;
             var agent = Singleton<BotRoster>.Instance?.GetAgent(_bot);
             // Cancellation can finish after combat or Ghost has taken ownership of the body.
             // The layer handoff already released our mover pause; leave the new owner's state alone.
@@ -341,6 +354,7 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
 
     private async Task LootContainerAsync(LootableContainer container, CancellationToken ct)
     {
+        CheckSession(ct);
         var initialState = container.DoorState;
         Log.Debug($"OrbitLootHandler.Container({Nick}, {container.name}): door={initialState}, ItemOwner={(container.ItemOwner != null ? "yes" : "null")}");
 
@@ -355,6 +369,7 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
             // Ghosts pay the same opening time, just without the animation (disabled body). Without
             // this a ghost emptied a whole container in one continuation chain (raid 8 lesson).
             await Task.Delay(ContainerOpenAnimMs, ct);
+            CheckSession(ct);
         }
 
         var rootItem = container.ItemOwner?.RootItem;
@@ -366,6 +381,7 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
         else
         {
             await LootContainerDrainAsync(container, rootItem, ct);
+            CheckSession(ct);
         }
 
         try
@@ -391,6 +407,7 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
     /// </summary>
     private async Task LootContainerDrainAsync(LootableContainer container, Item rootItem, CancellationToken ct)
     {
+        CheckSession(ct);
         // Hoist every weapon, body armor and helmet found in the container out of the drain queue and into
         // their deferred phase 2/4 pipelines. Keeps every gear-affecting tx as the last op of the session.
         var drain = new List<DrainEntry>();
@@ -404,9 +421,11 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
         {
             var slotItems = new List<DrainEntry>();
             await EnumerateItemsForDrainAsync(child, "", slotItems, ct);
+            CheckSession(ct);
             foreach (var entry in slotItems)
             {
                 await LootWorkBudget.Checkpoint(ct);
+                CheckSession(ct);
                 if (entry.Item is Weapon w)
                 {
                     containerWeapons.Add((w, entry.Path));
@@ -451,9 +470,11 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
         // Resolve the post-swap weapon set so mag / ammo pickups during phase 1 can be gated against the
         // loadout the bot will end the session with (not the one it currently holds).
         await ResolvePostSwapWeaponsAsync(null, containerWeapons, ct);
+        CheckSession(ct);
 
         // Phase 1: drain non-weapon items.
         await DrainProgressiveAsync(drain, ct);
+        CheckSession(ct);
 
         if (containerWeapons.Count == 0 && containerArmors.Count == 0 && containerHelmets.Count == 0 && containerRigs.Count == 0 && containerBackpacks.Count == 0 && containerHeadsets.Count == 0) return;
 
@@ -466,6 +487,7 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
         foreach (var (w, path) in containerWeapons)
         {
             await LootWorkBudget.Checkpoint(ct);
+            CheckSession(ct);
             if (!CanEquipWeaponIntoEmptySlot(w))
             {
                 toStrip.Add((w, path));
@@ -496,11 +518,13 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
             ct.ThrowIfCancellationRequested();
             var modItems = new List<DrainEntry>();
             await EnumerateItemsForDrainAsync(w, path, modItems, ct);
+            CheckSession(ct);
             foreach (var modEntry in modItems)
             {
                 if (ReferenceEquals(modEntry.Item, w)) continue;
                 ct.ThrowIfCancellationRequested();
                 await TransferItemAsync(modEntry, ct);
+                CheckSession(ct);
             }
         }
 
@@ -508,9 +532,11 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
         // qualifies only if the bot's target slot is empty AND the candidate compatible. The highest-scoring
         // qualifying item per slot is kept; the others get nothing done to them (no mods to strip on armor).
         (Item item, string path, float score)? bestArmor = await ResolveBestGearForEmptySlotAsync(containerArmors, EquipmentSlot.ArmorVest, ct);
+        CheckSession(ct);
         if (bestArmor != null)
             Log.Info($"OrbitLootHandler.Container({Nick}, {container.name}): phase2 armor winner = {bestArmor.Value.path} → {bestArmor.Value.item.LocalizedName()} (score {bestArmor.Value.score:F1})");
         (Item item, string path, float score)? bestHelmet = await ResolveBestGearForEmptySlotAsync(containerHelmets, EquipmentSlot.Headwear, ct);
+        CheckSession(ct);
         if (bestHelmet != null)
             Log.Info($"OrbitLootHandler.Container({Nick}, {container.name}): phase2 helmet winner = {bestHelmet.Value.path} → {bestHelmet.Value.item.LocalizedName()} (score {bestHelmet.Value.score:F1})");
         // Rig candidates use a dedicated resolver because RigScorer is keyed off TacticalVest cells + armor
@@ -525,6 +551,7 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
                 foreach (var (item, path) in containerRigs)
                 {
                     await LootWorkBudget.Checkpoint(ct);
+                    CheckSession(ct);
                     if (!rigSlot.CheckCompatibility(item)) continue;
                     float score;
                     using (TransitionPerformance.Measure(TransitionPhase.LootEvaluate)) score = RigScorer.Score(item);
@@ -545,6 +572,7 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
                 foreach (var (item, path) in containerBackpacks)
                 {
                     await LootWorkBudget.Checkpoint(ct);
+                    CheckSession(ct);
                     if (!backpackSlot.CheckCompatibility(item)) continue;
                     float score;
                     using (TransitionPerformance.Measure(TransitionPhase.LootEvaluate)) score = BackpackScorer.Score(item);
@@ -565,6 +593,7 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
                 foreach (var (item, path) in containerHeadsets)
                 {
                     await LootWorkBudget.Checkpoint(ct);
+                    CheckSession(ct);
                     if (!earpieceSlot.CheckCompatibility(item)) continue;
                     float score;
                     using (TransitionPerformance.Measure(TransitionPhase.LootEvaluate)) score = HeadsetScorer.Score(item);
@@ -588,6 +617,7 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
             ct.ThrowIfCancellationRequested();
             Log.Debug($"OrbitLootHandler.Container({Nick}, {container.name}): phase4 pre-equip settle (2500ms) — weapon");
             await Task.Delay(2500, ct);
+            CheckSession(ct);
             if (!CanEquipWeaponIntoEmptySlot(bestWeapon.Value.weapon))
             {
                 Log.Info($"OrbitLootHandler.Container({Nick}, {container.name}): phase4 SKIP {bestWeapon.Value.path} → {bestWeapon.Value.weapon.LocalizedName()} — no longer fits any empty slot");
@@ -596,6 +626,7 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
             {
                 Log.Info($"OrbitLootHandler.Container({Nick}, {container.name}): phase4 perform equip {bestWeapon.Value.path} → {bestWeapon.Value.weapon.LocalizedName()}");
                 await TransferItemAsync(new DrainEntry(bestWeapon.Value.weapon, bestWeapon.Value.path), ct);
+                CheckSession(ct);
             }
         }
         if (bestArmor != null)
@@ -603,8 +634,10 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
             ct.ThrowIfCancellationRequested();
             Log.Debug($"OrbitLootHandler.Container({Nick}, {container.name}): phase4 pre-equip settle (2500ms) — armor");
             await Task.Delay(2500, ct);
+            CheckSession(ct);
             Log.Info($"OrbitLootHandler.Container({Nick}, {container.name}): phase4 perform armor equip → {bestArmor.Value.item.LocalizedName()}");
             await ArmorSwapper.TryEquipOnlyAsync(_bot, bestArmor.Value.item, EquipmentSlot.ArmorVest, ct);
+            CheckSession(ct);
             _bot.AIData?.CalcPower();
         }
         if (bestHelmet != null)
@@ -612,8 +645,10 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
             ct.ThrowIfCancellationRequested();
             Log.Debug($"OrbitLootHandler.Container({Nick}, {container.name}): phase4 pre-equip settle (2500ms) — helmet");
             await Task.Delay(2500, ct);
+            CheckSession(ct);
             Log.Info($"OrbitLootHandler.Container({Nick}, {container.name}): phase4 perform helmet equip → {bestHelmet.Value.item.LocalizedName()}");
             await ArmorSwapper.TryEquipOnlyAsync(_bot, bestHelmet.Value.item, EquipmentSlot.Headwear, ct);
+            CheckSession(ct);
             _bot.AIData?.CalcPower();
         }
         if (bestRig != null)
@@ -621,8 +656,10 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
             ct.ThrowIfCancellationRequested();
             Log.Debug($"OrbitLootHandler.Container({Nick}, {container.name}): phase4 pre-equip settle (2500ms) — rig");
             await Task.Delay(2500, ct);
+            CheckSession(ct);
             Log.Info($"OrbitLootHandler.Container({Nick}, {container.name}): phase4 perform rig equip → {bestRig.Value.item.LocalizedName()}");
             await RigSwapper.TryEquipOnlyAsync(_bot, bestRig.Value.item, ct);
+            CheckSession(ct);
             _bot.AIData?.CalcPower();
         }
         if (bestBackpack != null)
@@ -630,21 +667,26 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
             ct.ThrowIfCancellationRequested();
             Log.Debug($"OrbitLootHandler.Container({Nick}, {container.name}): phase4 pre-equip settle (2500ms) — backpack");
             await Task.Delay(2500, ct);
+            CheckSession(ct);
             Log.Info($"OrbitLootHandler.Container({Nick}, {container.name}): phase4 perform backpack equip → {bestBackpack.Value.item.LocalizedName()}");
             await BackpackSwapper.TryEquipOnlyAsync(_bot, bestBackpack.Value.item, ct);
+            CheckSession(ct);
         }
         if (bestHeadset != null)
         {
             ct.ThrowIfCancellationRequested();
             Log.Debug($"OrbitLootHandler.Container({Nick}, {container.name}): phase4 pre-equip settle (2500ms) — headset");
             await Task.Delay(2500, ct);
+            CheckSession(ct);
             Log.Info($"OrbitLootHandler.Container({Nick}, {container.name}): phase4 perform headset equip → {bestHeadset.Value.item.LocalizedName()}");
             await HeadsetSwapper.TryEquipOnlyAsync(_bot, bestHeadset.Value.item, ct);
+            CheckSession(ct);
         }
     }
 
     private async Task<(Item item, string path, float score)?> ResolveBestGearForEmptySlotAsync(List<(Item item, string path)> candidates, EquipmentSlot slotKind, CancellationToken ct)
     {
+        CheckSession(ct);
         if (candidates.Count == 0) return null;
         var equipment = _bot?.GetPlayer?.Inventory?.Equipment;
         var slot = equipment?.GetSlot(slotKind);
@@ -653,6 +695,7 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
         foreach (var (item, path) in candidates)
         {
             await LootWorkBudget.Checkpoint(ct);
+            CheckSession(ct);
             if (!slot.CheckCompatibility(item)) continue;
             float score;
             using (TransitionPerformance.Measure(TransitionPhase.LootEvaluate)) score = ArmorScorer.Score(item);
@@ -680,7 +723,9 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
 
     private async Task LootCorpseAsync(Corpse corpse, CancellationToken ct)
     {
+        CheckSession(ct);
         await LootWorkBudget.Checkpoint(ct);
+        CheckSession(ct);
         var equip = corpse.Item;
         if (equip == null)
         {
@@ -754,9 +799,11 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
             if (root == null) continue;
             var slotItems = new List<DrainEntry>();
             await EnumerateItemsForDrainAsync(root, slotKind.ToString(), slotItems, ct);
+            CheckSession(ct);
             foreach (var entry in slotItems)
             {
                 await LootWorkBudget.Checkpoint(ct);
+                CheckSession(ct);
                 if (entry.Item is Weapon nestedWeapon)
                 {
                     corpseWeapons.Add((entry.Path, nestedWeapon));
@@ -782,6 +829,7 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
             if (root == null) continue;
             var slotItems = new List<DrainEntry>();
             await EnumerateItemsForDrainAsync(root, slotKind == EquipmentSlot.ArmBand ? "Belt" : slotKind.ToString(), slotItems, ct);
+            CheckSession(ct);
             // Search nested pouches normally, but leave the equipped belt on its corpse.
             if (slotKind == EquipmentSlot.ArmBand)
             {
@@ -792,6 +840,7 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
             for (var i = 0; i < slotItems.Count; i++)
             {
                 await LootWorkBudget.Checkpoint(ct);
+                CheckSession(ct);
                 if (slotItems[i].Item is Weapon nestedWeapon)
                 {
                     corpseWeapons.Add((slotItems[i].Path, nestedWeapon));
@@ -818,6 +867,7 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
         for (var i = 0; i < queue.Count; i++)
         {
             await LootWorkBudget.Checkpoint(ct);
+            CheckSession(ct);
             var e = queue[i];
             Log.Debug($"  [{i}] T={e.revealMs}ms slot={e.slot} path={e.entry.Path} item={e.entry.Item.LocalizedName()} ({e.entry.Item.Width}x{e.entry.Item.Height}, price={ItemPriceLookup.GetPrice(e.entry.Item):N0}₽, perSlot={ItemPriceLookup.GetPricePerSlot(e.entry.Item):N0}₽)");
         }
@@ -826,6 +876,7 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
         // loadout the bot will end the session with (not the one it currently holds).
         var corpseWeaponsForResolver = corpseWeapons.ConvertAll(t => (t.sourcePath, t.weapon));
         await ResolvePostSwapWeaponsAsync(corpseWeaponsForResolver, null, ct);
+        CheckSession(ct);
 
         // Phase 1: drain everything that isn't a corpse weapon slot (rig / pockets / armor / bag, plus their
         // contents).
@@ -840,12 +891,14 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
             {
                 Log.Debug($"OrbitLootHandler.Corpse({Nick}): waiting {waitMs}ms for queue[{i}] (T={entry.revealMs}ms, elapsed={elapsedMs}ms) — {entry.entry.Path}/{entry.entry.Item.LocalizedName()}");
                 await Task.Delay(waitMs, ct);
+                CheckSession(ct);
             }
             else
             {
                 Log.Debug($"OrbitLootHandler.Corpse({Nick}): queue[{i}] already revealed (T={entry.revealMs}ms, elapsed={elapsedMs}ms) — immediate grab on {entry.entry.Path}/{entry.entry.Item.LocalizedName()}");
             }
             await TransferItemAsync(entry.entry, ct);
+            CheckSession(ct);
         }
 
         // Phase 2: synchronous WouldSwap pre-check on every corpse weapon. No BSG tx is fired. Keeps the
@@ -856,6 +909,7 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
         foreach (var (sourcePath, weaponRoot) in corpseWeapons)
         {
             await LootWorkBudget.Checkpoint(ct);
+            CheckSession(ct);
             WeaponSwapper.WouldSwapResult verdict;
             using (TransitionPerformance.Measure(TransitionPhase.LootEvaluate))
                 verdict = WeaponSwapper.WouldSwap(_bot, weaponRoot, _currentSourceRoot);
@@ -884,6 +938,7 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
         if (corpseArmorItem != null)
         {
             await LootWorkBudget.Checkpoint(ct);
+            CheckSession(ct);
             ArmorSwapper.WouldSwapResult verdict;
             using (TransitionPerformance.Measure(TransitionPhase.LootEvaluate))
                 verdict = ArmorSwapper.WouldSwap(_bot, corpseArmorItem, EquipmentSlot.ArmorVest);
@@ -894,6 +949,7 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
         if (corpseHelmetItem != null)
         {
             await LootWorkBudget.Checkpoint(ct);
+            CheckSession(ct);
             ArmorSwapper.WouldSwapResult verdict;
             using (TransitionPerformance.Measure(TransitionPhase.LootEvaluate))
                 verdict = ArmorSwapper.WouldSwap(_bot, corpseHelmetItem, EquipmentSlot.Headwear);
@@ -904,6 +960,7 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
         if (corpseRigItem != null)
         {
             await LootWorkBudget.Checkpoint(ct);
+            CheckSession(ct);
             RigSwapper.WouldSwapResult verdict;
             using (TransitionPerformance.Measure(TransitionPhase.LootEvaluate))
                 verdict = RigSwapper.WouldSwap(_bot, corpseRigItem);
@@ -914,6 +971,7 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
         if (corpseBackpackItem != null)
         {
             await LootWorkBudget.Checkpoint(ct);
+            CheckSession(ct);
             BackpackSwapper.WouldSwapResult verdict;
             using (TransitionPerformance.Measure(TransitionPhase.LootEvaluate))
                 verdict = BackpackSwapper.WouldSwap(_bot, corpseBackpackItem);
@@ -924,6 +982,7 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
         if (corpseHeadsetItem != null)
         {
             await LootWorkBudget.Checkpoint(ct);
+            CheckSession(ct);
             HeadsetSwapper.WouldSwapResult verdict;
             using (TransitionPerformance.Measure(TransitionPhase.LootEvaluate))
                 verdict = HeadsetSwapper.WouldSwap(_bot, corpseHeadsetItem);
@@ -938,12 +997,14 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
             ct.ThrowIfCancellationRequested();
             var modItems = new List<DrainEntry>();
             await EnumerateItemsForDrainAsync(weaponToStrip, sourcePath, modItems, ct);
+            CheckSession(ct);
             foreach (var modEntry in modItems)
             {
                 if (ReferenceEquals(modEntry.Item, weaponToStrip)) continue;
                 ct.ThrowIfCancellationRequested();
                 Log.Debug($"OrbitLootHandler.Corpse({Nick}, {corpse.name}): phase3 strip mod {modEntry.Path}/{modEntry.Item.LocalizedName()} from {weaponToStrip.LocalizedName()}");
                 await TransferItemAsync(modEntry, ct);
+                CheckSession(ct);
             }
         }
 
@@ -958,10 +1019,12 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
             // the bot is stable on both sides of the swap window.
             Log.Debug($"OrbitLootHandler.Corpse({Nick}, {corpse.name}): phase4 pre-swap settle (2500ms)");
             await Task.Delay(2500, ct);
+            CheckSession(ct);
             // Re-evaluate against the bot's updated loadout (phase 3 may have widened its ammo pool, shifting
             // the baseline). The recheck also surfaces the weapon that will be displaced so its mods can be
             // salvaged before the swap fires.
             await LootWorkBudget.Checkpoint(ct);
+            CheckSession(ct);
             WeaponSwapper.WouldSwapResult recheck;
             using (TransitionPerformance.Measure(TransitionPhase.LootEvaluate))
                 recheck = WeaponSwapper.WouldSwap(_bot, best.Value.weapon, _currentSourceRoot);
@@ -982,12 +1045,14 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
                 Log.Debug($"OrbitLootHandler.Corpse({Nick}, {corpse.name}): phase4 pre-strip mods of {recheck.DisplacedWeapon.LocalizedName()} (will be thrown to corpse by swap)");
                 var displacedModItems = new List<DrainEntry>();
                 await EnumerateItemsForDrainAsync(recheck.DisplacedWeapon, "BotDisplaced", displacedModItems, ct);
+                CheckSession(ct);
                 foreach (var modEntry in displacedModItems)
                 {
                     if (ReferenceEquals(modEntry.Item, recheck.DisplacedWeapon)) continue;
                     ct.ThrowIfCancellationRequested();
                     Log.Debug($"OrbitLootHandler.Corpse({Nick}, {corpse.name}): phase4 strip mod {modEntry.Path}/{modEntry.Item.LocalizedName()} from to-be-displaced {recheck.DisplacedWeapon.LocalizedName()}");
                     await TransferItemAsync(modEntry, ct);
+                    CheckSession(ct);
                 }
             }
             if (recheck.WouldSwap)
@@ -995,7 +1060,7 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
                 Log.Info($"OrbitLootHandler.Corpse({Nick}, {corpse.name}): phase4 perform weapon swap — candidate {best.Value.weapon.LocalizedName()} (from corpse {best.Value.sourcePath}); destination decided by WeaponSwapper");
                 _allowWeaponSwapPath = true;
                 try { await TransferItemAsync(new DrainEntry(best.Value.weapon, best.Value.sourcePath), ct); }
-                finally { _allowWeaponSwapPath = false; }
+                finally { if (OwnsSession(ct)) _allowWeaponSwapPath = false; }
             }
         }
 
@@ -1006,7 +1071,9 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
             ct.ThrowIfCancellationRequested();
             Log.Debug($"OrbitLootHandler.Corpse({Nick}, {corpse.name}): phase4 pre-armor settle (2500ms)");
             await Task.Delay(2500, ct);
+            CheckSession(ct);
             await LootWorkBudget.Checkpoint(ct);
+            CheckSession(ct);
             ArmorSwapper.WouldSwapResult recheck;
             using (TransitionPerformance.Measure(TransitionPhase.LootEvaluate))
                 recheck = ArmorSwapper.WouldSwap(_bot, bestArmor.Value.candidate, bestArmor.Value.slotKind);
@@ -1018,6 +1085,7 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
             {
                 Log.Info($"OrbitLootHandler.Corpse({Nick}, {corpse.name}): phase4 perform armor swap → {bestArmor.Value.candidate.LocalizedName()}");
                 await ArmorSwapper.TryHandleAsync(_bot, bestArmor.Value.candidate, bestArmor.Value.slotKind, ct);
+                CheckSession(ct);
                 _bot.AIData?.CalcPower();
             }
         }
@@ -1028,7 +1096,9 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
             ct.ThrowIfCancellationRequested();
             Log.Debug($"OrbitLootHandler.Corpse({Nick}, {corpse.name}): phase4 pre-helmet settle (2500ms)");
             await Task.Delay(2500, ct);
+            CheckSession(ct);
             await LootWorkBudget.Checkpoint(ct);
+            CheckSession(ct);
             ArmorSwapper.WouldSwapResult recheck;
             using (TransitionPerformance.Measure(TransitionPhase.LootEvaluate))
                 recheck = ArmorSwapper.WouldSwap(_bot, bestHelmet.Value.candidate, bestHelmet.Value.slotKind);
@@ -1040,6 +1110,7 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
             {
                 Log.Info($"OrbitLootHandler.Corpse({Nick}, {corpse.name}): phase4 perform helmet swap → {bestHelmet.Value.candidate.LocalizedName()}");
                 await ArmorSwapper.TryHandleAsync(_bot, bestHelmet.Value.candidate, bestHelmet.Value.slotKind, ct);
+                CheckSession(ct);
                 _bot.AIData?.CalcPower();
             }
         }
@@ -1052,7 +1123,9 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
             ct.ThrowIfCancellationRequested();
             Log.Debug($"OrbitLootHandler.Corpse({Nick}, {corpse.name}): phase4 pre-rig settle (2500ms)");
             await Task.Delay(2500, ct);
+            CheckSession(ct);
             await LootWorkBudget.Checkpoint(ct);
+            CheckSession(ct);
             RigSwapper.WouldSwapResult recheck;
             using (TransitionPerformance.Measure(TransitionPhase.LootEvaluate))
                 recheck = RigSwapper.WouldSwap(_bot, bestRig.Value.candidate);
@@ -1064,6 +1137,7 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
             {
                 Log.Info($"OrbitLootHandler.Corpse({Nick}, {corpse.name}): phase4 perform rig swap → {bestRig.Value.candidate.LocalizedName()}");
                 await RigSwapper.TryHandleAsync(_bot, bestRig.Value.candidate, ct);
+                CheckSession(ct);
                 _bot.AIData?.CalcPower();
             }
         }
@@ -1076,7 +1150,9 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
             ct.ThrowIfCancellationRequested();
             Log.Debug($"OrbitLootHandler.Corpse({Nick}, {corpse.name}): phase4 pre-backpack settle (2500ms)");
             await Task.Delay(2500, ct);
+            CheckSession(ct);
             await LootWorkBudget.Checkpoint(ct);
+            CheckSession(ct);
             BackpackSwapper.WouldSwapResult recheck;
             using (TransitionPerformance.Measure(TransitionPhase.LootEvaluate))
                 recheck = BackpackSwapper.WouldSwap(_bot, bestBackpack.Value.candidate);
@@ -1088,6 +1164,7 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
             {
                 Log.Info($"OrbitLootHandler.Corpse({Nick}, {corpse.name}): phase4 perform backpack swap → {bestBackpack.Value.candidate.LocalizedName()}");
                 await BackpackSwapper.TryHandleAsync(_bot, bestBackpack.Value.candidate, ct);
+                CheckSession(ct);
             }
         }
 
@@ -1097,7 +1174,9 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
             ct.ThrowIfCancellationRequested();
             Log.Debug($"OrbitLootHandler.Corpse({Nick}, {corpse.name}): phase4 pre-headset settle (2500ms)");
             await Task.Delay(2500, ct);
+            CheckSession(ct);
             await LootWorkBudget.Checkpoint(ct);
+            CheckSession(ct);
             HeadsetSwapper.WouldSwapResult recheck;
             using (TransitionPerformance.Measure(TransitionPhase.LootEvaluate))
                 recheck = HeadsetSwapper.WouldSwap(_bot, bestHeadset.Value.candidate);
@@ -1109,6 +1188,7 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
             {
                 Log.Info($"OrbitLootHandler.Corpse({Nick}, {corpse.name}): phase4 perform headset swap → {bestHeadset.Value.candidate.LocalizedName()}");
                 await HeadsetSwapper.TryHandleAsync(_bot, bestHeadset.Value.candidate, ct);
+                CheckSession(ct);
             }
         }
     }
@@ -1149,6 +1229,7 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
     // transitions straight to an already-visible item.
     private async Task DrainProgressiveAsync(List<DrainEntry> items, CancellationToken ct)
     {
+        CheckSession(ct);
         if (items.Count == 0) return;
         for (var i = 0; i < items.Count; i++)
         {
@@ -1168,17 +1249,20 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
             {
                 Log.Debug($"OrbitLootHandler.Drain({Nick}): waiting {waitMs}ms for item[{i}] (T={revealMs}ms, elapsed={elapsedMs}ms) — {items[i].Path}/{items[i].Item.LocalizedName()}");
                 await Task.Delay(waitMs, ct);
+                CheckSession(ct);
             }
             else
             {
                 Log.Debug($"OrbitLootHandler.Drain({Nick}): item[{i}] already revealed (T={revealMs}ms, elapsed={elapsedMs}ms) — immediate grab on {items[i].Path}/{items[i].Item.LocalizedName()}");
             }
             await TransferItemAsync(items[i], ct);
+            CheckSession(ct);
         }
     }
 
     private async Task LootLooseItemAsync(LootItem lootItem, CancellationToken ct)
     {
+        CheckSession(ct);
         if (lootItem.Item == null)
         {
             Log.Warning($"OrbitLootHandler.Loose({Nick}, {lootItem.name}): lootItem.Item is null");
@@ -1187,7 +1271,9 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
         Log.Debug($"OrbitLootHandler.Loose({Nick}, {lootItem.name}): awaiting 0.5s, item={lootItem.Item.LocalizedName()}");
         _currentSourceRoot = lootItem.Item;
         await Task.Delay(500, ct); // ghosts included — same approach time as an awake pickup
+        CheckSession(ct);
         await PickupLooseAsync(lootItem.Item, ct);
+        CheckSession(ct);
     }
 
     // Silent inventory→inventory transfer (container/corpse path). No per-item Pickup state — the
@@ -1197,6 +1283,7 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
 
     private async Task<bool> TransferItemAsync(DrainEntry entry, CancellationToken ct)
     {
+        CheckSession(ct);
         // Bump the watchdog on every transfer attempt — each one is forward progress regardless of
         // outcome (TAKE / SKIP / SWAP all count).
         BumpLootActivity();
@@ -1219,17 +1306,20 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
             if (_allowWeaponSwapPath)
             {
                 outcome = await WeaponSwapper.TryHandleAsync(_bot, candidateWeapon, _currentSourceRoot, ct, DormantMode);
+                CheckSession(ct);
             }
             else if (DormantMode)
             {
                 // Dormant: an empty weapon slot can be filled without touching the hands; otherwise the weapon
                 // goes to the bag through the default placement below.
                 outcome = await WeaponSwapper.TryEquipOnlyAsync(_bot, candidateWeapon, ct, dormant: true);
+                CheckSession(ct);
                 if (outcome == WeaponSwapper.Outcome.Skipped) outcome = WeaponSwapper.Outcome.NotApplicable;
             }
             else
             {
                 outcome = await WeaponSwapper.TryEquipOnlyAsync(_bot, candidateWeapon, ct);
+                CheckSession(ct);
                 // Skipped here just means "no empty slot fits" — fall through to default bag placement.
                 if (outcome == WeaponSwapper.Outcome.Skipped) outcome = WeaponSwapper.Outcome.NotApplicable;
             }
@@ -1244,8 +1334,10 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
                 // covers the rest.
                 SyncBotWeaponStateAfterSwap();
                 await WaitForHandsControllerSettleAsync(ct);
+                CheckSession(ct);
                 Log.Debug($"OrbitLootHandler.Transfer({Nick}): post-swap blind hold (2500ms)");
                 await Task.Delay(2500, ct);
+                CheckSession(ct);
                 return true;
             }
             if (outcome == WeaponSwapper.Outcome.Skipped)
@@ -1259,6 +1351,7 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
 
         Log.Debug($"OrbitLootHandler.Transfer({Nick}): TRY {name} at {entry.Path} (price={price:N0}₽, perSlot={pricePerSlot:N0}₽)");
         var success = await RunTransactionAsync(place, name, ct);
+        CheckSession(ct);
         if (success) RecordPickup(name, price, entry.Path);
         return success;
     }
@@ -1273,7 +1366,7 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
     {
         try
         {
-            if (_bot == null) return;
+            if (!HasLiveOwner) return;
             try { _bot.WeaponManager?.Selector?.UpdateWeaponsList(); }
             catch (System.Exception ulEx) { Log.Warning($"OrbitLootHandler.SyncBotWeaponStateAfterSwap({Nick}): UpdateWeaponsList THREW {ulEx.Message}"); }
             try { _bot.AIData?.CalcPower(); }
@@ -1293,6 +1386,7 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
     /// </summary>
     private async Task WaitForHandsControllerSettleAsync(CancellationToken ct)
     {
+        CheckSession(ct);
         const int maxWaitMs = 10000;
         const int pollIntervalMs = 100;
         var ic = _bot?.GetPlayer?.InventoryController;
@@ -1310,6 +1404,7 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
                 return;
             }
             await Task.Delay(pollIntervalMs, ct);
+            CheckSession(ct);
             elapsed += pollIntervalMs;
         }
         Log.Warning($"OrbitLootHandler.WaitForHandsControllerSettleAsync({Nick}): timed out after {maxWaitMs}ms — proceeding anyway");
@@ -1321,6 +1416,7 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
     /// </summary>
     private void SyncBotWeaponStateAtSessionEnd()
     {
+        if (!HasLiveOwner) return;
         try
         {
             var player = _bot?.GetPlayer;
@@ -1354,6 +1450,7 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
     // Loose world item path: kneel animation per pickup via the player's managed Pickup state.
     private async Task<bool> PickupLooseAsync(Item item, CancellationToken ct)
     {
+        CheckSession(ct);
         var entry = new DrainEntry(item, "");
         if (!ValidatePickup(entry, out var name, out var price, out var pricePerSlot, out var inventoryController)) return false;
         var player = _bot.GetPlayer;
@@ -1365,7 +1462,9 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
         if (DormantMode)
         {
             await Task.Delay(500, ct); // kneel-time equivalent — the animation can't play on a disabled body
+            CheckSession(ct);
             var taken = await RunTransactionAsync(place, name, ct);
+            CheckSession(ct);
             if (taken) RecordPickup(name, price, entry.Path);
             return taken;
         }
@@ -1375,30 +1474,34 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
         try
         {
             player.CurrentManagedState.Pickup(true, () => pickupReady.TrySetResult(true));
+            using (ct.Register(() => pickupReady.TrySetResult(false)))
+            {
+                var ready = await pickupReady.Task;
+                CheckSession(ct);
+                if (!ready) return false;
+            }
+
+            Log.Debug($"OrbitLootHandler.Loose({Nick}): TRY {name} (price={price:N0}₽, perSlot={pricePerSlot:N0}₽, kneel done)");
+            var success = await RunTransactionAsync(place, name, ct);
+            CheckSession(ct);
+            if (success) RecordPickup(name, price, entry.Path);
+            return success;
         }
+        catch (System.OperationCanceledException) { throw; }
         catch (System.Exception e)
         {
-            Log.Warning($"OrbitLootHandler.Loose({Nick}, {name}): Pickup(true) THREW {e}");
+            CheckSession(ct);
+            Log.Warning($"OrbitLootHandler.Loose({Nick}, {name}): Pickup THREW {e}");
             return false;
         }
-
-        using (ct.Register(() => pickupReady.TrySetResult(false)))
+        finally
         {
-            if (!await pickupReady.Task)
+            if (OwnsSession(ct) && HasLiveOwner && !DormantMode)
             {
                 try { player.CurrentManagedState.Pickup(false, null); } catch { }
-                return false;
+                try { player.UpdateInteractionCast(); } catch { }
             }
         }
-
-        Log.Debug($"OrbitLootHandler.Loose({Nick}): TRY {name} (price={price:N0}₽, perSlot={pricePerSlot:N0}₽, kneel done)");
-        var success = await RunTransactionAsync(place, name, ct);
-
-        try { player.CurrentManagedState.Pickup(false, null); } catch { }
-        try { player.UpdateInteractionCast(); } catch { }
-
-        if (success) RecordPickup(name, price, entry.Path);
-        return success;
     }
 
     private bool ValidatePickup(DrainEntry entry, out string name, out float price, out float pricePerSlot, out InventoryController inventoryController)
@@ -1468,6 +1571,7 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
 
     internal bool HasSpaceForLooseLoot(LootItem loot)
     {
+        if (!HasLiveOwner) return false;
         var inventory = _bot.GetPlayer?.InventoryController;
         return inventory != null && loot?.Item != null
             && ItemManipulator.QuickFindAppropriatePlace(loot.Item, inventory,
@@ -1487,11 +1591,14 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
 
     private async Task<bool> RunTransactionAsync(OperationResult<IItemOperationResult> place, string name, CancellationToken ct)
     {
+        CheckSession(ct);
         var inventoryController = _bot.GetPlayer?.InventoryController;
         if (inventoryController == null) return false;
         try
         {
-            var result = await inventoryController.TryRunNetworkTransaction(place, null);
+            CheckSession(ct);
+            var result = await LootActorGuard.AwaitTransaction(inventoryController.TryRunNetworkTransaction(place, null), ct);
+            CheckSession(ct);
             if (!result.Succeed) Log.Warning($"OrbitLootHandler.Pickup({Nick}): TX FAILED on {name} (Error={result.Error})");
             if (!result.Succeed && result.Error == "Can not execute")
                 Log.Warning($"OrbitLootHandler.Pickup({Nick}): refusal detail: {WeaponSwapper.DescribeRefusal(_bot, place.Value)}");
@@ -1500,6 +1607,7 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
         catch (System.OperationCanceledException) { throw; }
         catch (System.Exception e)
         {
+            CheckSession(ct);
             Log.Warning($"OrbitLootHandler.Pickup({Nick}, {name}): tx THREW {e}");
             return false;
         }
@@ -1638,6 +1746,7 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
     private async Task ResolvePostSwapWeaponsAsync(List<(string sourcePath, Weapon weapon)> corpseWeapons,
                                         List<(Weapon weapon, string path)> containerWeapons, CancellationToken ct)
     {
+        CheckSession(ct);
         _postSwapWeapons.Clear();
         var displaced = new HashSet<string>();
         if (corpseWeapons != null)
@@ -1645,6 +1754,7 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
             foreach (var (_, w) in corpseWeapons)
             {
                 await LootWorkBudget.Checkpoint(ct);
+                CheckSession(ct);
                 WeaponSwapper.WouldSwapResult verdict;
                 using (TransitionPerformance.Measure(TransitionPhase.LootEvaluate))
                     verdict = WeaponSwapper.WouldSwap(_bot, w, _currentSourceRoot);
@@ -1658,6 +1768,7 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
             foreach (var (w, _) in containerWeapons)
             {
                 await LootWorkBudget.Checkpoint(ct);
+                CheckSession(ct);
                 if (CanEquipWeaponIntoEmptySlot(w)) _postSwapWeapons.Add(w);
             }
         }
