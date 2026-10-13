@@ -39,10 +39,12 @@ internal static class GhostWeaponVisuals
                 if (Belongs(pair.Key)) pair.Key.enabled = false;
         }
 
-        internal void Restore()
+        internal void Restore(bool waking)
         {
             foreach (var pair in Renderers)
-                if (Belongs(pair.Key)) pair.Key.forceRenderingOff = pair.Value;
+                // A culling mod may have released its mask while this bot slept. Replaying
+                // that captured mask at wake can hide the weapon with no owner left to show it.
+                if (Belongs(pair.Key)) pair.Key.forceRenderingOff = waking ? false : pair.Value;
             foreach (var pair in Lights)
                 if (Belongs(pair.Key)) pair.Key.enabled = pair.Value;
         }
@@ -85,14 +87,14 @@ internal static class GhostWeaponVisuals
     {
         if (ReferenceEquals(player, null)) return;
         for (var i = Active.Count - 1; i >= 0; i--)
-            if (ReferenceEquals(Active[i].Player, player)) Release(Active[i].Root);
+            if (ReferenceEquals(Active[i].Player, player)) Release(Active[i].Root, waking: true);
     }
 
-    internal static void Release(GameObject root)
+    internal static void Release(GameObject root, bool waking = false)
     {
         if (ReferenceEquals(root, null) || !ByRoot.TryGetValue(root, out var mask)) return;
         ByRoot.Remove(root); Active.Remove(mask);
-        try { mask.Restore(); Report(mask, "restored"); }
+        try { mask.Restore(waking); Report(mask, waking ? "visible after wake" : "restored"); }
         catch (Exception error) { Failure(error); }
     }
 
