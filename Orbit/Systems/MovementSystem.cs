@@ -1892,7 +1892,7 @@ public partial class MovementSystem
 
         squad.SpawnPosition = dest;
         _waypointSystem.ClearSquadUnreachability(squad);
-        Sain.MainObjectiveBuilder.Generate(squad, _waypointSystem);
+        _waypointSystem.QueueMainObjectives(squad);
 
         var squadObj = squad.Objective;
         squadObj.LocationPrevious = null;

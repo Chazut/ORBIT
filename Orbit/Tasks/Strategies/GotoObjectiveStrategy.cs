@@ -127,6 +127,12 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                 Singleton<OrbitManager>.Instance?.SquadRegistry?.TryResolvePersonality(squad);
             }
 
+            if (waypointSystem.MainObjectivesPending(squad) && !squad.ExtractRequested)
+            {
+                RaidTimeExtraction.Check(squad);
+                continue;
+            }
+
             // Corpse-stuck watchdog: only bites when nothing completes (unreachable corpse, hung loot, or a
             // stuck member keeps the en-route blacklist below from firing) and would otherwise pin the squad
             // on the body forever.

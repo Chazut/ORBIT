@@ -22,7 +22,7 @@ namespace Orbit.Sain;
 /// </summary>
 public static class MainObjectiveBuilder
 {
-    public static void Generate(Squad squad, WaypointSystem waypointSystem)
+    public static void Generate(Squad squad, WaypointSystem waypointSystem, ISet<int> reachableQuests = null)
     {
         if (squad?.Leader?.Bot?.Profile?.Info?.Settings == null) return;
         if (!ServerConfig.MainObjectives.Enabled)
@@ -144,7 +144,7 @@ public static class MainObjectiveBuilder
                         break;
                     case MainObjectiveType.Quest:
                         questPool ??= BuildQuestPool(waypointSystem);
-                        candidate = RollQuest(questPool, waypointSystem, squad);
+                        candidate = RollQuest(questPool, waypointSystem, squad, reachableQuests);
                         break;
                     case MainObjectiveType.Kills:
                         killZoneAnchors ??= waypointSystem.GetPositiveForceZoneAnchors(squad);
@@ -253,7 +253,7 @@ public static class MainObjectiveBuilder
         };
     }
 
-    private static MainObjective RollQuest(List<Waypoint> questPool, WaypointSystem waypointSystem, Squad squad)
+    private static MainObjective RollQuest(List<Waypoint> questPool, WaypointSystem waypointSystem, Squad squad, ISet<int> reachableQuests)
     {
         // Walk the pool in random order, pick the first trigger that is REACHABLE from the squad's spawn
         // position AND not already owned by this same squad. Cross-squad collisions are intentional: two
@@ -276,8 +276,9 @@ public static class MainObjectiveBuilder
 
             // Reachability gate. Uses squad.SpawnPosition (captured at squad creation) as the source. If
             // unreachable, skip and try the next pool entry.
-            if (squad != null && squad.SpawnPosition != Vector3.zero
-                && !waypointSystem.IsReachableFromPosition(squad.SpawnPosition, loc.Position))
+            if (reachableQuests != null ? !reachableQuests.Contains(loc.Id)
+                : squad != null && squad.SpawnPosition != Vector3.zero
+                    && !waypointSystem.IsReachableFromPosition(squad.SpawnPosition, loc.Position))
             {
                 Log.Info($"{squad} skipping Quest main {triggerId}@{waypointSystem.WorldToCell(loc.Position)} — NavMesh.CalculatePath from spawn {squad.SpawnPosition} returned non-Complete");
                 continue;
@@ -308,7 +309,19 @@ public static class MainObjectiveBuilder
         return false;
     }
 
-    private static List<Waypoint> BuildQuestPool(WaypointSystem waypointSystem)
+    internal static bool NeedsQuestReachability(Squad squad)
+    {
+        if (squad?.Leader?.Bot?.Profile?.Info?.Settings == null || !ServerConfig.MainObjectives.Enabled
+            || ServerConfig.MainObjectives.QuestWeightScale <= 0 || squad.SpawnPosition == Vector3.zero) return false;
+        var pmc = squad.Leader.Bot.Profile.Info.Settings.Role.IsPMC();
+        var scav = squad.Leader.Bot.Profile.WillBeAPlayerScav();
+        if (!pmc && !scav || pmc && !ServerConfig.MainObjectives.EnabledForPmc
+            || scav && !ServerConfig.PlayerScav.Enabled) return false;
+        return (squad.Personality?.MainMixQuestWeight
+            ?? (pmc ? PersonalityFallback.PmcMixQuest : ServerConfig.PlayerScav.MainMixQuest)) > 0;
+    }
+
+    internal static List<Waypoint> BuildQuestPool(WaypointSystem waypointSystem)
     {
         var pool = new List<Waypoint>();
         var cells = waypointSystem.Cells;

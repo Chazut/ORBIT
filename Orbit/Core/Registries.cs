@@ -149,6 +149,7 @@ public class SquadRegistry(SquadData squadData, StrategyManager strategyManager,
         // keyed by this id so the next squad doesn't inherit stale state (canonical case: corpse-kill
         // credits transferring to a brand-new squad that never killed anyone, bypassing the LoS gate).
         waypointSystem?.ClearSquadCorpseCredits(squad.Id);
+        waypointSystem?.CancelMainGeneration(squad);
         if (agent.Bot?.BotsGroup != null) _squadIdMap.Remove(agent.Bot.BotsGroup);
         squadData.Entities.Remove(squad);
         strategyManager.RemoveEntity(squad);
@@ -191,7 +192,7 @@ public class SquadRegistry(SquadData squadData, StrategyManager strategyManager,
 
         // Roll the squad's main objectives at creation. Builder is player-blind and self-contained — skips
         // boss/raider/goon roles internally, picks anchors from static map data.
-        MainObjectiveBuilder.Generate(squad, waypointSystem);
+        waypointSystem.QueueMainObjectives(squad);
 
         return squad;
     }
@@ -233,7 +234,7 @@ public class SquadRegistry(SquadData squadData, StrategyManager strategyManager,
         Log.Info($"{squad} PMC personality locked: brain='{brainName ?? "(none)"}' → {squad.Archetype} ({reason}) | extract={squad.Personality.ExtractLootThreshold:N0}₽ coverage={squad.Personality.LootCoverage:P0} mains={squad.Personality.MainCount} sprint={squad.Personality.SprintPropensity:F1}");
 
         // Now that the archetype is known, generate the main objectives using the locked mix weights.
-        MainObjectiveBuilder.Generate(squad, waypointSystem);
+        waypointSystem.QueueMainObjectives(squad);
     }
 
     private static bool AnyMemberActive(Squad squad)
