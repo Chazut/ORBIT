@@ -1,0 +1,18 @@
+<MudDialog>
+    <DialogContent>
+        <MudTextField T="string" @bind-Value="_name" Label="Preset name" Immediate="true"
+                      MaxLength="60" AutoFocus="true" Variant="Variant.Outlined" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => Dialog.Cancel())">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="@string.IsNullOrWhiteSpace(_name)"
+                   OnClick="@(() => Dialog.Close(DialogResult.Ok(_name.Trim())))">Rename</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance Dialog { get; set; } = default!;
+    [Parameter] public string Name { get; set; } = "";
+    private string _name = "";
+    protected override void OnInitialized() => _name = Name;
+}

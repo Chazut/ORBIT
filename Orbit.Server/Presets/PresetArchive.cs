@@ -48,12 +48,13 @@ public static class PresetArchive
         using (var archive = new ZipArchive(output, ZipArchiveMode.Create, leaveOpen: true))
         {
             // Stable filenames let extracting a later release replace both files in place.
-            if (parts != PresetParts.ZonesOnly) Write("config.json", snapshot.Config);
+            if (parts != PresetParts.ZonesOnly) Write("config.json", AddonDiscovery.WithoutRushPoints(snapshot.Config));
             if (parts != PresetParts.ConfigOnly) Write("zones.json", new ZonePackModel
             {
                 Name = name,
                 OrbitVersion = typeof(PresetArchive).Assembly.GetName().Version?.ToString(3) ?? "",
                 Maps = snapshot.Maps,
+                RushPoints = AddonDiscovery.ReadRushPoints(snapshot.Config),
             });
 
             void Write<T>(string fileName, T value)

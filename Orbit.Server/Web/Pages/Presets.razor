@@ -25,7 +25,7 @@
                           Style="min-width:220px; flex:1" />
             <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="Duplicate" Disabled="@(Store.Error != null || string.IsNullOrWhiteSpace(_name))"
                        StartIcon="@Icons.Material.Filled.ContentCopy">Save as new preset</MudButton>
-            <MudButton Variant="Variant.Outlined" OnClick="Rename" Disabled="@(Store.ReadOnly || Store.Error != null || string.IsNullOrWhiteSpace(_name))">Rename current</MudButton>
+            <MudButton Variant="Variant.Outlined" OnClick="@(() => Rename(Store.ActiveId, Store.ActiveName))" Disabled="@(Store.ReadOnly || Store.Error != null || _choosing)">Rename current</MudButton>
             <MudButton Variant="Variant.Outlined" OnClick="Export" Disabled="@(Store.Error != null || _choosing)"
                        StartIcon="@Icons.Material.Filled.IosShare">Export preset ZIP</MudButton>
         </div>
@@ -55,6 +55,8 @@
                 }
                 @if (!preset.ReadOnly)
                 {
+                    <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" title="Rename preset"
+                                   Disabled="@(Store.Error != null || _choosing)" OnClick="@(() => Rename(preset.Id, preset.Name))" />
                     <MudIconButton Icon="@Icons.Material.Filled.DeleteOutline" Size="Size.Small" Color="Color.Error"
                                    title="Delete preset" Disabled="@(preset.Id == Store.ActiveId || Store.Error != null)"
                                    OnClick="@(() => Delete(preset.Id, preset.Name))" />
@@ -106,7 +108,21 @@
         catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
     }
     private void Duplicate() => Run(() => { Store.Duplicate(_name); _name = ""; }, "New preset saved and selected.");
-    private void Rename() => Run(() => { Store.Rename(_name); _name = ""; }, "Preset renamed.");
+    private async Task Rename(string id, string name)
+    {
+        if (_choosing) return;
+        _choosing = true;
+        try
+        {
+            var dialog = await Dialogs.ShowAsync<PresetRenameDialog>("Rename preset", new DialogParameters
+                { [nameof(PresetRenameDialog.Name)] = name },
+                new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = true });
+            if (await dialog.Result is { Canceled: false, Data: string renamed })
+                Run(() => Store.Rename(id, renamed), "Preset renamed.");
+        }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+        finally { _choosing = false; }
+    }
     private async Task Select(string id)
     {
         if (_choosing) return;

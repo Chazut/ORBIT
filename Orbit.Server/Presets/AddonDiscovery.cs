@@ -161,11 +161,26 @@ public static class AddonDiscovery
     }
 
     // Zone-pack points are map data, even though runtime configuration stores them under rush.maps.
+    public static Dictionary<string, List<RushPoint>> ReadRushPoints(JsonElement config)
+    {
+        if (!config.TryGetProperty("rush", out var rush) || !rush.TryGetProperty("maps", out var maps)) return new();
+        return JsonSerializer.Deserialize<Dictionary<string, List<RushPoint>>>(maps.GetRawText(),
+            new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower }) ?? new();
+    }
+
+    public static JsonElement WithoutRushPoints(JsonElement config)
+    {
+        var copy = JsonNode.Parse(config.GetRawText())!.AsObject();
+        if (copy["rush"] is JsonObject rush) rush.Remove("maps");
+        return JsonSerializer.SerializeToElement(copy);
+    }
+
     public static JsonElement OverlayRushPoints(JsonElement baseline, Dictionary<string, List<RushPoint>> points)
     {
         if (points.Count == 0) return baseline;
         var merged = JsonNode.Parse(baseline.GetRawText())!.AsObject();
-        var maps = merged["rush"]!["maps"]!.AsObject();
+        var rush = (merged["rush"] ??= new JsonObject()).AsObject();
+        var maps = (rush["maps"] ??= new JsonObject()).AsObject();
         var options = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower };
         foreach (var (map, catalogue) in points) maps[map] = JsonSerializer.SerializeToNode(catalogue, options);
         return JsonSerializer.Deserialize<JsonElement>(ConfigService.NormalizeJson(merged.ToJsonString()));

@@ -8,6 +8,7 @@
             <div><MudRadio T="PresetParts" Value="PresetParts.ConfigOnly" Disabled="@(!HasConfig)">Config only</MudRadio></div>
             <div><MudRadio T="PresetParts" Value="PresetParts.ZonesOnly" Disabled="@(!HasZones)">Zones only</MudRadio></div>
         </MudRadioGroup>
+        <MudText Typo="Typo.body2" Class="mt-2">Zones include map targets for Spawn, Boss, Marked, Sniper and Other rushes. Config includes behavior settings and probabilities.</MudText>
         @if (Exporting)
         {
             <MudTextField T="string" @bind-Value="_name" Label="Preset name" Variant="Variant.Outlined"

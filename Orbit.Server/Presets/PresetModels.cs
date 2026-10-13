@@ -43,7 +43,10 @@ public sealed class PresetAddon
     public JsonElement? Config { get; init; }
     public Dictionary<string, MapZoneModel> Maps { get; init; } = new();
     public Dictionary<string, List<RushPoint>> RushPoints { get; init; } = new();
+    public bool HasZones => Maps.Count > 0 || RushPoints.Count > 0
+        || Config is { } config && config.TryGetProperty("rush", out var rush)
+            && rush.TryGetProperty("maps", out var maps) && maps.EnumerateObject().Any();
     public string Contents => Config.HasValue
-        ? Maps.Count > 0 ? $"Settings + {Maps.Count} map(s)" : "Settings only"
+        ? Maps.Count > 0 ? $"Settings + {Maps.Count} map(s)" : HasZones ? "Settings + rush map targets" : "Settings only"
         : $"{Maps.Count} map(s) only";
 }

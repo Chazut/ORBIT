@@ -43,7 +43,7 @@ public sealed class PresetService(ConfigService configs, ZoneStoreService zones,
                 var result = new List<PresetChoice> { new("default", "Default", true, "Settings + all maps") };
                 result.AddRange(_library.Presets.Select(p => new PresetChoice(p.Id, p.Name, false, "Settings + all maps")));
                 result.AddRange(_addons.Select(a => new PresetChoice(a.Id, a.Name, true, a.Contents, a.Source,
-                    a.Config.HasValue, a.Maps.Count > 0)));
+                    a.Config.HasValue, a.HasZones)));
                 if (_library.ActiveAddon is { } active && result.All(p => p.Id != active.Id))
                     result.Add(new(active.Id, active.Name, true, "Saved addon snapshot (source unavailable)", "Source unavailable"));
                 return result;
@@ -203,7 +203,7 @@ public sealed class PresetService(ConfigService configs, ZoneStoreService zones,
                 throw new InvalidDataException("This preset is no longer available.");
             var addon = _addons.FirstOrDefault(a => a.Id == id);
             if (addon != null && (parts == PresetParts.ConfigOnly && !addon.Config.HasValue
-                || parts == PresetParts.ZonesOnly && addon.Maps.Count == 0))
+                || parts == PresetParts.ZonesOnly && !addon.HasZones))
                 throw new InvalidDataException("This addon does not contain the selected part.");
             TrackEdits();
             var next = WithSavedEdits();
@@ -213,8 +213,9 @@ public sealed class PresetService(ConfigService configs, ZoneStoreService zones,
             {
                 target = Normalize(new PresetSnapshot
                 {
-                    Config = parts == PresetParts.ConfigOnly ? target.Config
-                        : addon != null ? AddonDiscovery.OverlayRushPoints(current.Config, addon.RushPoints) : current.Config,
+                    Config = parts == PresetParts.ConfigOnly
+                        ? AddonDiscovery.OverlayRushPoints(target.Config, AddonDiscovery.ReadRushPoints(current.Config))
+                        : AddonDiscovery.OverlayRushPoints(current.Config, AddonDiscovery.ReadRushPoints(target.Config)),
                     Maps = parts == PresetParts.ZonesOnly ? target.Maps : current.Maps,
                 });
                 var custom = NewPreset(UniqueName("Custom"), target);
@@ -265,15 +266,18 @@ public sealed class PresetService(ConfigService configs, ZoneStoreService zones,
         Changed?.Invoke();
     }
 
-    public void Rename(string name)
+    public void Rename(string name) => Rename(ActiveId, name);
+
+    public void Rename(string id, string name)
     {
         lock (_gate)
         {
             RequireReady();
-            if (ReadOnly) throw new InvalidOperationException("Duplicate this protected preset to rename it.");
-            name = ValidateName(name, _library.ActiveId);
+            if (!_library.Presets.Any(p => p.Id == id))
+                throw new InvalidOperationException("Duplicate this protected preset to rename it.");
+            name = ValidateName(name, id);
             var next = Clone(_library);
-            next.Presets.First(p => p.Id == next.ActiveId).Name = name;
+            next.Presets.First(p => p.Id == id).Name = name;
             Persist(next);
             _library = next;
         }
