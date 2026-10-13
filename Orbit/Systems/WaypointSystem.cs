@@ -2287,6 +2287,10 @@ public partial class WaypointSystem
         if (CategoryAllowsLockedDoorBypass(loc.Category))
         {
             var nearbyLocked = loc.LockedDoorsOnPath ?? CollectNearbyLockedDoors(loc.Position, LockedDoorDetectionRadius);
+            // A door near the loot does not explain a path ending on another floor or far
+            // from its entrance. Keep only doors actually reached by this blocked route.
+            var blockedEnd = corners.Length > 0 ? corners[corners.Length - 1] : origin;
+            nearbyLocked = nearbyLocked?.FindAll(door => LockedDoorPath.NearBlockedEnd(door, blockedEnd));
             if (nearbyLocked != null && nearbyLocked.Count > 0)
             {
                 loc.LockedDoorsOnPath = nearbyLocked;

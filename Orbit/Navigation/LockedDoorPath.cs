@@ -5,6 +5,13 @@ namespace Orbit.Navigation;
 
 internal static class LockedDoorPath
 {
+    internal static bool NearBlockedEnd(Door door, Vector3 end)
+    {
+        if (door == null || door.DoorState != EDoorState.Locked) return false;
+        var delta = end - door.transform.position;
+        return Mathf.Abs(delta.y) <= 2f && delta.x * delta.x + delta.z * delta.z <= 9f;
+    }
+
     // Test the actual door leaf, including disabled box colliders. A shared open carver can
     // make navigation complete while the physical door is still locked for this squad.
     internal static bool Crosses(Door door, Vector3[] corners)
