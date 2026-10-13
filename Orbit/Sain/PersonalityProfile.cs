@@ -83,6 +83,16 @@ public sealed class PersonalityProfile
         return ResolveTable(archetype).MiniLootValueThreshold;
     }
 
+    internal static Orbit.Settings.SquadLootWaitStyle LootWaitStyleFor(PersonalityArchetype archetype)
+        => archetype switch
+        {
+            PersonalityArchetype.Timmy => ServerConfig.Personalities.Timmy.SquadLootWait,
+            PersonalityArchetype.Cautious => ServerConfig.Personalities.Cautious.SquadLootWait,
+            PersonalityArchetype.Aggressive => ServerConfig.Personalities.Aggressive.SquadLootWait,
+            PersonalityArchetype.VeryAggressive => ServerConfig.Personalities.VeryAggressive.SquadLootWait,
+            _ => ServerConfig.Personalities.Average.SquadLootWait,
+        };
+
     /// <summary>
     /// Roll a profile for the given archetype using the F12 tables. Each Vector2 range is sampled once;
     /// scalars are passed through. Called at squad registration when the leader is PMC and SAIN personality

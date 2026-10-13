@@ -25,7 +25,10 @@ public static class BehaviorValidation
         c.Rush.Validate();
         foreach (var style in new[] { c.Personalities?.Timmy, c.Personalities?.Cautious, c.Personalities?.Average,
                      c.Personalities?.Aggressive, c.Personalities?.VeryAggressive })
+        {
             (style?.Travel ?? throw new InvalidDataException("Travel styles must be objects.")).Validate();
+            (style.SquadLootWait ?? throw new InvalidDataException("Squad loot waiting settings must be objects.")).Validate();
+        }
         if (c.Movement?.SprintByType == null || c.MapOverrides == null)
             throw new InvalidDataException("Movement and map overrides must be objects.");
         foreach (var pair in c.Movement.SprintByType)

@@ -2,8 +2,11 @@ using System.Collections.Generic;
 using Orbit.Entities;
 using Orbit.Helpers;
 using Orbit.Navigation;
+using Orbit.Sain;
+using Orbit.Settings;
 using Orbit.Tasks.Actions;
 using UnityEngine;
+using Random = UnityEngine.Random;
 
 namespace Orbit.Systems;
 
@@ -16,6 +19,10 @@ internal sealed class CorpseEscort
         public Vector3 Anchor;
         public bool AtBody;
         public float NextUpdate;
+        public int Layout;
+        public int Failures;
+        public int ArrivalFailures;
+        public bool WaitingFallback;
         public readonly List<Vector3> Rejected = new();
     }
 
@@ -30,14 +37,29 @@ internal sealed class CorpseEscort
     private float _nextScan;
     private int _deferredCorpseId = -1;
     private float _deferredUntil;
+    private Vector3 _holdAnchor;
+    private Waypoint _returnWaypoint;
+    private float _returnDeadline;
+    internal SquadLootWaitMode Mode { get; private set; }
+    internal bool Returning => _returnWaypoint != null;
 
     internal Agent Looter { get; private set; }
     internal Waypoint Target { get; private set; }
     internal bool Active => Looter != null;
     internal bool Owns(Agent agent) => Active && Looter == agent;
+    internal bool IsWaitingInCover(Agent agent)
+    {
+        if (!Active || agent == Looter || !Available(agent) || InFlight(agent)
+            || agent.Objective.Status != ObjectiveStatus.Finished
+            || !_slots.TryGetValue(agent, out var slot) || slot.Assigned != agent.Objective.Location
+            || agent.Guard.CoverPoint is not { } cover || cover.Category == CoverCategory.None) return false;
+        var delta = agent.Position - cover.Position;
+        return delta.sqrMagnitude <= 4f && Mathf.Abs(delta.y) <= 1f;
+    }
     internal bool IsEscortWaypoint(Waypoint waypoint)
     {
         if (waypoint == null) return false;
+        if (waypoint == _returnWaypoint) return true;
         foreach (var slot in _slots.Values)
             if (slot.Assigned == waypoint) return true;
         return false;
@@ -67,6 +89,23 @@ internal sealed class CorpseEscort
                 return false;
             }
 
+            if (Returning)
+            {
+                if (Looter.Objective.Location != _returnWaypoint || Looter.Objective.Status == ObjectiveStatus.Failed
+                    || Time.time >= _returnDeadline || !HasWaitingMember(squad))
+                {
+                    End(squad, waypoints, "regroup interrupted or blocked");
+                    return false;
+                }
+                var delta = Looter.Position - _returnWaypoint.Position;
+                if (delta.sqrMagnitude <= 25f && Mathf.Abs(delta.y) <= 2f)
+                {
+                    End(squad, waypoints, "regrouped after loot");
+                    return false;
+                }
+                return true;
+            }
+
             // A loot session can mark the body consumed before its transfer/animation has ended.
             // Keep that owner until the action has really released it, including adjacent loot sweeps.
             var current = Looter.Objective.Location;
@@ -82,6 +121,8 @@ internal sealed class CorpseEscort
                     _deferredCorpseId = Target.Id;
                     _deferredUntil = Time.time + 20f;
                 }
+                // Only release the loot owner after all native transfers/animations have finished.
+                if (current == Target && TryReturnToGroup(squad, waypoints)) return true;
                 End(squad, waypoints, "loot ended or unavailable");
                 return false;
             }
@@ -94,17 +135,21 @@ internal sealed class CorpseEscort
         Waypoint target = null;
         // Prefer a running session, then an already committed approach, then pending own kills.
         // One stable owner prevents squads splitting between distant corpses every strategy tick.
-        for (var pass = 0; pass < 3 && owner == null; pass++)
+        for (var pass = 0; pass < 4 && owner == null; pass++)
         {
             foreach (var member in squad.Members)
             {
                 if (!Available(member)) continue;
                 var candidate = pass == 2 ? waypoints.TryGetNextOwnKillCorpseForAgent(squad, member)
                     : member.Objective.Location;
-                if (candidate?.Category != WaypointCategory.Corpse || candidate.Target == null
+                var waitingForOtherLoot = pass == 3 && InFlight(member)
+                    && candidate?.Category is WaypointCategory.ContainerLoot or WaypointCategory.LooseLoot
+                    && HasSettledSquadmate(squad, member);
+                if (pass == 3 && !waitingForOtherLoot) continue;
+                if ((!waitingForOtherLoot && candidate?.Category != WaypointCategory.Corpse) || candidate.Target == null
                     || !GotoObjectiveAction.IsLootableForAgent(member, candidate)) continue;
                 if (pass == 0 && !InFlight(member)) continue;
-                if (pass != 0 && (InFlight(member) || squad.CompletedPoiIds.Contains(candidate.Id)
+                if (pass is 1 or 2 && (InFlight(member) || squad.CompletedPoiIds.Contains(candidate.Id)
                     || member.ValueSkippedPoiIds.Contains(candidate.Id)
                     || waypoints.IsClaimedByOther(candidate.Id, member.Id)
                     || (candidate.Id == _deferredCorpseId && Time.time < _deferredUntil))) continue;
@@ -122,16 +167,21 @@ internal sealed class CorpseEscort
         _resumeAfterCorpse = _mission.Category == WaypointCategory.Corpse
             ? squad.PreInterruptObjectiveLocation : null;
         _startedAt = Time.time;
+        var archetype = squad.Personality?.Archetype ?? PersonalityArchetype.Average;
+        var style = PersonalityProfile.LootWaitStyleFor(archetype) ?? SquadLootWaitStyle.For(archetype.ToString());
+        Mode = style.Choose(Random.value, Random.value);
+        if (Mode == SquadLootWaitMode.HoldCover && !TrySetHoldAnchor(squad, waypoints))
+            Mode = SquadLootWaitMode.EscortCover;
         if (owner.Objective.Location != target)
             Assign(owner, target, null, waypoints);
-        Log.Info($"{squad} corpse escort started: looter={owner}, target={target}, resume={_mission}");
+        Log.Info($"{squad} corpse escort started: looter={owner}, target={target}, resume={_mission}, mode={Mode}, personality={archetype}");
         return true;
     }
 
     // The loot action keeps its usual short adjacent sweep without replacing the saved mission.
     internal void ContinueSweep(Agent agent, Waypoint next)
     {
-        if (!Owns(agent)) return;
+        if (!Owns(agent) || Returning) return;
         Target = next;
         _haveCovers = false;
     }
@@ -142,24 +192,40 @@ internal sealed class CorpseEscort
         if (agent == Looter || InFlight(agent) || !Available(agent)) return true;
 
         if (!_slots.TryGetValue(agent, out var slot))
-            _slots[agent] = slot = new Slot();
+            _slots[agent] = slot = new Slot { Layout = memberIndex + Random.Range(0, 16) };
         if (Time.time < slot.NextUpdate) return true;
 
-        var atBody = Looter.Objective.Status == ObjectiveStatus.Looting
+        var holding = Mode == SquadLootWaitMode.HoldCover;
+        var atBody = holding || Looter.Objective.Status == ObjectiveStatus.Looting
                      || (Looter.Position - Target.Position).sqrMagnitude <= 64f;
-        var anchor = atBody ? Target.Position : Looter.Position;
+        var anchor = holding ? _holdAnchor : atBody ? Target.Position : Looter.Position;
         var failed = slot.Assigned != null && agent.Objective.Location == slot.Assigned
                      && agent.Objective.Status == ObjectiveStatus.Failed;
         var displaced = slot.Assigned != null && agent.Objective.Status == ObjectiveStatus.Finished
                         && (agent.Position - slot.Assigned.Position).sqrMagnitude > 36f;
-        if (slot.Assigned != null && agent.Objective.Location == slot.Assigned && !failed && !displaced
+        if (slot.Assigned != null && agent.Objective.Location == slot.Assigned && !failed && !displaced && slot.Failures == 0
             && slot.AtBody == atBody && (slot.Anchor - anchor).sqrMagnitude < 36f)
             return true;
 
-        slot.NextUpdate = Time.time + 3f;
-        if (failed && slot.Rejected.Count < 8) slot.Rejected.Add(slot.Assigned.Position);
-        if ((slot.Anchor - anchor).sqrMagnitude > 225f) slot.Rejected.Clear();
-        if (atBody && (!_haveCovers || (_coverAnchor - anchor).sqrMagnitude > 36f))
+        if (slot.WaitingFallback && (slot.Anchor - anchor).sqrMagnitude < 225f) return true;
+        slot.WaitingFallback = false;
+        slot.NextUpdate = Time.time + Random.Range(2.5f, 4f);
+        if ((slot.Anchor - anchor).sqrMagnitude > 225f)
+        {
+            slot.Rejected.Clear();
+            slot.Failures = slot.ArrivalFailures = 0;
+        }
+        if (failed)
+        {
+            if (slot.Rejected.Count < 8) slot.Rejected.Add(slot.Assigned.Position);
+            if (++slot.ArrivalFailures >= 3)
+            {
+                WaitLocally(squad, agent, slot, anchor, atBody, waypoints);
+                return true;
+            }
+        }
+        var useCover = Mode != SquadLootWaitMode.Follow;
+        if (useCover && (!_haveCovers || (_coverAnchor - anchor).sqrMagnitude > 36f))
         {
             waypoints.CollectCorpseEscortCover(anchor, _covers);
             _coverAnchor = anchor;
@@ -170,11 +236,16 @@ internal sealed class CorpseEscort
         foreach (var pair in _slots)
             if (pair.Key != agent && squad.Members.Contains(pair.Key) && pair.Value.Assigned != null)
                 _occupied.Add(pair.Value.Assigned.Position);
-        if (!waypoints.TryPickCorpseEscortPosition(agent, Looter.Position, anchor, atBody ? _covers : null,
-                _occupied, slot.Rejected, memberIndex, out var cover))
+        if (!waypoints.TryPickCorpseEscortPosition(agent, holding ? _holdAnchor : Looter.Position,
+                anchor, useCover ? _covers : null,
+                _occupied, slot.Rejected, slot.Layout, out var cover, maxPaths: 6))
         {
             // Do not send an escort to an unvalidated point or keep pathfinding every tick.
             slot.NextUpdate = Time.time + 8f;
+            slot.Anchor = anchor;
+            // Stop the previous mission's move order even during the delay before our one retry.
+            slot.Failures++;
+            WaitLocally(squad, agent, slot, anchor, atBody, waypoints, final: slot.Failures >= 2);
             Log.Debug($"{agent} corpse escort waiting for a reachable spaced position near {Looter}");
             return true;
         }
@@ -183,8 +254,9 @@ internal sealed class CorpseEscort
         slot.Assigned = waypoints.CreateCorpseEscortWaypoint(cover.Position);
         slot.Anchor = anchor;
         slot.AtBody = atBody;
+        slot.Failures = 0;
         Assign(agent, slot.Assigned, cover, waypoints);
-        Log.Debug($"{agent} corpse escort {(atBody ? "cover" : "follow")}: looter={Looter}, position={cover.Position}, cover={cover.Category}");
+        Log.Debug($"{agent} corpse escort {(useCover ? "cover" : "follow")}: looter={Looter}, position={cover.Position}, cover={cover.Category}, mode={Mode}");
         return true;
     }
 
@@ -198,6 +270,19 @@ internal sealed class CorpseEscort
         agent.Objective.DispatchTime = Time.time;
         agent.Guard.CoverPoint = cover;
         // Goto owns arrival; its activation makes Guard dispose any outstanding sweep job normally.
+    }
+
+    private static void WaitLocally(Squad squad, Agent agent, Slot slot, Vector3 anchor, bool atBody,
+        WaypointSystem waypoints, bool final = true)
+    {
+        ForgetSlot(squad, agent, slot);
+        slot.Assigned = waypoints.CreateCorpseEscortWaypoint(agent.Position);
+        slot.Anchor = anchor;
+        slot.AtBody = atBody;
+        slot.WaitingFallback = final;
+        Assign(agent, slot.Assigned, new CoverPoint(agent.Position, Vector3.zero,
+            CoverCategory.None, CoverLevel.Stay), waypoints);
+        Log.Debug($"{agent} corpse escort local wait: cover route unavailable, anchor={anchor}, retry={!final}");
     }
 
     private static void ForgetSlot(Squad squad, Agent agent, Slot slot)
@@ -237,8 +322,14 @@ internal sealed class CorpseEscort
             ForgetSlot(squad, pair.Key, pair.Value);
         }
         if (squad.Members.Contains(Looter) && !InFlight(Looter) && !Looter.SoloExtractRequested
-            && Looter.Objective.Location == Target)
+            && (Looter.Objective.Location == Target || Looter.Objective.Location == _returnWaypoint))
             Resume(squad, Looter, waypoints);
+        if (_returnWaypoint != null)
+        {
+            squad.CompletedPoiIds.Remove(_returnWaypoint.Id);
+            squad.RecentlyVisitedPoiCooldowns.Remove(_returnWaypoint.Id);
+            Looter.ArrivalFailures.Forget(_returnWaypoint.Id);
+        }
         if (resuming)
         {
             // Members must walk back to the saved anchor before its normal guard timer can finish.
@@ -255,6 +346,50 @@ internal sealed class CorpseEscort
         Target = null;
         _mission = null;
         _resumeAfterCorpse = null;
+        _returnWaypoint = null;
+    }
+
+    private static bool HasSettledSquadmate(Squad squad, Agent looter)
+    {
+        foreach (var member in squad.Members)
+            if (member != looter && Available(member) && !InFlight(member)
+                && member.Objective.Status == ObjectiveStatus.Finished
+                && (member.Position - looter.Position).sqrMagnitude <= 1600f) return true;
+        return false;
+    }
+
+    private bool HasWaitingMember(Squad squad)
+    {
+        foreach (var member in squad.Members)
+            if (member != Looter && Available(member) && !InFlight(member)
+                && _slots.TryGetValue(member, out var slot) && member.Objective.Location == slot.Assigned)
+                return true;
+        return false;
+    }
+
+    private bool TrySetHoldAnchor(Squad squad, WaypointSystem waypoints)
+    {
+        // Use a member's real position, never an average that could lie inside a wall or on another floor.
+        Agent waiting = null;
+        foreach (var member in squad.Members)
+            if (member != Looter && Available(member) && !InFlight(member)) { waiting = member; break; }
+        if (waiting == null || (waiting.Position - Target.Position).sqrMagnitude > 3600f) return false;
+        foreach (var member in squad.Members)
+            if (member != Looter && Available(member) && !InFlight(member)
+                && (member.Position - waiting.Position).sqrMagnitude > 625f) return false;
+        return waypoints.TryGetLootRegroupPosition(Target.Position, waiting.Position, out _holdAnchor);
+    }
+
+    private bool TryReturnToGroup(Squad squad, WaypointSystem waypoints)
+    {
+        if (Mode != SquadLootWaitMode.HoldCover || !HasWaitingMember(squad)) return false;
+        if ((Looter.Position - _holdAnchor).sqrMagnitude <= 25f) return false;
+        if (!waypoints.TryGetLootRegroupPosition(Looter.Position, _holdAnchor, out var position)) return false;
+        _returnWaypoint = waypoints.CreateCorpseEscortWaypoint(position);
+        _returnDeadline = Time.time + 60f;
+        Assign(Looter, _returnWaypoint, null, waypoints);
+        Log.Debug($"{Looter} corpse escort regroup: position={position}, mode={Mode}");
+        return true;
     }
 
     private static void Resume(Squad squad, Agent agent, WaypointSystem waypoints)

@@ -20,6 +20,18 @@ public partial class WaypointSystem
         => new(NewRuntimeWaypointId(), WaypointCategory.Synthetic, "CorpseEscort", position,
             1f, new List<Door>(), new List<CoverPoint>(), null);
 
+    internal bool TryGetLootRegroupPosition(Vector3 from, Vector3 anchor, out Vector3 position)
+    {
+        position = default;
+        if (!NavMesh.SamplePosition(from, out var origin, 1.5f, NavMesh.AllAreas)
+            || !NavMesh.SamplePosition(anchor, out var target, .75f, NavMesh.AllAreas)
+            || !NavMesh.CalculatePath(origin.position, target.position, NavMesh.AllAreas, _escortPath)
+            || _escortPath.status != NavMeshPathStatus.PathComplete
+            || PathHelper.TotalLength(_escortPath.corners) > 100f) return false;
+        position = target.position;
+        return true;
+    }
+
     internal void CollectCorpseEscortCover(Vector3 center, List<CoverPoint> result, bool ambush = false)
     {
         result.Clear();

@@ -250,6 +250,7 @@ public class PersonalitiesConfig
     public ArchetypeConfig Timmy { get; set; } = new()
     {
         Travel = Orbit.Settings.TravelStyle.For("Timmy"),
+        SquadLootWait = Orbit.Settings.SquadLootWaitStyle.For("Timmy"),
         MainMixQuest = 0.29f, MainMixKills = 0.29f, MainMixLootValue = 0.42f,
         MainCountMin = 1, MainCountMax = 2,
         ExtractThresholdMin = 100_000f, ExtractThresholdMax = 300_000f,
@@ -262,6 +263,7 @@ public class PersonalitiesConfig
     public ArchetypeConfig Cautious { get; set; } = new()
     {
         Travel = Orbit.Settings.TravelStyle.For("Cautious"),
+        SquadLootWait = Orbit.Settings.SquadLootWaitStyle.For("Cautious"),
         MainMixQuest = 0.23f, MainMixKills = 0.06f, MainMixLootValue = 0.71f,
         MainCountMin = 2, MainCountMax = 4,
         ExtractThresholdMin = 200_000f, ExtractThresholdMax = 500_000f,
@@ -274,6 +276,7 @@ public class PersonalitiesConfig
     public ArchetypeConfig Average { get; set; } = new()
     {
         Travel = Orbit.Settings.TravelStyle.For("Average"),
+        SquadLootWait = Orbit.Settings.SquadLootWaitStyle.For("Average"),
         MainMixQuest = 0.34f, MainMixKills = 0.33f, MainMixLootValue = 0.33f,
         MainCountMin = 1, MainCountMax = 5,
         ExtractThresholdMin = 500_000f, ExtractThresholdMax = 1_000_000f,
@@ -286,6 +289,7 @@ public class PersonalitiesConfig
     public ArchetypeConfig Aggressive { get; set; } = new()
     {
         Travel = Orbit.Settings.TravelStyle.For("Aggressive"),
+        SquadLootWait = Orbit.Settings.SquadLootWaitStyle.For("Aggressive"),
         MainMixQuest = 0.18f, MainMixKills = 0.64f, MainMixLootValue = 0.18f,
         MainCountMin = 2, MainCountMax = 4,
         ExtractThresholdMin = 1_000_000f, ExtractThresholdMax = 1_500_000f,
@@ -298,6 +302,7 @@ public class PersonalitiesConfig
     public ArchetypeConfig VeryAggressive { get; set; } = new()
     {
         Travel = Orbit.Settings.TravelStyle.For("VeryAggressive"),
+        SquadLootWait = Orbit.Settings.SquadLootWaitStyle.For("VeryAggressive"),
         MainMixQuest = 0.06f, MainMixKills = 0.83f, MainMixLootValue = 0.11f,
         MainCountMin = 2, MainCountMax = 5,
         ExtractThresholdMin = 1_500_000f, ExtractThresholdMax = 3_000_000f,
@@ -312,6 +317,7 @@ public class PersonalitiesConfig
 public class ArchetypeConfig
 {
     public Orbit.Settings.TravelStyle Travel { get; set; } = new();
+    public Orbit.Settings.SquadLootWaitStyle SquadLootWait { get; set; } = new();
     public float MainMixQuest { get; set; }
     public float MainMixKills { get; set; }
     public float MainMixLootValue { get; set; }

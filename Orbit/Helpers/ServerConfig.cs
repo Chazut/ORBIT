@@ -200,6 +200,7 @@ public static class ServerConfig
     public sealed class ArchetypeSection
     {
         [JsonProperty("travel")] public Orbit.Settings.TravelStyle Travel = new();
+        [JsonProperty("squad_loot_wait")] public Orbit.Settings.SquadLootWaitStyle SquadLootWait = new();
         [JsonProperty("main_mix_quest")] public float MainMixQ;
         [JsonProperty("main_mix_kills")] public float MainMixK;
         [JsonProperty("main_mix_loot_value")] public float MainMixL;
@@ -238,6 +239,7 @@ public static class ServerConfig
         [JsonProperty("timmy")] public ArchetypeSection Timmy = new ArchetypeSection
         {
             Travel = Orbit.Settings.TravelStyle.For("Timmy"),
+            SquadLootWait = Orbit.Settings.SquadLootWaitStyle.For("Timmy"),
             MainMixQ = 0.29f, MainMixK = 0.29f, MainMixL = 0.42f,
             MainCountMin = 1, MainCountMax = 2,
             ExtractThresholdMin = 100_000f, ExtractThresholdMax = 300_000f,
@@ -250,6 +252,7 @@ public static class ServerConfig
         [JsonProperty("cautious")] public ArchetypeSection Cautious = new ArchetypeSection
         {
             Travel = Orbit.Settings.TravelStyle.For("Cautious"),
+            SquadLootWait = Orbit.Settings.SquadLootWaitStyle.For("Cautious"),
             MainMixQ = 0.23f, MainMixK = 0.06f, MainMixL = 0.71f,
             MainCountMin = 2, MainCountMax = 4,
             ExtractThresholdMin = 200_000f, ExtractThresholdMax = 500_000f,
@@ -262,6 +265,7 @@ public static class ServerConfig
         [JsonProperty("average")] public ArchetypeSection Average = new ArchetypeSection
         {
             Travel = Orbit.Settings.TravelStyle.For("Average"),
+            SquadLootWait = Orbit.Settings.SquadLootWaitStyle.For("Average"),
             MainMixQ = 0.34f, MainMixK = 0.33f, MainMixL = 0.33f,
             MainCountMin = 1, MainCountMax = 5,
             ExtractThresholdMin = 500_000f, ExtractThresholdMax = 1_000_000f,
@@ -274,6 +278,7 @@ public static class ServerConfig
         [JsonProperty("aggressive")] public ArchetypeSection Aggressive = new ArchetypeSection
         {
             Travel = Orbit.Settings.TravelStyle.For("Aggressive"),
+            SquadLootWait = Orbit.Settings.SquadLootWaitStyle.For("Aggressive"),
             MainMixQ = 0.18f, MainMixK = 0.64f, MainMixL = 0.18f,
             MainCountMin = 2, MainCountMax = 4,
             ExtractThresholdMin = 1_000_000f, ExtractThresholdMax = 1_500_000f,
@@ -286,6 +291,7 @@ public static class ServerConfig
         [JsonProperty("very_aggressive")] public ArchetypeSection VeryAggressive = new ArchetypeSection
         {
             Travel = Orbit.Settings.TravelStyle.For("VeryAggressive"),
+            SquadLootWait = Orbit.Settings.SquadLootWaitStyle.For("VeryAggressive"),
             MainMixQ = 0.06f, MainMixK = 0.83f, MainMixL = 0.11f,
             MainCountMin = 2, MainCountMax = 5,
             ExtractThresholdMin = 1_500_000f, ExtractThresholdMax = 3_000_000f,

@@ -78,6 +78,15 @@
     </MudItem>
 </MudGrid>
 
+<MudText Typo="Typo.subtitle2" Class="mt-4 mb-2" Style="opacity:.75">Waiting for a squadmate to loot</MudText>
+<MudText Typo="Typo.caption" Class="mb-2">The leader's personality sets one choice for the group at each loot stop. Members use separate positions. Combat and urgent extraction take priority.</MudText>
+<OrbitSlider T="float" @bind-Value="Cfg.SquadLootWait.CoverChance" Label="Wait in cover chance" Fmt="P0"
+             Min="0f" Max="1f" Step="0.05f"
+             Tooltip="Choose nearby cover while a squadmate loots. Otherwise, follow with normal spacing. If no reachable cover exists, use a walkable waiting position." />
+<OrbitSlider T="float" @bind-Value="Cfg.SquadLootWait.StayBehindChance" Label="Stay behind when using cover" Fmt="P0"
+             Min="0f" Max="1f" Step="0.05f"
+             Tooltip="After choosing cover, chance to wait near the group's starting position and let the looter return. Otherwise, accompany the looter and cover nearby. Staying behind requires a short reachable return route; blocked returns do not hold the squad indefinitely." />
+
 <MudText Typo="Typo.subtitle2" Class="mt-4 mb-2" Style="opacity:.75">Movement</MudText>
 <TravelStyleEditor Cfg="Cfg.Travel" />
 <OrbitSlider T="float" @bind-Value="Cfg.SprintPropensity" Label="Sprint propensity" Fmt="P0"

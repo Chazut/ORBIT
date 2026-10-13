@@ -160,6 +160,7 @@ public static class OrbitTelemetry
             var operation = agent.Squad.Operation;
             category = $"MultiStep: {operation.Definition.Name} ({operation.Index + 1}/{operation.Count}) {operation.Current.Label}";
         }
+        if (agent.Squad?.CorpseEscort.IsWaitingInCover(agent) == true) category = "SquadCover";
         var x = loc?.Position.x ?? 0f;
         var y = loc?.Position.y ?? 0f;
         var z = loc?.Position.z ?? 0f;
