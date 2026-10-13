@@ -30,7 +30,7 @@ public class OrbitFikaPlugin : BaseUnityPlugin
     public const string PluginGuid = "com.chazut.orbit.fika";
     public const string PluginName = "ORBIT Fika Bridge";
     public const string PluginVersion = "1.2.0";
-    public const string ReleaseVersion = "1.2.0-rc.2";
+    public const string ReleaseVersion = "1.2.0-rc.3";
     private DoorSyncBridge _doors;
     private ScopeSyncBridge _scopes;
 
@@ -39,6 +39,7 @@ public class OrbitFikaPlugin : BaseUnityPlugin
 
     private struct PendingShot
     {
+        public string FightId, ProfileId;
         public float At;
         public Vector3 Pos;
         public WeaponSoundPlayer Sound;
@@ -61,6 +62,7 @@ public class OrbitFikaPlugin : BaseUnityPlugin
         FikaEventDispatcher.SubscribeEvent<FikaNetworkManagerCreatedEvent>(OnNetworkManagerCreated);
         FikaEventDispatcher.SubscribeEvent<FikaNetworkManagerDestroyedEvent>(OnNetworkManagerDestroyed);
         OrbitEvents.GhostFightSoundsResolved += OnGhostFightResolved;
+        OrbitEvents.GhostFightSoundsStopped += OnGhostFightStopped;
         _log.LogInfo($"{PluginName} {ReleaseVersion} loaded");
     }
 
@@ -68,7 +70,7 @@ public class OrbitFikaPlugin : BaseUnityPlugin
     {
         _network = e.Manager;
         _isHost = e.Manager is FikaServer;
-        _pending.Clear();
+        ClearShots();
         // Only clients replay received fights; the host already plays its own burst via the limiter.
         if (!_isHost)
             e.Manager.RegisterPacket<OrbitGhostFightPacket>(OnGhostFightPacket);
@@ -78,7 +80,7 @@ public class OrbitFikaPlugin : BaseUnityPlugin
     private static void OnNetworkManagerDestroyed(FikaNetworkManagerDestroyedEvent e)
     {
         _network = null;
-        _pending.Clear();
+        ClearShots();
     }
 
     // ORBIT resolves ghost fights on the machine that owns the bots, so this only ever fires
@@ -88,6 +90,7 @@ public class OrbitFikaPlugin : BaseUnityPlugin
         if (_network == null || !_isHost) return;
         var packet = new OrbitGhostFightPacket
         {
+            FightId = fight.FightId,
             PosA = fight.PosA,
             PosB = fight.PosB,
             ProfileA = fight.ProfileA,
@@ -98,7 +101,7 @@ public class OrbitFikaPlugin : BaseUnityPlugin
         };
         try
         {
-            _network.SendData(ref packet, DeliveryMethod.ReliableUnordered, true);
+            _network.SendData(ref packet, DeliveryMethod.ReliableOrdered, true);
         }
         catch
         {
@@ -108,6 +111,11 @@ public class OrbitFikaPlugin : BaseUnityPlugin
 
     private static void OnGhostFightPacket(OrbitGhostFightPacket packet)
     {
+        if (packet.Shots < 0)
+        {
+            CancelShots(packet.FightId, string.IsNullOrEmpty(packet.ProfileA) ? null : packet.ProfileA);
+            return;
+        }
         var gameWorld = Singleton<GameWorld>.Instance;
         var listener = gameWorld?.MainPlayer;
         if (listener == null) return;
@@ -140,7 +148,8 @@ public class OrbitFikaPlugin : BaseUnityPlugin
                 var sound = WeaponSoundFromProfile(gameWorld, shooter.ProfileId);
                 if (sound == null) continue;
                 var weapon = Orbit.Api.GhostWeaponProfile.From(WeaponFromProfile(gameWorld, shooter.ProfileId), sound, engagementDistance);
-                QueueShooterShots(sound, weapon, shooter.Position, shooter.Shots, packet.Duration, startOffset, pauseScale);
+                QueueShooterShots(sound, weapon, shooter.Position, shooter.Shots, packet.Duration, startOffset, pauseScale,
+                    packet.FightId, shooter.ProfileId, shooter.ShotTimes);
                 queued++;
             }
             if (queued == 0)
@@ -166,8 +175,8 @@ public class OrbitFikaPlugin : BaseUnityPlugin
         var budgetB = packet.Shots - budgetA;
         if (soundA == null) { budgetB = packet.Shots; budgetA = 0; }
         if (soundB == null) { budgetA = packet.Shots; budgetB = 0; }
-        if (soundA != null) QueueShooterShots(soundA, Orbit.Api.GhostWeaponProfile.Default(soundA.IsAutoWeapon), packet.PosA, budgetA, packet.Duration);
-        if (soundB != null) QueueShooterShots(soundB, Orbit.Api.GhostWeaponProfile.Default(soundB.IsAutoWeapon), packet.PosB, budgetB, packet.Duration);
+        if (soundA != null) QueueShooterShots(soundA, Orbit.Api.GhostWeaponProfile.Default(soundA.IsAutoWeapon), packet.PosA, budgetA, packet.Duration, profileId: packet.ProfileA);
+        if (soundB != null) QueueShooterShots(soundB, Orbit.Api.GhostWeaponProfile.Default(soundB.IsAutoWeapon), packet.PosB, budgetB, packet.Duration, profileId: packet.ProfileB);
     }
 
     private static List<OrbitGhostShooter> ToWire(List<OrbitEvents.GhostShooter> shooters)
@@ -175,23 +184,25 @@ public class OrbitFikaPlugin : BaseUnityPlugin
         var wire = new List<OrbitGhostShooter>(shooters?.Count ?? 0);
         if (shooters == null) return wire;
         for (var i = 0; i < shooters.Count; i++)
-            wire.Add(new OrbitGhostShooter { ProfileId = shooters[i].ProfileId, Position = shooters[i].Position, Shots = shooters[i].Shots });
+            wire.Add(new OrbitGhostShooter { ProfileId = shooters[i].ProfileId, Position = shooters[i].Position, Shots = shooters[i].Shots, ShotTimes = shooters[i].ShotTimes });
         return wire;
     }
 
     private static bool OnSideA(OrbitGhostFightPacket packet, Vector3 position)
         => (position - packet.PosA).sqrMagnitude <= (position - packet.PosB).sqrMagnitude;
 
-    private static void QueueShooterShots(WeaponSoundPlayer sound, Orbit.Api.GhostWeaponProfile weapon, Vector3 pos, int budget, float duration, float startOffset = 0f, float pauseScale = 1f)
+    private static void QueueShooterShots(WeaponSoundPlayer sound, Orbit.Api.GhostWeaponProfile weapon, Vector3 pos, int budget, float duration, float startOffset = 0f, float pauseScale = 1f,
+        string fightId = null, string profileId = null, List<float> shotTimes = null)
     {
         if (sound == null || budget <= 0) return;
-        var times = Orbit.Api.GhostShotScheduler.Schedule(weapon, budget, duration, startOffset, pauseScale);
+        var times = shotTimes ?? Orbit.Api.GhostShotScheduler.Schedule(weapon, budget, duration, startOffset, pauseScale);
         // One entry per trigger pull: an automatic weapon's Body clip is a 16-round loop (GhostShotPlayback).
         var pulls = Orbit.Api.GhostShotPlayback.GroupTriggerPulls(times, weapon, sound.IsAutoWeapon);
         for (var i = 0; i < pulls.Count; i++)
         {
             _pending.Add(new PendingShot
             {
+                FightId = fightId, ProfileId = profileId,
                 At = Time.time + pulls[i].At,
                 Pos = pos + new Vector3(Random.Range(-1.5f, 1.5f), 0f, Random.Range(-1.5f, 1.5f)),
                 Sound = sound,
@@ -238,7 +249,7 @@ public class OrbitFikaPlugin : BaseUnityPlugin
         var audio = Singleton<BetterAudio>.Instance;
         if (gameWorld?.MainPlayer == null || audio == null)
         {
-            _pending.Clear();
+            ClearShots();
             return;
         }
 
@@ -256,12 +267,16 @@ public class OrbitFikaPlugin : BaseUnityPlugin
                     Orbit.Api.GhostShotPlayback.PlayTail(audio, shot.Sound, shot.LoopSource, shot.Pos, listenerDist);
                     continue;
                 }
+                // Observed Fika bodies are normally awake locally, even while the host simulates
+                // them. Only death/despawn is decided here; the host sends wake/fight cancellation.
+                if (gameWorld.GetAlivePlayerByProfileID(shot.ProfileId)?.HealthController?.IsAlive != true) continue;
                 var source = Orbit.Api.GhostShotPlayback.Play(audio, shot.Sound, shot.Pos, listenerDist, Mathf.Max(1, shot.Rounds), out var tailDelay);
                 if (source != null && tailDelay > 0f)
                 {
                     _pending.Add(new PendingShot
                     {
                         At = Time.time + tailDelay, Pos = shot.Pos, Sound = shot.Sound, IsTail = true, LoopSource = source,
+                        FightId = shot.FightId, ProfileId = shot.ProfileId,
                     });
                 }
             }
@@ -277,5 +292,37 @@ public class OrbitFikaPlugin : BaseUnityPlugin
         _doors?.Dispose();
         _scopes?.Dispose();
         OrbitEvents.GhostFightSoundsResolved -= OnGhostFightResolved;
+        OrbitEvents.GhostFightSoundsStopped -= OnGhostFightStopped;
+        ClearShots();
+    }
+
+    private static void OnGhostFightStopped(OrbitEvents.GhostFightSoundStop stop)
+    {
+        if (_network == null || !_isHost) return;
+        // Start and stop share one ordered channel, so a delayed start cannot undo a cancellation.
+        var packet = new OrbitGhostFightPacket { FightId = stop.FightId, ProfileA = stop.ProfileId, Shots = -1 };
+        try { _network.SendData(ref packet, DeliveryMethod.ReliableOrdered, true); }
+        catch { /* Raid teardown. */ }
+    }
+
+    private static void CancelShots(string fightId, string profileId)
+    {
+        if (string.IsNullOrEmpty(fightId)) return;
+        for (var i = _pending.Count - 1; i >= 0; i--)
+        {
+            var shot = _pending[i];
+            if (shot.FightId != fightId || profileId != null && shot.ProfileId != profileId) continue;
+            if (shot.IsTail)
+                try { shot.LoopSource?.Stop(0.02f); } catch { }
+            _pending.RemoveAt(i);
+        }
+    }
+
+    private static void ClearShots()
+    {
+        foreach (var shot in _pending)
+            if (shot.IsTail)
+                try { shot.LoopSource?.Stop(0.02f); } catch { }
+        _pending.Clear();
     }
 }

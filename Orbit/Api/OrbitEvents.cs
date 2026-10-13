@@ -19,6 +19,14 @@ public static class OrbitEvents
     /// their <c>WeaponSoundPlayer</c> for authentic sound banks.
     /// </summary>
     public static event Action<GhostFightSounds> GhostFightSoundsResolved;
+    public static event Action<GhostFightSoundStop> GhostFightSoundsStopped;
+
+    public struct GhostFightSoundStop
+    {
+        public string FightId;
+        // Null stops the entire fight. Otherwise only this shooter's remaining sounds are removed.
+        public string ProfileId;
+    }
 
     /// <summary>One firing member of a simulated fight: whose weapon sound banks to use, from where,
     /// and how many shots of the fight's budget are its own.</summary>
@@ -27,10 +35,12 @@ public static class OrbitEvents
         public string ProfileId;
         public Vector3 Position;
         public int Shots;
+        public List<float> ShotTimes;
     }
 
     public struct GhostFightSounds
     {
+        public string FightId;
         public Vector3 PosA;
         public Vector3 PosB;
         /// <summary>First shooter of each side, kept for pre-2.1 consumers.</summary>
@@ -53,5 +63,12 @@ public static class OrbitEvents
         {
             // Subscriber bugs must never break the limiter.
         }
+    }
+
+    internal static void StopGhostFightSounds(string fightId, string profileId)
+    {
+        if (string.IsNullOrEmpty(fightId)) return;
+        try { GhostFightSoundsStopped?.Invoke(new GhostFightSoundStop { FightId = fightId, ProfileId = profileId }); }
+        catch { /* Optional bridge failures must not interrupt combat cleanup. */ }
     }
 }

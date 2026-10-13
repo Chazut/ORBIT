@@ -215,6 +215,7 @@ public partial class DormancySystem
     // weapons' sound banks), so the player hears WHERE the off-screen activity is and can go look.
     private struct PendingShot
     {
+        public string FightId, ProfileId;
         public float At;
         public Vector3 Pos;
         public WeaponSoundPlayer Sound;
@@ -233,6 +234,8 @@ public partial class DormancySystem
     // the end. Duration scales with how contested the fight is and with distance.
     private sealed class ActiveGhostFight
     {
+        public string AudioId;
+        public readonly HashSet<string> AudioShooters = new();
         public GhostUnit Winner;
         public GhostUnit Loser;
         public float EndsAt;
@@ -383,8 +386,8 @@ public partial class DormancySystem
         using (TransitionPerformance.Measure(TransitionPhase.GhostSpectator))
             if (UpdateSpectatorMode()) { ClearStagedWakes(); return; }
         PumpStagedWakes();
-        if (_pendingShots.Count > 0) PumpGhostFightShots();
         if (_activeFights.Count > 0) PumpGhostFights();
+        if (_pendingShots.Count > 0) PumpGhostFightShots();
         using (TransitionPerformance.Measure(TransitionPhase.GhostNativeMove))
         {
             _nativeMoveScratch.Clear();
@@ -506,6 +509,7 @@ public partial class DormancySystem
     /// corpse or despawned bot is never left as an invisible inactive GameObject.</summary>
     public void OnAgentRemoved(Agent agent)
     {
+        CancelGhostShooter(agent.Player?.ProfileId);
         GhostWeaponVisuals.Wake(agent.Player);
         ForgetStagedBot(agent.Bot);
         NativeAwakeGrenadeDiagnostics.Forget(agent.Bot);
@@ -1037,6 +1041,7 @@ public partial class DormancySystem
         if (agent.IsDormant) RecordWakeEvent(agent.Player, reason);
         var bot = agent.Bot;
         var player = agent.Player;
+        CancelGhostShooter(player?.ProfileId);
         GhostWeaponVisuals.Wake(player);
 
         GhostWakeActivationDiagnostics.Track(bot);
@@ -1855,7 +1860,7 @@ public partial class DormancySystem
 
         if (_darkness > 0f)
             Log.Info($"GHOST SKIRMISH night: darkness {_darkness:F2}, {a.Label} nightVision={a.NightCapable} (x{NightFightMul(a, b):F2}), {b.Label} nightVision={b.NightCapable} (x{NightFightMul(b, a):F2})");
-        QueueFightSounds(a, posA, b, posB, loserDeaths + winnerDeaths, duration, shotsPerSecond);
+        QueueFightSounds(fight, a, posA, b, posB, loserDeaths + winnerDeaths, duration, shotsPerSecond);
         RegisterFightNoise(a, b, duration);
     }
 
@@ -1902,15 +1907,23 @@ public partial class DormancySystem
 
                 ExecuteDueKills(fight.LoserKillAts, fight.Loser, fight.Winner);
                 ExecuteDueKills(fight.WinnerKillAts, fight.Winner, fight.Loser);
+                if (!HasLivingFightMember(fight.Winner) || !HasLivingFightMember(fight.Loser))
+                {
+                    ReleaseFightPins(fight);
+                    _activeFights.RemoveAt(i);
+                    continue;
+                }
                 if (Time.time < fight.EndsAt) continue;
                 ApplyFightAttrition(fight.Winner, fight.Loser, fight.WinnerWoundChance, fight.WinnerWound);
                 ApplyFightAttrition(fight.Loser, fight.Winner, fight.LoserWoundChance, fight.LoserWound);
+                StopFightSounds(fight.AudioId);
                 _activeFights.RemoveAt(i);
             }
             catch (System.Exception e)
             {
                 // Drop the broken fight rather than retrying it every frame (BSG swallows tick exceptions).
                 Log.Error($"GHOST SKIRMISH: fight pump failed, dropping the fight: {e.Message}");
+                StopFightSounds(fight.AudioId);
                 _activeFights.RemoveAt(i);
             }
         }
@@ -1935,6 +1948,7 @@ public partial class DormancySystem
 
     private void ReleaseFightPins(ActiveGhostFight fight)
     {
+        StopFightSounds(fight.AudioId);
         _unitFightingUntil.Remove(fight.Winner.Key);
         _unitFightingUntil.Remove(fight.Loser.Key);
         foreach (var bot in fight.Winner.VanillaBots) _nativeGhosts.Pin(bot, 0f);
@@ -2082,7 +2096,7 @@ public partial class DormancySystem
     /// own weapon sound banks) spread over a few seconds at the fighters' positions. Skipped entirely
     /// when no human is close enough to hear.
     /// </summary>
-    private void QueueFightSounds(GhostUnit a, Vector3 posA, GhostUnit b, Vector3 posB, int casualties, float duration, float shotsPerSecond)
+    private void QueueFightSounds(ActiveGhostFight fight, GhostUnit a, Vector3 posA, GhostUnit b, Vector3 posB, int casualties, float duration, float shotsPerSecond)
     {
         if (!_cfg.GhostFightSounds) return;
 
@@ -2098,11 +2112,30 @@ public partial class DormancySystem
         CollectShooters(b, shots - shots / 2, _shooters);
         var profileA = sideBStart > 0 ? _shooters[0].ProfileId : null;
         var profileB = _shooters.Count > sideBStart ? _shooters[sideBStart].ProfileId : null;
+        fight.AudioId = System.Guid.NewGuid().ToString("N");
+        var engagementDistance = Vector3.Distance(posA, posB);
+        for (var i = 0; i < _shooters.Count; i++)
+        {
+            var shooter = _shooters[i];
+            var sound = WeaponSoundFromProfile(shooter.ProfileId);
+            var weapon = Api.GhostWeaponProfile.From(WeaponFromProfile(shooter.ProfileId), sound, engagementDistance);
+            var (offset, scale) = i < sideBStart
+                ? Api.GhostShotScheduler.SideStagger(i, sideBStart)
+                : Api.GhostShotScheduler.SideStagger(i - sideBStart, _shooters.Count - sideBStart);
+            shooter.ShotTimes = Api.GhostShotScheduler.Schedule(weapon, shooter.Shots, duration, offset, scale);
+            var longestPause = 0f;
+            for (var j = 1; j < shooter.ShotTimes.Count; j++)
+                longestPause = Mathf.Max(longestPause, shooter.ShotTimes[j] - shooter.ShotTimes[j - 1]);
+            Log.Debug($"GHOST AUDIO PLAN: shooter={shooter.ProfileId} mode={weapon.Mode} shots={shooter.ShotTimes.Count}/{shooter.Shots} duration={duration:F1}s maxGap={longestPause:F1}s");
+            _shooters[i] = shooter;
+            fight.AudioShooters.Add(shooter.ProfileId);
+        }
 
         // Fika bridge (Orbit.Fika addon): raised before the local earshot gate, because audibility
         // is a per-listener judgement and each co-op client replays the burst against its own ears.
         Api.OrbitEvents.RaiseGhostFightSounds(new Api.OrbitEvents.GhostFightSounds
         {
+            FightId = fight.AudioId,
             PosA = posA,
             PosB = posB,
             ProfileA = profileA,
@@ -2127,22 +2160,14 @@ public partial class DormancySystem
         }
 
         Log.Info($"GHOST FIGHT SOUNDS: queueing up to {shots} shots from {_shooters.Count} shooter(s) over {duration:F1}s, closest human {listenerDist:F0}m");
-        var engagementDistance = Vector3.Distance(posA, posB);
-        var shootersA = sideBStart;
-        var shootersB = _shooters.Count - sideBStart;
         for (var i = 0; i < _shooters.Count; i++)
         {
             var shooter = _shooters[i];
             var sound = WeaponSoundFromProfile(shooter.ProfileId);
             if (sound == null) continue;
             var weapon = Api.GhostWeaponProfile.From(WeaponFromProfile(shooter.ProfileId), sound, engagementDistance);
-            // Squadmates fire staggered and pause longer the more of them there are, so a five-man
-            // side sounds like a firefight rather than one 4000 rpm gun.
-            var (startOffset, pauseScale) = i < sideBStart
-                ? Api.GhostShotScheduler.SideStagger(i, shootersA)
-                : Api.GhostShotScheduler.SideStagger(i - sideBStart, shootersB);
             Log.Debug($"GHOST FIGHT SOUNDS: {(i < sideBStart ? "A" : "B")} {DescribeShooter(shooter.ProfileId, sound)}, mode {weapon.Mode} {weapon.CyclicRpm:F0}/{weapon.SemiRpm:F0}rpm bursts {weapon.BurstShare:P0} at {engagementDistance:F0}m, {shooter.Shots} shot(s)");
-            QueueShooterShots(sound, weapon, shooter.Position, shooter.Shots, duration, startOffset, pauseScale);
+            QueueShooterShots(sound, weapon, shooter, fight.AudioId);
         }
     }
 
@@ -2182,20 +2207,20 @@ public partial class DormancySystem
         }
     }
 
-    private void QueueShooterShots(WeaponSoundPlayer sound, Api.GhostWeaponProfile weapon, Vector3 pos, int budget, float duration, float startOffset = 0f, float pauseScale = 1f)
+    private void QueueShooterShots(WeaponSoundPlayer sound, Api.GhostWeaponProfile weapon, Api.OrbitEvents.GhostShooter shooter, string fightId)
     {
-        if (sound == null || budget <= 0) return;
-        var times = Api.GhostShotScheduler.Schedule(weapon, budget, duration, startOffset, pauseScale);
+        if (sound == null || shooter.ShotTimes == null) return;
         // One entry per TRIGGER PULL, not per round: an automatic weapon's Body clip is a 16-round loop
         // that must be started once and cut, see GhostShotPlayback.
-        var pulls = Api.GhostShotPlayback.GroupTriggerPulls(times, weapon, sound.IsAutoWeapon);
+        var pulls = Api.GhostShotPlayback.GroupTriggerPulls(shooter.ShotTimes, weapon, sound.IsAutoWeapon);
         for (var i = 0; i < pulls.Count; i++)
         {
             _pendingShots.Add(new PendingShot
             {
+                FightId = fightId, ProfileId = shooter.ProfileId,
                 At = Time.time + pulls[i].At,
                 // A shooter shifts around its own spot between shots, it never teleports.
-                Pos = pos + new Vector3(Random.Range(-1.5f, 1.5f), 0f, Random.Range(-1.5f, 1.5f)),
+                Pos = shooter.Position + new Vector3(Random.Range(-1.5f, 1.5f), 0f, Random.Range(-1.5f, 1.5f)),
                 Sound = sound,
                 Rounds = pulls[i].Rounds,
             });
@@ -2283,6 +2308,13 @@ public partial class DormancySystem
                         Api.GhostShotPlayback.PlayTail(audio, shot.Sound, shot.LoopSource, shot.Pos, listenerDist);
                     continue;
                 }
+                if (!GhostShooterCanPlay(shot.ProfileId))
+                {
+                    CancelGhostShooter(shot.ProfileId);
+                    // Cancellation may remove earlier entries in this reverse iteration.
+                    i = Mathf.Min(i, _pendingShots.Count);
+                    continue;
+                }
                 var rounds = Mathf.Max(1, shot.Rounds);
                 BetterSource source;
                 float tailDelay;
@@ -2299,6 +2331,7 @@ public partial class DormancySystem
                     _pendingShots.Add(new PendingShot
                     {
                         At = Time.time + tailDelay, Pos = shot.Pos, Sound = shot.Sound, IsTail = true, LoopSource = source,
+                        FightId = shot.FightId, ProfileId = shot.ProfileId,
                     });
                 }
             }
@@ -2459,6 +2492,7 @@ public partial class DormancySystem
             victim.IsDormant = false;
             _dormantAgents.Remove(victim);
             DormantProfileIds.Remove(victim.Player.ProfileId);
+            CancelGhostShooter(victim.Player.ProfileId);
         }
         try
         {
@@ -2492,6 +2526,7 @@ public partial class DormancySystem
             _vanillaDormant.Remove(victim);
             UnthrottleBrain(victim);
             DormantProfileIds.Remove(victim.GetPlayer?.ProfileId);
+            CancelGhostShooter(victim.GetPlayer?.ProfileId);
         }
         try
         {
@@ -2560,6 +2595,7 @@ public partial class DormancySystem
                         _nativeGhosts.Remove(owner);
                         UnthrottleBrain(owner);
                         DormantProfileIds.Remove(player.ProfileId);
+                        CancelGhostShooter(player.ProfileId);
                         if (!owner.gameObject.activeSelf) owner.gameObject.SetActive(true);
                         Log.Info($"vanilla sleeper {player.Profile?.Nickname} died while dormant — body re-activated");
                     }
@@ -2770,6 +2806,7 @@ public partial class DormancySystem
         var native = _nativeGhosts.Remove(bot);
         UnthrottleBrain(bot);
         DormantProfileIds.Remove(bot.GetPlayer.ProfileId);
+        CancelGhostShooter(bot.GetPlayer.ProfileId);
         _vanillaLastHp[bot] = VanillaHp(bot);
         GhostWeaponVisuals.Wake(bot.GetPlayer);
         // A dead member also needs its body back, but must not reactivate its brain.
@@ -2814,6 +2851,7 @@ public partial class DormancySystem
         if (!dormant) return;
         UnthrottleBrain(bot);
         DormantProfileIds.Remove(bot.ProfileId);
+        CancelGhostShooter(bot.ProfileId);
         try { if (bot.gameObject != null) bot.gameObject.SetActive(true); }
         catch { }
     }
