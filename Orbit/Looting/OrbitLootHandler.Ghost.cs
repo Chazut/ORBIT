@@ -6,7 +6,10 @@ namespace Orbit.Looting;
 public partial class OrbitLootHandler
 {
     private readonly LootBodyGate _bodyGate = new();
-    internal bool CanEnterGhost => !_bodyGate.Busy && !GhostBodyTransition.Busy(_bot?.GetPlayer);
+    private readonly LootTransactionGate _inventoryGate = new();
+    internal bool CanEnterGhost => !_bodyGate.Busy && !_inventoryGate.Busy && !GhostBodyTransition.Busy(_bot?.GetPlayer);
+
+    internal void TrackInventoryTransaction(System.Threading.Tasks.Task task) => _inventoryGate.Track(task);
 
     internal void EnterGhost(Agent agent)
     {

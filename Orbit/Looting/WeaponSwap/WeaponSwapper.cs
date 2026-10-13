@@ -199,20 +199,22 @@ public static class WeaponSwapper
 
     /// <summary>Wake resync: the weapon list changed while the body was inactive. Same refresh as the end of
     /// an awake swap, so BSG and SAIN see the new loadout and the main weapon is drawn.</summary>
-    public static void ResyncHandsAfterWake(BotOwner bot, string who)
+    public static bool ResyncHandsAfterWake(BotOwner bot, string who)
     {
         try
         {
             var selector = bot?.WeaponManager?.Selector;
-            if (selector == null) return;
+            if (selector == null) return false;
             selector.UpdateWeaponsList();
-            selector.ChangeToMain();
+            if (!selector.ChangeToMain()) return false;
             try { bot.AIData?.CalcPower(); } catch { }
-            Log.Info($"{who} woke with gear equipped while asleep: weapon list refreshed, main weapon redrawn");
+            Log.Debug($"GHOST HANDS: {who} main weapon redraw requested");
+            return true;
         }
         catch (System.Exception e)
         {
             Log.Warning($"{who} hands resync after wake threw: {e.Message}");
+            return false;
         }
     }
 
@@ -494,7 +496,8 @@ public static class WeaponSwapper
         using var waitCts = CancellationTokenSource.CreateLinkedTokenSource(ct, timeoutCts.Token);
         try
         {
-            var result = await LootActorGuard.AwaitTransaction(ic.TryRunNetworkTransaction(op, null), waitCts.Token);
+            var transaction = LootActorGuard.TrackTransaction(bot, ic.TryRunNetworkTransaction(op, null));
+            var result = await LootActorGuard.AwaitTransaction(transaction, waitCts.Token);
             LootActorGuard.RequireCurrent(bot, ct);
             if (!result.Succeed)
             {

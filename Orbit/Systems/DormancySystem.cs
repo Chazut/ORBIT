@@ -375,6 +375,8 @@ public partial class DormancySystem
 
     public void Update(List<Agent> liveAgents, List<Squad> squads)
     {
+        // Redraws can finish after a wake, including when spectators suspend Ghost Mode.
+        for (var i = 0; i < liveAgents.Count; i++) GhostHandsRecovery.Tick(liveAgents[i]);
         if (!_enabled) return;
         using (TransitionPerformance.Measure(TransitionPhase.GhostWeaponVisuals)) GhostWeaponVisuals.Tick();
         // Check before scheduled shots/kills: spectators must see live combat after waking.
@@ -671,6 +673,7 @@ public partial class DormancySystem
             if (!bot.gameObject.activeSelf) { _farBlockedState++; return false; } // someone else owns the GameObject — never fight over it
             if (agent.SoloExtractRequested && (agent.SoloExtractIsEmergency || NearOwnExfil(agent))) { _farBlockedExtract++; return false; }
             var loot = agent.LootHandler;
+            if (agent.GhostHandsResync) { _farBlockedHands++; return false; }
             if (loot != null && loot.LootTaskRunning && !_cfg.GhostLooting)
             { _farBlockedLoot++; return false; }
             if (bot.Memory != null && (bot.Memory.GoalEnemy != null || bot.Memory.IsUnderFire))
@@ -886,7 +889,7 @@ public partial class DormancySystem
 
     // ── ORBIT squad sleep / wake mechanics ──────────────────────────────
 
-    // An operation that is still registered after this long is stuck for good, asleep or not.
+    // Report prolonged operations at this interval; only their completion releases the body.
     private const float InventoryBusyMaxHoldSeconds = 15f;
 
     /// <summary>
@@ -895,15 +898,15 @@ public partial class DormancySystem
     /// and refuses every later operation that touches the same item or the same cells ("Can not execute").
     /// Deactivating the body freezes the animation, so the operation would stay active for the whole sleep:
     /// Interchange raid, mikufilck fell asleep 9 frames after its fight and 15 of its ghost loot operations
-    /// were refused. Same idea as the mid-heal gate above. Bounded, so an operation that never completes on
-    /// an awake body cannot keep its squad awake for the rest of the raid.
+    /// were refused. Keep the body awake until the native operation actually finishes. A timeout in our
+    /// waiter cannot cancel an operation owned by EFT/Fika.
     /// </summary>
     private static bool InventoryOperationInFlight(Agent agent)
     {
         try
         {
             var controller = agent.Player?.InventoryController;
-            if (controller == null) return false;
+            if (controller == null) return true;
             ItemEventArgs first = null;
             var count = 0;
             foreach (var activeEvent in controller.SelectEvents<ItemEventArgs>())
@@ -916,7 +919,6 @@ public partial class DormancySystem
                 agent.InventoryBusySince = -1f;
                 return false;
             }
-            if (float.IsPositiveInfinity(agent.InventoryBusySince)) return false; // released as stuck, until the list empties
             if (agent.InventoryBusySince < 0f)
             {
                 agent.InventoryBusySince = Time.time;
@@ -924,13 +926,13 @@ public partial class DormancySystem
                 return true;
             }
             if (Time.time - agent.InventoryBusySince < InventoryBusyMaxHoldSeconds) return true;
-            Log.Info($"{agent} still has {count} inventory operation(s) in flight after {InventoryBusyMaxHoldSeconds:F0}s ({first.GetType().Name} on {first.Item?.LocalizedName() ?? "?"}, {first.Status}): stuck, no longer holding the body awake");
-            agent.InventoryBusySince = float.PositiveInfinity;
-            return false;
+            Log.Info($"GHOST INVENTORY HOLD: {agent} still has {count} pending operation(s) ({first.GetType().Name}, {first.Status}); keeping body awake");
+            agent.InventoryBusySince = Time.time;
+            return true;
         }
         catch
         {
-            return false;
+            return true;
         }
     }
 
@@ -1072,11 +1074,7 @@ public partial class DormancySystem
 
             // Gear equipped while asleep never reached the hands (no animation on an inactive body): refresh
             // the weapon list and redraw the main weapon now that the body is live again.
-            if (agent.GhostHandsResync)
-            {
-                agent.GhostHandsResync = false;
-                Orbit.Looting.WeaponSwap.WeaponSwapper.ResyncHandsAfterWake(bot, agent.ToString());
-            }
+            GhostHandsRecovery.Tick(agent);
 
             using var navigationTiming = TransitionPerformance.Measure(TransitionPhase.WakeNavigation);
             wakePose.RestoreIfMoved("before navigation");

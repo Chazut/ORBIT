@@ -932,7 +932,7 @@ internal class BotLootState
         {
             try
             {
-                _agent.Bot?.LootOpener?.Interact(container, EFT.EInteractionType.Close);
+                LootContainerInteraction.Close(_agent.Bot, container, _agent.IsDormant);
             }
             catch (System.Exception e)
             {

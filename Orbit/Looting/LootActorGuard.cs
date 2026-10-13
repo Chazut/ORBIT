@@ -26,6 +26,13 @@ internal static class LootActorGuard
         if (!IsCurrent(bot, bot?.GetPlayer)) throw new OperationCanceledException(ct);
     }
 
+    internal static Task<T> TrackTransaction<T>(BotOwner bot, Task<T> task)
+    {
+        var agent = Singleton<BotRoster>.Instance?.GetAgent(bot);
+        if (agent != null && ReferenceEquals(agent.Bot, bot)) agent.LootHandler?.TrackInventoryTransaction(task);
+        return task;
+    }
+
     // Cancellation stops our continuation, not an inventory operation owned by EFT/Fika. Observe a
     // late fault without touching the old controller or fast-forwarding a replacement actor's hands.
     internal static async Task<T> AwaitTransaction<T>(Task<T> task, CancellationToken ct)

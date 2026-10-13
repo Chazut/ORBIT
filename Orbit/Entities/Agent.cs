@@ -37,9 +37,11 @@ public class Agent(int id, BotOwner bot, float[] taskScores) : Entity(id, taskSc
     /// waiting for the slot1/slot2 swap, which moves the weapon in hands and is done at the next AWAKE loot
     /// session. <see cref="GhostBestWeapon"/> is what the sleeper fights with in simulated fights meanwhile.</summary>
     public bool GhostHandsResync;
+    internal bool GhostHandsDrawPending;
+    internal float GhostHandsRetryAt;
 
-    /// <summary>Time.time at which the limiter first found an inventory operation in flight on this body
-    /// while it wanted to put it to sleep, -1 when none. Bounds how long that gate may hold the body awake.</summary>
+    /// <summary>Diagnostic timer for inventory operations preventing sleep, -1 when none.
+    /// An expired timer never releases an operation that is still pending.</summary>
     public float InventoryBusySince = -1f;
     public Weapon GhostPendingPromotion;
     public Weapon GhostBestWeapon;

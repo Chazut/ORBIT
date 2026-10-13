@@ -387,13 +387,7 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
         try
         {
             Log.Debug($"OrbitLootHandler.Container({Nick}, {container.name}): calling LootOpener.Interact(Close), door={container.DoorState}");
-            if (!DormantMode) _bot.LootOpener.Interact(container, EInteractionType.Close);
-            else if (container.DoorState == EDoorState.Open)
-            {
-                if (FikaDetection.FikaLoaded)
-                    _bot.GetPlayer.ExecuteInteraction(container, new InteractionResult(EInteractionType.Close));
-                else container.Close();
-            }
+            LootContainerInteraction.Close(_bot, container, DormantMode);
         }
         catch (System.Exception e)
         {
@@ -1597,7 +1591,8 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
         try
         {
             CheckSession(ct);
-            var result = await LootActorGuard.AwaitTransaction(inventoryController.TryRunNetworkTransaction(place, null), ct);
+            var transaction = LootActorGuard.TrackTransaction(_bot, inventoryController.TryRunNetworkTransaction(place, null));
+            var result = await LootActorGuard.AwaitTransaction(transaction, ct);
             CheckSession(ct);
             if (!result.Succeed) Log.Warning($"OrbitLootHandler.Pickup({Nick}): TX FAILED on {name} (Error={result.Error})");
             if (!result.Succeed && result.Error == "Can not execute")
