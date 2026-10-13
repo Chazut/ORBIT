@@ -56,5 +56,7 @@ internal sealed class OperationProgress
     internal bool Stalled(float activeElapsed, bool interactionApproach = false) => _stalledLegs >= 6
         || _stalledLegs >= 2 && activeElapsed - _progressAt >= 90f
         || interactionApproach && activeElapsed - _progressAt >= 30f;
+    internal bool SniperStalled(float activeElapsed) => activeElapsed - _progressAt >= 45f
+        || _stalledLegs >= 3 && activeElapsed - _progressAt >= 30f;
     internal string Diagnostics => $"bestGap={_bestGap:F2}m stalledLegs={_stalledLegs}";
 }

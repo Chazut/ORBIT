@@ -35,6 +35,7 @@ internal sealed class SniperPlan : IObjectiveWork
     private MainObjective _main;
     private Vector3 _post, _leg;
     private float _lastTick, _travel, _held, _nextWork, _nextEquipment, _pose = 1;
+    private float _activeTravel, _rescueTravel;
     private int _candidate, _retries;
     private int _relocationMember;
     private float _nextRelocation;
@@ -78,6 +79,7 @@ internal sealed class SniperPlan : IObjectiveWork
                 Release(squad, w); _departing = true; _arrived = false;
                 _post = RecordedRouteLibrary.Departure(w.RecordedMap, _recording, _actor.Position);
                 _route.Reset(); _recorded.Reset(); _progress.Reset(); _approachHistory.Clear(); _travel = 0;
+                _activeTravel = _rescueTravel = 0;
                 _recorded.Suspend();
                 main.Position = _post; main.CellCoords = w.WorldToCell(_post); SetStatus(squad, "leaving post");
             }
@@ -113,7 +115,17 @@ internal sealed class SniperPlan : IObjectiveWork
         if (_paused)
         { _paused = false; _route.Reset(); _recorded.ResetSearch(); SetStatus(squad, "approach"); }
         if (_actor != null && !_arrived) _recorded.Observe(_actor.Position, dt);
-        if (!_arrived || _actor == null || !Near(_actor.Position, _post, 4)) _travel += dt;
+        if (!_arrived || _actor == null || !Near(_actor.Position, _post, 4))
+        {
+            _travel += dt;
+            _activeTravel += dt;
+            if (_recorded.Active) _rescueTravel += dt;
+        }
+        // A retry, a new survey or a replacement actor cannot renew the objective indefinitely.
+        // Combat and own-kill looting above pause these budgets; holding a valid post is separate.
+        var approachBudget = Mathf.Clamp(ServerConfig.Rush.TravelTimeout, 30f, _departing ? 180f : 600f);
+        if (_activeTravel >= approachBudget + (_recording == null ? 0f : 120f) || _rescueTravel >= 120f)
+            return End(squad, w, _departing ? "failed: return timeout" : "failed: approach timeout");
         if (_travel >= ServerConfig.Rush.TravelTimeout)
         {
             if (!EnableRescue(squad, w, "travel timeout")) return End(squad, w, "travel timeout");
@@ -130,6 +142,14 @@ internal sealed class SniperPlan : IObjectiveWork
             _nextEquipment = now + 5;
         }
         if (TryRecordedTransit(w, now)) return true;
+        if (!_arrived && !_recorded.Active)
+        {
+            var target = _resolved ? _post : _recording == null
+                ? new Vector3(_site.X, _site.Y, _site.Z) : RecordedRouteLibrary.Post(_recording, 0);
+            _progress.Observe(_actor.Position, target, _travel);
+            if (_orders.ContainsKey(_actor)) _progress.ObserveLeg(_actor.Position, _travel);
+            if (_progress.SniperStalled(_travel) && !_progress.AdvancingAlongLeg(_travel)) return RetryPost(squad, w);
+        }
         if (!_resolved)
         {
             var site = _recording == null ? new Vector3(_site.X, _site.Y, _site.Z) : RecordedRouteLibrary.Post(_recording, 0);
@@ -159,12 +179,6 @@ internal sealed class SniperPlan : IObjectiveWork
             return true;
         }
         if (TryLocalRelocation(squad, w, now)) return true;
-        if (!_arrived)
-        {
-            _progress.Observe(_actor.Position, _post, _travel);
-            if (_orders.ContainsKey(_actor)) _progress.ObserveLeg(_actor.Position, _travel);
-            if (!_recorded.Active && _progress.Stalled(_travel) && !_progress.AdvancingAlongLeg(_travel)) return RetryPost(squad, w);
-        }
         if (!_orders.ContainsKey(_actor))
         {
             if (!w.TryOperationWork(this)) return true;
@@ -212,6 +226,7 @@ internal sealed class SniperPlan : IObjectiveWork
             {
                 _arrived = true; main.CampStartedAt = now; main.CampTargetDuration = _duration;
                 _travel = 0;
+                _activeTravel = _rescueTravel = 0;
             }
             _actor.Guard.CoverPoint = new CoverPoint(_post, Direction(_site.WatchYaw, _site.WatchPitch), CoverCategory.None, CoverLevel.Stay);
             SetStatus(squad, "holding");
@@ -311,6 +326,7 @@ internal sealed class SniperPlan : IObjectiveWork
         {
             if (ReachedLeg())
             {
+                _progress.ReachedLeg();
                 _recorded.RememberPartialLeg();
                 OperationRouteSearch.Remember(_approachHistory, _actor.Position);
                 Release(squad, w); _route.Reset(); _retries = 0;
@@ -337,6 +353,8 @@ internal sealed class SniperPlan : IObjectiveWork
             if (++_retries >= 3) return _recording == null ? End(squad, w, "no advancing site approach") : RetryPost(squad, w);
             return true;
         }
+        _progress.BeginLeg(_recorded.Active && !_recorded.Complete ? _recorded.RouteCorners : _route.RouteCorners, _travel);
+        _progress.ObserveLeg(_actor.Position, _travel);
         foreach (var member in squad.Members)
             if (member.IsActive && !member.SoloExtractRequested && !CorpseEscort.InFlight(member))
                 Assign(member, _leg, w, "Sniper site approach");

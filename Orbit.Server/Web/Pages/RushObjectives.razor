@@ -9,10 +9,11 @@
 <PageTitle>ORBIT: Rush objectives</PageTitle>
 <MudContainer MaxWidth="MaxWidth.ExtraLarge">
     <PageHeader Title="Rush objectives" OnReset="@(() => { Cfg.Rush = new(); _selected = null; })"
-        Description="One optional opening main per PMC squad, rolled after its personality resolves. Combat pauses it; extraction takes priority. PlayerScavs never rush. Save to apply next raid. Rush settings and map points travel with configuration/full presets and addons." />
+        Description="One optional opening main per PMC squad, rolled after its personality resolves. Combat pauses it; extraction takes priority. PlayerScavs never rush. Save to apply next raid. Behavior settings travel with preset config; map points travel with preset zones." />
     <SettingsCard Title="Opening priority">
         <OrbitSwitch @bind-Value="Cfg.Rush.Enabled" Label="Enable rush objectives" />
         <OrbitSlider T="float" @bind-Value="Cfg.Rush.TravelTimeout" Label="Travel timeout per sector" Unit="s" Min="30" Max="1800" Step="30" />
+        <MudText Typo="Typo.caption">For snipers, this timeout is capped at 10 minutes on approach and 3 minutes on return. A recorded fallback gets up to 2 additional minutes. Combat and looting their own kills pause these timers.</MudText>
         <OrbitSlider T="float" @bind-Value="Cfg.Rush.OwnSpawnExclusion" Label="Distance outside own spawn sector" Unit="m" Min="10" Max="500" Step="10" />
         <OrbitSlider T="int" @bind-Value="Cfg.Rush.SpawnSectors" Label="Maximum sectors per spawn rush" Min="1" Max="10" Step="1" />
         <OrbitSlider T="float" @bind-Value="Cfg.Rush.SpawnDeadline" Label="End all spawn rushes after raid begins" Unit="s" Min="30" Max="1200" Step="30" />
@@ -42,6 +43,16 @@
         <MudTabs ActivePanelIndex="_tab" ActivePanelIndexChanged="SelectTab" Color="Color.Primary" Class="my-3">
             <MudTabPanel Text="Spawn" /><MudTabPanel Text="Boss" /><MudTabPanel Text="Marked" /><MudTabPanel Text="Sniper" /><MudTabPanel Text="Other" />
         </MudTabs>
+        @if (Kind == "Sniper")
+        {
+            <MudAlert Severity="Severity.Warning" Class="mb-3">
+                Placing a sniper point does not guarantee that bots can reach it. Some locations have difficult pathfinding;
+                the default rooftop sites needed scripted fallback routes in ORBIT to work.
+                Bots try to find their own route first and move on if repeated attempts fail.
+                If a point you add does not work, suggest it on the ORBIT Discord so it can be reviewed
+                for inclusion in the defaults with a fallback route.
+            </MudAlert>
+        }
         <MudStack Row="true" Class="mb-3" Wrap="Wrap.Wrap">
             <MudButton Disabled="@(Kind == "Boss" && !Bosses.Any())" OnClick="@(() => { _placing = true; _moving = false; })" Variant="Variant.Filled" Color="Color.Primary">Add point on map</MudButton>
             <MudButton OnClick="RestoreSuggestions" Variant="Variant.Outlined">Restore native suggestions for this tab</MudButton>
