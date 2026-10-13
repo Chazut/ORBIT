@@ -40,11 +40,13 @@ internal sealed class OperationProgress
         { _legRemaining = bestRemaining; _legProgressAt = activeElapsed; }
     }
     internal bool AdvancingAlongLeg(float activeElapsed) => _leg != null && activeElapsed - _legProgressAt < 10f;
-    internal bool Observe(Vector3 position, Vector3 target, float activeElapsed)
+    internal bool Observe(Vector3 position, Vector3 target, float activeElapsed, bool horizontalOnly = false)
     {
-        var gap = Vector3.Distance(position, target);
+        var delta = position - target;
+        if (horizontalOnly) delta.y = 0;
+        var gap = delta.magnitude;
         var height = Mathf.Abs(position.y - target.y);
-        var climbed = height < _bestHeight - 1f;
+        var climbed = !horizontalOnly && height < _bestHeight - 1f;
         if (gap > _bestGap - 3f && !climbed) return false;
         _bestGap = Mathf.Min(_bestGap, gap); _bestHeight = Mathf.Min(_bestHeight, height);
         _progressAt = activeElapsed; _stalledLegs = 0;

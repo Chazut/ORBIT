@@ -45,6 +45,9 @@ public class MainObjective
     /// toward. For Kills this is the centre of a Config zone; for LootValue, the centre of the high-value
     /// cell; for Quest, the trigger's nav-point.</summary>
     public Vector3 Position;
+    // All-floor zones have a horizontal anchor, not a required standing height (often Y=0).
+    internal bool HasAreaAnchor => Operation == null && string.IsNullOrEmpty(ZoneFloorId)
+        && Type is MainObjectiveType.LootValue or MainObjectiveType.Kills;
     public bool Completed;
     public bool KillAmbush;
     public float KillZoneRadius;

@@ -22,6 +22,7 @@ internal sealed class MainObjectiveApproach : IObjectiveWork
     private int _failures;
     private bool _active, _paused;
     private Vector3 _leg;
+    private Vector3? _routeTarget;
 
     public void ResumeObjectiveWork() => Tick(_squad, _waypoints, WaypointSystem.ObjectiveCombat(_squad));
     internal bool Owns(Agent agent) => _active && !_paused && _orders.TryGetValue(agent, out var point)
@@ -38,7 +39,8 @@ internal sealed class MainObjectiveApproach : IObjectiveWork
             {
                 if (!main.CanPursue(squad.MainObjectives)
                     || _deferred.TryGetValue(main, out var until) && Time.time < until) continue;
-                var gap = (main.Position - squad.Leader.Position).sqrMagnitude;
+                var gap = main.HasAreaAnchor ? WaypointSystem.XzDistanceSqr(main.Position, squad.Leader.Position)
+                    : (main.Position - squad.Leader.Position).sqrMagnitude;
                 if (gap < distance) { nearest = main; distance = gap; }
             }
         return nearest;
@@ -72,7 +74,7 @@ internal sealed class MainObjectiveApproach : IObjectiveWork
         }
         if (_paused) { _paused = false; dt = 0; _route.Reset(); }
         _elapsed += dt;
-        if (_progress.Observe(leader.Position, _target.Position, _elapsed)) _lastProgress = _elapsed;
+        if (_progress.Observe(leader.Position, _target.Position, _elapsed, _target.HasAreaAnchor)) _lastProgress = _elapsed;
         if (!_active)
         {
             if (_elapsed - _lastProgress < 60f) return false;
@@ -101,7 +103,14 @@ internal sealed class MainObjectiveApproach : IObjectiveWork
         }
         if (now < _nextSearch || !waypoints.TryOperationWork(this)) return true;
         _nextSearch = now + .1f;
-        if (!_route.Find(leader.Position, _target.Position, out _leg, out _, _failures, _history, floorAware: true))
+        if (!_routeTarget.HasValue)
+        {
+            if (!waypoints.TryMainApproachDestination(squad, _target, out var destination))
+                return Retry(squad, waypoints, "no ground destination in main area");
+            _routeTarget = destination;
+        }
+        if (!_route.Find(leader.Position, _routeTarget.Value, out _leg, out _, _failures, _history,
+            floorAware: !_target.HasAreaAnchor))
         {
             if (_route.Pending) return true;
             return Retry(squad, waypoints, "no advancing native route");
@@ -122,13 +131,16 @@ internal sealed class MainObjectiveApproach : IObjectiveWork
         }
         squad.Objective.Status = SquadObjectiveState.Active;
         squad.Objective.RepickRequested = false;
-        Report(squad, "leg", $"point={_leg} remaining={Vector3.Distance(_leg, _target.Position):F1}m");
+        var remaining = _target.HasAreaAnchor ? Mathf.Sqrt(WaypointSystem.XzDistanceSqr(_leg, _target.Position))
+            : Vector3.Distance(_leg, _target.Position);
+        Report(squad, "leg", $"point={_leg} remaining={remaining:F1}m");
         return true;
     }
 
     private bool Retry(Squad squad, WaypointSystem waypoints, string reason)
     {
         Release(squad, waypoints); _route.Reset(); _nextSearch = Time.time + 3f;
+        _routeTarget = null;
         if (++_failures < 3) return true;
         Report(squad, "deferred", reason);
         // Keep the objective pending. Another main may have a usable route from this side of the map.
@@ -145,6 +157,7 @@ internal sealed class MainObjectiveApproach : IObjectiveWork
         Release(squad, waypoints); _target = null; _active = _paused = false;
         _failures = 0; _route.Reset(); _history.Clear(); _progress.Reset();
         _elapsed = _lastProgress = 0; _nextSearch = 0;
+        _routeTarget = null;
     }
 
     private void Release(Squad squad, WaypointSystem waypoints)
