@@ -45,6 +45,7 @@ internal sealed class NativeGhostNavigation(BotOwner bot, DoorSystem doors)
     private Vector3 _edgeOrigin, _edgeDirection;
     private float _failedRetryAt;
     private bool _failureHandled;
+    private float _cornerReportAt;
     internal bool Failed { get; private set; }
     internal bool HasUnhandledFailure => Failed && !_failureHandled;
     private int RetryCount => Math.Max(_repeatedSegment, _invalidPaths);
@@ -54,6 +55,7 @@ internal sealed class NativeGhostNavigation(BotOwner bot, DoorSystem doors)
     internal Vector3? Target => _target;
     internal float StalledFor => HasOrder ? Time.time - _progressAt : 0f;
     internal bool RecoveringLocally => _recoveryOrigin.HasValue;
+    internal bool HasRouteFailure => _failures > 0;
     internal bool PersistentlyInvalid => HasOrder && _status == NavMeshPathStatus.PathInvalid
         && _invalidPaths >= 3 && StalledFor >= 45f && Time.time - _invalidSince >= 45f;
 
@@ -402,7 +404,7 @@ internal sealed class NativeGhostNavigation(BotOwner bot, DoorSystem doors)
                 if (_reachedFrontiers.Any(p => Vector3.Distance(p, end) < 1f))
                 { Reject("partial-repeated-frontier"); continue; }
             }
-            if (!CanStartRoute(candidate, corners)) { Reject("blocked-start"); continue; }
+            if (!CanStartRoute(candidate, corners, out _, doors)) { Reject("blocked-start"); continue; }
             _triedLandings.Add(candidate);
             bot.GetPlayer.Transform.position = candidate;
             NativeGhostSystem.SyncMover(bot);
@@ -435,6 +437,54 @@ internal sealed class NativeGhostNavigation(BotOwner bot, DoorSystem doors)
 
     private static string Precise(Vector3? p)
         => p.HasValue ? FormattableString.Invariant($"({p.Value.x:F3},{p.Value.y:F3},{p.Value.z:F3})") : "none";
+
+    internal bool TrySkipReachedCorner()
+    {
+        var controller = bot.Mover.ActualPathController;
+        var path = controller.CurPath;
+        if (!HasOrder || path == null || path.CurIndex + 1 >= path.Length) return false;
+        var from = bot.Position;
+        var corner = path.GetPoint(path.CurIndex);
+        if (!NearCorner(from, corner) || !TakeQuery()) return false;
+        var next = path.GetPoint(path.CurIndex + 1);
+        if (!CanContinuePastCorner(from, corner, next, doors)) return false;
+        controller.IncCornerIndex();
+        if (Time.time >= _cornerReportAt)
+        {
+            _cornerReportAt = Time.time + 30f;
+            Log.Info($"NATIVE GHOST: {bot.Profile.Nickname} continued past reached corner: from={Precise(from)} corner={Precise(corner)} next={Precise(next)}; native goal retained");
+        }
+        return true;
+    }
+
+    private static bool NearCorner(Vector3 from, Vector3 corner)
+        => Finite(from) && Finite(corner) && (corner - from).sqrMagnitude <= 0.01f
+            && Mathf.Abs(corner.y - from.y) <= 0.05f;
+
+    // A navmesh boundary at an already-reached intermediate corner can reject the final
+    // centimetre. Advance the cursor only when the next half-metre is independently walkable.
+    // This never crosses a navmesh gap, relocates the body or consumes the final destination.
+    private static bool CanContinuePastCorner(Vector3 from, Vector3 corner, Vector3 nextCorner, DoorSystem doors)
+    {
+        if (!NearCorner(from, corner) || !Finite(nextCorner)
+            || Vector3.Distance(from, nextCorner) <= 0.1f) return false;
+        var origin = from;
+        var end = Vector3.MoveTowards(from, nextCorner, 0.5f);
+        for (var i = 0; i < 4; i++)
+        {
+            var next = Vector3.MoveTowards(from, end, 0.125f);
+            if (DangerZones.IsInside(next)
+                || !NavMesh.SamplePosition(next, out var hit, 0.05f, NavMesh.AllAreas)
+                || !Finite(hit.position) || Vector3.Distance(next, hit.position) > 0.05f
+                || DangerZones.IsInside(hit.position)
+                || (hit.position - from).sqrMagnitude < 0.000001f
+                || NavMesh.Raycast(from, hit.position, out _, NavMesh.AllAreas)) return false;
+            from = hit.position;
+            if (Vector3.Distance(from, end) < 0.01f) break;
+        }
+        return Vector3.Distance(from, end) < 0.05f
+            && NativeGhostRelocation.SpaceClear(origin, from, doors, out _);
+    }
 
     // Arrival belongs to the requested goal. A projected last corner must not consume the route
     // while the original action is still outside its radius. A small margin also respects '<'.
@@ -491,7 +541,7 @@ internal sealed class NativeGhostNavigation(BotOwner bot, DoorSystem doors)
     internal static bool CanStartRoute(Vector3 from, Vector3[] corners)
         => CanStartRoute(from, corners, out _);
 
-    internal static bool CanStartRoute(Vector3 from, Vector3[] corners, out string reason)
+    internal static bool CanStartRoute(Vector3 from, Vector3[] corners, out string reason, DoorSystem doors = null)
     {
         reason = null;
         var remaining = 2f;
@@ -510,7 +560,11 @@ internal sealed class NativeGhostNavigation(BotOwner bot, DoorSystem doors)
                 if (!NavMesh.SamplePosition(next, out var hit, 0.75f, NavMesh.AllAreas)) { reason = "start-off-navmesh"; return false; }
                 if (!Finite(hit.position)) { reason = "start-nonfinite"; return false; }
                 if (DangerZones.IsInside(hit.position)) { reason = "start-danger"; return false; }
-                if (NavMesh.Raycast(from, hit.position, out _, NavMesh.AllAreas)) { reason = "start-navmesh-edge"; return false; }
+                if (NavMesh.Raycast(from, hit.position, out _, NavMesh.AllAreas))
+                {
+                    if (i + 1 < corners.Length && CanContinuePastCorner(from, corner, corners[i + 1], doors)) break;
+                    reason = "start-navmesh-edge"; return false;
+                }
                 if ((hit.position - from).sqrMagnitude < 0.000001f) { reason = "start-no-progress"; return false; }
                 from = hit.position;
                 remaining -= amount;

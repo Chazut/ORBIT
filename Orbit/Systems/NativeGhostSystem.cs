@@ -44,6 +44,7 @@ public sealed partial class NativeGhostSystem
         public NativeGhostNavigation Navigation;
         public NativeGhostAdapters Adapter;
         public NativeGhostRegroup Regroup;
+        public NativeGhostHuntProgress HuntProgress;
         public HearingDetour Hearing;
         public Func<Vector3, float> HumanDistanceSqr;
         public float HumanWakeDistanceSqr;
@@ -249,6 +250,7 @@ public sealed partial class NativeGhostSystem
             Navigation = new NativeGhostNavigation(bot, _doors),
             Adapter = NativeGhostAdapters.Resolve(bot),
             Regroup = NativeGhostRegroup.Resolve(bot),
+            HuntProgress = new NativeGhostHuntProgress(bot.Position),
             HumanDistanceSqr = _humanDistanceSqr,
             HumanWakeDistanceSqr = _humanWakeDistanceSqr,
         };
@@ -358,6 +360,7 @@ public sealed partial class NativeGhostSystem
         if (!state.Doors.Check(out var failure, requested)) return false;
         state.Navigation.Suspend();
         state.Adapter?.SuspendProgress();
+        state.HuntProgress.Suspend();
         state.Bot.Mover.IsMoving = false;
         if (failure != null) RequestWake(state, failure);
         return true;
@@ -643,7 +646,7 @@ public sealed partial class NativeGhostSystem
                 state.ReportAt = Time.time + 30f;
             }
             if (state.WakeReason != null || Time.time < state.PinnedUntil)
-            { state.Navigation.Suspend(); state.Adapter?.SuspendProgress(); return; }
+            { state.Navigation.Suspend(); state.Adapter?.SuspendProgress(); state.HuntProgress.Suspend(); return; }
             if (bot == null || bot.IsDead || bot.Brain?.Agent != state.Brain || bot.gameObject.activeSelf)
             {
                 RequestWake(state, "native lifecycle changed");
@@ -652,11 +655,20 @@ public sealed partial class NativeGhostSystem
             var mover = bot.Mover;
             SyncMover(bot);
             if (mover.Pause && mover.RemainPause > 0f)
-            { state.Navigation.Suspend(); state.Adapter?.SuspendProgress(); return; }
+            { state.Navigation.Suspend(); state.Adapter?.SuspendProgress(); state.HuntProgress.Suspend(); return; }
             if (mover.Pause) mover.MovementResume();
             if (state.Doors.Pending && WaitForDoor(state)) return;
             UpdateHearing(state);
             state.Navigation.Update();
+            var huntTravel = state.UpdateHunt != null && state.Hearing == null
+                && NativeGhostHuntProgress.IsTravel(state.Decision) && state.Navigation.HasOrder
+                && bot.Memory?.GoalEnemy == null && bot.Memory?.IsUnderFire != true
+                && (mover.Sprinting && !mover.NoSprint || mover.DestMoveSpeed > 0f);
+            if (state.HuntProgress.Update(huntTravel, state.Navigation.HasRouteFailure))
+            {
+                RequestWake(state, $"hunt movement stalled for {state.HuntProgress.StalledSeconds:F0}s despite local recovery: {state.Navigation.Summary}");
+                return;
+            }
             if (state.Hearing == null) NativeGhostPatrolRecovery.Update(bot, state.Decision, state.Navigation);
             if (state.Hearing == null && (state.Adapter?.RefreshStalledCheckpoint(bot, state.Decision, state.Navigation.Target, state.Navigation.RecoveringLocally) == true
                 || state.Regroup?.Refresh(bot, state.Decision, state.Navigation) == true))
@@ -699,6 +711,7 @@ public sealed partial class NativeGhostSystem
                     : (hit.position - from).sqrMagnitude < 0.000001f && distance > 0.1f ? "no-navmesh-progress" : null;
                 if (blocked != null)
                 {
+                    if (blocked == "navmesh-edge" && state.Navigation.TrySkipReachedCorner()) continue;
                     if (!state.Navigation.Blocked(blocked, next, corner, sampled ? hit.position : null,
                         blocked == "navmesh-edge" ? edgeHit.position : null)) RequestWake(state, "native route needs physical navigation");
                     return;
@@ -707,6 +720,7 @@ public sealed partial class NativeGhostSystem
                 var travelled = Vector3.Distance(from, hit.position);
                 state.Travelled += travelled;
                 state.Navigation.Walked(from, hit.position);
+                state.HuntProgress.Walked(from, hit.position);
                 SyncMover(bot);
                 mover.IsMoving = travelled > 0.001f;
                 if (travelled > 0.001f)

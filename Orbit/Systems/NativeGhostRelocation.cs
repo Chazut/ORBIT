@@ -16,24 +16,8 @@ internal static class NativeGhostRelocation
         reason = null;
         var world = Singleton<GameWorld>.Instance;
         if (world == null) { reason = "no-world"; return false; }
+        if (!SpaceClear(from, to, doors, out reason)) return false;
         var mask = LayersMaskController.HighPolyWithTerrainMask;
-        var direction = to - from;
-        var length = direction.magnitude;
-        // Do not cross solid walls or locked rooms to compensate for missing navigation.
-        if (Physics.CheckCapsule(to + Vector3.up * 0.4f, to + Vector3.up * 1.4f, 0.25f, mask, QueryTriggerInteraction.Ignore))
-        { reason = "occupied-volume"; return false; }
-        if (Physics.SphereCast(from + Vector3.up * 0.8f, 0.25f, direction.normalized, out _, length, mask, QueryTriggerInteraction.Ignore))
-        { reason = "solid-wall"; return false; }
-        for (var d = 0f; d <= length; d += 0.5f)
-            if (DangerZones.IsInside(from + direction.normalized * d)) { reason = "danger-volume"; return false; }
-        var ray = new Ray(from + Vector3.up * 0.8f, direction.normalized);
-        foreach (var door in doors.Doors)
-        {
-            if (door == null || door.DoorState == EDoorState.Open || door.Collider == null) continue;
-            var bounds = door.Collider.bounds;
-            bounds.Expand(0.5f);
-            if (bounds.Contains(ray.origin) || bounds.IntersectRay(ray, out var distance) && distance <= length) { reason = "closed-door"; return false; }
-        }
         foreach (var player in world.AllAlivePlayersList)
         {
             if (player == null || player == bot.GetPlayer || player.HealthController is not { IsAlive: true }) continue;
@@ -52,6 +36,33 @@ internal static class NativeGhostRelocation
             if (head == null) { reason = "no-human-head"; return false; }
             if (Visible(head.position, from, mask) || Visible(head.position, to, mask)) { reason = "visible-human"; return false; }
         }
+        return true;
+    }
+
+    // Cursor changes use geometry checks without relocating the body. IsSafe additionally
+    // keeps every human, encounter and overlap gate for actual relocations.
+    internal static bool SpaceClear(Vector3 from, Vector3 to, DoorSystem doors, out string reason)
+    {
+        reason = null;
+        var mask = LayersMaskController.HighPolyWithTerrainMask;
+        var direction = to - from;
+        var length = direction.magnitude;
+        if (Physics.CheckCapsule(to + Vector3.up * 0.4f, to + Vector3.up * 1.4f, 0.25f, mask, QueryTriggerInteraction.Ignore))
+        { reason = "occupied-volume"; return false; }
+        if (Physics.SphereCast(from + Vector3.up * 0.8f, 0.25f, direction.normalized, out _, length, mask, QueryTriggerInteraction.Ignore))
+        { reason = "solid-wall"; return false; }
+        for (var d = 0f; d <= length; d += 0.5f)
+            if (DangerZones.IsInside(from + direction.normalized * d)) { reason = "danger-volume"; return false; }
+        var ray = new Ray(from + Vector3.up * 0.8f, direction.normalized);
+        if (doors != null)
+            foreach (var door in doors.Doors)
+            {
+                if (door == null || door.DoorState == EDoorState.Open || door.Collider == null) continue;
+                var bounds = door.Collider.bounds;
+                bounds.Expand(0.5f);
+                if (bounds.Contains(ray.origin) || bounds.IntersectRay(ray, out var distance) && distance <= length)
+                { reason = "closed-door"; return false; }
+            }
         return true;
     }
 
