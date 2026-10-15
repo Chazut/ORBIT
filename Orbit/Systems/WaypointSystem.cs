@@ -2406,7 +2406,7 @@ public partial class WaypointSystem
     /// 1. Filters exfils whose live BSG status is unusable (NotPresent / Hidden / etc).
     /// 2. Filters co-op exfils — bots can't coordinate cross-faction in SPT.
     /// 3. PMC squads only get PMC-accessible exfils, scav squads only scav.
-    /// 4. Reserve is blanket-blocked (every exfil there is conditional).
+    /// 4. Reserve permits supported multi-step, no-backpack and converted paid Scav Lands exits.
     /// Non-Exfil waypoints always pass.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -2448,11 +2448,12 @@ public partial class WaypointSystem
         }
         else if (!allowedFactions.IsBotEnabled(role.Value)) return false;
 
-        // Reserve permits active multi-step exits and the validated no-backpack route.
+        // Reserve permits active multi-step exits, the no-backpack route and paid Scav Lands.
         // Other conditional exits still require mechanics the dispatcher cannot satisfy.
         if (MultiStepAccess.IsConditional(exfil))
             return squadIsPmc == true && MultiStepAccess.ExitActive(exfil) && MatchesBotSpawnEntry(squad, exfil);
-        if (string.Equals(_mapId, "RezervBase", StringComparison.OrdinalIgnoreCase) && !NoBackpackExfil.RequiresDrop(exfil))
+        if (string.Equals(_mapId, "RezervBase", StringComparison.OrdinalIgnoreCase)
+            && !NoBackpackExfil.RequiresDrop(exfil) && !IsPaidScavLands(exfil))
             return false;
 
         // Live availability check.
@@ -2486,6 +2487,22 @@ public partial class WaypointSystem
         if (exfil is SharedExfiltrationPoint) return true;
         if (exfil is ScavExfiltrationPoint) return !squadIsPmc.Value;
         return squadIsPmc.Value;
+    }
+
+    // SVM converts Scav Lands to the supported SharedTimer + TransferItem flow.
+    // Inspect live settings because waypoint collection can precede LoadSettings.
+    // Availability, faction and remaining requirements are still checked by the caller.
+    private static bool IsPaidScavLands(ExfiltrationPoint exfil)
+    {
+        if (exfil.Settings?.ExfiltrationType != EExfiltrationType.SharedTimer || exfil.Requirements == null)
+            return false;
+        if (!string.Equals(exfil.Settings.Name, "EXFIL_ScavCooperation", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(exfil.name, "EXFIL_ScavCooperation", StringComparison.OrdinalIgnoreCase))
+            return false;
+        foreach (var requirement in exfil.Requirements)
+            if (requirement?.Requirement == ERequirementState.TransferItem)
+                return true;
+        return false;
     }
 
     /// <summary>
@@ -2545,7 +2562,8 @@ public partial class WaypointSystem
         else if (!allowedFactions.IsBotEnabled(role.Value)) return false;
         if (MultiStepAccess.IsConditional(exfil))
             return squadIsPmc == true && MultiStepAccess.ExitActive(exfil) && MatchesBotSpawnEntry(squad, exfil);
-        if (string.Equals(_mapId, "RezervBase", StringComparison.OrdinalIgnoreCase) && !NoBackpackExfil.RequiresDrop(exfil)) return false;
+        if (string.Equals(_mapId, "RezervBase", StringComparison.OrdinalIgnoreCase)
+            && !NoBackpackExfil.RequiresDrop(exfil) && !IsPaidScavLands(exfil)) return false;
         if (exfil.Status == EExfiltrationStatus.NotPresent
             || exfil.Status == EExfiltrationStatus.Hidden
             || exfil.Status == EExfiltrationStatus.AwaitsManualActivation) return false;
