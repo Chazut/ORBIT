@@ -1,6 +1,6 @@
 namespace Orbit.Systems;
 
-internal enum SprintReason { Walking, Restricted, Approach, Turning, Settling, Sprinting }
+internal enum SprintReason { Walking, Restricted, Approach, Turning, Settling, Sprinting, StutterRecovery }
 
 // Native movement can reject a sprint or stop it during an animation transition. Do not
 // reassert it every frame, or sprint into a short cover adjustment while still turning.
@@ -19,15 +19,17 @@ internal sealed class SprintControl
 
     internal SprintReason Reason { get; private set; }
     internal bool ReportLoop { get; private set; }
+    internal readonly SprintStutterGuard Stutter = new();
 
     internal void Suspend()
     {
         _eligibleSince = -1f;
         _requested = false;
+        Stutter.Reset();
     }
 
     internal bool Evaluate(bool wantsSprint, bool allowed, bool physicalSprint,
-        float destinationDistanceSqr, float headingDot, float now)
+        float destinationDistanceSqr, float headingDot, float now, bool detectStutter = true)
     {
         ReportLoop = false;
         if (!_observed || now > _windowUntil)
@@ -51,6 +53,8 @@ internal sealed class SprintControl
             return Stop(SprintReason.Approach);
         if (headingDot < (physicalSprint ? StopHeadingDot : StartHeadingDot))
             return Stop(SprintReason.Turning);
+        if (Stutter.Update(detectStutter, physicalSprint, now))
+            return Stop(SprintReason.StutterRecovery, resetStutter: false);
         if (physicalSprint)
         {
             _requested = true;
@@ -67,12 +71,14 @@ internal sealed class SprintControl
             return false;
         }
         _requested = true;
+        Stutter.Requested();
         Reason = SprintReason.Sprinting;
         return true;
     }
 
-    private bool Stop(SprintReason reason)
+    private bool Stop(SprintReason reason, bool resetStutter = true)
     {
+        if (resetStutter) Stutter.Reset();
         _eligibleSince = -1f;
         _requested = false;
         Reason = reason;

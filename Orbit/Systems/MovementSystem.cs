@@ -782,7 +782,20 @@ public partial class MovementSystem
         var wantsSprint = WantsTravelSprint(agent, movement.Sprint);
         var shouldSprint = movement.SprintControl.Evaluate(wantsSprint,
             wantsSprint && CanSprint(agent) && (player.Physical.Sprinting || player.Physical.CanSprint) && !doorsNearby,
-            player.Physical.Sprinting, distanceSqr, headingDot, Time.time);
+            player.Physical.Sprinting, distanceSqr, headingDot, Time.time,
+            detectStutter: player.Physical.CanSprint && player.MovementContext.CanWalk
+                && player.PoseLevel >= .99f && movement.Pose >= .99f && !movement.Prone
+                && !bot.Memory.IsUnderFire && bot.Memory.GoalEnemy == null
+                && player.CurrentManagedState?.Name is EPlayerState.Run or EPlayerState.Sprint);
+        if (movement.SprintControl.Stutter.Triggered)
+            Log.Always($"SPRINT RECOVERY: {agent} action=walk bursts={SprintStutterGuard.BurstLimit} "
+                + $"windowSeconds={SprintStutterGuard.WindowSeconds:F1} "
+                + $"lastSprintSeconds={movement.SprintControl.Stutter.LastSprintSeconds:F3} "
+                + $"walkSeconds={SprintStutterGuard.WalkSeconds:F1} "
+                + $"activation={movement.SprintControl.Stutter.Activations} "
+                + $"state={player.CurrentManagedState?.Name ?? EPlayerState.None} "
+                + $"grounded={player.MovementContext.IsGrounded} headingDot={headingDot:F2} "
+                + $"distanceSqr={distanceSqr:F1} objective={agent.Objective.Location}");
         if (movement.SprintControl.ReportLoop)
             Log.Always($"SPRINT LOOP: {agent} reason={movement.SprintControl.Reason} requested={wantsSprint} "
                 + $"physical={player.Physical.Sprinting} headingDot={headingDot:F2} distanceSqr={distanceSqr:F1} "
@@ -822,6 +835,7 @@ public partial class MovementSystem
     {
         if (HoldForAirborneMotion(agent)) return;
         agent.Movement.AwakeMotion.ClearInput();
+        agent.Movement.SprintControl.Suspend();
         var movement = agent.Movement;
         var player = agent.Player;
         if (player == null) return;
@@ -1428,6 +1442,7 @@ public partial class MovementSystem
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void AssignPath(Movement movement, NavJob job)
     {
+        movement.SprintControl.Stutter.Reset();
         movement.Target = job.Target;
         movement.Path = job.Path;
         movement.Status = MovementStatus.Moving;

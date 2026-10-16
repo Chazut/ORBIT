@@ -264,6 +264,14 @@ resumes. Existing recovery from persistent off-mesh falls remains available.
 capped per bot (four episode pairs and six stops). Correlate them with the visible
 stutter and RaidReview; a contact loss alone does not establish its cause.
 
+Beta 7 also detects three confirmed sprints lasting at most one second that end
+within six seconds while ordinary travel still permits sprinting. The bot walks
+for two seconds, then retries through the normal stable-start check. Walking input
+and the route continue. Voluntary stops, turns, doors, insufficient stamina, combat,
+route changes and native jumps/vaults clear the detector and any remaining recovery.
+Each activation writes one `SPRINT RECOVERY` line, including Quiet mode, for the debug
+ZIP. Rejected starts without an observed sprint do not trigger this protection.
+
 ### Boss rush completion and loot (next beta)
 
 A squad's own boss kill completes its Boss Rush search, even if the killer dies.
