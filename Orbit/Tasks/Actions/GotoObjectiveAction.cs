@@ -212,13 +212,7 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                             TrackArrivalFailure(agent, objective.Location);
                             break;
                         }
-                        if (agent.Squad != null && !agent.Squad.CompletedPoiIds.Contains(objective.Location.Id))
-                        {
-                            agent.Squad.CompletedPoiIds.Add(objective.Location.Id);
-                            QuestObjectiveRecovery.Retire(agent.Squad, objective.Location, "stalled approach");
-                        }
-                        objective.Status = ObjectiveStatus.Failed;
-                        Log.Info($"{agent} stuck en-route to {objective.Location} for {StuckEnRouteThresholdSeconds:F0}s without advancing — blacklisted for {agent.Squad}, rerouting");
+                        AbandonStalledObjective(agent);
                         break;
                     }
 
@@ -528,6 +522,26 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
         Log.Info($"{agent} blacklisting {location} for {agent.Squad} after {LoSBlockedTimeoutSeconds:F0}s of blocked arrival (reason={reason}); cleared agent + squad target to force re-dispatch");
         ClearLoSBlockedTracking(agent);
         return true;
+    }
+
+    private static void AbandonStalledObjective(Agent agent)
+    {
+        var location = agent.Objective.Location;
+        if (agent.Squad != null)
+        {
+            agent.Squad.CompletedPoiIds.Add(location.Id);
+            QuestObjectiveRecovery.Retire(agent.Squad, location, "stalled approach");
+            if (agent.Squad.Objective.Location?.Id == location.Id)
+                agent.Squad.Objective.Location = null;
+        }
+        // A blacklist filters future picks, but a retained agent/squad target bypasses
+        // selection and sends the bot straight back to the same blocked destination.
+        agent.Objective.Location = null;
+        agent.Objective.SplinterParent = null;
+        agent.Objective.Status = ObjectiveStatus.None;
+        agent.ArrivalFailures.Forget(location.Id);
+        ClearLoSBlockedTracking(agent);
+        Log.Info($"{agent} stuck en-route to {location} for {StuckEnRouteThresholdSeconds:F0}s without advancing: blacklisted for {agent.Squad}; cleared agent + matching squad target to force re-dispatch");
     }
 
     private static void ClearLoSBlockedTracking(Agent agent)

@@ -272,6 +272,11 @@ route changes and native jumps/vaults clear the detector and any remaining recov
 Each activation writes one `SPRINT RECOVERY` line, including Quiet mode, for the debug
 ZIP. Rejected starts without an observed sprint do not trigger this protection.
 
+Beta 7 also releases a destination after the 30-second no-progress watchdog
+blacklists it. Both the bot's retained target and a matching squad target are
+cleared, so the next dispatch can select another point. Unrelated squad targets,
+combat pauses and the separate extraction retry rules are preserved.
+
 ### Boss rush completion and loot (next beta)
 
 A squad's own boss kill completes its Boss Rush search, even if the killer dies.
