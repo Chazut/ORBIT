@@ -119,6 +119,11 @@ public sealed class RushPoint
     public float LootZ { get; set; }
     public float Radius { get; set; } = 20;
     public float SearchSeconds { get; set; } = 25;
+    // Search preserves the behavior of existing Other points and saved presets.
+    public string CustomMode { get; set; } = "Search";
+    public float CampSeconds { get; set; } = 60;
+    public float LootRadius { get; set; } = 20;
+    public float LootSeconds { get; set; } = 120;
     public float Weight { get; set; } = 1;
     public string FloorId { get; set; }
     public float WatchYaw { get; set; }
@@ -138,6 +143,11 @@ public sealed class RushPoint
             MapBehaviorOverride.Range(n, -10000, 10000, "Rush coordinate");
         MapBehaviorOverride.Range(Radius, 1, 200, "Rush radius");
         MapBehaviorOverride.Range(SearchSeconds, 1, 600, "Rush search duration");
+        if (CustomMode is not ("Search" or "Camp" or "Loot" or "CampThenLoot"))
+            throw new ArgumentException("Unknown Other rush behavior.");
+        MapBehaviorOverride.Range(CampSeconds, 0, 1800, "Other camp duration");
+        MapBehaviorOverride.Range(LootRadius, 1, 200, "Other loot radius");
+        MapBehaviorOverride.Range(LootSeconds, 1, 1800, "Other loot time limit");
         MapBehaviorOverride.Range(Weight, 0, 100, "Rush point weight");
         MapBehaviorOverride.Range(WatchYaw, 0, 360, "Sniper watch bearing");
         MapBehaviorOverride.Range(WatchArc, 15, 360, "Sniper watch arc");

@@ -630,6 +630,7 @@ public class LootContainerAction(AgentData dataset, WaypointSystem waypointSyste
 
     private bool TryScavengeSweep(Agent agent, Waypoint justLooted)
     {
+        if (agent.Squad?.Rush?.CollectingCustomArea == true) return false;
         // The room planner owns the next pickup; an ordinary sweep may lead through floors or walls.
         if (agent.Squad?.Rush?.CollectingMarkedRoom == true) return false;
         if (agent.Squad?.Camp.Active == true) return false;

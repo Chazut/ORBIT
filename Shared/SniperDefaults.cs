@@ -39,7 +39,7 @@ public static class SniperDefaults
             Id = "73fd948d52b149b8a0dad648ae5f5b23", Name = "Sniper point", Enabled = true,
             Boss = "bossSanitar", DoorId = "", X = -196.50992f,
             Y = 3f, Z = -80.77049f, LootX = -196.50992f,
-            LootY = 3f, LootZ = -80.77049f, Radius = 20f,
+            LootY = 3f, LootZ = -80.77049f, Radius = 60f,
             SearchSeconds = 25f, Weight = 1f, FloorId = "3rd-floor",
             WatchYaw = 320f, WatchArc = 360f, WatchDistance = 300f,
             WatchPitch = -5f, Elevated = true
@@ -48,9 +48,9 @@ public static class SniperDefaults
             Id = "3bc9877f14434b6b9d504c463a4dc0d0", Name = "Sniper point copy", Enabled = true,
             Boss = "bossSanitar", DoorId = "", X = -307.17947f,
             Y = 3f, Z = -79.59503f, LootX = -307.17947f,
-            LootY = 3f, LootZ = -79.59503f, Radius = 20f,
+            LootY = 3f, LootZ = -79.59503f, Radius = 60f,
             SearchSeconds = 25f, Weight = 1f, FloorId = "3rd-floor",
-            WatchYaw = 320f, WatchArc = 360f, WatchDistance = 300f,
+            WatchYaw = 40f, WatchArc = 360f, WatchDistance = 300f,
             WatchPitch = -5f, Elevated = true
         });
         Add("Interchange@rework", new RushPoint {

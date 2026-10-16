@@ -12,7 +12,7 @@ using UnityEngine.AI;
 
 namespace Orbit.Systems;
 
-internal sealed class RushPlan : IObjectiveWork
+internal sealed partial class RushPlan : IObjectiveWork
 {
     private Squad _squad;
     private WaypointSystem _waypoints;
@@ -65,6 +65,8 @@ internal sealed class RushPlan : IObjectiveWork
     internal bool Owns(Agent agent) => Sniper != null ? Sniper.Owns(agent) : !Main.Completed && !_paused && !agent.SoloExtractRequested
         && (!_orders.TryGetValue(agent, out var point) || agent.Objective.Location == point);
     internal bool CollectingMarkedRoom => Kind == "Marked" && !Main.Completed && _inside;
+    internal bool CollectingCustomArea => Kind == "Custom" && !Main.Completed && _customArrived
+        && _sites[_current].CustomMode is "Loot" or "CampThenLoot";
     internal bool OwnsMarkedLoot(Agent agent, Waypoint point) => CollectingMarkedRoom && !_paused
         && agent == _actor && point != null && point == _loot;
 
@@ -102,7 +104,7 @@ internal sealed class RushPlan : IObjectiveWork
         if (_actor == null || !_actor.IsActive || _actor.Bot.IsDead || !squad.Members.Contains(_actor)
             || _actor.SoloExtractRequested || (CorpseEscort.InFlight(_actor) && (_loot == null || _actor.Objective.Location != _loot)))
         {
-            Release(squad, waypoints); _actor = null; _loot = null; _route.Reset();
+            Release(squad, waypoints); _actor = null; _loot = null; _route.Reset(); _customArrived = false;
             _recorded.ResetSearch(); _searchingRecorded = false;
             if (CollectingMarkedRoom) _attempted.Clear();
             if (_current < 0) ResetRanking();
@@ -129,12 +131,13 @@ internal sealed class RushPlan : IObjectiveWork
             if (_roomEntryIdle >= RoomEntryStallSeconds)
                 return Skip(squad, waypoints, "room entrance stalled");
         }
-        if (Status != "looting") _elapsed += delta;
+        if (Status != "looting" && !_customArrived) _elapsed += delta;
         if (_elapsed > ServerConfig.Rush.TravelTimeout && Status != "searching" && Status != "looting")
             return Skip(squad, waypoints, "travel timeout");
         if (Status is "searching" or "looting") _held += delta;
         if (Status == "looting" && _loot == null && (_roomIdle += delta) > ServerConfig.Rush.TravelTimeout)
             return Skip(squad, waypoints, "room loot stalled");
+        if (_customArrived) return TickCustom(squad, waypoints, _sites[_current], delta);
         if (now < _nextWork) return true;
         if (_current < 0)
         {
@@ -186,10 +189,10 @@ internal sealed class RushPlan : IObjectiveWork
             _nextWork = now + .1f;
             var target = _inside ? RoomCenter(site) : Position(site);
             if (door != null && !_inside && _doorApproach) target = door.GetInteractionParameters(_actor.Position).InteractionPosition;
-            // Marked rooms and boss areas on another floor may need distant stairs.
+            // Marked rooms, boss areas and Other points on another floor may need distant stairs.
             var final = false;
             var found = !_searchingRecorded && _route.Find(_actor.Position, target, out _anchor, out final, _retries, _approachHistory,
-                floorAware: (Kind is "Marked" or "Boss") && Mathf.Abs(_actor.Position.y - target.y) > 2.5f,
+                floorAware: (Kind is "Marked" or "Boss" or "Custom") && Mathf.Abs(_actor.Position.y - target.y) > 2.5f,
                 finalPoint: door != null && !_inside && _doorApproach ? DoorStep(door).InteractionCheck : null,
                 localAccess: door != null && !_inside && _doorApproach);
             if (_searchingRecorded)
@@ -249,6 +252,8 @@ internal sealed class RushPlan : IObjectiveWork
         }
         if (door != null && !_inside) return InteractDoor(squad, waypoints, site, door);
         if (Kind == "Marked") { _held = 0; SetStatus(squad, "looting"); return true; }
+        if (Kind == "Custom" && site.CustomMode != "Search")
+        { _customArrived = true; return TickCustom(squad, waypoints, site, 0); }
         if (Status != "searching") { _held = 0; SetStatus(squad, "searching"); }
         if (_held >= site.SearchSeconds * _searchScale) return Visit(squad, waypoints);
         if (now >= _nextRoam)
@@ -319,9 +324,11 @@ internal sealed class RushPlan : IObjectiveWork
 
     private bool HasOwnKillDetour(Squad squad, WaypointSystem waypoints)
     {
-        // A marked-room transfer belongs to this plan, not to a corpse detour.
+        // A room or Other-area transfer belongs to this plan, not to a corpse detour.
         // Finish it before yielding to a queued kill, keeping its claim and task intact.
-        if (_actor != null && OwnsMarkedLoot(_actor, _actor.Objective.Location) && CorpseEscort.InFlight(_actor)) return false;
+        if (_actor != null && (OwnsMarkedLoot(_actor, _actor.Objective.Location)
+            || CollectingCustomArea && _loot != null && _actor.Objective.Location == _loot)
+            && CorpseEscort.InFlight(_actor)) return false;
         return HasPendingOwnKill(squad, waypoints);
     }
 
@@ -348,7 +355,7 @@ internal sealed class RushPlan : IObjectiveWork
     private bool Pause(Squad squad, WaypointSystem waypoints, string reason)
     {
         waypoints.CancelOperationWork(this);
-        if (!_paused) { Release(squad, waypoints); _loot = null; _actor = null; _paused = true; }
+        if (!_paused) { Release(squad, waypoints); _loot = null; _actor = null; _paused = true; _customArrived = false; }
         if (Status != reason) SetStatus(squad, reason);
         if (_current < 0) ResetRanking();
         _nextWork = Time.time + .25f;
@@ -452,6 +459,7 @@ internal sealed class RushPlan : IObjectiveWork
     {
         SetStatus(squad, _states[_current]); Release(squad, waypoints); _processed++;
         _current = -1; _retries = _attempts = 0; ResetRanking();
+        _customArrived = _customCampDone = false; _customCampHeld = _customLootHeld = 0;
         _recorded.Reset(); _searchingRecorded = false;
         _elapsed = _held = _interactAt = _roomIdle = 0; _inside = _doorApproach = false; _loot = null; _room = null; _roomLooters.Clear(); _attempted.Clear(); _route.Reset();
         _roomEntryIdle = 0; _roomEntryBestDistance = float.MaxValue;
@@ -529,5 +537,6 @@ internal sealed class RushPlan : IObjectiveWork
             w.ReleaseClaim(pair.Value.Id, pair.Key.Id);
         }
         _orders.Clear();
+        _customSlots.Clear();
     }
 }

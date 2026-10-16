@@ -108,6 +108,13 @@ public static class RushDefaults
         },
         ["Interchange"] = new()
         {
+            new() {
+                Id = "48b4403069fc47a1a053fa5910a5a70b", Name = "Techlight loot rush", Kind = "Custom",
+                Boss = "bossKilla", X = 93.772865f, Y = 36.735f, Z = 50.922386f,
+                LootX = 93.772865f, LootY = 36.735f, LootZ = 50.922386f,
+                Radius = 20f, SearchSeconds = 25f, CustomMode = "Loot", CampSeconds = 60f,
+                LootRadius = 20f, LootSeconds = 120f, FloorId = "3rd-floor"
+            },
             new() { Id = "bossKilla-ZoneCenterBot-1", Name = "ZoneCenterBot 1", Kind = "Boss", Boss = "bossKilla", X = -27.08f, Y = 27.119f, Z = -2.07f, Radius = 40f, SearchSeconds = 30f },
             new() { Id = "bossKilla-ZoneCenterBot-2", Name = "ZoneCenterBot 2", Kind = "Boss", Boss = "bossKilla", X = 20.18f, Y = 36.625f, Z = -80.62f, Radius = 40f, SearchSeconds = 30f },
             new() { Id = "bossKilla-ZoneCenterBot-3", Name = "ZoneCenterBot 3", Kind = "Boss", Boss = "bossKilla", X = 56.58f, Y = 27.06f, Z = -11.05f, Radius = 40f, SearchSeconds = 30f },
@@ -382,6 +389,13 @@ public static class RushDefaults
         },
         ["Interchange@rework"] = new()
         {
+            new() {
+                Id = "a57b7c8c88974bb5a6a0e1b6e90d28e8", Name = "Techlight loot rush", Kind = "Custom",
+                Boss = "bossKilla", X = 94.004036f, Y = 36.735f, Z = 52.243095f,
+                LootX = 94.004036f, LootY = 36.735f, LootZ = 52.243095f,
+                Radius = 20f, SearchSeconds = 25f, CustomMode = "Loot", CampSeconds = 60f,
+                LootRadius = 20f, LootSeconds = 120f, FloorId = "3rd-floor"
+            },
             new() { Id = "bossKilla-ZoneCenterBot-1", Name = "ZoneCenterBot 1", Kind = "Boss", Boss = "bossKilla", X = -27.08f, Y = 27.119f, Z = -2.07f, Radius = 40f, SearchSeconds = 30f },
             new() { Id = "bossKilla-ZoneCenterBot-2", Name = "ZoneCenterBot 2", Kind = "Boss", Boss = "bossKilla", X = 20.18f, Y = 36.625f, Z = -80.62f, Radius = 40f, SearchSeconds = 30f },
             new() { Id = "bossKilla-ZoneCenterBot-3", Name = "ZoneCenterBot 3", Kind = "Boss", Boss = "bossKilla", X = 56.58f, Y = 27.06f, Z = -11.05f, Radius = 40f, SearchSeconds = 30f },

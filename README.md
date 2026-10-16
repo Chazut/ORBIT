@@ -254,6 +254,17 @@ observation pauses are retained, as are faction and personality sprint settings.
 Repeated transitions or rejected starts produce a bounded `SPRINT LOOP`
 diagnostic, even with Quiet logging enabled, for the next debug ZIP.
 
+### Other rush behaviors (next beta)
+
+In **Rush objectives > Other**, each point can search/patrol, camp, loot, or camp
+then loot. Camp duration starts on arrival and pauses during combat or own-kill
+detours. Loot has its own radius and time limit; an inventory transfer already
+in progress can finish before the objective ends. Existing points keep Search.
+These settings are included in saved presets and exported zone packs.
+Other points on another floor use the expanded search for stair access, including
+detours away from the target. An unreachable point is still skipped after the
+existing retry or travel limit.
+
 ### Ghost wake placement (next beta)
 
 Ghost wake-ups validate physical ground and body clearance on the current floor.
