@@ -33,6 +33,7 @@ public class CorpseRegistrationPatch : ModulePatch
         using var timing = GhostDeathDiagnostics.Measure(TransitionPhase.GhostCorpseRegistration);
         if (__result == null)
         {
+            RememberBossKillWithoutBody(Singleton<OrbitManager>.Instance, __instance);
             Log.Debug($"CorpseRegistration: NULL __result for {__instance?.Profile?.Info?.Nickname ?? "?"} — no waypoint created");
             return;
         }
@@ -52,6 +53,7 @@ public class CorpseRegistrationPatch : ModulePatch
             // looters (ghosts included) straight into the mines. The loot is simply lost.
             if (Orbit.Navigation.DangerZones.IsInside(pos))
             {
+                RememberBossKillWithoutBody(manager, __instance);
                 Log.Info($"CorpseRegistration: {__result.name} died inside a border zone — no loot waypoint");
                 return;
             }
@@ -68,7 +70,8 @@ public class CorpseRegistrationPatch : ModulePatch
             );
 
             manager.WaypointSystem.AddRuntimeWaypoint(loc);
-            manager.WaypointSystem.RegisterRushCorpse(__result, __instance?.Profile?.Info?.Settings?.Role.ToString());
+            var victimRole = __instance?.Profile?.Info?.Settings?.Role.ToString();
+            manager.WaypointSystem.RegisterRushCorpse(loc, victimRole);
             var victimName = __instance?.Profile?.Info?.Nickname ?? "?";
             var victimProfileId = __instance?.Profile?.Id;
             Log.Debug($"CorpseRegistration: registered Corpse waypoint {loc} for victim {victimName} at ({pos.x:F2},{pos.y:F2},{pos.z:F2})");
@@ -123,6 +126,7 @@ public class CorpseRegistrationPatch : ModulePatch
                     return;
                 }
                 manager.WaypointSystem.TagCorpseKillerSquad(loc.Id, a.Squad.Id);
+                manager.WaypointSystem.RememberRushBossKill(a.Squad, loc, victimRole);
                 // Goons / bosses / raiders / cultists / bloodhounds run on either vanilla BSG brain or
                 // ORBIT's basic roam-with-no-mains pipeline — they don't have a loot layer that knows what
                 // to do with the corpse. Forcing the own-kill bee-line on them just pins the squad on a body
@@ -151,5 +155,26 @@ public class CorpseRegistrationPatch : ModulePatch
         {
             Log.Error($"CorpseRegistration failed for {__instance?.Profile?.Info?.Nickname}: {ex}");
         }
+    }
+
+    private static void RememberBossKillWithoutBody(OrbitManager manager, Player victim)
+    {
+        if (manager?.WaypointSystem == null || victim == null) return;
+        try
+        {
+            var aggressor = Traverse.Create(victim).Field("LastAggressor").GetValue<IPlayer>();
+            if (string.IsNullOrEmpty(aggressor?.ProfileId)) return;
+            var agents = manager.AgentData.Entities.Values;
+            for (var i = 0; i < agents.Count; i++)
+                if (agents[i]?.Squad != null && agents[i].Player?.ProfileId == aggressor.ProfileId)
+                {
+                    // A missing or dangerous body cannot be looted, but it must not
+                    // erase a boss kill the squad already witnessed through damage.
+                    manager.WaypointSystem.RememberRushBossKill(agents[i].Squad, null,
+                        victim.Profile?.Info?.Settings?.Role.ToString());
+                    break;
+                }
+        }
+        catch (Exception error) { Log.Warning($"Boss Rush kill attribution without corpse failed: {error}"); }
     }
 }

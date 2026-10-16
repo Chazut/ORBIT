@@ -18,6 +18,7 @@ public class Squad(int id, float[] taskScores, int targetMembersCount) : Entity(
     internal bool PendingDispatchCompletedCurrent;
     internal readonly Orbit.Systems.TravelHold TravelHold = new();
     internal readonly Orbit.Systems.CorpseEscort CorpseEscort = new();
+    internal readonly Orbit.Systems.BossRushLoot BossLoot = new();
     internal readonly Orbit.Systems.CampPlan Camp = new();
     internal Orbit.Systems.OperationPlan Operation;
     internal Orbit.Systems.RushPlan Rush;

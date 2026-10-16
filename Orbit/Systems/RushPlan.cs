@@ -18,6 +18,7 @@ internal sealed partial class RushPlan : IObjectiveWork
     private WaypointSystem _waypoints;
     void IObjectiveWork.ResumeObjectiveWork() => Tick(_squad, _waypoints, WaypointSystem.ObjectiveCombat(_squad));
     internal readonly string Kind;
+    internal string BossRole => Kind == "Boss" ? _sites[0].Boss : null;
     internal MainObjective Main;
     private string _status = "pending";
     internal string Status { get => Sniper?.Status ?? _status; private set => _status = value; }
@@ -82,11 +83,17 @@ internal sealed partial class RushPlan : IObjectiveWork
             return End(squad, waypoints, "cancelled for extraction or settings");
         if (Kind == "Spawn" && WaypointSystem.RushRaidSeconds > ServerConfig.Rush.SpawnDeadline)
             return End(squad, waypoints, "opening window expired");
-        // Native perception, never a lookup of the boss's actual spawn or global alive/dead state.
+        // Live-boss perception is unchanged. Corpse discovery is local proximity;
+        // own-squad kill knowledge is handled by TickRush before routing resumes.
         if (Kind == "Boss" && now >= _nextWork)
         {
-            var found = waypoints.PerceivedRushBoss(squad, _sites[0].Boss);
-            if (found != null) return End(squad, waypoints, found);
+            var found = waypoints.PerceivedRushBoss(squad, _sites[0].Boss, out var corpse);
+            if (found != null)
+            {
+                End(squad, waypoints, found);
+                squad.BossLoot.Enqueue(squad, corpse);
+                return false;
+            }
         }
         if (combat || now < squad.GhostFightUntil)
             return Pause(squad, waypoints, "paused");

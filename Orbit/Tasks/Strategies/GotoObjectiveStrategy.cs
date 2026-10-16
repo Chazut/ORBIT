@@ -73,6 +73,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
         }
         if (entity is Squad campingSquad) campingSquad.Camp.End(campingSquad, "strategy deactivated");
         if (entity is Squad squad) squad.CorpseEscort.End(squad, waypointSystem, "strategy deactivated");
+        if (entity is Squad bossSquad) bossSquad.BossLoot.Cancel(bossSquad, waypointSystem, "strategy deactivated");
         // Return any assignments before deactivating.
         waypointSystem.Return(entity);
         base.Deactivate(entity);
@@ -861,6 +862,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
             }
 
             if (squad.CorpseEscort.UpdateMember(squad, agent, i, waypointSystem)) continue;
+            if (squad.BossLoot.Owns(agent)) continue;
             if (squad.Camp.PendingAirdrop != null || squad.Camp.RetryMain != null || squad.Camp.Owns(agent)) continue;
             if (squad.Operation?.Owns(agent) == true || squad.Rush?.Owns(agent) == true
                 || squad.MainApproach.Owns(agent) || ExtractCampApproach.Owns(squad, agent)) continue;
@@ -1328,7 +1330,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
             // Bump the revision so raid-review re-snapshots immediately rather than at its next periodic poll.
             if (main.Completed) Orbit.Api.OrbitTelemetry.MainObjectivesRevision++;
         }
-        if (allDone && !squad.ExtractRequested && ServerConfig.MainObjectives.ExtractOnAllCompleted)
+        if (allDone && !squad.BossLoot.Pending && !squad.ExtractRequested && ServerConfig.MainObjectives.ExtractOnAllCompleted)
         {
             squad.ExtractRequested = true;
             squad.ExtractRequestedReason = "all mains done";

@@ -19,7 +19,7 @@ public partial class WaypointSystem
     private List<RushPoint> _rushPoints;
     private Dictionary<string, Door> _rushDoors;
     private readonly Dictionary<string, Audio.SpatialSystem.SpatialAudioPortal> _rushPortals = new();
-    private readonly Dictionary<Corpse, string> _rushCorpses = new();
+    private readonly Dictionary<Waypoint, string> _rushCorpses = new();
     internal static float RushRaidSeconds => (float)(Singleton<AbstractGame>.Instance?.GameTimer?.PastTime.TotalSeconds ?? double.PositiveInfinity);
 
     private void InitializeRush()
@@ -53,9 +53,14 @@ public partial class WaypointSystem
         }
         return new(new Vector3(point.LootX, point.LootY, point.LootZ), point.Radius, selected);
     }
-    internal void RegisterRushCorpse(Corpse corpse, string role)
+    internal void RegisterRushCorpse(Waypoint corpse, string role)
     {
         if (corpse != null && RushDefaults.IsBossRushTarget(_zoneKey, role)) _rushCorpses[corpse] = role;
+    }
+
+    internal void RememberRushBossKill(Squad squad, Waypoint corpse, string role)
+    {
+        if (RushDefaults.IsBossRushTarget(_zoneKey, role)) squad.BossLoot.RememberKill(role, corpse);
     }
 
     internal MainObjective RollRushMain(Squad squad)
@@ -111,6 +116,17 @@ public partial class WaypointSystem
 
     internal bool TickRush(Squad squad, bool combat)
     {
+        // Knowledge belongs to the squad, so a killer's death cannot erase it. Also
+        // handle a kill after the live boss was spotted and the search already ended.
+        if (squad.MainObjectives != null)
+            foreach (var main in squad.MainObjectives)
+                if (main.Rush is { Kind: "Boss" } boss && (!main.Completed || boss.Status == "boss seen")
+                    && squad.BossLoot.TryGetKill(boss.BossRole, out var body))
+                {
+                    boss.End(squad, this, "boss killed by squad");
+                    squad.BossLoot.Enqueue(squad, body);
+                }
+        if (squad.BossLoot.Tick(squad, this, combat)) return true;
         if (squad.Rush == null && squad.MainObjectives != null)
             foreach (var main in squad.MainObjectives)
                 if (!main.Completed && main.Rush != null) { squad.Rush = main.Rush; break; }
@@ -123,28 +139,34 @@ public partial class WaypointSystem
             squad.Rush = null;
             if (marked) Orbit.Tasks.Actions.LootContainerAction.ReevaluateAfterMarkedRoom(squad);
         }
-        return result;
+        return squad.BossLoot.Tick(squad, this, combat) || result;
     }
 
-    internal string PerceivedRushBoss(Squad squad, string role)
+    internal string PerceivedRushBoss(Squad squad, string role, out Waypoint corpse)
     {
+        corpse = null;
         foreach (var member in squad.Members)
         {
-            if (!member.IsActive) continue;
+            if (member.Bot.IsDead || member.SoloExtractRequested) continue;
+            // Boss Rush discovery is a proximity rule, independent of awake/Ghost
+            // vision. Keep it local to the member's floor, including indoors.
+            foreach (var pair in _rushCorpses)
+            {
+                if (pair.Key.Target is not Corpse body || body == null || pair.Value != role) continue;
+                var delta = body.transform.position - member.Position;
+                if (delta.sqrMagnitude > 900f || Mathf.Abs(delta.y) > 2.5f) continue;
+                corpse = pair.Key;
+                return "boss body found";
+            }
+        }
+        foreach (var member in squad.Members)
+        {
+            if (!member.IsActive || member.Bot.IsDead || member.SoloExtractRequested) continue;
             var enemies = member.Bot.EnemiesController?.EnemyInfos;
             if (enemies != null)
                 foreach (var enemy in enemies.Values)
                     if (enemy.IsVisible && enemy.Person?.Profile?.Info?.Settings?.Role.ToString() == role)
                         return "boss seen";
-            foreach (var pair in _rushCorpses)
-            {
-                if (pair.Key == null || pair.Value != role) continue;
-                var target = pair.Key.transform.position + Vector3.up * .4f;
-                if ((target - member.Position).sqrMagnitude > 900f || !member.Bot.LookSensor.IsPointInVisibleSector(target)) continue;
-                var head = member.Bot.LookSensor.HeadPoint;
-                if (!Physics.Linecast(head, target, LayersMaskController.HighPolyWithTerrainMask, QueryTriggerInteraction.Ignore))
-                    return "boss body found";
-            }
         }
         return null;
     }

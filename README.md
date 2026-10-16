@@ -254,6 +254,17 @@ observation pauses are retained, as are faction and personality sprint settings.
 Repeated transitions or rejected starts produce a bounded `SPRINT LOOP`
 diagnostic, even with Quiet logging enabled, for the next debug ZIP.
 
+### Boss rush completion and loot (next beta)
+
+A squad's own boss kill completes its Boss Rush search, even if the killer dies.
+Finding the target boss's corpse within 30 m also completes the search, with a
+2.5 m height tolerance. This proximity rule does not change Ghost vision.
+An eligible survivor then attempts to loot the body before the automatic
+departure for completed objectives. Another survivor can take over if the looter
+dies or cannot collect it. Combat pauses collection, native transfers finish,
+and unavailable bodies or a bounded collection timeout let the squad move on.
+Urgent extraction and disabled looting retain their normal priority.
+
 ### Other rush behaviors (next beta)
 
 In **Rush objectives > Other**, each point can search/patrol, camp, loot, or camp
