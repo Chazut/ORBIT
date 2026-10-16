@@ -77,6 +77,11 @@ public partial class MovementSystem
                 continue;
             }
 
+            if (HoldForAirborneMotion(agent))
+            {
+                ObserveAwakeRecovery(agent, CanRecoverAirborneFall(agent.Player));
+                continue;
+            }
             if (HoldForTravelObservation(agent)) continue;
             if (agent.SniperReturn?.Tick(this, _waypointSystem) == true) continue;
 
@@ -111,11 +116,7 @@ public partial class MovementSystem
                 continue;
             }
 
-            using (MeasureMovement(TransitionPhase.MovementRecovery, "recovery anchor", agent))
-            {
-                if (agent.Stuck.Recovery.Observe(agent.Position, agent.Bot?.Mover))
-                    TryReturnToValidatedAnchor(agent);
-            }
+            ObserveAwakeRecovery(agent);
 
             // Runs before UpdateMovement: an islanded bot has no path, so UpdateMovement early-returns and the
             // stuck remediation never sees it.
@@ -648,6 +649,7 @@ public partial class MovementSystem
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void UpdateMovement(Agent agent)
     {
+        if (HoldForAirborneMotion(agent)) return;
         var bot = agent.Bot;
         var player = agent.Player;
         var movement = agent.Movement;
@@ -665,15 +667,7 @@ public partial class MovementSystem
 
         if (!movement.HasPath || movement.Status == MovementStatus.Failed || movement.Status == MovementStatus.Stopped)
         {
-            StopAwakeInput(agent);
-            return;
-        }
-
-        // Gravity and native vault animation continue, but no stale travel input or new jump is added.
-        if (player.MovementContext?.IsGrounded != true)
-        {
-            StopAwakeInput(agent);
-            agent.Stuck.Soft.Reset();
+            StopAwakeInput(agent, "no-route");
             return;
         }
 
@@ -774,10 +768,11 @@ public partial class MovementSystem
         var revision = movement.PathRevision;
         var beforeRecovery = agent.Position;
         _stuckRemediation.Update(agent);
+        if (HoldForAirborneMotion(agent)) return;
         // Recovery can replace the route or body position. Recompute steering on the next tick.
         if (movement.Path == null || movement.PathRevision != revision
             || (agent.Position - beforeRecovery).sqrMagnitude > .04f)
-        { StopAwakeInput(agent); return; }
+        { StopAwakeInput(agent, "recovery-route-changed"); return; }
 
         // Decide after advancing corners and computing steering, so the old corner does not
         // request sprint while the body needs to turn toward the next segment.
@@ -792,16 +787,21 @@ public partial class MovementSystem
             Log.Always($"SPRINT LOOP: {agent} reason={movement.SprintControl.Reason} requested={wantsSprint} "
                 + $"physical={player.Physical.Sprinting} headingDot={headingDot:F2} distanceSqr={distanceSqr:F1} "
                 + $"indoors={bot.AIData.EnvironmentId != 0} look={agent.Look.Target != null} "
-                + $"nativeAllowed={player.Physical.CanSprint} objective={agent.Objective.Location}");
+                + $"nativeAllowed={player.Physical.CanSprint} grounded={player.MovementContext?.IsGrounded == true} "
+                + $"state={player.CurrentManagedState?.Name ?? EPlayerState.None} "
+                + $"groundEpisodes={movement.AwakeMotion.GroundEpisodes} nativeDrops={movement.AwakeMotion.NativeDrops} "
+                + $"objective={agent.Objective.Location}");
         if (player.Physical.Sprinting != shouldSprint)
         {
             Log.Debug($"{agent} sprint transition: {player.Physical.Sprinting}->{shouldSprint} "
                 + $"reason={movement.SprintControl.Reason} headingDot={headingDot:F2} distanceSqr={distanceSqr:F1}");
+            if (!shouldSprint) movement.AwakeMotion.TraceStop(agent, movement.SprintControl.Reason.ToString());
             player.EnableSprint(shouldSprint);
         }
 
         player.CharacterController.SetSteerDirection(moveVector);
         player.Move(moveDir);
+        movement.AwakeMotion.Remember(agent, moveVector);
         bot.AimingManager.CurrentAiming.Move(player.Speed);
     }
 
@@ -820,6 +820,8 @@ public partial class MovementSystem
     /// </summary>
     private static void HoldForDoorInteraction(Agent agent)
     {
+        if (HoldForAirborneMotion(agent)) return;
+        agent.Movement.AwakeMotion.ClearInput();
         var movement = agent.Movement;
         var player = agent.Player;
         if (player == null) return;
@@ -836,8 +838,6 @@ public partial class MovementSystem
         }
 
         backVector.Normalize();
-        if (player.MovementContext?.IsGrounded != true)
-        { StopAwakeInput(agent); return; }
         agent.Bot.Mover.SetTargetMoveSpeed(DoorHoldMoveSpeed);
         player.CharacterController.SetSteerDirection(backVector);
         player.Move(CalcMoveDirection(backVector, player.Rotation));

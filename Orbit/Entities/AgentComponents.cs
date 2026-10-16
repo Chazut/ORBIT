@@ -79,6 +79,7 @@ public class Movement
 {
     internal readonly Orbit.Systems.MovementFailureHistory Failures = new();
     internal readonly Orbit.Systems.SprintControl SprintControl = new();
+    internal readonly Orbit.Systems.AwakeMotion AwakeMotion = new();
     internal Orbit.Systems.TravelMotion Travel;
     public static readonly Vector3 Infinity = new(float.MaxValue, float.MaxValue, float.MaxValue);
 

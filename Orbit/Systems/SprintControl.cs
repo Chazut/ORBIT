@@ -20,6 +20,12 @@ internal sealed class SprintControl
     internal SprintReason Reason { get; private set; }
     internal bool ReportLoop { get; private set; }
 
+    internal void Suspend()
+    {
+        _eligibleSince = -1f;
+        _requested = false;
+    }
+
     internal bool Evaluate(bool wantsSprint, bool allowed, bool physicalSprint,
         float destinationDistanceSqr, float headingDot, float now)
     {

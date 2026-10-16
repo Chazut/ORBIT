@@ -254,6 +254,16 @@ observation pauses are retained, as are faction and personality sprint settings.
 Repeated transitions or rejected starts produce a bounded `SPRINT LOOP`
 diagnostic, even with Quiet logging enabled, for the next debug ZIP.
 
+Brief ground-contact loss retains the last grounded travel input for at most
+0.15 seconds, on the same route and within 1 m. It never starts a sprint.
+Native jumps, falls, vaults and their landing states keep control of the body;
+ORBIT suspends pose changes and new unstuck actions until ordinary grounded movement
+resumes. Existing recovery from persistent off-mesh falls remains available.
+`SPRINT GROUND` records contact/traversal episodes and native sprint drops;
+`SPRINT STOP` identifies explicit ORBIT stops. These Quiet-independent logs are
+capped per bot (four episode pairs and six stops). Correlate them with the visible
+stutter and RaidReview; a contact loss alone does not establish its cause.
+
 ### Boss rush completion and loot (next beta)
 
 A squad's own boss kill completes its Boss Rush search, even if the killer dies.

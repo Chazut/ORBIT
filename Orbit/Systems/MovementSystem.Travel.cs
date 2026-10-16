@@ -163,9 +163,8 @@ public partial class MovementSystem
         agent.Stuck.IdleRescueIntent = false;
         if (!agent.IsDormant)
         {
-            agent.Player.EnableSprint(false);
+            StopAwakeInput(agent, "travel-observation");
             agent.Bot.Mover.SetTargetMoveSpeed(0f);
-            agent.Player.Move(Vector2.zero);
         }
         if (agent.Look.Target == null || agent.Look.Target == state.OwnedLook)
         {
