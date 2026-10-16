@@ -277,6 +277,12 @@ blacklists it. Both the bot's retained target and a matching squad target are
 cleared, so the next dispatch can select another point. Unrelated squad targets,
 combat pauses and the separate extraction retry rules are preserved.
 
+Multi-step door navigation also keeps the real door handle or selected card
+reader elevation when planning a route. A bot below ULTRA Medical can continue
+searching for stairs instead of treating the space underneath the door as its
+destination. Opening still requires the native standing position, physical
+reach and an unobstructed interaction on arrival.
+
 ### Boss rush completion and loot (next beta)
 
 A squad's own boss kill completes its Boss Rush search, even if the killer dies.

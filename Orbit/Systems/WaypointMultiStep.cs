@@ -173,13 +173,17 @@ public partial class WaypointSystem
         out Vector3 point, out bool final, int expansion, IReadOnlyList<Vector3> history)
     {
         var target = step.Position;
-        if (step.Kind == OperationStepKind.Access && step.Object is KeycardDoor card
-            && card.DoorState == EDoorState.Locked && card.Proxies?.Length > 0)
-            target = card.GetInteractionParameters(actor.Position).InteractionPosition; // Reader standing point, not the distant door.
+        if (step.Kind == OperationStepKind.Access)
+        {
+            var interaction = step.Object.GetInteractionParameters(actor.Position);
+            target = interaction.InteractionPosition;
+            // Native door/reader standing points inherit the caller's height. Keep the
+            // selected side, but search at the actual handle/reader elevation so stairs
+            // remain eligible. Ground sampling and final interaction checks stay separate.
+            target.y = interaction.ViewTarget.y;
+        }
         else if (step.Kind == OperationStepKind.Switch)
             target = step.SwitchApproach ?? OperationSwitchReach.TargetPosition(step.Object);
-        else if (step.Kind == OperationStepKind.Access)
-            target = step.Object.GetInteractionParameters(actor.Position).InteractionPosition;
         // If another squad already powered D2, approach the bunker entry before restricting travel.
         // Reaching this anchor must never activate the distant gate button.
         var entering = step.Underground && !OperationRoutePolicy.InD2Bunker(actor.Position);
