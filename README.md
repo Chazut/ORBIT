@@ -254,6 +254,36 @@ observation pauses are retained, as are faction and personality sprint settings.
 Repeated transitions or rejected starts produce a bounded `SPRINT LOOP`
 diagnostic, even with Quiet logging enabled, for the next debug ZIP.
 
+### Debug ZIP (next beta)
+
+Use **F12 > ORBIT > Create debug ZIP** on the player client. Solo and Fika hosts
+export their local report. Fika clients automatically request the matching
+host/headless report through the shared SPT server, including Raid Review data
+when RR is installed on that host. Update ORBIT on the player, host/headless and
+SPT server. The Fika addon is not required for this transfer.
+
+Keep the host/headless and SPT server running for the first collection. File
+collection and transfer start only when the button is clicked; background
+heartbeats carry session metadata only. The button shows preparation, upload
+and download stages, with byte progress and cancellation. Transfers use 128 KiB
+blocks at up to 1 MiB/s per direction, with a 256 MiB compressed archive limit.
+
+The server temporarily caches completed host snapshots for up to 24 hours
+(32 raids, 1 GiB total). Re-exporting that snapshot needs only the SPT server
+and does not upload the host files again. Exports made during a raid are
+provisional and refreshed on the next request. A missing/offline host, failed
+transfer or missing RR is reported explicitly; the local ZIP remains usable.
+Only the host's retained raid can be collected if it is not already cached.
+Automatic matching applies to raids recorded with this update; older debug
+records without the shared Fika identity remain local exports.
+
+The ZIP keeps player files at the root and host files under **Host/**.
+`report.json` records the shared raid identity, cache use and missing data.
+Logging settings still apply on the machine running the bots: enable
+Performance logging and, when requested, disable Quiet logging and select the
+needed log levels on the host/headless before reproducing an issue. Exporting
+cannot recover diagnostics that were never recorded.
+
 Bots frozen or acting weird? In order: check for the unsupported mods
 above, test with vanilla raid times (extended raids are a known trouble
 source), and if you run ABPS try regenerating its config. Still broken:

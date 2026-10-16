@@ -335,7 +335,7 @@ public class Plugin : BaseUnityPlugin
             "ON: records every frame over the 60 FPS budget (16.67 ms), slow bot decisions and Ghost transitions, even with Quiet logging. Automatically saves a performance journal in BepInEx/ORBIT/diagnostics during the raid and a final summary when it ends. Larger stalls also save a detailed JSON capture.",
             null, new ConfigurationManagerAttributes { Category = "", Order = -1 }));
         Config.Bind(essentials, "Debug report", string.Empty, new ConfigDescription(
-            "Creates a local ZIP with the BepInEx session log, the last raid's performance diagnostics and its Raid Review replay data, when available. During a raid, exports the data available so far. Saved in BepInEx/ORBIT/debug; attach it to your bug report. No upload is performed.",
+            "Creates a ZIP with this client's log and the selected raid's diagnostics/replay. On Fika clients, requests matching host/headless files through your SPT server only when clicked. Keep the host running for the first collection. Completed snapshots are cached on the server for 24 hours. Transfers run in the background, limited to 1 MiB/s per direction. Saved in BepInEx/ORBIT/debug.",
             null, new ConfigurationManagerAttributes { Category = "", Order = -2, HideDefaultButton = true, CustomDrawer = DrawDebugExportButton }));
     }
 
@@ -350,6 +350,21 @@ public class Plugin : BaseUnityPlugin
                 DebugExport.Start();
         }
         finally { GUI.enabled = enabled; }
+        if (DebugExport.Busy)
+        {
+            var progress = DebugExport.Progress;
+            if (progress != null && progress.Fraction >= 0)
+            {
+                var track = GUILayoutUtility.GetRect(1f, 18f, GUILayout.ExpandWidth(true));
+                GUI.Box(track, GUIContent.none);
+                var fill = new Rect(track.x + 2, track.y + 2, (track.width - 4) * progress.Fraction, track.height - 4);
+                var oldColor = GUI.color;
+                GUI.color = new Color(0.35f, 0.65f, 0.9f, 1f);
+                GUI.DrawTexture(fill, Texture2D.whiteTexture);
+                GUI.color = oldColor;
+            }
+            if (DebugExport.CanCancelHost && GUILayout.Button("Cancel host transfer (keep local ZIP)", GUILayout.ExpandWidth(true))) DebugExport.Cancel();
+        }
         GUILayout.Label(DebugExport.Status, new GUIStyle(GUI.skin.label) { wordWrap = true });
         if (DebugExport.LastPath != null && GUILayout.Button("Open debug folder", GUILayout.ExpandWidth(true)))
             Application.OpenURL(new Uri(DebugExport.Folder + System.IO.Path.DirectorySeparatorChar).AbsoluteUri);

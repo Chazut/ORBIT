@@ -5,6 +5,7 @@ using System.IO.Compression;
 using System.Net.Http;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
+using Orbit.Debugging;
 
 namespace Orbit.Helpers;
 
@@ -18,6 +19,8 @@ internal sealed class DebugArchive
         public DateTime StartedUtc;
         public DateTime? EndedUtc;
         public RaidReviewDebug.Context RaidReview;
+        public DebugRaidLink Fika;
+        public string ContextWarning;
         public string[] Diagnostics = Array.Empty<string>();
     }
 
@@ -53,11 +56,22 @@ internal sealed class DebugArchive
         Checkpoint();
     }
 
-    private RaidRecord Snapshot() => _current == null ? null : new RaidRecord {
+    internal RaidRecord Snapshot() => _current == null ? null : new RaidRecord {
         Id = _current.Id, Map = _current.Map, Version = _current.Version,
         StartedUtc = _current.StartedUtc, EndedUtc = _current.EndedUtc,
-        RaidReview = _current.RaidReview,
+        RaidReview = _current.RaidReview, Fika = _current.Fika, ContextWarning = _current.ContextWarning,
         Diagnostics = _diagnostics.ToArray() };
+
+    internal void SetFika(DebugRaidLink link, string warning = null)
+    {
+        if (_current == null) return;
+        _current.Fika = link;
+        _current.ContextWarning = warning;
+        Checkpoint();
+    }
+
+    internal Task<RaidRecord> LoadLastRaid() => Task.Run(() =>
+        File.Exists(_recordPath) ? JsonConvert.DeserializeObject<RaidRecord>(File.ReadAllText(_recordPath)) : null);
 
     private void Checkpoint()
     {
@@ -75,13 +89,15 @@ internal sealed class DebugArchive
             flushLogs();
             SaveLog(record);
             Persist(record);
-            await _raidReview.Capture(record).ConfigureAwait(false);
+            // Fika replay collection can cross machines and is deferred until an explicit export.
+            if (record.Fika == null) await _raidReview.Capture(record).ConfigureAwait(false);
             PruneRaidReview(record);
         });
     }
 
     // Capture the record before dispatch so a new raid cannot change an in-progress export.
-    internal Task<string> Create(Task diagnosticsReady, Func<string> flushLogs, RaidReviewDebug.Context raidReview = null)
+    internal Task<string> Create(Task diagnosticsReady, Func<string> flushLogs, RaidReviewDebug.Context raidReview = null,
+        string expectedRaid = null)
     {
         var record = Snapshot();
         var result = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -101,6 +117,9 @@ internal sealed class DebugArchive
                 }
                 if (record != null && !SafeId(record.Id))
                     throw new InvalidDataException("Invalid last raid identifier.");
+                if (record?.ContextWarning != null) warnings.Add(record.ContextWarning);
+                if (expectedRaid != null && record?.Id != expectedRaid)
+                    throw new InvalidDataException("The requested raid snapshot is no longer available on this host.");
                 if (sameSession)
                 {
                     try { SaveLog(record); }
@@ -212,7 +231,9 @@ internal sealed class DebugArchive
                     + "The BepInEx log contains messages from installed mods and may include player names and local paths.\n"
                     + "RaidReview/ contains JSON replay data for this raid when available: players, positions, inventories, loot, combat and objectives.\n"
                     + "RR is read through its configured server. Cached end-of-raid data can be used if that server is offline.\n"
-                    + "report.json identifies the selected raid and lists missing files. Nothing was uploaded automatically.\n");
+                    + "report.json identifies the selected raid and lists missing files.\n"
+                    + "For Fika, clicking Create debug ZIP can request this raid's host files through your SPT server.\n"
+                    + "Host/ contains the host/headless snapshot when available; HostDebug in report.json describes the transfer.\n");
             }
             File.Move(temporary, path);
             return path;

@@ -140,5 +140,10 @@ public class OrbitDisposePatch : ModulePatch
         {
             Plugin.LogSource.LogWarning($"ORBIT dispose hit an error (swallowed to protect raid/FIKA teardown): {e}");
         }
+        finally
+        {
+            try { DebugExport.WorldEnded(); }
+            catch (System.Exception e) { Plugin.LogSource.LogWarning("Debug snapshot cleanup failed: " + e.Message); }
+        }
     }
 }
