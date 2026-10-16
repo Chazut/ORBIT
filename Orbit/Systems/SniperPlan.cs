@@ -39,7 +39,7 @@ internal sealed class SniperPlan : IObjectiveWork
     private int _candidate, _retries;
     private int _relocationMember;
     private float _nextRelocation;
-    private bool _resolved, _partial, _arrived, _paused;
+    private bool _resolved, _partial, _arrived, _paused, _returningToPost;
     internal string Status { get; private set; } = "pending";
     internal string Step => _site.Name;
 
@@ -61,7 +61,7 @@ internal sealed class SniperPlan : IObjectiveWork
         if (!ServerConfig.Rush.Allows(squad.Leader?.BotCategory) || squad.ExtractRequested && !_recorded.Active && !_departing)
             return End(squad, w, "cancelled for extraction or settings");
         if (_actor != null && (!squad.Members.Contains(_actor) || _actor.Bot.IsDead || _actor.SoloExtractRequested))
-        { Release(squad, w); _actor = null; _arrived = false; _route.Reset(); _recorded.Reset(); _progress.Reset(); _approachHistory.Clear(); _retries = 0; }
+        { Release(squad, w); _actor = null; _arrived = false; _returningToPost = false; _route.Reset(); _recorded.Reset(); _progress.Reset(); _approachHistory.Clear(); _retries = 0; }
         if (_actor != null && now >= _nextEquipment)
         {
             _nextEquipment = now + 5;
@@ -71,7 +71,7 @@ internal sealed class SniperPlan : IObjectiveWork
         if (_arrived)
         {
             // Count time at the post during safe long-range combat too; never extend forever.
-            if (_actor != null && Near(_actor.Position, _post, 4)) _held += dt;
+            if (_actor != null && (Near(_actor.Position, _post, 4) || SniperCombat.IsAlertHeld(_actor.Bot))) _held += dt;
             main.CampElapsed = _held;
             if (_held >= _duration)
             {
@@ -97,7 +97,7 @@ internal sealed class SniperPlan : IObjectiveWork
             if (_arrived && _actor != null) SniperCombat.Refresh(_actor, _post, now + 2);
             return false;
         }
-        if (!_arrived && !_departing && RushPlan.HasPendingOwnKill(squad, w))
+        if (!_arrived && !_departing && !_returningToPost && RushPlan.HasPendingOwnKill(squad, w))
         {
             w.CancelOperationWork(this);
             if (!_paused)
@@ -113,7 +113,31 @@ internal sealed class SniperPlan : IObjectiveWork
             return false;
         }
         if (_paused)
-        { _paused = false; _route.Reset(); _recorded.ResetSearch(); SetStatus(squad, "approach"); }
+        {
+            _paused = false; _route.Reset(); _recorded.ResetSearch();
+            if (_arrived && _actor != null)
+            {
+                SniperCombat.CancelAlert(_actor.Bot, "alert-ended");
+                _returningToPost = !Near(_actor.Position, _post, 3f);
+                if (_returningToPost)
+                {
+                    _arrived = false; _progress.Reset(); _approachHistory.Clear();
+                    // The completed ascent belongs to the previous arrival. A later
+                    // return must be able to rejoin the stairs from its new position.
+                    _recorded.Reset();
+                }
+                Log.Info($"SNIPER ALERT: {_actor} state={(_returningToPost ? "returning" : "resumed")} reason=alert-ended post={_post} held={_held:F1}s duration={_duration:F1}s");
+            }
+            SetStatus(squad, _returningToPost ? "returning to post" : "approach");
+        }
+        if (_returningToPost && _actor != null && CorpseEscort.InFlight(_actor))
+        {
+            // Finishing an inventory transfer must not be interrupted by the return order.
+            w.CancelOperationWork(this); _recorded.Suspend();
+            SetStatus(squad, "waiting for transfer");
+            return false;
+        }
+        if (_returningToPost) SetStatus(squad, "returning to post");
         if (_actor != null && !_arrived) _recorded.Observe(_actor.Position, dt);
         if (!_arrived || _actor == null || !Near(_actor.Position, _post, 4))
         {
@@ -123,7 +147,7 @@ internal sealed class SniperPlan : IObjectiveWork
         }
         // A retry, a new survey or a replacement actor cannot renew the objective indefinitely.
         // Combat and own-kill looting above pause these budgets; holding a valid post is separate.
-        var approachBudget = Mathf.Clamp(ServerConfig.Rush.TravelTimeout, 30f, _departing ? 180f : 600f);
+        var approachBudget = Mathf.Clamp(ServerConfig.Rush.TravelTimeout, 30f, _departing || _returningToPost ? 180f : 600f);
         if (_activeTravel >= approachBudget + (_recording == null ? 0f : 120f) || _rescueTravel >= 120f)
             return End(squad, w, _departing ? "failed: return timeout" : "failed: approach timeout");
         if (_travel >= ServerConfig.Rush.TravelTimeout)
@@ -136,7 +160,7 @@ internal sealed class SniperPlan : IObjectiveWork
         if (_actor == null)
         {
             foreach (var member in squad.Members)
-                if (member.IsActive && !member.SoloExtractRequested && !CorpseEscort.InFlight(member)
+                if (member.IsActive && !member.Bot.IsDead && !member.SoloExtractRequested && !CorpseEscort.InFlight(member)
                     && SniperEquipment.Eligible(member, ServerConfig.Rush.SniperMinZoom)) { _actor = member; break; }
             if (_actor == null) return End(squad, w, "no scoped member");
             _nextEquipment = now + 5;
@@ -227,6 +251,11 @@ internal sealed class SniperPlan : IObjectiveWork
                 _arrived = true; main.CampStartedAt = now; main.CampTargetDuration = _duration;
                 _travel = 0;
                 _activeTravel = _rescueTravel = 0;
+                if (_returningToPost)
+                {
+                    _returningToPost = false;
+                    Log.Info($"SNIPER ALERT: {_actor} state=resumed reason=post-reached post={_post} held={_held:F1}s duration={_duration:F1}s");
+                }
             }
             _actor.Guard.CoverPoint = new CoverPoint(_post, Direction(_site.WatchYaw, _site.WatchPitch), CoverCategory.None, CoverLevel.Stay);
             SetStatus(squad, "holding");

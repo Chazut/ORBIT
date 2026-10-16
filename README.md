@@ -294,6 +294,17 @@ dies or cannot collect it. Combat pauses collection, native transfers finish,
 and unavailable bodies or a bounded collection timeout let the squad move on.
 Urgent extraction and disabled looting retain their normal priority.
 
+### Sniper alert retention (next beta)
+
+Snipers already holding a post keep SAIN's combat decisions after an unseen
+contact, while ordinary movement stays within 12 m of the post on the same
+floor. SAIN can choose a local cover or angle; routes that leave the roof are
+rejected. Incoming fire, recent wounds, suppression, grenades, close known
+threats, visible enemies, squad orders and self-care release this noise guard.
+After the alert, an active sniper objective returns to its post with the
+original remaining hold time. `SNIPER ALERT` logs identify holding, rejected
+routes, local moves, release reasons and return/resume events.
+
 ### Other rush behaviors (next beta)
 
 In **Rush objectives > Other**, each point can search/patrol, camp, loot, or camp

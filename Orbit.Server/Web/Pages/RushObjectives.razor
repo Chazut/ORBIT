@@ -20,7 +20,7 @@
     </SettingsCard>
     <SettingsCard Title="Sniper equipment and combat" Subtitle="One scoped PMC takes the firing post while squadmates cover nearby. Native visibility and shooting rules apply. Several squads can select the same site.">
         <OrbitSlider T="float" @bind-Value="Cfg.Rush.SniperMinZoom" Label="Minimum available optic magnification" Unit="x" Min="1.5f" Max="20" Step="0.5f" />
-        <OrbitSwitch @bind-Value="Cfg.Rush.SniperCombatHold" Label="Prefer shooting from the post during safe distant combat (SAIN)" />
+        <OrbitSwitch @bind-Value="Cfg.Rush.SniperCombatHold" Label="Prefer staying at the post after distant noise and during safe ranged combat (SAIN)" />
         <OrbitSlider T="float" @bind-Value="Cfg.Rush.SniperDisengageDistance" Label="Resume ordinary combat for threats closer than" Unit="m" Min="50" Max="200" Step="5" />
         <MudText Typo="Typo.caption">Medical actions, incoming fire, nearby enemies and squad combat orders retain priority. Unsupported SAIN versions keep ordinary combat.</MudText>
     </SettingsCard>

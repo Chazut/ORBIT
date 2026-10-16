@@ -30,6 +30,7 @@ internal static class SniperSainDecisionPatch
             var prefix = typeof(SniperSainDecisionPatch).GetMethod(nameof(Prefix), BindingFlags.Static | BindingFlags.NonPublic)
                 .MakeGenericMethod(args[0].ParameterType, args[1].ParameterType, args[2].ParameterType);
             Enum.Parse(args[0].ParameterType, "StandAndShoot");
+            SniperSainAlertPatch.Enable(harmony, type, args[3].ParameterType);
             harmony.Patch(target, prefix: new HarmonyMethod(prefix));
             Ready = true;
             Log.Info("SNIPER: SAIN distant shooting preference ready");
@@ -42,14 +43,17 @@ internal static class SniperSainDecisionPatch
     }
     private static class Decision<T> where T : struct
     { internal static readonly T Stand = (T)Enum.Parse(typeof(T), "StandAndShoot"); }
-    private static void Prefix<TSolo, TSquad, TSelf>(object __instance, ref TSolo __0, TSquad __1, TSelf __2)
+    private static void Prefix<TSolo, TSquad, TSelf>(object __instance, ref TSolo __0, TSquad __1, TSelf __2, object __3)
         where TSolo : struct where TSquad : struct where TSelf : struct
     {
         try
         {
             if (!Ready) return;
-            if (!SniperCombat.CanHold(_owner(__instance))) return;
-            if (__1.ToString() != "None" || __2.ToString() != "None") return;
+            var bot = _owner(__instance);
+            if (!SniperCombat.HasLease(bot)) return;
+            var independent = __1.ToString() == "None" && __2.ToString() == "None";
+            SniperSainAlertPatch.Observe(__instance, bot, __0.ToString(), independent, __3);
+            if (!SniperCombat.CanHold(bot) || !independent || !SniperSainAlertPatch.SafeForDistantHold(__instance)) return;
             // Preserve all safety/self-care decisions and squad coordination.
             if (__0.ToString() is "Search" or "RushEnemy" or "StandAndShoot" or "ShootDistantEnemy")
                 __0 = Decision<TSolo>.Stand;
@@ -57,6 +61,7 @@ internal static class SniperSainDecisionPatch
         catch (Exception error)
         {
             Ready = false;
+            SniperSainAlertPatch.Fail(error);
             Log.Warning($"SNIPER: SAIN preference disabled, ordinary combat retained: {error.Message}");
         }
     }
