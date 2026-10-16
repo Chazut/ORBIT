@@ -34,6 +34,7 @@ public partial class DormancySystem
         internal Squad Squad;
         internal readonly List<BotOwner> Bots = new();
         internal readonly List<Agent> Agents = new();
+        internal readonly List<float> RetryAt = new();
         internal GhostWakeReason Reason;
         internal float Started;
         internal float GroundRetryAt;
@@ -209,7 +210,7 @@ public partial class DormancySystem
     {
         _wakingGroups.Add(pending.Key, pending);
         _stagedWakes.Add(pending);
-        foreach (var bot in pending.Bots) _wakingBots.Add(bot, pending);
+        foreach (var bot in pending.Bots) { _wakingBots.Add(bot, pending); pending.RetryAt.Add(0f); }
         TraceWakeDecision("queued", pending.Reason, "safe-to-delay", pending.Bots[0]);
         Log.Info($"GHOST WAKE QUEUE: queued members={pending.Bots.Count} cause={pending.Reason.Cause} first={pending.Bots[0].ProfileId}");
     }
@@ -351,13 +352,33 @@ public partial class DormancySystem
         _stagedWakes.RemoveAt(selected); _stagedWakes.Add(next);
         try
         {
+            // Retry unsafe members individually; ready followers in this group keep their turn.
+            var ready = next.Next;
+            while (ready < next.Bots.Count && next.RetryAt[ready] > Time.realtimeSinceStartup) ready++;
+            if (ready == next.Bots.Count) return;
+            if (ready != next.Next)
+            {
+                (next.Bots[next.Next], next.Bots[ready]) = (next.Bots[ready], next.Bots[next.Next]);
+                (next.RetryAt[next.Next], next.RetryAt[ready]) = (next.RetryAt[ready], next.RetryAt[next.Next]);
+                if (next.Squad != null)
+                    (next.Agents[next.Next], next.Agents[ready]) = (next.Agents[ready], next.Agents[next.Next]);
+            }
             var bot = next.Bots[next.Next];
             WakeStagedMember(next, next.Next, next.Reason);
             // Ground certification can defer one unsafe member. Retain its queue slot and
-            // let other groups run; never wait for activation of a body we kept inactive.
+            // let other members and groups run; never wait for an inactive body to activate.
             if (next.Squad != null ? next.Agents[next.Next].IsDormant : _vanillaDormant.Contains(bot))
-            { next.GroundRetryAt = Time.realtimeSinceStartup + .25f; return; }
+            {
+                next.RetryAt[next.Next] = Time.realtimeSinceStartup + .25f;
+                next.GroundRetryAt = next.RetryAt[next.Next];
+                for (var i = next.Next + 1; i < next.Bots.Count; i++)
+                    if (next.RetryAt[i] < next.GroundRetryAt) next.GroundRetryAt = next.RetryAt[i];
+                return;
+            }
             next.Next++;
+            next.GroundRetryAt = next.Next < next.RetryAt.Count ? next.RetryAt[next.Next] : 0f;
+            for (var i = next.Next + 1; i < next.RetryAt.Count; i++)
+                if (next.RetryAt[i] < next.GroundRetryAt) next.GroundRetryAt = next.RetryAt[i];
             if (bot != null && !bot.IsDead && bot.GetPlayer?.HealthController is { IsAlive: true }
                 && bot.BotState is EBotState.PreActive or EBotState.NonActive)
             {

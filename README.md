@@ -254,6 +254,18 @@ observation pauses are retained, as are faction and personality sprint settings.
 Repeated transitions or rejected starts produce a bounded `SPRINT LOOP`
 diagnostic, even with Quiet logging enabled, for the next debug ZIP.
 
+### Ghost wake placement (next beta)
+
+Ghost wake-ups validate physical ground and body clearance on the current floor.
+If the current spot is blocked, ORBIT tries nearby lateral positions with a short,
+clear route and a limited height difference. It keeps retrying when none is safe.
+A blocked member no longer delays the other members of its group.
+
+Early bot deaths now record damage type, spawn timing, position and the death
+call chain in diagnostic logs. Updated Raid Review records deaths without a
+killer as KIA and reserves Extracted for confirmed extractions. Older ambiguous
+removals are shown as Removed.
+
 ### Debug ZIP (next beta)
 
 Use **F12 > ORBIT > Create debug ZIP** on the player client. Solo and Fika hosts

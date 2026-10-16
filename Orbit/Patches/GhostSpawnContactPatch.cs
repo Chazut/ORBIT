@@ -15,6 +15,7 @@ public class GhostSpawnRegistrationPatch : ModulePatch
     public static void Prefix(BotOwner __instance)
     {
         Orbit.Helpers.PerformanceJournal.Event("spawn-preactivate", __instance?.ProfileId);
+        Orbit.Helpers.SpawnDeathDiagnostics.Register(__instance);
         Singleton<OrbitManager>.Instance?.DormancySystem.RegisterSpawn(__instance);
     }
 }
@@ -30,6 +31,7 @@ public class GhostSpawnActivationPatch : ModulePatch
         if (value == EBotState.Active)
         {
             Orbit.Helpers.PerformanceJournal.Event("body-active", __instance?.ProfileId);
+            Orbit.Helpers.SpawnDeathDiagnostics.Register(__instance, active: true);
             Singleton<OrbitManager>.Instance?.DormancySystem.RegisterFirstActivation(__instance);
         }
     }

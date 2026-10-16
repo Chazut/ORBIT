@@ -136,6 +136,7 @@ public partial class DormancySystem
         GhostWeaponVisuals.Clear();
         NativeGhostSystem.Clear();
         BotLandingGuard.Clear();
+        SpawnDeathDiagnostics.Clear();
         Api.OrbitTelemetry.ClearGhostFights();
         DormantProfileIds.Clear();
         _throttledBrainAgents.Clear();
@@ -1021,9 +1022,11 @@ public partial class DormancySystem
         try
         {
             using var timing = TransitionPerformance.Measure(TransitionPhase.WakeGroup);
+            var before = SquadDormantCount(squad);
             for (var i = 0; i < squad.Members.Count; i++)
                 // Awake or initializing newcomers already own their body. Never PostActivate them here.
                 if (squad.Members[i].IsDormant) WakeAgentWithReason(squad.Members[i], reason);
+            if (SquadDormantCount(squad) == before) return;
             squad.DormancySleepAllowedAt = Time.time + reason.CooldownSeconds;
             _windowWakes++;
             RecordWake(reason.Cause);
@@ -2781,8 +2784,10 @@ public partial class DormancySystem
         try
         {
             using var timing = TransitionPerformance.Measure(TransitionPhase.WakeGroup);
+            var activated = 0;
             for (var i = 0; i < group.Count; i++)
-                WakeVanillaBotWithReason(group[i], reason);
+                if (WakeVanillaBotWithReason(group[i], reason)) activated++;
+            if (activated == 0) return;
             _vanillaSleepAllowedAt[key] = Time.time + reason.CooldownSeconds;
             _windowWakes++;
             RecordWake(reason.Cause);
@@ -2800,6 +2805,7 @@ public partial class DormancySystem
     {
         if (_vanillaDormant.Contains(bot) && !BotLandingGuard.PrepareWake(bot)) return false;
         if (!_vanillaDormant.Remove(bot)) return false;
+        _vanillaHpBaseline.Remove(bot);
         var wakePose = new GhostWakePose(bot.GetPlayer);
         GhostWakeActivationDiagnostics.Track(bot);
         RecordWakeEvent(bot.GetPlayer, reason);

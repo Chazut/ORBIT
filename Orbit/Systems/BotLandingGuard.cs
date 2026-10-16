@@ -34,8 +34,17 @@ internal static class BotLandingGuard
     private static readonly List<Watch> Watches = new();
     private static readonly List<Rejected> Rejections = new();
     private static readonly Dictionary<BotOwner, float> CorrectedUntil = new();
-    private static readonly Dictionary<BotOwner, float> WakeRetryAt = new();
+    private sealed class WakeSearch
+    {
+        internal Vector3 Origin;
+        internal int Candidate;
+        internal float RetryAt, LogAt;
+    }
+    private static readonly Dictionary<BotOwner, WakeSearch> WakeSearches = new();
+    private const float WakeHeightLimit = 0.65f;
+    private const float WakeRadius = 3f;
     private static readonly NavMeshPath LocalPath = new();
+    private static readonly Vector3[] WakeCorners = new Vector3[64];
     private static float _nextTick;
     private static float _probeWindow;
     private static int _nearbyProbes;
@@ -47,7 +56,7 @@ internal static class BotLandingGuard
         Humans.Clear();
         Rejections.Clear();
         CorrectedUntil.Clear();
-        WakeRetryAt.Clear();
+        WakeSearches.Clear();
         _nextTick = 0f;
         _probeWindow = 0f;
         _nearbyProbes = 0;
@@ -131,49 +140,91 @@ internal static class BotLandingGuard
     {
         var player = bot?.GetPlayer;
         if (player == null || bot.IsDead) return true;
-        if (WakeRetryAt.TryGetValue(bot, out var retry) && Time.time < retry) return false;
         var origin = player.Position;
         if (!BotGroundPlacement.Finite(origin)) return false;
-        if (IsRejected(bot, origin))
+        if (!WakeSearches.TryGetValue(bot, out var search))
         {
-            RefreshHumans();
-            var rejected = new Watch { Bot = bot, Surface = origin, Landing = origin };
-            if (TryNearby(rejected, Humans, out _, out var nearby, out _))
-            { player.Teleport(nearby); WakeRetryAt.Remove(bot); return true; }
-            return false;
+            if (WakeSearches.Count >= 256) WakeSearches.Clear();
+            WakeSearches[bot] = search = new WakeSearch { Origin = origin };
         }
-        if (BotGroundPlacement.TryResolve(player, origin, out var landing, out var reason))
+        if ((search.Origin - origin).sqrMagnitude > .01f)
+        { search.Origin = origin; search.Candidate = 0; search.RetryAt = 0; }
+        if (Time.time < search.RetryAt) return false;
+        var reason = "rejected-position";
+        if (!IsRejected(bot, origin) && BotGroundPlacement.TryResolve(player, origin, out var current, out reason)
+            && SameWakeFloor(origin, current) && ClearOfOtherBodies(bot, current))
         {
-            if ((landing - origin).sqrMagnitude > .0001f) player.Teleport(landing);
-            WakeRetryAt.Remove(bot);
+            if ((current - origin).sqrMagnitude > .0001f) player.Teleport(current);
+            WakeSearches.Remove(bot);
             return true;
         }
-        // Inspect nearby height bands in nearest-first order, never distant path corners.
-        // The horizontal footprint stays within 2m; each candidate needs real capsule support.
-        for (var i = 0; i < 17; i++)
+        // Resume a bounded lateral search across retries. Never probe another height band:
+        // a mesh point above or below the sleeper is not proof of its intended floor.
+        for (var probe = 0; probe < 8; probe++)
         {
             if (!TakeProbe()) { reason = "query-budget"; break; }
-            var height = i == 0 ? 0 : (i + 1) / 2 * (i % 2 == 1 ? 1 : -1);
-            var sample = origin + Vector3.up * height;
-            if (!NavMesh.SamplePosition(sample, out var hit, .75f, NavMesh.AllAreas)) continue;
-            var delta = hit.position - origin;
-            if (delta.x * delta.x + delta.z * delta.z > 4f || Mathf.Abs(delta.y) > 8f
-                || DangerZones.IsInside(hit.position) || IsRejected(bot, hit.position)) continue;
-            if (!BotGroundPlacement.TryResolve(player, hit.position, out landing, out reason)) continue;
+            var index = search.Candidate;
+            search.Candidate = (index + 1) % 32;
+            var radius = index < 8 ? .5f : index < 16 ? 1f : index < 24 ? 2f : WakeRadius;
+            var angle = index % 8 * Mathf.PI / 4f;
+            var candidate = origin + new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle)) * radius;
+            if (!NavMesh.SamplePosition(candidate, out var hit, .35f, NavMesh.AllAreas))
+            { reason = "no-local-mesh"; continue; }
+            if (!SameWakeFloor(origin, hit.position)) { reason = "different-floor"; continue; }
+            if (DangerZones.IsInside(hit.position) || IsRejected(bot, hit.position))
+            { reason = "unsafe-destination"; continue; }
+            if (!BotGroundPlacement.TryResolve(player, hit.position, out var landing, out reason)) continue;
+            if (!SameWakeFloor(origin, landing)) { reason = "different-floor"; continue; }
             if (!ClearOfOtherBodies(bot, landing)) { reason = "another-body"; continue; }
+            if (!ConnectedWakeFloor(bot, origin, hit.position, landing))
+            { reason = "blocked-segment"; continue; }
             player.Teleport(landing);
-            WakeRetryAt.Remove(bot);
-            Log.Info($"GHOST WAKE GROUND: {bot.Profile.Nickname} supported before activation from={origin} to={landing}");
+            WakeSearches.Remove(bot);
+            Log.Info($"GHOST WAKE GROUND: {bot.Profile.Nickname} supported before activation from={origin} to={landing} sameFloor=True");
             return true;
         }
-        // A failed physical query must not turn into an unchecked placement. Keep the sleeper
-        // eligible for the next wake attempt; urgent requests still bypass the ordinary wake queue.
-        if (!WakeRetryAt.ContainsKey(bot))
-            Log.Warning($"GHOST WAKE GROUND: {bot.Profile.Nickname} activation deferred at={origin} reason={reason}");
-        if (WakeRetryAt.Count >= 256) WakeRetryAt.Clear();
-        WakeRetryAt[bot] = Time.time + .25f;
+        if (Time.time >= search.LogAt)
+        {
+            Log.Warning($"GHOST WAKE GROUND: {bot.Profile.Nickname} activation deferred at={origin} reason={reason} nextProbe={search.Candidate}");
+            search.LogAt = Time.time + 10f;
+        }
+        search.RetryAt = Time.time + .25f;
         return false;
     }
+
+    private static bool SameWakeFloor(Vector3 origin, Vector3 target)
+    {
+        var delta = target - origin;
+        return BotGroundPlacement.Finite(target) && Mathf.Abs(delta.y) <= WakeHeightLimit
+            && delta.x * delta.x + delta.z * delta.z <= WakeRadius * WakeRadius + .001f;
+    }
+
+    private static bool ConnectedWakeFloor(BotOwner bot, Vector3 origin, Vector3 mesh, Vector3 landing)
+    {
+        // A complete route alone can connect two floors by taking a distant staircase.
+        // Require a short route whose entire height stays within the starting floor band.
+        if (!NavMesh.CalculatePath(origin, mesh, NavMesh.AllAreas, LocalPath)
+            || LocalPath.status != NavMeshPathStatus.PathComplete) return false;
+        var count = LocalPath.GetCornersNonAlloc(WakeCorners);
+        if (count == 0 || count >= WakeCorners.Length) return false;
+        var length = 0f;
+        var previous = origin;
+        for (var i = 0; i < count; i++)
+        {
+            var corner = WakeCorners[i];
+            if (!SameWakeFloor(origin, corner)) return false;
+            length += Vector3.Distance(previous, corner);
+            previous = corner;
+        }
+        length += Vector3.Distance(previous, mesh);
+        if (length > Vector3.Distance(origin, mesh) * 1.5f + .5f) return false;
+        var mask = bot.GetPlayer.MovementContext.GroundMask;
+        foreach (var height in WakeClearanceHeights)
+            if (Physics.Linecast(origin + Vector3.up * height, landing + Vector3.up * height,
+                    mask, QueryTriggerInteraction.Ignore)) return false;
+        return true;
+    }
+    private static readonly float[] WakeClearanceHeights = { .35f, 1f, 1.5f };
 
     private static void Place(BotOwner bot, Vector3 surface, Vector3 landing, string source, Action repath, bool corrected)
     {
@@ -193,74 +244,19 @@ internal static class BotLandingGuard
     internal static void Wake(BotOwner bot, Vector3 surface, Action repath = null)
     {
         if (bot == null || bot.IsDead || bot.GetPlayer == null) return;
-        var from = bot.GetPlayer.Position;
-        if (!BotGroundPlacement.Finite(surface)) surface = from;
-        // A stale path corner must not turn a wake adjustment into a long-range teleport.
-        if ((surface - from).sqrMagnitude > 4f) surface = from;
-        if (Mathf.Abs(surface.y - from.y) > 0.65f)
-        {
-            if (BotGroundPlacement.HasSupport(bot.GetPlayer))
-            {
-                TryRecover(bot, from, "wake", repath);
-                return;
-            }
-            RefreshHumans();
-            if (TryWakeLanding(bot, from, surface, out var resolvedSurface, out var landing, out var reason))
-            {
-                Place(bot, resolvedSurface, landing, "wake-validated", repath, Corrected(bot));
-                return;
-            }
-            // Retain the nearby mesh height for fall detection. Replacing it with the unsupported
-            // Ghost height would make the short floor probe miss the very floor we need to detect.
-            Watches.RemoveAll(w => ReferenceEquals(w.Bot, bot));
-            Watches.Add(new Watch { Bot = bot, Surface = surface, Landing = from, Source = "wake-pending",
-                Started = Time.time, NextRetry = Time.time + 0.5f, Repath = repath });
-            Log.Warning($"GROUND PLACEMENT: {bot.Profile.Nickname} wake validation deferred from={from} surface={surface} reason={reason}");
-            return;
-        }
-        if (!TryPlace(bot, surface, "wake", repath, validateGround: true))
-        {
-            if (IsRejected(bot, surface) && TryRecover(bot, surface, "wake", repath)) return;
-            // Activation may have changed the controller. Recheck the actual body instead of
-            // trusting a zero-height adjustment as proof of support.
-            if (PrepareWake(bot)) TryPlace(bot, bot.GetPlayer.Position, "wake", repath, validateGround: true);
-        }
+        // Activation and native path corners must obey the same floor guard as PrepareWake.
+        // Certify the actual pose again instead of snapping to a stale corner on another floor.
+        if (!PrepareWake(bot)) return;
+        var landing = bot.GetPlayer.Position;
+        Watches.RemoveAll(w => ReferenceEquals(w.Bot, bot));
+        Watches.Add(new Watch { Bot = bot, Surface = landing, Landing = landing, Source = "wake",
+            Started = Time.time, NextRetry = Time.time + .5f, Repath = repath });
     }
 
     private static bool TakeProbe()
     {
         if (Time.time >= _probeWindow) { _probeWindow = Time.time + 0.2f; _nearbyProbes = 0; }
         return _nearbyProbes++ < 32;
-    }
-
-    private static bool TryWakeLanding(BotOwner bot, Vector3 origin, Vector3 mesh,
-        out Vector3 surface, out Vector3 landing, out string reason)
-    {
-        surface = landing = default;
-        reason = "no-local-landing";
-        for (var probe = 0; probe < 9; probe++)
-        {
-            if (!TakeProbe()) { reason = "query-budget"; return false; }
-            var angle = (probe - 1) * Mathf.PI / 4f;
-            var candidate = probe == 0 ? mesh : mesh + new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle)) * 1.25f;
-            if (!NavMesh.SamplePosition(candidate, out var hit, 0.3f, NavMesh.AllAreas)
-                || (hit.position - origin).sqrMagnitude > 4f || Mathf.Abs(hit.position.y - mesh.y) > 0.65f
-                || IsRejected(bot, hit.position) || DangerZones.IsInside(hit.position)) continue;
-            if (probe != 0 && (!NavMesh.CalculatePath(mesh, hit.position, NavMesh.AllAreas, LocalPath)
-                || LocalPath.status != NavMeshPathStatus.PathComplete)) continue;
-            if (!BotGroundPlacement.TryResolve(bot.GetPlayer, hit.position, out landing, out reason)) continue;
-            if ((landing - origin).sqrMagnitude > 4f) { reason = "wake-distance-limit"; continue; }
-            if (!ClearOfOtherBodies(bot, landing)) { reason = "another-body"; continue; }
-            if (!Hidden(origin, landing, Humans)) { reason = "human-visible"; continue; }
-            // Check the short horizontal approach at the verified floor height. A body already
-            // below that floor must be allowed to cross back upward through its support surface.
-            var start = new Vector3(origin.x, hit.position.y + 1f, origin.z);
-            if (Physics.Linecast(start, landing + Vector3.up, bot.GetPlayer.MovementContext.GroundMask,
-                    QueryTriggerInteraction.Ignore)) { reason = "blocked-segment"; continue; }
-            surface = hit.position;
-            return true;
-        }
-        return false;
     }
 
     internal static bool TryRecover(BotOwner bot, Vector3 surface, string source, Action repath = null)
@@ -418,7 +414,8 @@ internal static class BotLandingGuard
             if (!NavMesh.CalculatePath(watch.Surface, hit.position, NavMesh.AllAreas, LocalPath)
                 || LocalPath.status != NavMeshPathStatus.PathComplete) { reason = "disconnected-navmesh"; continue; }
             if (!BotGroundPlacement.TryResolve(watch.Bot.GetPlayer, hit.position, out landing, out reason)) continue;
-            if ((landing - watch.Landing).sqrMagnitude > 9f) { reason = "local-distance-limit"; continue; }
+            if (!SameWakeFloor(watch.Surface, landing)
+                || (landing - watch.Landing).sqrMagnitude > 9f) { reason = "local-floor-limit"; continue; }
             if (!ClearOfOtherBodies(watch.Bot, landing)) { reason = "another-body"; continue; }
             if (!Hidden(watch.Bot.GetPlayer.Position, landing, humans)) { reason = "human-visible"; continue; }
             // A short complete route can still go around a wall. Never teleport through that wall.
