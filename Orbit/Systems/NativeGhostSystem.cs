@@ -167,6 +167,7 @@ public sealed partial class NativeGhostSystem
         if (!SainCleanupScopeReady || !SainStopGuardReady) return Refuse("sain-bridge");
         if (!MoveOrderReady || !PointOrderReady || !WayOrderReady || !GoalOrderReady) return Refuse("movement-bridge");
         if (!NativeGhostBodyPatches.Ready) return Refuse("body-operation-bridge");
+        if (!BotHealingFixesCompat.AllowsNativeSleep) return Refuse("bot-healing-fixes-bridge");
         try
         {
             var decision = bot.Brain.LastDecision;

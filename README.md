@@ -231,6 +231,16 @@ mods (AILimit, Adaptive Bot Culling...). Their systems overlap with ORBIT's
 objectives, looting or Ghost Mode. Supported faction mods have their own
 **Take over** toggles; leave them OFF to retain the author's behaviour.
 
+### Bot Healing Fixes (next beta)
+
+Bot Healing Fixes 1.0.0 is detected automatically when installed. Its first-aid
+and surgery replacement keeps control of awake bots. For native bots in Ghost,
+ORBIT guards the asynchronous medicine entry before it touches the body or
+starts an item operation: simulated wound care stays simulated, while physical
+care requests a wake before normal medical decisions retry. No setting is needed.
+If the optional bridge cannot bind to a changed API, native bots stay awake and
+the log explains the fallback. Other Bot Healing Fixes patches remain unchanged.
+
 ## Troubleshooting
 
 ### Sprint stability (next beta)

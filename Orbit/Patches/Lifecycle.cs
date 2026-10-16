@@ -25,6 +25,7 @@ public class OrbitInitPatch : ModulePatch
     public static void Postfix(BotsController __instance)
     {
         Log.Debug("Initializing ORBIT runtime");
+        BotHealingFixesCompat.Enable();
 
         // Re-fetch the server config before anything reads it this raid, so a Save in the server
         // web UI applies on the next raid without restarting the game.

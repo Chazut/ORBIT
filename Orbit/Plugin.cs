@@ -151,6 +151,7 @@ public class Plugin : BaseUnityPlugin
         EnableSafe(new NativeFollowerArrivalDiagnosticPatch());
         EnableSafe(new NativeGlukharChoiceDiagnosticPatch());
         NativeGhostBodyPatches.Enable();
+        BotHealingFixesCompat.Enable();
         SanitarPatrolMedicinePatch.Enable();
         SniperSainDecisionPatch.Enable();
         LootPatrolResumePatch.Enable();
