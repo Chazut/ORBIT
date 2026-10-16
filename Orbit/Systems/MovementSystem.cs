@@ -705,11 +705,6 @@ public partial class MovementSystem
         if (Math.Abs(speedDelta) > 1e-8)
             bot.Mover.SetTargetMoveSpeed(movementSpeed);
 
-        // Sprint
-        var shouldSprint = WantsTravelSprint(agent, movement.Sprint) && CanSprint(agent) && !doorsNearby;
-        if (player.Physical.Sprinting != shouldSprint)
-            player.EnableSprint(shouldSprint);
-
         // Path handling
         var moveVector = movement.Path[movement.CurrentCorner] - agent.Position;
         var nextCornerIndex = movement.CurrentCorner + 1;
@@ -718,7 +713,8 @@ public partial class MovementSystem
         if (hasNextCorner)
         {
             var cornerReached = false;
-            var cornerReachedEps = bot.Mover.Sprinting ? CornerSprintEpsSqr : CornerWalkEpsSqr;
+            // ORBIT drives Player directly; the paused native mover's sprint flag can be stale.
+            var cornerReachedEps = player.Physical.Sprinting ? CornerSprintEpsSqr : CornerWalkEpsSqr;
             var moveVectorSqrMag = moveVector.sqrMagnitude;
 
             if (moveVectorSqrMag <= cornerReachedEps)
@@ -783,7 +779,27 @@ public partial class MovementSystem
             || (agent.Position - beforeRecovery).sqrMagnitude > .04f)
         { StopAwakeInput(agent); return; }
 
+        // Decide after advancing corners and computing steering, so the old corner does not
+        // request sprint while the body needs to turn toward the next segment.
         var moveDir = CalcMoveDirection(moveVector, player.Rotation);
+        var headingDot = moveDir.normalized.y;
+        var distanceSqr = (movement.Target - agent.Position).sqrMagnitude;
+        var wantsSprint = WantsTravelSprint(agent, movement.Sprint);
+        var shouldSprint = movement.SprintControl.Evaluate(wantsSprint,
+            wantsSprint && CanSprint(agent) && (player.Physical.Sprinting || player.Physical.CanSprint) && !doorsNearby,
+            player.Physical.Sprinting, distanceSqr, headingDot, Time.time);
+        if (movement.SprintControl.ReportLoop)
+            Log.Always($"SPRINT LOOP: {agent} reason={movement.SprintControl.Reason} requested={wantsSprint} "
+                + $"physical={player.Physical.Sprinting} headingDot={headingDot:F2} distanceSqr={distanceSqr:F1} "
+                + $"indoors={bot.AIData.EnvironmentId != 0} look={agent.Look.Target != null} "
+                + $"nativeAllowed={player.Physical.CanSprint} objective={agent.Objective.Location}");
+        if (player.Physical.Sprinting != shouldSprint)
+        {
+            Log.Debug($"{agent} sprint transition: {player.Physical.Sprinting}->{shouldSprint} "
+                + $"reason={movement.SprintControl.Reason} headingDot={headingDot:F2} distanceSqr={distanceSqr:F1}");
+            player.EnableSprint(shouldSprint);
+        }
+
         player.CharacterController.SetSteerDirection(moveVector);
         player.Move(moveDir);
         bot.AimingManager.CurrentAiming.Move(player.Speed);

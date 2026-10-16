@@ -233,6 +233,17 @@ objectives, looting or Ghost Mode. Supported faction mods have their own
 
 ## Troubleshooting
 
+### Sprint stability (next beta)
+
+Awake bots controlled by ORBIT walk through short cover adjustments and sharp
+turns. Sprint starts require an aligned, stable direction for 0.35 seconds and
+at least 8 m to the destination; bots already running slow down within 5 m.
+Rejected native sprint requests wait for another stable window before retrying.
+Path corners use the player's actual sprint state. Existing guard and travel
+observation pauses are retained, as are faction and personality sprint settings.
+Repeated transitions or rejected starts produce a bounded `SPRINT LOOP`
+diagnostic, even with Quiet logging enabled, for the next debug ZIP.
+
 Bots frozen or acting weird? In order: check for the unsupported mods
 above, test with vanilla raid times (extended raids are a known trouble
 source), and if you run ABPS try regenerating its config. Still broken:
