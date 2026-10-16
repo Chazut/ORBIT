@@ -3,7 +3,7 @@
 @typeparam T where T : struct, System.Numerics.INumber<T>
 
 <div class="mb-1">
-    <div class="d-flex align-center" style="gap:6px">
+    <div class="d-flex align-center" style="@(Disabled ? "gap:6px; opacity:.5; filter:grayscale(1)" : "gap:6px")">
         <MudText Typo="Typo.body2">@Label</MudText>
         @if (!string.IsNullOrEmpty(Tooltip))
         {
@@ -15,7 +15,7 @@
         @if (_editing)
         {
             <input @ref="_input" value="@_editText" inputmode="decimal" autocomplete="off" spellcheck="false"
-                   placeholder="@EditPlaceholder"
+                   placeholder="@EditPlaceholder" disabled="@Disabled"
                    @oninput="@(e => _editText = e.Value?.ToString() ?? "")"
                    @onkeydown="OnEditKey" @onblur="CommitEdit"
                    style="width:86px; text-align:right; font:inherit; font-size:.875rem; font-variant-numeric:tabular-nums; color:var(--mud-palette-primary); background:rgba(255,255,255,.06); border:1px solid var(--mud-palette-primary); border-radius:6px; padding:0 6px; outline:none" />
@@ -26,20 +26,21 @@
         }
         else
         {
-            <span title="@($"Click to type a value ({FormatValue(Min)} to {FormatValue(Max)})")" @onclick="BeginEdit"
-                  style="cursor:text; border-bottom:1px dashed rgba(255,180,84,.45)">
+            <span title="@(Disabled ? null : $"Click to type a value ({FormatValue(Min)} to {FormatValue(Max)})")" @onclick="BeginEdit"
+                  style="@(Disabled ? "cursor:default" : "cursor:text; border-bottom:1px dashed rgba(255,180,84,.45)")">
                 <MudText Typo="Typo.body2" Color="Color.Primary" Style="font-variant-numeric: tabular-nums">@Display</MudText>
             </span>
         }
     </div>
     <MudSlider T="T" Value="Value" ValueChanged="OnChanged" Min="Min" Max="Max" Step="Step"
-               Immediate="true" Color="Color.Primary" Size="Size.Small" />
+               Immediate="true" Color="Color.Primary" Size="Size.Small" Disabled="Disabled" />
 </div>
 
 @code {
     [Parameter] public string Label { get; set; } = "";
     [Parameter] public string Tooltip { get; set; } = "";
     [Parameter] public T Value { get; set; }
+    [Parameter] public bool Disabled { get; set; }
     [Parameter] public EventCallback<T> ValueChanged { get; set; }
     [Parameter] public T Min { get; set; }
     [Parameter] public T Max { get; set; }
@@ -60,7 +61,19 @@
 
     private string FormatValue(T v) => Fmt is null ? v.ToString() ?? "" : v.ToString(Fmt, CultureInfo.InvariantCulture);
 
-    private Task OnChanged(T v) { Value = v; return ValueChanged.InvokeAsync(v); }
+    private Task OnChanged(T v)
+    {
+        if (Disabled) return Task.CompletedTask;
+        Value = v;
+        return ValueChanged.InvokeAsync(v);
+    }
+
+    protected override void OnParametersSet()
+    {
+        if (!Disabled) return;
+        _editing = false;
+        _focusPending = false;
+    }
 
     // ── typed value ──
     // Percent settings ("P0") are stored as fractions and typed as percents; everything else is typed raw.
@@ -85,6 +98,7 @@
 
     private void BeginEdit()
     {
+        if (Disabled) return;
         // Empty field with the current value as placeholder: typing replaces the value straight away, no
         // need to select the old text first (that would take a script). Leaving it empty changes nothing.
         _editText = "";
@@ -108,7 +122,7 @@
 
     private Task CommitEdit()
     {
-        if (!_editing) return Task.CompletedTask; // Enter already committed, this is the blur that follows
+        if (Disabled || !_editing) return Task.CompletedTask; // Enter already committed, this is the blur that follows
         _editing = false;
         var text = _editText.Trim().TrimEnd('%').Trim().Replace(',', '.');
         if (text.Length == 0) return Task.CompletedTask;

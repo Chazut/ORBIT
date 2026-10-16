@@ -8,7 +8,7 @@
         @if (OnReset.HasDelegate)
         {
             <MudTooltip Text="Restore this section's default values. Nothing is written until you hit Save." Placement="Placement.Bottom" Arrow="true">
-                <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.RestartAlt" OnClick="DoReset">Reset</MudButton>
+                <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.RestartAlt" OnClick="DoReset" Disabled="ResetDisabled">Reset</MudButton>
             </MudTooltip>
         }
     </div>
@@ -24,9 +24,11 @@
     [Parameter] public string Subtitle { get; set; } = "";
     [Parameter] public RenderFragment? ChildContent { get; set; }
     [Parameter] public EventCallback OnReset { get; set; }
+    [Parameter] public bool ResetDisabled { get; set; }
 
     private async Task DoReset()
     {
+        if (ResetDisabled) return;
         await OnReset.InvokeAsync();
         Snackbar.Add($"{Title}: defaults restored. Hit Save to apply.", Severity.Info);
     }

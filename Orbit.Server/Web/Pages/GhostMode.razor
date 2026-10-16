@@ -10,7 +10,7 @@
         <MudChip T="string" Color="Color.Primary" Size="Size.Small" Variant="Variant.Outlined">New in 2.0</MudChip>
         <MudSpacer />
         <MudTooltip Text="Restore this page's default values. Nothing is written until you hit Save." Placement="Placement.Bottom" Arrow="true">
-            <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.RestartAlt" OnClick="ResetPage">Reset page</MudButton>
+            <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.RestartAlt" OnClick="ResetPage" Disabled="GhostSettingsDisabled">Reset page</MudButton>
         </MudTooltip>
     </div>
     <MudText Typo="Typo.body2" Class="mb-3" Style="opacity:.6">
@@ -22,23 +22,23 @@
         Do not combine with AI-limiter or bot-culling mods (AI Limit, Adaptive Bot Culling, QuestingBots sleeping...).
     </MudAlert>
 
-    <SettingsCard Title="Limiter" OnReset="ResetLimiter">
+    <SettingsCard Title="Limiter" OnReset="ResetLimiter" ResetDisabled="GhostSettingsDisabled">
         <OrbitSwitch @bind-Value="Cfg.GhostMode.Enabled" Label="Enable Ghost Mode"
                      Tooltip="Sleeps far-away bots while their supported behaviour continues. Covers ORBIT squads and, with native movement enabled, vanilla patrols and supported faction hunts. The type toggles below control who may sleep; the BTR is never touched." />
-        <OrbitSwitch @bind-Value="Cfg.GhostMode.WakeForSpectators" Label="Wake bots for spectating"
+        <OrbitSwitch Disabled="GhostSettingsDisabled" @bind-Value="Cfg.GhostMode.WakeForSpectators" Label="Wake bots for spectating"
                      Tooltip="ON (default): wakes all sleeping bots and pauses Ghost Mode when the last human player dies or extracts. In co-op, waits until nobody is still playing; the headless host does not count. Ghost Mode resumes if a player returns. Saves apply from the next raid." />
-        <OrbitSwitch @bind-Value="Cfg.GhostMode.GhostMovement" Label="Ghost movement"
+        <OrbitSwitch Disabled="GhostSettingsDisabled" @bind-Value="Cfg.GhostMode.GhostMovement" Label="Ghost movement"
                      Tooltip="ON: sleeping bots advance along their planned routes. Native bots also need Vanilla / faction movement below. OFF: sleepers hold position." />
-        <OrbitSwitch @bind-Value="Cfg.GhostMode.NativeGhostMovement" Label="Vanilla / faction movement"
+        <OrbitSwitch Disabled="GhostSettingsDisabled" @bind-Value="Cfg.GhostMode.NativeGhostMovement" Label="Vanilla / faction movement"
                      Tooltip="Keeps supported bots moving without faction takeover: vanilla patrols and followers, plus MoreBotsAPI hunt, regroup and search. Their original behaviour chooses where to go. Ordinary unlocked doors work in Ghost; unsupported actions and special door interactions require waking. Requires Ghost movement. OFF: bots without takeover sleep in place." />
-        <OrbitSwitch @bind-Value="Cfg.GhostMode.GhostLooting" Label="Ghost looting"
+        <OrbitSwitch Disabled="GhostSettingsDisabled" @bind-Value="Cfg.GhostMode.GhostLooting" Label="Ghost looting"
                      Tooltip="ON (default): sleeping ORBIT squads keep looting containers, corpses and loose items along their routes, so the raid economy keeps evolving off-screen. OFF: sleepers walk past everything and the loot waits for you." />
-        <MudSelect T="string" @bind-Value="Cfg.GhostMode.GhostAwakeBehavior" Label="Ghost meets awake bot" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mt-3" Style="max-width: 480px"
+        <MudSelect Disabled="GhostSettingsDisabled" T="string" @bind-Value="Cfg.GhostMode.GhostAwakeBehavior" Label="Ghost meets awake bot" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mt-3" Style="max-width: 480px"
                    HelperText="Applies to ORBIT, vanilla and faction groups. Combat, player distance, scoped view and other sleep protections always apply. If the awake group cannot safely sleep, the Ghost wakes as before.">
             <MudSelectItem T="string" Value="@("sleep_awake")">Put the awake group into Ghost (default)</MudSelectItem>
             <MudSelectItem T="string" Value="@("wake_ghost")">Wake the Ghost group</MudSelectItem>
         </MudSelect>
-        <MudSelect T="string" @bind-Value="Cfg.GhostMode.GhostFightsMode" Label="Ghost fights" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mt-3" Style="max-width: 380px"
+        <MudSelect Disabled="GhostSettingsDisabled" T="string" @bind-Value="Cfg.GhostMode.GhostFightsMode" Label="Ghost fights" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mt-3" Style="max-width: 380px"
                    HelperText="Uses the game's hostility rules for ORBIT, vanilla and faction groups. In Simulated mode, both sides stay asleep; a side waking brings the encounter back to real combat.">
             <MudSelectItem T="string" Value="@("simulated")">Simulated: statistical resolution, zero cost (default)</MudSelectItem>
             <MudSelectItem T="string" Value="@("real")">Real fights: wake both units and let the AI fight it out</MudSelectItem>
@@ -46,7 +46,7 @@
         </MudSelect>
         @if (Cfg.GhostMode.GhostFightsMode != "off")
         {
-            <MudSelect T="string" @bind-Value="Cfg.GhostMode.GhostFightFrequency" Label="Ghost fight frequency" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mt-3" Style="max-width: 380px"
+            <MudSelect Disabled="GhostSettingsDisabled" T="string" @bind-Value="Cfg.GhostMode.GhostFightFrequency" Label="Ghost fight frequency" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mt-3" Style="max-width: 380px"
                        HelperText="Scales the contact odds and the cooldown between rematches, never the outcome. In short: frequency = how often the shooting starts, lethality = how many body bags per firefight.">
                 <MudSelectItem T="string" Value="@("rare")">Rare: lower contact odds, longer cooldown between rematches</MudSelectItem>
                 <MudSelectItem T="string" Value="@("normal")">Normal (default)</MudSelectItem>
@@ -56,27 +56,27 @@
         @if (Cfg.GhostMode.GhostFightsMode == "simulated")
         {
             <div class="mt-2"></div>
-            <OrbitSlider T="float" @bind-Value="Cfg.GhostMode.GhostFightLethality" Label="Ghost fight lethality" Unit="x"
+            <OrbitSlider Disabled="GhostSettingsDisabled" T="float" @bind-Value="Cfg.GhostMode.GhostFightLethality" Label="Ghost fight lethality" Unit="x"
                          Min="0.5f" Max="2f" Step="0.1f" Fmt="0.0"
                          Tooltip="Casualty multiplier for simulated fights. At 0.5x a fight that would kill 1 bot flips a coin between 0 and 1 (shots heard, everyone walks away); at 2x it kills 2. In short: frequency = how often the shooting starts, lethality = how many body bags per firefight." />
             <div class="mt-1"></div>
-            <OrbitSwitch @bind-Value="Cfg.GhostMode.GhostFightSounds" Label="Ghost fight sounds"
+            <OrbitSwitch Disabled="GhostSettingsDisabled" @bind-Value="Cfg.GhostMode.GhostFightSounds" Label="Ghost fight sounds"
                          Tooltip="ON (default): a simulated fight plays a burst of distant gunfire at its location, using the fighters' real weapon sounds, so you can hear where the off-screen action is and go investigate. Only plays when you are close enough to hear it." />
         }
-        <OrbitSwitch @bind-Value="Cfg.GhostMode.FullSleep" Label="Let everyone sleep"
+        <OrbitSwitch Disabled="GhostSettingsDisabled" @bind-Value="Cfg.GhostMode.FullSleep" Label="Let everyone sleep"
                      Tooltip="ON (default): no population floor — far from every human, the whole map may sleep. Maximum performance. OFF: the minimum below is kept awake as a permanent real-world backdrop." />
         @if (!Cfg.GhostMode.FullSleep)
         {
             <div class="mt-3"></div>
-            <OrbitSlider T="int" @bind-Value="Cfg.GhostMode.MinAwakeBots" Label="Minimum awake bots"
+            <OrbitSlider Disabled="GhostSettingsDisabled" T="int" @bind-Value="Cfg.GhostMode.MinAwakeBots" Label="Minimum awake bots"
                          Min="0" Max="30" Step="1"
                          Tooltip="Population floor: keeps at least this many bots awake, meaning PMCs, PlayerScavs, and any type whose default-dormant toggle below is OFF. Default-dormant types never take a floor slot. On small maps the floor self-caps so everything can still sleep." />
         }
     </SettingsCard>
 
-    <SettingsCard Title="Ghost hearing" OnReset="ResetHearing"
+    <SettingsCard Title="Ghost hearing" OnReset="ResetHearing" ResetDisabled="GhostSettingsDisabled"
                   Subtitle="Investigate real and simulated gunfire while in Ghost. Includes vanilla bots and supported factions; UNTAR/RUAF checkpoint guards keep their posts.">
-        <OrbitSwitch @bind-Value="Cfg.GhostMode.GhostHearing" Label="Investigate gunfire while in Ghost"
+        <OrbitSwitch Disabled="GhostSettingsDisabled" @bind-Value="Cfg.GhostMode.GhostHearing" Label="Investigate gunfire while in Ghost"
                      Tooltip="Hear real gunfire and simulated fights within the distances configured below. Eligible groups may leave their current route to investigate. Saves apply from the next raid." />
         @if (Cfg.GhostMode.GhostHearing)
         {
@@ -88,12 +88,12 @@
                 <MudGrid Spacing="2" Class="align-center">
                     <MudItem xs="12" sm="4"><MudText Typo="Typo.body2">PMCs / PlayerScavs</MudText></MudItem>
                     <MudItem xs="6" sm="4">
-                        <MudNumericField T="float" @bind-Value="Cfg.GhostMode.GhostHearingPlayersRange" Label="Unsuppressed"
+                        <MudNumericField Disabled="GhostSettingsDisabled" T="float" @bind-Value="Cfg.GhostMode.GhostHearingPlayersRange" Label="Unsuppressed"
                                          Min="50f" Max="1000f" Step="10f" Format="0" Variant="Variant.Outlined" Margin="Margin.Dense"
                                          Adornment="Adornment.End" AdornmentText="m" />
                     </MudItem>
                     <MudItem xs="6" sm="4">
-                        <MudNumericField T="float" @bind-Value="Cfg.GhostMode.GhostHearingPlayersSuppressedRange" Label="Suppressed"
+                        <MudNumericField Disabled="GhostSettingsDisabled" T="float" @bind-Value="Cfg.GhostMode.GhostHearingPlayersSuppressedRange" Label="Suppressed"
                                          Min="50f" Max="1000f" Step="10f" Format="0" Variant="Variant.Outlined" Margin="Margin.Dense"
                                          Adornment="Adornment.End" AdornmentText="m" />
                     </MudItem>
@@ -103,12 +103,12 @@
                         </MudTooltip>
                     </MudItem>
                     <MudItem xs="6" sm="4">
-                        <MudNumericField T="float" @bind-Value="Cfg.GhostMode.GhostHearingVanillaRange" Label="Unsuppressed"
+                        <MudNumericField Disabled="GhostSettingsDisabled" T="float" @bind-Value="Cfg.GhostMode.GhostHearingVanillaRange" Label="Unsuppressed"
                                          Min="50f" Max="1000f" Step="10f" Format="0" Variant="Variant.Outlined" Margin="Margin.Dense"
                                          Adornment="Adornment.End" AdornmentText="m" />
                     </MudItem>
                     <MudItem xs="6" sm="4">
-                        <MudNumericField T="float" @bind-Value="Cfg.GhostMode.GhostHearingVanillaSuppressedRange" Label="Suppressed"
+                        <MudNumericField Disabled="GhostSettingsDisabled" T="float" @bind-Value="Cfg.GhostMode.GhostHearingVanillaSuppressedRange" Label="Suppressed"
                                          Min="50f" Max="1000f" Step="10f" Format="0" Variant="Variant.Outlined" Margin="Margin.Dense"
                                          Adornment="Adornment.End" AdornmentText="m" />
                     </MudItem>
@@ -118,12 +118,12 @@
                         </MudTooltip>
                     </MudItem>
                     <MudItem xs="6" sm="4">
-                        <MudNumericField T="float" @bind-Value="Cfg.GhostMode.GhostHearingFactionsRange" Label="Unsuppressed"
+                        <MudNumericField Disabled="GhostSettingsDisabled" T="float" @bind-Value="Cfg.GhostMode.GhostHearingFactionsRange" Label="Unsuppressed"
                                          Min="50f" Max="1000f" Step="10f" Format="0" Variant="Variant.Outlined" Margin="Margin.Dense"
                                          Adornment="Adornment.End" AdornmentText="m" />
                     </MudItem>
                     <MudItem xs="6" sm="4">
-                        <MudNumericField T="float" @bind-Value="Cfg.GhostMode.GhostHearingFactionsSuppressedRange" Label="Suppressed"
+                        <MudNumericField Disabled="GhostSettingsDisabled" T="float" @bind-Value="Cfg.GhostMode.GhostHearingFactionsSuppressedRange" Label="Suppressed"
                                          Min="50f" Max="1000f" Step="10f" Format="0" Variant="Variant.Outlined" Margin="Margin.Dense"
                                          Adornment="Adornment.End" AdornmentText="m" />
                     </MudItem>
@@ -133,21 +133,21 @@
                 <summary style="cursor:pointer; font-weight:500; padding:6px 0">Investigation rules</summary>
                 <MudGrid Spacing="3" Class="mt-1">
                     <MudItem xs="12" sm="6">
-                        <OrbitSlider T="int" @bind-Value="Cfg.GhostMode.GhostHearingMinShots" Label="Minimum shots" Min="1" Max="30" Step="1"
+                        <OrbitSlider Disabled="GhostSettingsDisabled" T="int" @bind-Value="Cfg.GhostMode.GhostHearingMinShots" Label="Minimum shots" Min="1" Max="30" Step="1"
                                      Tooltip="Real gunfire needs this many shots in the same area before a group can roll to investigate. Simulated Ghost fights already count as a combat." />
                     </MudItem>
                     <MudItem xs="12" sm="6">
-                        <OrbitSlider T="float" @bind-Value="Cfg.GhostMode.GhostHearingCooldownSeconds" Label="Investigation cooldown" Unit="s"
+                        <OrbitSlider Disabled="GhostSettingsDisabled" T="float" @bind-Value="Cfg.GhostMode.GhostHearingCooldownSeconds" Label="Investigation cooldown" Unit="s"
                                      Min="0f" Max="600f" Step="5f" Fmt="0"
                                      Tooltip="Minimum time between starting two investigations for the same group. A busy group still finishes its current activity before investigating again." />
                     </MudItem>
                     <MudItem xs="12" sm="6">
-                        <OrbitSlider T="float" @bind-Value="Cfg.GhostMode.GhostHearingMemorySeconds" Label="Gunfire memory" Unit="s"
+                        <OrbitSlider Disabled="GhostSettingsDisabled" T="float" @bind-Value="Cfg.GhostMode.GhostHearingMemorySeconds" Label="Gunfire memory" Unit="s"
                                      Min="1f" Max="180f" Step="1f" Fmt="0"
                                      Tooltip="How long a combat remains eligible after its last real shot or the end of a simulated fight. Each group still rolls only once per combat." />
                     </MudItem>
                     <MudItem xs="12" sm="6">
-                        <OrbitSlider T="float" @bind-Value="Cfg.GhostMode.GhostHearingClusterRadius" Label="Gunfire grouping radius" Unit="m"
+                        <OrbitSlider Disabled="GhostSettingsDisabled" T="float" @bind-Value="Cfg.GhostMode.GhostHearingClusterRadius" Label="Gunfire grouping radius" Unit="m"
                                      Min="1f" Max="150f" Step="1f" Fmt="0"
                                      Tooltip="Real shots within this distance of a remembered combat count toward that same combat. Smaller values separate nearby firefights; larger values combine them." />
                     </MudItem>
@@ -161,97 +161,97 @@
                 </MudText>
                 <MudGrid Spacing="3">
                     <MudItem xs="12" sm="6">
-                        <OrbitSlider T="int" @bind-Value="Cfg.GhostMode.GhostHearingVeryAggressivePct" Label="Very aggressive" Unit="%" Min="0" Max="100" Step="1" />
+                        <OrbitSlider Disabled="GhostSettingsDisabled" T="int" @bind-Value="Cfg.GhostMode.GhostHearingVeryAggressivePct" Label="Very aggressive" Unit="%" Min="0" Max="100" Step="1" />
                     </MudItem>
                     <MudItem xs="12" sm="6">
-                        <OrbitSlider T="int" @bind-Value="Cfg.GhostMode.GhostHearingAggressivePct" Label="Aggressive" Unit="%" Min="0" Max="100" Step="1" />
+                        <OrbitSlider Disabled="GhostSettingsDisabled" T="int" @bind-Value="Cfg.GhostMode.GhostHearingAggressivePct" Label="Aggressive" Unit="%" Min="0" Max="100" Step="1" />
                     </MudItem>
                     <MudItem xs="12" sm="6">
-                        <OrbitSlider T="int" @bind-Value="Cfg.GhostMode.GhostHearingAveragePct" Label="Average" Unit="%" Min="0" Max="100" Step="1" />
+                        <OrbitSlider Disabled="GhostSettingsDisabled" T="int" @bind-Value="Cfg.GhostMode.GhostHearingAveragePct" Label="Average" Unit="%" Min="0" Max="100" Step="1" />
                     </MudItem>
                     <MudItem xs="12" sm="6">
-                        <OrbitSlider T="int" @bind-Value="Cfg.GhostMode.GhostHearingCautiousPct" Label="Cautious" Unit="%" Min="0" Max="100" Step="1" />
+                        <OrbitSlider Disabled="GhostSettingsDisabled" T="int" @bind-Value="Cfg.GhostMode.GhostHearingCautiousPct" Label="Cautious" Unit="%" Min="0" Max="100" Step="1" />
                     </MudItem>
                     <MudItem xs="12" sm="6">
-                        <OrbitSlider T="int" @bind-Value="Cfg.GhostMode.GhostHearingTimmyPct" Label="Timmy" Unit="%" Min="0" Max="100" Step="1" />
+                        <OrbitSlider Disabled="GhostSettingsDisabled" T="int" @bind-Value="Cfg.GhostMode.GhostHearingTimmyPct" Label="Timmy" Unit="%" Min="0" Max="100" Step="1" />
                     </MudItem>
                     <MudItem xs="12" sm="6">
-                        <OrbitSlider T="int" @bind-Value="Cfg.GhostMode.GhostHearingPlayerScavPct" Label="PlayerScav" Unit="%" Min="0" Max="100" Step="1" />
+                        <OrbitSlider Disabled="GhostSettingsDisabled" T="int" @bind-Value="Cfg.GhostMode.GhostHearingPlayerScavPct" Label="PlayerScav" Unit="%" Min="0" Max="100" Step="1" />
                     </MudItem>
                     <MudItem xs="12" sm="6">
-                        <OrbitSlider T="int" @bind-Value="Cfg.GhostMode.GhostHearingScavPct" Label="Scavs" Unit="%" Min="0" Max="100" Step="1"
+                        <OrbitSlider Disabled="GhostSettingsDisabled" T="int" @bind-Value="Cfg.GhostMode.GhostHearingScavPct" Label="Scavs" Unit="%" Min="0" Max="100" Step="1"
                                      Tooltip="Sniper scavs keep their posts and never investigate gunfire while in Ghost." />
                     </MudItem>
                     <MudItem xs="12" sm="6">
-                        <OrbitSlider T="int" @bind-Value="Cfg.GhostMode.GhostHearingGoonsPct" Label="Goons" Unit="%" Min="0" Max="100" Step="1" />
+                        <OrbitSlider Disabled="GhostSettingsDisabled" T="int" @bind-Value="Cfg.GhostMode.GhostHearingGoonsPct" Label="Goons" Unit="%" Min="0" Max="100" Step="1" />
                     </MudItem>
                     <MudItem xs="12" sm="6">
-                        <OrbitSlider T="int" @bind-Value="Cfg.GhostMode.GhostHearingBossesPct" Label="Vanilla bosses and followers" Unit="%" Min="0" Max="100" Step="1" />
+                        <OrbitSlider Disabled="GhostSettingsDisabled" T="int" @bind-Value="Cfg.GhostMode.GhostHearingBossesPct" Label="Vanilla bosses and followers" Unit="%" Min="0" Max="100" Step="1" />
                     </MudItem>
                     <MudItem xs="12" sm="6">
-                        <OrbitSlider T="int" @bind-Value="Cfg.GhostMode.GhostHearingCultistsPct" Label="Cultists" Unit="%" Min="0" Max="100" Step="1" />
+                        <OrbitSlider Disabled="GhostSettingsDisabled" T="int" @bind-Value="Cfg.GhostMode.GhostHearingCultistsPct" Label="Cultists" Unit="%" Min="0" Max="100" Step="1" />
                     </MudItem>
                     <MudItem xs="12" sm="6">
-                        <OrbitSlider T="int" @bind-Value="Cfg.GhostMode.GhostHearingRaidersPct" Label="Vanilla raiders" Unit="%" Min="0" Max="100" Step="1" />
+                        <OrbitSlider Disabled="GhostSettingsDisabled" T="int" @bind-Value="Cfg.GhostMode.GhostHearingRaidersPct" Label="Vanilla raiders" Unit="%" Min="0" Max="100" Step="1" />
                     </MudItem>
                     <MudItem xs="12" sm="6">
-                        <OrbitSlider T="int" @bind-Value="Cfg.GhostMode.GhostHearingRoguesPct" Label="Vanilla rogues" Unit="%" Min="0" Max="100" Step="1" />
+                        <OrbitSlider Disabled="GhostSettingsDisabled" T="int" @bind-Value="Cfg.GhostMode.GhostHearingRoguesPct" Label="Vanilla rogues" Unit="%" Min="0" Max="100" Step="1" />
                     </MudItem>
                     <MudItem xs="12" sm="6">
-                        <OrbitSlider T="int" @bind-Value="Cfg.GhostMode.GhostHearingBloodhoundsPct" Label="Bloodhounds" Unit="%" Min="0" Max="100" Step="1" />
+                        <OrbitSlider Disabled="GhostSettingsDisabled" T="int" @bind-Value="Cfg.GhostMode.GhostHearingBloodhoundsPct" Label="Bloodhounds" Unit="%" Min="0" Max="100" Step="1" />
                     </MudItem>
                     <MudItem xs="12" sm="6">
-                        <OrbitSlider T="int" @bind-Value="Cfg.GhostMode.GhostHearingUntarRuafHuntersPct" Label="UNTAR / RUAF hunters" Unit="%" Min="0" Max="100" Step="1" />
+                        <OrbitSlider Disabled="GhostSettingsDisabled" T="int" @bind-Value="Cfg.GhostMode.GhostHearingUntarRuafHuntersPct" Label="UNTAR / RUAF hunters" Unit="%" Min="0" Max="100" Step="1" />
                     </MudItem>
                     <MudItem xs="12" sm="6">
-                        <OrbitSlider T="int" @bind-Value="Cfg.GhostMode.GhostHearingRoguesVsRaidersPct" Label="Raiders vs Rogues" Unit="%" Min="0" Max="100" Step="1" />
+                        <OrbitSlider Disabled="GhostSettingsDisabled" T="int" @bind-Value="Cfg.GhostMode.GhostHearingRoguesVsRaidersPct" Label="Raiders vs Rogues" Unit="%" Min="0" Max="100" Step="1" />
                     </MudItem>
                     <MudItem xs="12" sm="6">
-                        <OrbitSlider T="int" @bind-Value="Cfg.GhostMode.GhostHearingArmyOfTwoPct" Label="Rook and Tombstone" Unit="%" Min="0" Max="100" Step="1" />
+                        <OrbitSlider Disabled="GhostSettingsDisabled" T="int" @bind-Value="Cfg.GhostMode.GhostHearingArmyOfTwoPct" Label="Rook and Tombstone" Unit="%" Min="0" Max="100" Step="1" />
                     </MudItem>
                     <MudItem xs="12" sm="6">
-                        <OrbitSlider T="int" @bind-Value="Cfg.GhostMode.GhostHearingIsbPct" Label="ISB (including White Tusk)" Unit="%" Min="0" Max="100" Step="1" />
+                        <OrbitSlider Disabled="GhostSettingsDisabled" T="int" @bind-Value="Cfg.GhostMode.GhostHearingIsbPct" Label="ISB (including White Tusk)" Unit="%" Min="0" Max="100" Step="1" />
                     </MudItem>
                     <MudItem xs="12" sm="6">
-                        <OrbitSlider T="int" @bind-Value="Cfg.GhostMode.GhostHearingBlackDivisionPct" Label="Black Division" Unit="%" Min="0" Max="100" Step="1" />
+                        <OrbitSlider Disabled="GhostSettingsDisabled" T="int" @bind-Value="Cfg.GhostMode.GhostHearingBlackDivisionPct" Label="Black Division" Unit="%" Min="0" Max="100" Step="1" />
                     </MudItem>
                 </MudGrid>
             </details>
         }
     </SettingsCard>
 
-    <SettingsCard Title="Default-dormant bot types" OnReset="ResetTypes"
+    <SettingsCard Title="Default-dormant bot types" OnReset="ResetTypes" ResetDisabled="GhostSettingsDisabled"
                   Subtitle="These types sleep by default and wake when a player gets close. Encounters with awake bots follow the setting above. Enable both movement options to keep supported native behaviours moving while asleep.">
-        <OrbitSwitch @bind-Value="Cfg.GhostMode.DormantScavs" Label="Scavs (including snipers)" />
-        <OrbitSwitch @bind-Value="Cfg.GhostMode.DormantGoons" Label="Goons" />
-        <OrbitSwitch @bind-Value="Cfg.GhostMode.DormantBosses" Label="Bosses and followers" />
-        <OrbitSwitch @bind-Value="Cfg.GhostMode.DormantCultists" Label="Cultists" />
-        <OrbitSwitch @bind-Value="Cfg.GhostMode.DormantRaiders" Label="Raiders and rogues" />
-        <OrbitSwitch @bind-Value="Cfg.GhostMode.DormantBloodhounds" Label="Bloodhounds" />
-        <OrbitSwitch @bind-Value="Cfg.GhostMode.DormantOthers" Label="Other factions (modded and unrecognised)" />
+        <OrbitSwitch Disabled="GhostSettingsDisabled" @bind-Value="Cfg.GhostMode.DormantScavs" Label="Scavs (including snipers)" />
+        <OrbitSwitch Disabled="GhostSettingsDisabled" @bind-Value="Cfg.GhostMode.DormantGoons" Label="Goons" />
+        <OrbitSwitch Disabled="GhostSettingsDisabled" @bind-Value="Cfg.GhostMode.DormantBosses" Label="Bosses and followers" />
+        <OrbitSwitch Disabled="GhostSettingsDisabled" @bind-Value="Cfg.GhostMode.DormantCultists" Label="Cultists" />
+        <OrbitSwitch Disabled="GhostSettingsDisabled" @bind-Value="Cfg.GhostMode.DormantRaiders" Label="Raiders and rogues" />
+        <OrbitSwitch Disabled="GhostSettingsDisabled" @bind-Value="Cfg.GhostMode.DormantBloodhounds" Label="Bloodhounds" />
+        <OrbitSwitch Disabled="GhostSettingsDisabled" @bind-Value="Cfg.GhostMode.DormantOthers" Label="Other factions (modded and unrecognised)" />
     </SettingsCard>
 
-    <SettingsCard Title="Distances" OnReset="ResetDistances"
+    <SettingsCard Title="Distances" OnReset="ResetDistances" ResetDisabled="GhostSettingsDisabled"
                   Subtitle="Sleep and wake use different distances on purpose (hysteresis), so bots at the edge do not flap between states. Aiming through an optic stretches the wake range forward with the scope's magnification (capped by the slider below), so long-range sniping still finds live targets. Designed to also cover Fika clients and headless from their replicated aim state (untested).">
-        <OrbitSlider T="float" @bind-Value="Cfg.GhostMode.SleepDistance" Label="Sleep beyond" Unit="m"
+        <OrbitSlider Disabled="GhostSettingsDisabled" T="float" @bind-Value="Cfg.GhostMode.SleepDistance" Label="Sleep beyond" Unit="m"
                      Min="100f" Max="500f" Step="10f" Fmt="0"
                      Tooltip="A squad farther than this from every human player goes to sleep." />
-        <OrbitSlider T="float" @bind-Value="Cfg.GhostMode.WakeDistance" Label="Wake within" Unit="m"
+        <OrbitSlider Disabled="GhostSettingsDisabled" T="float" @bind-Value="Cfg.GhostMode.WakeDistance" Label="Wake within" Unit="m"
                      Min="50f" Max="450f" Step="10f" Fmt="0"
                      Tooltip="A sleeping squad closer than this to any human player wakes up." />
-        <OrbitSlider T="float" @bind-Value="Cfg.GhostMode.HostileWakeDistance" Label="Ghost / awake encounter distance" Unit="m"
+        <OrbitSlider Disabled="GhostSettingsDisabled" T="float" @bind-Value="Cfg.GhostMode.HostileWakeDistance" Label="Ghost / awake encounter distance" Unit="m"
                      Min="0f" Max="150f" Step="5f" Fmt="0"
                      Tooltip="Within this distance, the Ghost meets awake bot setting applies. If an awake group cannot sleep safely, the Ghost wakes using the existing grace period." />
         <div class="mt-1"></div>
-        <OrbitSlider T="float" @bind-Value="Cfg.GhostMode.WakeIntervalMs" Label="Delay between bot wake-ups" Unit="ms"
+        <OrbitSlider Disabled="GhostSettingsDisabled" T="float" @bind-Value="Cfg.GhostMode.WakeIntervalMs" Label="Delay between bot wake-ups" Unit="ms"
                      Min="0f" Max="500f" Step="10f" Fmt="0"
                      Tooltip="Time after one bot finishes waking before the next non-urgent bot starts. Visible bots, aiming and combat threats bypass this delay. Higher values spread the work over more time." />
-        <OrbitSwitch @bind-Value="Cfg.GhostMode.ScopedWake" Label="Scoped wake"
+        <OrbitSwitch Disabled="GhostSettingsDisabled" @bind-Value="Cfg.GhostMode.ScopedWake" Label="Scoped wake"
                      Tooltip="ON (default): aiming through a magnified optic wakes bots ahead of you, in a cone wider than the scope view so they never pop in at the reticle. OFF: only the normal wake ring applies." />
         @if (Cfg.GhostMode.ScopedWake)
         {
             <div class="mt-3"></div>
-            <OrbitSlider T="float" @bind-Value="Cfg.GhostMode.ScopedWakeMaxDistance" Label="Scoped wake up to" Unit="m"
+            <OrbitSlider Disabled="GhostSettingsDisabled" T="float" @bind-Value="Cfg.GhostMode.ScopedWakeMaxDistance" Label="Scoped wake up to" Unit="m"
                          Min="200f" Max="1500f" Step="50f" Fmt="0"
                          Tooltip="Hard cap on the optic-stretched wake distance, whatever the magnification." />
         }
@@ -271,6 +271,8 @@
 </MudContainer>
 
 @code {
+    private bool GhostSettingsDisabled => !Cfg.GhostMode.Enabled;
+
     private void ResetPage() { ResetLimiter(); ResetHearing(); ResetTypes(); ResetDistances(); }
 
     private void ResetHearing()
