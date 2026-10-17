@@ -15,11 +15,11 @@ public sealed class RushSettings
     public float SniperDisengageDistance { get; set; } = 60;
     public bool SniperCombatHold { get; set; } = true;
     public int SniperCatalogueVersion { get; set; } = 1;
-    public RushStyle Timmy { get; set; } = new(.05f, 0, 1, 1, 1) { SniperWeight = 2, SniperHoldMin = 90, SniperHoldMax = 180 };
-    public RushStyle Cautious { get; set; } = new(.15f, 0, 1, 3, 1) { SniperWeight = 6, SniperHoldMin = 180, SniperHoldMax = 360 };
+    public RushStyle Timmy { get; set; } = new(.05f, 0, 1, 1, 1) { SniperWeight = 2, SniperHoldMin = 120, SniperHoldMax = 240 };
+    public RushStyle Cautious { get; set; } = new(.15f, 0, 1, 3, 1) { SniperWeight = 6, SniperHoldMin = 240, SniperHoldMax = 480 };
     public RushStyle Average { get; set; } = new(.25f, 0, 2, 2, 1);
-    public RushStyle Aggressive { get; set; } = new(.5f, 3, 3, 2, 1) { SniperWeight = 1, SniperHoldMin = 60, SniperHoldMax = 120 };
-    public RushStyle VeryAggressive { get; set; } = new(.8f, 5, 3, 2, 1) { SniperWeight = .5f, SniperHoldMin = 30, SniperHoldMax = 90 };
+    public RushStyle Aggressive { get; set; } = new(.5f, 3, 3, 2, 1) { SniperWeight = 1, SniperHoldMin = 90, SniperHoldMax = 180 };
+    public RushStyle VeryAggressive { get; set; } = new(.8f, 5, 3, 2, 1) { SniperWeight = .5f, SniperHoldMin = 60, SniperHoldMax = 120 };
     // Lists are complete map catalogues. Variants inherit the base map until explicitly customized.
     public Dictionary<string, List<RushPoint>> Maps { get; set; } = RushDefaults.Create();
     public RushStyle Style(string archetype) => archetype switch
@@ -71,8 +71,8 @@ public sealed class RushStyle
     public float CustomWeight { get; set; } = 1;
     public float SniperWeight { get; set; } = 3;
     public float SniperStartWindow { get; set; } = 600;
-    public float SniperHoldMin { get; set; } = 120;
-    public float SniperHoldMax { get; set; } = 240;
+    public float SniperHoldMin { get; set; } = 180;
+    public float SniperHoldMax { get; set; } = 360;
     public float SpawnStartWindow { get; set; } = 120;
     public float BossStartWindow { get; set; } = 600;
     public float MarkedStartWindow { get; set; } = 600;

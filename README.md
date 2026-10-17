@@ -296,6 +296,11 @@ Urgent extraction and disabled looting retain their normal priority.
 
 ### Sniper alert retention (next beta)
 
+Default time at the post is 2-4 minutes for Timmy, 4-8 for Cautious, 3-6 for
+Average, 1.5-3 for Aggressive and 1-2 for Very Aggressive. A duration is sampled
+within that personality's range; reaching the post starts the hold timer.
+Existing presets retain their saved durations unless edited.
+
 Snipers already holding a post keep SAIN's combat decisions after an unseen
 contact, while ordinary movement stays within 12 m of the post on the same
 floor. SAIN can choose a local cover or angle; routes that leave the roof are
