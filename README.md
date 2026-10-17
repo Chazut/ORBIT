@@ -296,6 +296,8 @@ Urgent extraction and disabled looting retain their normal priority.
 
 ### Sniper alert retention (next beta)
 
+While holding a sniper post, the scoped member occasionally moves to another nearby cover or sightline, roughly every 45 to 75 seconds when enough camp time remains. Candidate searches use the shared planning budget and prefer native cover with a clear view. Every path corner must remain within 12 metres of the first occupied post and within 0.75 metres of its height, including the path returned by the movement queue. Blocked moves are abandoned without a teleport, jump recovery or resetting the camp timer. Followers keep their own guard positions. Combat interrupts the move and SAIN keeps priority; the existing return-to-post behaviour resumes after the alert.
+
 Default time at the post is 2-4 minutes for Timmy, 4-8 for Cautious, 3-6 for
 Average, 1.5-3 for Aggressive and 1-2 for Very Aggressive. A duration is sampled
 within that personality's range; reaching the post starts the hold timer.

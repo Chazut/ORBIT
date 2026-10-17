@@ -12,7 +12,7 @@ namespace Orbit.Systems;
 
 // One survey/path per shared objective work slot. Geometry is retained for this plan/raid.
 // Local mesh-gap recovery uses the movement system's guarded placement for awake and sleeping bots.
-internal sealed class SniperPlan : IObjectiveWork
+internal sealed partial class SniperPlan : IObjectiveWork
 {
     private Squad _squad;
     private WaypointSystem _waypoints;
@@ -61,7 +61,7 @@ internal sealed class SniperPlan : IObjectiveWork
         if (!ServerConfig.Rush.Allows(squad.Leader?.BotCategory) || squad.ExtractRequested && !_recorded.Active && !_departing)
             return End(squad, w, "cancelled for extraction or settings");
         if (_actor != null && (!squad.Members.Contains(_actor) || _actor.Bot.IsDead || _actor.SoloExtractRequested))
-        { Release(squad, w); _actor = null; _arrived = false; _returningToPost = false; _route.Reset(); _recorded.Reset(); _progress.Reset(); _approachHistory.Clear(); _retries = 0; }
+        { ResetPostShift(); Release(squad, w); _actor = null; _arrived = false; _returningToPost = false; _route.Reset(); _recorded.Reset(); _progress.Reset(); _approachHistory.Clear(); _retries = 0; }
         if (_actor != null && now >= _nextEquipment)
         {
             _nextEquipment = now + 5;
@@ -71,12 +71,13 @@ internal sealed class SniperPlan : IObjectiveWork
         if (_arrived)
         {
             // Count time at the post during safe long-range combat too; never extend forever.
-            if (_actor != null && (Near(_actor.Position, _post, 4) || SniperCombat.IsAlertHeld(_actor.Bot))) _held += dt;
+            if (_actor != null && (Near(_actor.Position, _post, 4) || _shifting && WithinRoof(_actor.Position)
+                || SniperCombat.IsAlertHeld(_actor.Bot))) _held += dt;
             main.CampElapsed = _held;
             if (_held >= _duration)
             {
                 if (_recording == null) return End(squad, w, "completed");
-                Release(squad, w); _departing = true; _arrived = false;
+                ResetPostShift(); Release(squad, w); _departing = true; _arrived = false;
                 _post = RecordedRouteLibrary.Departure(w.RecordedMap, _recording, _actor.Position);
                 _route.Reset(); _recorded.Reset(); _progress.Reset(); _approachHistory.Clear(); _travel = 0;
                 _activeTravel = _rescueTravel = 0;
@@ -90,6 +91,7 @@ internal sealed class SniperPlan : IObjectiveWork
             w.CancelOperationWork(this);
             if (!_paused)
             {
+                InterruptPostShift("combat");
                 Release(squad, w, keepCombatLease: _arrived);
                 _paused = true;
                 SetStatus(squad, "paused");
@@ -112,6 +114,9 @@ internal sealed class SniperPlan : IObjectiveWork
             // Keep the chosen post, elapsed approach and rescue cursor for the return trip.
             return false;
         }
+        if (_shiftYielded && ShiftUnsafe())
+        { w.CancelOperationWork(this); return false; }
+        _shiftYielded = false;
         if (_paused)
         {
             _paused = false; _route.Reset(); _recorded.ResetSearch();
@@ -138,6 +143,7 @@ internal sealed class SniperPlan : IObjectiveWork
             return false;
         }
         if (_returningToPost) SetStatus(squad, "returning to post");
+        if (_arrived && TickPostShift(squad, w, now)) return true;
         if (_actor != null && !_arrived) _recorded.Observe(_actor.Position, dt);
         if (!_arrived || _actor == null || !Near(_actor.Position, _post, 4))
         {
@@ -251,6 +257,8 @@ internal sealed class SniperPlan : IObjectiveWork
                 _arrived = true; main.CampStartedAt = now; main.CampTargetDuration = _duration;
                 _travel = 0;
                 _activeTravel = _rescueTravel = 0;
+                if (!_roofSet) { _roofOrigin = _post; _roofSet = true; }
+                SchedulePostShift(now);
                 if (_returningToPost)
                 {
                     _returningToPost = false;
@@ -516,7 +524,7 @@ internal sealed class SniperPlan : IObjectiveWork
     }
 
     internal bool End(Squad squad, WaypointSystem w, string reason, MainObjective main = null)
-    { w.CancelOperationWork(this); _main ??= main; Release(squad, w); _main.Completed = true; SetStatus(squad, reason); return false; }
+    { w.CancelOperationWork(this); _main ??= main; ResetPostShift(); Release(squad, w); _main.Completed = true; SetStatus(squad, reason); return false; }
     private void Release(Squad squad, WaypointSystem w, bool keepCombatLease = false)
     {
         if (!keepCombatLease && _actor != null) SniperCombat.Remove(_actor.Bot);

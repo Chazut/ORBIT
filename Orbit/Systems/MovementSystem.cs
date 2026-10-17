@@ -85,6 +85,17 @@ public partial class MovementSystem
             if (HoldForTravelObservation(agent)) continue;
             if (agent.SniperReturn?.Tick(this, _waypointSystem) == true) continue;
 
+            // Optional roof movement never invokes island, jump or teleport recovery.
+            // The sniper planner abandons a blocked reposition and keeps the camp clock.
+            if (agent.Squad?.Rush?.Sniper?.IsPostShift(agent) == true)
+            {
+                agent.Stuck.Recovery.Suspend();
+                if (agent.IsDormant)
+                { if (DormancySystem.GhostMovementEnabled) GhostFollowPath(agent); }
+                else UpdateMovement(agent);
+                continue;
+            }
+
             // Dormant body: the GameObject is disabled, so the mover / doors / stuck machinery below has
             // nothing to drive. The ghost follower advances the transform along the planned path instead
             // (world keeps moving); everything else waits for the wake resync in DormancySystem.
@@ -159,6 +170,12 @@ public partial class MovementSystem
                 }
 
                 using var timing = MeasureMovement(TransitionPhase.MovementJob, "apply path job", agent);
+                if (agent.Squad?.Rush?.Sniper?.AllowPostShiftPath(agent, job.Target, job.Path, job.Status) == false)
+                {
+                    ResetPath(agent, MovementStatus.Failed);
+                    agent.Objective.Status = ObjectiveStatus.Failed;
+                    continue;
+                }
                 StartMovement(agent, job);
                 TrackGhostPathInvalid(agent, job);
             }
@@ -227,7 +244,7 @@ public partial class MovementSystem
         {
             origin = hit.position;
         }
-        else if (agent.IsDormant)
+        else if (agent.IsDormant && agent.Squad?.Rush?.Sniper?.IsPostShift(agent) != true)
         {
             // A mid-segment ghost can sit metres off the mesh (straight-line interpolation between
             // corners on sloped terrain). An off-mesh origin makes every new path PathInvalid, and the
@@ -249,7 +266,8 @@ public partial class MovementSystem
 
         var job = _navJobExecutor.Submit(origin, destination);
         var revision = ++agent.Movement.PathRevision;
-        if (styledTravel) job.Travel = CreateTravel(agent, destination, revision);
+        if (styledTravel && agent.Squad?.Rush?.Sniper?.IsPostShift(agent) != true)
+            job.Travel = CreateTravel(agent, destination, revision);
         _moveJobs.Enqueue((agent, job, revision));
     }
 
@@ -767,7 +785,7 @@ public partial class MovementSystem
 
         var revision = movement.PathRevision;
         var beforeRecovery = agent.Position;
-        _stuckRemediation.Update(agent);
+        if (agent.Squad?.Rush?.Sniper?.IsPostShift(agent) != true) _stuckRemediation.Update(agent);
         if (HoldForAirborneMotion(agent)) return;
         // Recovery can replace the route or body position. Recompute steering on the next tick.
         if (movement.Path == null || movement.PathRevision != revision
@@ -1424,6 +1442,8 @@ public partial class MovementSystem
     }
 
     private const float DoorColliderRayLength = 1.5f;
+
+    internal static void StopSniperPostShift(Agent agent) => ResetPath(agent);
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void ResetPath(Agent agent, MovementStatus status = MovementStatus.Stopped, bool invalidatePending = true)
