@@ -17,6 +17,11 @@ namespace Orbit.Tasks.Actions;
 /// </summary>
 public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSystem, WaypointSystem waypointSystem, float hysteresis) : Task<Agent>(hysteresis)
 {
+    private readonly System.Runtime.CompilerServices.ConditionalWeakTable<Agent, ExfilApproach> _exfilApproaches = new();
+
+    private void PauseExfilApproach(Agent agent)
+    { if (_exfilApproaches.TryGetValue(agent, out var approach)) approach.Pause(); }
+
     private static bool QuestArrivalAllowed(Agent agent, Waypoint point, out string refusal)
     {
         if (!agent.QuestArrival.Check(agent.Position, point.Position, out refusal)) return false;
@@ -96,6 +101,7 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                                                           or ObjectiveStatus.Looting
                                                           or ObjectiveStatus.Extracting)
             {
+                PauseExfilApproach(agent);
                 _stuckEnRouteTracker.Remove(agent.Id);
                 agent.TaskScores[ordinal] = 0;
                 continue;
@@ -107,6 +113,7 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
             {
                 _stuckEnRouteTracker.Remove(agent.Id);
                 NoBackpackExfil.PauseRecovery(agent);
+                PauseExfilApproach(agent);
             }
 
             // Keep navigation active until its arrival update validates the objective. A score that
@@ -147,6 +154,19 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                     if (ExtractAction.TryRecoverNoBackpack(agent)) continue;
                 }
             }
+
+            if (objective.Location.Category == WaypointCategory.Exfil
+                && objective.Status is ObjectiveStatus.None or ObjectiveStatus.Moving)
+            {
+                if (!_exfilApproaches.TryGetValue(agent, out var approach))
+                {
+                    approach = new ExfilApproach(agent, movementSystem, waypointSystem);
+                    _exfilApproaches.Add(agent, approach);
+                }
+                if (approach.Tick(ShouldSprintToObjective(agent, (objective.Location.Position - agent.Position).sqrMagnitude)))
+                { _stuckEnRouteTracker.Remove(agent.Id); continue; }
+            }
+            else PauseExfilApproach(agent);
 
             switch (objective.Status)
             {
@@ -453,6 +473,7 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
 
     protected override void Deactivate(Agent entity)
     {
+        PauseExfilApproach(entity);
         // Preserve the same target's watchdog across internal action changes. A handover to SAIN
         // still clears it, so legitimate combat/cover time never counts as an ORBIT navigation stall.
         if (!entity.IsActive || !dataset.Entities.Values.Contains(entity)

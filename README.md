@@ -90,7 +90,9 @@ ORBIT-controlled PMC and PlayerScav squads receive goals: high-value loot
 zones, kill hunts anchored on PvP hotspots, visits to EFT quest locations.
 The leader takes the anchor, the others splinter to nearby loot and cover. They extract for
 real reasons - enough roubles, goals completed, or the raid clock - and
-they coordinate on shared exfils like the car.
+they coordinate on shared exfils like the car. Spawn-side exit restrictions remain mandatory when
+a long path fails: bots advance along connected approach legs toward an authorized
+exit, then use its normal arrival and extraction checks.
 
 PMC and PlayerScav squads can hold cover within a Kill main or receive an
 extract-camping main. A squad can roll one extract camp, pursued after all its other

@@ -1444,6 +1444,7 @@ public partial class MovementSystem
     private const float DoorColliderRayLength = 1.5f;
 
     internal static void StopSniperPostShift(Agent agent) => ResetPath(agent);
+    internal static void StopExfilApproach(Agent agent) => ResetPath(agent);
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void ResetPath(Agent agent, MovementStatus status = MovementStatus.Stopped, bool invalidatePending = true)

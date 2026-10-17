@@ -1120,12 +1120,12 @@ public partial class WaypointSystem
         return true;
     }
 
-    private void LogEligibleExfil(Squad squad, Waypoint point, Vector3 origin, bool entry, bool fallback)
+    private void LogEligibleExfil(Squad squad, Waypoint point, Vector3 origin, bool entry)
     {
         if (!Log.DebugEnabled || point.Target is not ExfiltrationPoint exfil) return;
         using var timing = PerformanceJournal.Measure(TransitionPhase.ExfilDiagnostics, "exfil-diagnostics", squad: squad.Id);
         var distance = Vector3.Distance(point.Position, origin);
-        var verdict = entry ? "OK" : fallback ? "PASS-2-FALLBACK" : "REJECTED";
+        var verdict = entry ? "OK" : "REJECTED";
         var entries = exfil.EligibleEntryPoints != null && exfil.EligibleEntryPoints.Length > 0
             ? string.Join("/", exfil.EligibleEntryPoints) : "<any>";
         var requirements = "<none>";
@@ -2540,40 +2540,6 @@ public partial class WaypointSystem
             }
         }
         return false;
-    }
-
-    // Same gates as SquadCanUseWaypoint but skips MatchesBotSpawnEntry. Used by FindNearestEligibleExfil's
-    // Pass 2 fallback when the full spawn-side filter returned no exfil — better to extract on the wrong side
-    // than stay stuck forever.
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private bool SquadCanUseWaypointIgnoringEntry(Squad squad, bool? squadIsPmc, Waypoint loc, Agent solo = null)
-    {
-        if (loc.Category != WaypointCategory.Exfil) return true;
-        if (loc.Target is not ExfiltrationPoint exfil) return true;
-        var leaderBot = squad?.Leader?.Bot;
-        var role = leaderBot?.Profile?.Info?.Settings?.Role;
-        if (!role.HasValue) return false;
-        var allowedFactions = ServerConfig.Loot.ExtractAllowedFor;
-        var isPlayerScavLeader = leaderBot?.Profile != null && leaderBot.Profile.WillBeAPlayerScav();
-        if (isPlayerScavLeader)
-        {
-            if ((allowedFactions & ExtractFaction.PlayerScav) == 0) return false;
-        }
-        else if (!allowedFactions.IsBotEnabled(role.Value)) return false;
-        if (MultiStepAccess.IsConditional(exfil))
-            return squadIsPmc == true && MultiStepAccess.ExitActive(exfil) && MatchesBotSpawnEntry(squad, exfil);
-        if (string.Equals(_mapId, "RezervBase", StringComparison.OrdinalIgnoreCase)
-            && !NoBackpackExfil.RequiresDrop(exfil) && !IsPaidScavLands(exfil)) return false;
-        if (exfil.Status == EExfiltrationStatus.NotPresent
-            || exfil.Status == EExfiltrationStatus.Hidden
-            || exfil.Status == EExfiltrationStatus.AwaitsManualActivation) return false;
-        if (exfil.Status == EExfiltrationStatus.UncompleteRequirements
-            && exfil.Settings.ExfiltrationType != EExfiltrationType.SharedTimer && !NoBackpackExfil.RequiresDrop(exfil)) return false;
-        if (HasBotUnreachableRequirement(exfil, squad, solo)) return false;
-        if (!squadIsPmc.HasValue) return false;
-        if (exfil is SharedExfiltrationPoint) return true;
-        if (exfil is ScavExfiltrationPoint) return !squadIsPmc.Value;
-        return squadIsPmc.Value;
     }
 
     private bool MatchesBotSpawnEntry(Squad squad, ExfiltrationPoint exfil)

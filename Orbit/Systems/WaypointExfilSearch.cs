@@ -58,9 +58,8 @@ public partial class WaypointSystem
                 {
                     var point = _owner._exfilPoints[_candidate];
                     var entry = _owner.SquadCanUseWaypoint(Squad, _pmc, point, Solo);
-                    var fallback = !entry && _owner.SquadCanUseWaypointIgnoringEntry(Squad, _pmc, point, Solo);
-                    if (_logEligibility) _owner.LogEligibleExfil(Squad, point, Origin, entry, fallback);
-                    if (Squad.CompletedPoiIds.Contains(point.Id) || !entry && !fallback) continue;
+                    if (_logEligibility) _owner.LogEligibleExfil(Squad, point, Origin, entry);
+                    if (Squad.CompletedPoiIds.Contains(point.Id) || !entry) continue;
                     _search.Add(point, (point.Position - Origin).sqrMagnitude, entry);
                 }
                 if (_candidate < _owner._exfilPoints.Count) return true;
@@ -69,10 +68,8 @@ public partial class WaypointSystem
             }
             if (_search.Step(_query)) return true;
             Done = true;
-            if (_search.Fallback)
-                Log.Warning($"{Squad} no spawn-side eligible exfil, falling back to nearest reachable faction-allowed exfil {Result} (entry derivation may have failed)");
-            else if (_search.Partial)
-                Log.Info($"{Squad} no fully reachable exfil, committing to partial-path exfil {Result} (will walk as far as the mesh allows)");
+            if (_search.Partial)
+                Log.Info($"EXFIL ROUTE: {Squad} exit={Result} state=staged reason=no complete route; retaining spawn eligibility");
             if (PerformanceJournal.Enabled)
             {
                 var detail = $"squad={Squad.Id} solo={Solo?.Id ?? -1} frames={Time.frameCount - _firstFrame + 1} paths={_queries} result={Result?.Id ?? -1}";
@@ -84,8 +81,8 @@ public partial class WaypointSystem
 
         private NearestExfilSearch.Route Query(Waypoint point)
         {
-            if (Squad.CompletedPoiIds.Contains(point.Id) || !_owner.SquadCanUseWaypointIgnoringEntry(Squad, _pmc, point, Solo))
-                return new(false, float.MaxValue);
+            if (Squad.CompletedPoiIds.Contains(point.Id) || !_owner.SquadCanUseWaypoint(Squad, _pmc, point, Solo))
+                return new(false, float.MaxValue, available: false);
             _queries++;
             var found = CalculateTimedPath(Origin, point.Position, _path, TransitionPhase.ExfilPath, point.Name, Squad.Id);
             if (found && _path.status == NavMeshPathStatus.PathComplete)
@@ -104,11 +101,20 @@ public partial class WaypointSystem
             var corners = _path.corners;
             var gap = !found || _path.status == NavMeshPathStatus.PathInvalid || corners == null || corners.Length == 0
                 ? float.MaxValue : (corners[corners.Length - 1] - point.Position).sqrMagnitude;
+            Log.Debug($"EXFIL ROUTE QUERY: {Squad} exit={point.Name} status={_path.status} found={found} gap={Mathf.Sqrt(gap):F1}m");
             return new(false, gap);
         }
 
         internal bool ResultValid => Result == null || !Squad.CompletedPoiIds.Contains(Result.Id)
-            && _owner.SquadCanUseWaypointIgnoringEntry(Squad, _pmc, Result, Solo);
+            && _owner.SquadCanUseWaypoint(Squad, _pmc, Result, Solo);
+    }
+
+    internal bool CanUseExfil(Agent agent, Waypoint point)
+    {
+        var role = agent.Bot.Profile?.Info?.Settings?.Role;
+        return agent.Squad != null && role.HasValue
+            && SquadCanUseWaypoint(agent.Squad, role.Value.IsPMC(), point,
+                agent.SoloExtractRequested ? agent : null);
     }
 
     internal bool ExfilSearchPending(Squad squad, Agent solo = null)
