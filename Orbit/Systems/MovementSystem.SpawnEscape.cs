@@ -163,6 +163,7 @@ public partial class MovementSystem
     private void ContinueSpawnWaypointRescue(Agent agent, List<Agent> liveAgents)
     {
         var stuck = agent.Stuck;
+        if (!stuck.Recovery.Progress.CanAttempt(Time.time)) { CancelSpawnWaypointSearch(agent); return; }
         var found = TryFindReachableWaypoint(agent, liveAgents, agent.Position,
             SpawnIslandWaypointSearchRadius, out var wpDest, out var pending);
         if (pending) return;
@@ -175,6 +176,8 @@ public partial class MovementSystem
             if (BotLandingGuard.TryPlace(agent.Bot, wpDest, "spawn-rescue",
                     () => ResumeGroundPlacement(agent), validateGround: true))
             {
+                stuck.Recovery.RecordLocalRescue(fromPos, agent.Position);
+                BeginRescueVerification(agent, "spawn-rescue");
                 ResetAfterRescue(agent, resume: false);
                 stuck.SpawnIslandRescued = true;
                 Log.Info($"{agent} spawn-island rescue: teleported {Vector3.Distance(fromPos, wpDest):F0}m to a reachable waypoint (off the disconnected spawn chunk) from={fromPos} to={wpDest}");

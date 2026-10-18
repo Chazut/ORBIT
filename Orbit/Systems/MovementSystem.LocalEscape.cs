@@ -27,6 +27,69 @@ public partial class MovementSystem
     private const int EscapeQueryBudget = 32;
     private const int EscapeCandidateCount = 160;
 
+    private void BeginRescueVerification(Agent agent, string source)
+    {
+        agent.Stuck.Recovery.Progress.Begin(agent.Position, Time.time);
+        Log.Info($"{agent} RESCUE VERIFY: pending source={source} landing={agent.Position} failures={agent.Stuck.Recovery.Progress.Failures}");
+    }
+
+    private void ObserveRescueProgress(Agent agent, bool paused = false)
+    {
+        var progress = agent.Stuck.Recovery.Progress;
+        if (!progress.Tracking) return;
+        var objective = agent.Objective;
+        var movement = agent.Movement;
+        var goal = objective?.Location;
+        var target = goal == null ? agent.Position : goal.ExfilInteriorPosition ?? goal.Position;
+        // Extraction deliberately follows complete intermediate legs when the final exit
+        // has no single complete path. Keep the selected exit and verify its current leg.
+        if (goal?.Category == WaypointCategory.Exfil) target = movement.Target;
+        paused |= !agent.IsActive || agent.Bot.Memory.IsUnderFire || agent.Bot.Memory.GoalEnemy != null
+            || objective?.Status is ObjectiveStatus.Finished or ObjectiveStatus.Looting or ObjectiveStatus.Extracting
+            || Time.time < movement.DoorInteractHoldUntil;
+        var walking = !paused && goal != null && objective.Status == ObjectiveStatus.Moving
+            && movement.Status == MovementStatus.Moving && movement.HasPath
+            && (movement.Target - target).sqrMagnitude <= 2.25f
+            && (movement.Path[movement.Path.Length - 1] - target).sqrMagnitude <= 2.25f;
+        if (walking)
+        {
+            var corner = movement.Path[Mathf.Clamp(movement.CurrentCorner, 0, movement.Path.Length - 1)];
+            walking = Vector3.Dot(agent.Position - progress.LastPosition, corner - progress.LastPosition) >= 0f;
+        }
+        progress.Observe(agent.Position, Time.time, !paused, walking, goal?.Id ?? -1, target);
+        if (progress.Ready && Time.time >= progress.NextRouteCheck)
+        {
+            RefreshEscapeBudget();
+            if (_escapePaths < EscapeQueryBudget)
+            {
+                _escapePaths++;
+                progress.NextRouteCheck = Time.time + 5f;
+                var complete = IsPathComplete(agent.Position, target);
+                if (complete)
+                {
+                    Log.Info($"{agent} RESCUE VERIFY: confirmed objective={goal.Id} target={target} travelled={progress.Distance:F1}m failures={progress.Failures}");
+                    progress.Confirm();
+                    return;
+                }
+                Log.Debug($"{agent} RESCUE VERIFY: route-rejected objective={goal.Id} target={target} path={_rescuePath.status}");
+            }
+        }
+        if (!paused && progress.Expired)
+        {
+            var delay = progress.Fail(Time.time);
+            agent.Stuck.LocalEscape.Reset();
+            CancelSpawnWaypointSearch(agent);
+            Log.Info($"{agent} RESCUE VERIFY: no-progress objective={goal?.Id ?? -1} status={objective?.Status} travelled={progress.Distance:F1}m failures={progress.Failures} retryIn={delay:F0}s");
+        }
+    }
+
+    private void RefreshEscapeBudget()
+    {
+        if (Time.time < _escapeBudgetUntil) return;
+        _escapeBudgetUntil = Time.time + .25f;
+        _escapeSamples = _escapePaths = 0;
+    }
+
     private void AddEscapeReference(LocalEscapeSearch search, Vector3 position, bool destination = false)
     {
         if (search.ReferenceCount == search.References.Length || !BotGroundPlacement.Finite(position)) return;
@@ -78,6 +141,7 @@ public partial class MovementSystem
     private EscapeResult TryNearbyEscape(Agent agent, Vector3? objective, out Vector3 destination)
     {
         destination = default;
+        if (!agent.Stuck.Recovery.Progress.CanAttempt(Time.time)) return EscapeResult.Pending;
         var search = agent.Stuck.LocalEscape;
         if (!search.Active || (agent.Position - search.Origin).sqrMagnitude > 9f
             || Time.time - search.LastUsed > 10f || search.Complete && Time.time - search.CompletedAt >= 5f)
@@ -91,11 +155,7 @@ public partial class MovementSystem
             return EscapeResult.Exhausted;
         }
         if (!TeleportSafe(agent, _humanPlayers)) return EscapeResult.Pending;
-        if (Time.time >= _escapeBudgetUntil)
-        {
-            _escapeBudgetUntil = Time.time + .25f;
-            _escapeSamples = _escapePaths = 0;
-        }
+        RefreshEscapeBudget();
         var sampled = 0;
         var rejectedSurface = 0;
         var rejectedSafety = 0;
@@ -166,6 +226,7 @@ public partial class MovementSystem
 
     private bool CompleteNearbyEscape(Agent agent, Vector3 destination, bool resume = true)
     {
+        if (!agent.Stuck.Recovery.Progress.CanAttempt(Time.time)) return false;
         if (!TeleportSafe(agent, _humanPlayers) || !ClearEscapeLanding(agent, destination))
         { agent.Stuck.LocalEscape.Reset(); return false; }
         var from = agent.Position;
@@ -174,6 +235,7 @@ public partial class MovementSystem
                 () => ResumeGroundPlacement(agent), validateGround: true))
         { agent.Stuck.LocalEscape.Reset(); return false; }
         agent.Stuck.Recovery.RecordLocalRescue(from, agent.Position);
+        BeginRescueVerification(agent, "local-escape");
         if (agent.Squad != null)
         {
             agent.Squad.NextDispatchAttemptAt = 0f;

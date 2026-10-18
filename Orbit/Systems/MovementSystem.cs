@@ -68,6 +68,7 @@ public partial class MovementSystem
 
             if (!agent.IsActive)
             {
+                ObserveRescueProgress(agent, paused: true);
                 agent.Movement.Failures.Reset();
                 agent.Stuck.IdleRescueSince = -1f;
                 agent.Stuck.IdleRescueIntent = false;
@@ -79,16 +80,18 @@ public partial class MovementSystem
 
             if (HoldForAirborneMotion(agent))
             {
+                ObserveRescueProgress(agent, paused: true);
                 ObserveAwakeRecovery(agent, CanRecoverAirborneFall(agent.Player));
                 continue;
             }
-            if (HoldForTravelObservation(agent)) continue;
-            if (agent.SniperReturn?.Tick(this, _waypointSystem) == true) continue;
+            if (HoldForTravelObservation(agent)) { ObserveRescueProgress(agent, paused: true); continue; }
+            if (agent.SniperReturn?.Tick(this, _waypointSystem) == true) { ObserveRescueProgress(agent, paused: true); continue; }
 
             // Optional roof movement never invokes island, jump or teleport recovery.
             // The sniper planner abandons a blocked reposition and keeps the camp clock.
             if (agent.Squad?.Rush?.Sniper?.IsPostShift(agent) == true)
             {
+                ObserveRescueProgress(agent, paused: true);
                 agent.Stuck.Recovery.Suspend();
                 if (agent.IsDormant)
                 { if (DormancySystem.GhostMovementEnabled) GhostFollowPath(agent); }
@@ -105,6 +108,7 @@ public partial class MovementSystem
                 // Pinned while a simulated ghost fight plays out: nobody walks their route mid-firefight.
                 if (agent.Squad != null && Time.time < agent.Squad.GhostFightUntil)
                 {
+                    ObserveRescueProgress(agent, paused: true);
                     agent.Stuck.IdleRescueSince = -1f;
                     agent.Stuck.IdleRescueIntent = false;
                     agent.Stuck.LocalEscape.Reset();
@@ -115,6 +119,7 @@ public partial class MovementSystem
                 // so the invalid-path streak rescue never fires; a bot that fell asleep within seconds of
                 // spawning used to sit in that room for the whole raid (Streets, Gipphe). Both rescues move
                 // the body through Player.Teleport, which the wake resync already uses on inactive bodies.
+                ObserveRescueProgress(agent, paused: !DormancySystem.GhostMovementEnabled);
                 using (MeasureMovement(TransitionPhase.MovementIdleRescue, "idle rescue", agent))
                     TryIdleIslandRescue(agent);
                 using (MeasureMovement(TransitionPhase.MovementSpawnRescue, "spawn rescue", agent))
@@ -128,6 +133,7 @@ public partial class MovementSystem
             }
 
             ObserveAwakeRecovery(agent);
+            ObserveRescueProgress(agent);
 
             // Runs before UpdateMovement: an islanded bot has no path, so UpdateMovement early-returns and the
             // stuck remediation never sees it.
@@ -1561,6 +1567,7 @@ public partial class MovementSystem
     private void TryIdleIslandRescue(Agent agent)
     {
         var stuck = agent.Stuck;
+        if (!stuck.Recovery.Progress.CanAttempt(Time.time)) return;
         // Observe the body every active tick, independently of which failing objective is selected.
         // A gap in these observations means combat, a Ghost fight or inactive control, not travel time.
         if (stuck.IdleRescueLastObservedAt < 0f || Time.time - stuck.IdleRescueLastObservedAt > 2f)
@@ -1647,9 +1654,11 @@ public partial class MovementSystem
 
     private bool CompleteLocalRescue(Agent agent, Vector3 point)
     {
+        if (!agent.Stuck.Recovery.Progress.CanAttempt(Time.time)) return false;
         var from = agent.Position;
         if (!BotLandingGuard.TryPlace(agent.Bot, point, "local-rescue", () => ResumeGroundPlacement(agent))) return false;
         agent.Stuck.Recovery.RecordLocalRescue(from, agent.Position);
+        BeginRescueVerification(agent, "local-rescue");
         ResetAfterRescue(agent);
         return true;
     }
@@ -1726,6 +1735,7 @@ public partial class MovementSystem
 
     private bool RescueTeleportToConnectedPoint(Agent agent, Vector3 objectivePos, int startRing = 0)
     {
+        if (!agent.Stuck.Recovery.Progress.CanAttempt(Time.time)) return false;
         if (!TeleportSafe(agent, _humanPlayers)) return false;
 
         var pos = agent.Position;
@@ -1758,6 +1768,7 @@ public partial class MovementSystem
     // position is usable navmesh — enough to get the bot off a dead chunk.
     private bool RescueTeleportNearSquadmate(Agent agent)
     {
+        if (!agent.Stuck.Recovery.Progress.CanAttempt(Time.time)) return false;
         var squad = agent.Squad;
         if (squad?.Members == null) return false;
         if (!TeleportSafe(agent, _humanPlayers)) return false;
@@ -1801,6 +1812,7 @@ public partial class MovementSystem
     private void TrySpawnIslandRescue(Agent agent, List<Agent> liveAgents)
     {
         var stuck = agent.Stuck;
+        if (!stuck.Recovery.Progress.CanAttempt(Time.time)) { CancelSpawnWaypointSearch(agent); return; }
         if (stuck.SpawnIslandRescued) { CancelSpawnWaypointSearch(agent); return; } // one-shot; also set once the bot proves it can reach the map
 
         var pos = agent.Position;

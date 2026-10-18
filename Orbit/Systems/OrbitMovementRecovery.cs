@@ -6,6 +6,7 @@ namespace Orbit.Systems;
 // Per Agent, so neither recycled bot IDs nor subsequent raids inherit a recovery anchor.
 internal sealed class OrbitMovementRecovery
 {
+    internal readonly RescueProgress Progress = new();
     internal Vector3 Anchor { get; private set; }
     internal bool HasAnchor { get; private set; }
     internal bool OnMesh { get; private set; }
