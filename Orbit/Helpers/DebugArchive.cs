@@ -21,6 +21,7 @@ internal sealed class DebugArchive
         public RaidReviewDebug.Context RaidReview;
         public DebugRaidLink Fika;
         public string ContextWarning;
+        public string LoggingAtStart, LoggingAtEnd;
         public string[] Diagnostics = Array.Empty<string>();
     }
 
@@ -31,19 +32,19 @@ internal sealed class DebugArchive
     private string _backgroundError;
     private readonly RaidReviewDebug _raidReview;
 
-    internal DebugArchive(string bepinexRoot, string version, HttpClient raidReviewClient = null)
+    internal DebugArchive(string bepinexRoot, string version, HttpClient raidReviewClient = null, Action<string> log = null)
     {
         _root = Path.GetFullPath(bepinexRoot); _version = version;
         _folder = Path.Combine(_root, "ORBIT", "debug");
         _recordPath = Path.Combine(_folder, "last-raid.json");
-        _raidReview = new RaidReviewDebug(_folder, raidReviewClient);
+        _raidReview = new RaidReviewDebug(_folder, raidReviewClient, log);
     }
 
-    internal void BeginRaid(string map, RaidReviewDebug.Context raidReview = null)
+    internal void BeginRaid(string map, RaidReviewDebug.Context raidReview = null, string logging = null)
     {
         _diagnostics.Clear();
         _current = new RaidRecord { Id = Guid.NewGuid().ToString("N"), Map = map,
-            Version = _version, StartedUtc = DateTime.UtcNow, RaidReview = raidReview };
+            Version = _version, StartedUtc = DateTime.UtcNow, RaidReview = raidReview, LoggingAtStart = logging };
         Checkpoint();
     }
 
@@ -60,6 +61,7 @@ internal sealed class DebugArchive
         Id = _current.Id, Map = _current.Map, Version = _current.Version,
         StartedUtc = _current.StartedUtc, EndedUtc = _current.EndedUtc,
         RaidReview = _current.RaidReview, Fika = _current.Fika, ContextWarning = _current.ContextWarning,
+        LoggingAtStart = _current.LoggingAtStart, LoggingAtEnd = _current.LoggingAtEnd,
         Diagnostics = _diagnostics.ToArray() };
 
     internal void SetFika(DebugRaidLink link, string warning = null)
@@ -79,10 +81,11 @@ internal sealed class DebugArchive
         Queue(async () => { await Task.CompletedTask; Persist(record); });
     }
 
-    internal void FinishRaid(Task diagnosticsReady, Func<string> flushLogs)
+    internal void FinishRaid(Task diagnosticsReady, Func<string> flushLogs, string logging = null)
     {
         if (_current == null || _current.EndedUtc.HasValue) return;
         _current.EndedUtc = DateTime.UtcNow;
+        _current.LoggingAtEnd = logging;
         var record = Snapshot();
         Queue(async () => {
             await diagnosticsReady.ConfigureAwait(false);
@@ -97,7 +100,7 @@ internal sealed class DebugArchive
 
     // Capture the record before dispatch so a new raid cannot change an in-progress export.
     internal Task<string> Create(Task diagnosticsReady, Func<string> flushLogs, RaidReviewDebug.Context raidReview = null,
-        string expectedRaid = null)
+        string expectedRaid = null, string logging = null)
     {
         var record = Snapshot();
         var result = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -128,7 +131,13 @@ internal sealed class DebugArchive
                     Persist(record);
                 }
                 var rr = await _raidReview.Capture(record, raidReview).ConfigureAwait(false);
-                result.SetResult(WriteZip(record, warnings, rr));
+                if (sameSession)
+                {
+                    // Include this export's failures in the log as well as report.json.
+                    try { flushLogs(); SaveLog(record); }
+                    catch (Exception error) { warnings.Add("Could not refresh export log: " + error.Message); }
+                }
+                result.SetResult(WriteZip(record, warnings, rr, logging));
             }
             catch (Exception error) { result.SetException(error); }
         });
@@ -185,7 +194,7 @@ internal sealed class DebugArchive
         }
     }
 
-    private string WriteZip(RaidRecord record, List<string> warnings, RaidReviewDebug.Snapshot raidReview)
+    private string WriteZip(RaidRecord record, List<string> warnings, RaidReviewDebug.Snapshot raidReview, string logging)
     {
         Directory.CreateDirectory(_folder);
         var path = Path.Combine(_folder, "ORBIT-debug-" + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss-fff")
@@ -224,14 +233,16 @@ internal sealed class DebugArchive
                 raidReview.Files = rrFiles.ToArray();
                 WriteText(zip, "report.json", JsonConvert.SerializeObject(new {
                     CreatedUtc = DateTime.UtcNow, ExporterVersion = _version, Raid = record,
-                    DiagnosticFiles = count, RaidReview = raidReview, Warnings = warnings,
+                    DiagnosticFiles = count, RaidReview = raidReview, Warnings = warnings, ExportLogging = logging,
                     LogScope = "BepInEx session log, including startup and any earlier raids in that session. Diagnostics belong only to the selected raid."
                 }, Formatting.Indented));
                 WriteText(zip, "README.txt", "ORBIT debug report\nAttach this ZIP to your bug report and describe what happened.\n"
                     + "The BepInEx log contains messages from installed mods and may include player names and local paths.\n"
                     + "RaidReview/ contains JSON replay data for this raid when available: players, positions, inventories, loot, combat and objectives.\n"
                     + "RR is read through its configured server. Cached end-of-raid data can be used if that server is offline.\n"
-                    + "report.json identifies the selected raid and lists missing files.\n"
+                    + "report.json identifies the selected raid, lists missing files and records RR transfer attempts (phase, bytes, elapsed time and error).\n"
+                    + "RaidReview.Positions states Included, Cached or Missing. Cached data may omit the end of a raid.\n"
+                    + "Raid.LoggingAtStart/LoggingAtEnd and ExportLogging distinguish the recording and export settings; older recordings may have no saved settings.\n"
                     + "For Fika, clicking Create debug ZIP can request this raid's host files through your SPT server.\n"
                     + "Host/ contains the host/headless snapshot when available; HostDebug in report.json describes the transfer.\n");
             }

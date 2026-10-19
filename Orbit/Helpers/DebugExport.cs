@@ -16,7 +16,7 @@ namespace Orbit.Helpers;
 
 internal static class DebugExport
 {
-    private static readonly DebugArchive Archive = new(BepInEx.Paths.BepInExRootPath, Plugin.ReleaseVersion);
+    private static readonly DebugArchive Archive = new(BepInEx.Paths.BepInExRootPath, Plugin.ReleaseVersion, log: Log.Always);
     private static readonly DebugRelayTransfer Relay = new(Post);
     private static readonly Task<DebugArchive.RaidRecord> Restore = Archive.LoadLastRaid();
     private static Task<string> _export;
@@ -42,7 +42,7 @@ internal static class DebugExport
         var world = Singleton<GameWorld>.Instance;
         if (world != null && ReferenceEquals(_world, world)) return;
         _world = world;
-        Archive.BeginRaid(map, RaidReviewContext());
+        Archive.BeginRaid(map, RaidReviewContext(), Log.ReportSettings("raid-start"));
         _record = Archive.Snapshot();
         _restored = true;
     }
@@ -69,7 +69,7 @@ internal static class DebugExport
     internal static void RegisterDiagnostic(string path) => Archive.RegisterDiagnostic(path);
     internal static void FinishRaid(Task writers)
     {
-        Archive.FinishRaid(writers, Log.DebugFlush());
+        Archive.FinishRaid(writers, Log.DebugFlush(), Log.ReportSettings("raid-end"));
         _record = Archive.Snapshot() ?? _record;
         _nextPoll = DateTime.MinValue;
     }
@@ -85,8 +85,9 @@ internal static class DebugExport
         try
         {
             SetProgress(new DebugTransferProgress("Preparing local logs, diagnostics and RR replay"));
-            _cancel = new CancellationTokenSource(TimeSpan.FromMinutes(10));
-            var local = Archive.Create(DiagnosticCapture.PrepareExport(), Log.DebugFlush(), RaidReviewContext());
+            _cancel = new CancellationTokenSource();
+            var local = Archive.Create(DiagnosticCapture.PrepareExport(), Log.DebugFlush(), RaidReviewContext(),
+                logging: Log.ReportSettings("export"));
             _status = null;
             _export = Task.Run(async () =>
             {
@@ -97,6 +98,9 @@ internal static class DebugExport
                     record = JObject.Parse(reader.ReadToEnd())["Raid"]?.ToObject<DebugArchive.RaidRecord>();
                 if (DebugRelayProtocol.Valid(record?.Fika) && !record.Fika.Authority)
                 {
+                    // Start the remote budget after local RR preparation. Allow host preparation
+                    // plus upload/download of a large ZIP at the relay's existing rate limit.
+                    _cancel.CancelAfter(TimeSpan.FromMinutes(20));
                     _hostTransfer = true;
                     try
                     {
@@ -145,7 +149,8 @@ internal static class DebugExport
                 var record = _pollRecord;
                 var ticket = _heartbeat.Result.Ticket;
                 // Capture live diagnostics on the Unity thread; compression and networking stay off it.
-                var archive = Archive.Create(DiagnosticCapture.PrepareExport(), Log.DebugFlush(), expectedRaid: record.Id);
+                var archive = Archive.Create(DiagnosticCapture.PrepareExport(), Log.DebugFlush(), expectedRaid: record.Id,
+                    logging: Log.ReportSettings("host-export"));
                 _serving = Task.Run(() => Serve(record.Fika, ticket, archive));
             }
             if (_heartbeat.IsFaulted) _joined = null;

@@ -32,6 +32,7 @@ public partial class MovementSystem
         if (!agent.IsActive || agent.IsDormant || player == null)
         {
             motion.ClearInput();
+            motion.Jump.End(agent, "handoff");
             motion.Finish(agent, "handoff", EPlayerState.None);
             return false;
         }
@@ -40,6 +41,7 @@ public partial class MovementSystem
         var state = player.CurrentManagedState?.Name ?? EPlayerState.None;
         var held = traversal || player.MovementContext?.IsGrounded != true;
         motion.Observe(agent, held, traversal, state);
+        motion.Jump.Observe(agent, state);
         if (!held) return false;
 
         // Suspend new unstuck actions, pose changes and sprint requests during native motion.
@@ -77,6 +79,7 @@ public partial class MovementSystem
     private static void StopAwakeInput(Agent agent, [CallerMemberName] string reason = null)
     {
         agent.Movement.AwakeMotion.ClearInput();
+        agent.Movement.AwakeMotion.Jump.End(agent, reason ?? "stop");
         agent.Movement.SprintControl.Suspend();
         // ResetPath is also called during handoff. Never overwrite native/SAIN input there.
         if (!agent.IsActive || agent.IsDormant || agent.Player == null)

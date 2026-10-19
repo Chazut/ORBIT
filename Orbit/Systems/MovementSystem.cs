@@ -2114,16 +2114,20 @@ public partial class MovementSystem
             switch (stuck.Status)
             {
                 case SoftStuckStatus.None when stuck.Timer >= VaultAttemptDelay:
+                    agent.Movement.AwakeMotion.TraceRecovery(agent, "vault-request", stuck.Timer, distanceMoved, stuckThreshold);
                     Log.Debug($"{agent} is stuck, attempting to vault.");
                     stuck.Status = SoftStuckStatus.Vaulting;
                     agent.Player.MovementContext?.TryVaulting();
                     break;
                 case SoftStuckStatus.Vaulting when stuck.Timer >= JumpAttemptDelay:
+                    agent.Movement.AwakeMotion.TraceRecovery(agent, "jump-request", stuck.Timer, distanceMoved, stuckThreshold);
+                    agent.Movement.AwakeMotion.Jump.Request(agent);
                     Log.Debug($"{agent} is stuck, attempting to jump.");
                     stuck.Status = SoftStuckStatus.Jumping;
                     agent.Player.MovementContext?.TryJump();
                     break;
                 case SoftStuckStatus.Jumping when stuck.Timer >= FailedDelay:
+                    agent.Movement.AwakeMotion.TraceRecovery(agent, "failed", stuck.Timer, distanceMoved, stuckThreshold);
                     stuck.Status = SoftStuckStatus.Failed;
                     break;
                 case SoftStuckStatus.Failed:

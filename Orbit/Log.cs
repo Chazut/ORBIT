@@ -28,6 +28,17 @@ public static class Log
     private static int _mainThreadId, _lastFrame;
     private static float _nextReport;
 
+    internal static string DescribeSettings()
+        => $"quiet={Plugin.QuietLogging?.Value.ToString() ?? "unbound"} configured=[{Plugin.LogLevels?.Value.ToString() ?? "unbound"}] "
+            + $"effective=[{Effective()}] performance={Plugin.PerfLogging?.Value.ToString() ?? "unbound"}";
+
+    internal static string ReportSettings(string reason)
+    {
+        var settings = DescribeSettings();
+        Always($"LOG SETTINGS: reason={reason} {settings}");
+        return settings;
+    }
+
     internal static void Initialize()
     {
         _mainThreadId = Thread.CurrentThread.ManagedThreadId;

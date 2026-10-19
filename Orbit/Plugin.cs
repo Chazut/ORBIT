@@ -92,6 +92,10 @@ public class Plugin : BaseUnityPlugin
         try
         {
             SetupConfig();
+            Log.ReportSettings("startup");
+            QuietLogging.SettingChanged += (_, _) => Log.ReportSettings("quiet-changed");
+            LogLevels.SettingChanged += (_, _) => Log.ReportSettings("levels-changed");
+            PerfLogging.SettingChanged += (_, _) => Log.ReportSettings("performance-changed");
         }
         catch (Exception ex)
         {

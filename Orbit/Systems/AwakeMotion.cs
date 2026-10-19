@@ -7,6 +7,20 @@ namespace Orbit.Systems;
 // frame; returning without Move can stop it just as surely as EnableSprint(false).
 internal sealed class AwakeMotion
 {
+    internal readonly JumpDiagnostics Jump = new();
+    private float _nextRecoveryReport;
+    private int _recoverySuppressed;
+
+    internal void TraceRecovery(Agent agent, string action, float seconds, float distance, float expected)
+    {
+        if (Time.time < _nextRecoveryReport) { _recoverySuppressed++; return; }
+        _nextRecoveryReport = Time.time + 10f;
+        Log.Always($"MOVEMENT UNSTUCK: {agent} action={action} source=orbit-soft-stuck seconds={seconds:F2} "
+            + $"stepDistance={distance:F3} expectedDistance={expected:F3} suppressed={_recoverySuppressed} "
+            + $"state={agent.Player.CurrentManagedState?.Name} grounded={agent.Player.MovementContext?.IsGrounded == true} "
+            + $"position={agent.Position} target={agent.Movement.Target} revision={agent.Movement.PathRevision} objective={agent.Objective.Location}");
+        _recoverySuppressed = 0;
+    }
     private const float CoastSeconds = .15f;
     private float _inputAt = -1f;
     private int _revision;
