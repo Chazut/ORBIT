@@ -22,24 +22,29 @@ internal sealed class CampFormationSearch : IFrameSearch, IDisposable
     private readonly IEnumerator<bool> _steps;
     private readonly AmbushSearchBudget _budget = new();
     private readonly float _started;
+    private readonly float _timeout;
     private readonly int _firstFrame;
     private int _slices;
     internal bool Done, Success, DirectLoot, Cancelled;
-    internal bool TimedOut => Time.time - _started >= ServerConfig.Ambush.TravelTimeout;
+    internal float Elapsed => Mathf.Max(0, Time.time - _started);
+    internal bool TimedOut => Elapsed >= Mathf.Min(_timeout, ServerConfig.Ambush.TravelTimeout);
     internal string Rejections => _budget.Rejections;
-    internal bool Valid
+    internal bool Valid => InvalidReason == null;
+    internal string InvalidReason
     {
         get
         {
             var cfg = ServerConfig.Ambush;
-            if (!cfg.Allows(Squad.Leader?.BotCategory) || !cfg.For(Site.Kind).Enabled || !AmbushDirector.Available(Squad)
-                || ! _waypoints.IsAmbushSiteAvailable(Site, Squad.Leader?.BotCategory)
-                || Main != null && !Main.CanPursue(Squad.MainObjectives)
-                || Time.time - _started >= cfg.TravelTimeout || (Site.Position - _target).sqrMagnitude > 1f
-                || Squad.Size != _members.Count) return false;
+            if (!cfg.Allows(Squad.Leader?.BotCategory) || !cfg.For(Site.Kind).Enabled) return "ambush disabled";
+            if (!AmbushDirector.Available(Squad)) return "combat or member unavailable";
+            if (!_waypoints.IsAmbushSiteAvailable(Site, Squad.Leader?.BotCategory)) return "site unavailable";
+            if (Main != null && (!Main.CanPursue(Squad.MainObjectives) || Squad.MainObjectives?.Contains(Main) != true)) return "main no longer pending";
+            if (TimedOut) return "cover search timeout";
+            if ((Site.Position - _target).sqrMagnitude > 1f) return "site moved";
+            if (Squad.Size != _members.Count) return "group changed";
             for (var i = 0; i < _members.Count; i++)
-                if (!Squad.Members.Contains(_members[i]) || (_members[i].Position - _origins[i]).sqrMagnitude > 100f) return false;
-            return true;
+                if (!Squad.Members.Contains(_members[i]) || (_members[i].Position - _origins[i]).sqrMagnitude > 100f) return "member moved";
+            return null;
         }
     }
 
@@ -47,6 +52,7 @@ internal sealed class CampFormationSearch : IFrameSearch, IDisposable
     {
         _waypoints = waypoints; Squad = squad; Site = site; Main = main;
         _target = site.Position; _started = Time.time; _firstFrame = Time.frameCount;
+        _timeout = AmbushDirector.IsInitialKillSearch(main) ? AmbushDirector.InitialKillSearchRemaining(main) : float.MaxValue;
         _members = new List<Agent>(squad.Members);
         foreach (var member in _members) _origins.Add(member.Position);
         _steps = Search().GetEnumerator();

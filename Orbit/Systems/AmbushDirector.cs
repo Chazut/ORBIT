@@ -8,7 +8,7 @@ using Random = UnityEngine.Random;
 
 namespace Orbit.Systems;
 
-internal sealed class AmbushDirector(WaypointSystem waypoints)
+internal sealed partial class AmbushDirector(WaypointSystem waypoints)
 {
     private readonly List<Squad> _active = new();
     private readonly List<AmbushSite> _candidates = new();
@@ -56,7 +56,7 @@ internal sealed class AmbushDirector(WaypointSystem waypoints)
         _expiredFormations.Clear();
         foreach (var pair in _formations)
             if (!squads.Contains(pair.Key) || !pair.Value.Valid) _expiredFormations.Add(pair.Key);
-        foreach (var squad in _expiredFormations) CancelFormation(squad);
+        foreach (var squad in _expiredFormations) CancelFormation(squad, squads.Contains(squad) ? null : "group removed");
 
         for (var i = _active.Count - 1; i >= 0; i--)
         {
@@ -161,6 +161,7 @@ internal sealed class AmbushDirector(WaypointSystem waypoints)
             var rule = cfg.For(extract ? CampSiteKind.Extract : CampSiteKind.Hotspot);
             if (extract && Vector3.Distance(squad.Leader.Position, pending.Position) > rule.DistanceMax + 10f) return false;
             _nextPlan = Time.time + .5f;
+            if (IsInitialKillSearch(pending)) return StartInitialKillSearch(squad, pending);
             pending.CampRetryAt = Time.time + 15f;
             pending.CampSite ??= waypoints.CreateKillMainCampSite(pending);
             if (extract)
@@ -203,13 +204,18 @@ internal sealed class AmbushDirector(WaypointSystem waypoints)
         return ContinueFormation(squad);
     }
 
-    private void CancelFormation(Squad squad)
+    private void CancelFormation(Squad squad, string reason = null)
     {
         if (!_formations.Remove(squad, out var search)) return;
         waypoints.CancelFrameSearch(search); search.Dispose();
         // An interrupted calculation is not an exhausted cover attempt.
         if (search.Main != null)
         {
+            if (IsInitialKillSearch(search.Main))
+            {
+                CancelInitialKillSearch(squad, search, reason);
+                return;
+            }
             if (search.TimedOut && search.Main.Type == MainObjectiveType.ExtractCamp)
             {
                 (search.Main.CampApproach ??= new ExtractCampApproach(search.Main)).Fail(squad, waypoints, "cover search timeout");
@@ -231,11 +237,18 @@ internal sealed class AmbushDirector(WaypointSystem waypoints)
         _formations.Remove(squad); waypoints.CancelFrameSearch(search);
         if (search.Success)
         {
+            if (IsInitialKillSearch(search.Main))
+                LogInitialKillSearch(squad, search.Main, "ready", "reachable cover found", search.Rejections, search.Elapsed);
             squad.Camp.Begin(squad, search.Site, search.Positions, waypoints, search.Main, search.DirectLoot);
             if (!_active.Contains(squad)) _active.Add(squad);
             return !search.DirectLoot || squad.Camp.Tick(squad, waypoints);
         }
         var main = search.Main;
+        if (IsInitialKillSearch(main))
+        {
+            FailInitialKillSearchAttempt(squad, main, "cover search exhausted", search.Rejections, search.Elapsed);
+            return false;
+        }
         if (main != null && squad.Camp.RetryMain == main)
         {
             squad.Camp.RetryMainAfterFailure(squad, main, "cover search exhausted: " + search.Rejections);

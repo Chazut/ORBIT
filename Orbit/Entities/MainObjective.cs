@@ -68,6 +68,9 @@ public class MainObjective
     }
     internal float CampRetryAt;
     internal int CampRouteFailures;
+    internal bool CampInitialSearchResolved;
+    internal float CampInitialSearchElapsed;
+    internal List<Vector3> CampRejectedAnchors;
     internal Orbit.Systems.AmbushSite CampSite;
     internal Orbit.Systems.ExtractCampApproach CampApproach;
     public bool IsCampMain => Type == MainObjectiveType.ExtractCamp || Type == MainObjectiveType.Kills && KillAmbush;

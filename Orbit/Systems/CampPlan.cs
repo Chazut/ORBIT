@@ -77,6 +77,7 @@ internal sealed class CampPlan
             (main.CampApproach ??= new ExtractCampApproach(main)).Release(squad, waypoints);
         Site = site;
         Main = main;
+        if (main?.Type == MainObjectiveType.Kills) main.CampInitialSearchResolved = true;
         main?.SetCampState("approach");
         _held = _holdTick = 0;
         Holding = false;

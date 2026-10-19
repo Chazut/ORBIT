@@ -140,7 +140,7 @@ public partial class WaypointSystem
         };
     }
 
-    internal AmbushSite CreateKillMainCampSite(MainObjective main)
+    internal AmbushSite CreateKillMainCampSite(MainObjective main, IReadOnlyList<Vector3> rejectedAnchors = null)
     {
         if (main.Type != MainObjectiveType.Kills || !main.KillAmbush || main.KillZoneRadius <= 0) return null;
         // Unscoped main anchors may have Y=0. Use a real POI inside THIS main's zone and on its floor.
@@ -155,6 +155,12 @@ public partial class WaypointSystem
                 if (point.Category is WaypointCategory.Exfil or WaypointCategory.Corpse
                     || !MatchesZoneFloor(main.ZoneFloorId, point.Position)
                     || XzDistanceSqr(point.Position, main.KillZoneCenter) > main.KillZoneRadius * main.KillZoneRadius) continue;
+                // Exclude every failed anchor and nearby copies, not only the last one.
+                var rejected = false;
+                if (rejectedAnchors != null)
+                    for (var i = 0; i < rejectedAnchors.Count; i++)
+                        if (XzDistanceSqr(point.Position, rejectedAnchors[i]) < 400f) { rejected = true; break; }
+                if (rejected) continue;
                 var distance = XzDistanceSqr(point.Position, main.Position);
                 if (distance >= best) continue;
                 best = distance;
