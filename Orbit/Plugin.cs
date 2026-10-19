@@ -154,6 +154,7 @@ public class Plugin : BaseUnityPlugin
         BotHealingFixesCompat.Enable();
         SanitarPatrolMedicinePatch.Enable();
         SniperSainDecisionPatch.Enable();
+        EnableSafe(new SniperContactRangePatch());
         LootPatrolResumePatch.Enable();
         EnableSafe(new DormantDamageProbePatch());
         EnableSafe(new DormantGroundCollisionPatch());

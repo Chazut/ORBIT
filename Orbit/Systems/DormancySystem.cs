@@ -385,8 +385,9 @@ public partial class DormancySystem
         using (TransitionPerformance.Measure(TransitionPhase.GhostWeaponVisuals)) GhostWeaponVisuals.Tick();
         // Check before scheduled shots/kills: spectators must see live combat after waking.
         using (TransitionPerformance.Measure(TransitionPhase.GhostSpectator))
-            if (UpdateSpectatorMode()) { ClearStagedWakes(); return; }
+            if (UpdateSpectatorMode()) { ClearStagedWakes(); ClearSniperContacts(); return; }
         PumpStagedWakes();
+        PumpSniperContacts(squads);
         if (_activeFights.Count > 0) PumpGhostFights();
         if (_pendingShots.Count > 0) PumpGhostFightShots();
         using (TransitionPerformance.Measure(TransitionPhase.GhostNativeMove))

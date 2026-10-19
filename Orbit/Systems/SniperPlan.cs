@@ -43,6 +43,12 @@ internal sealed partial class SniperPlan : IObjectiveWork
     internal string Status { get; private set; } = "pending";
     internal string Step => _site.Name;
 
+    // The scoped actor at an occupied post, not followers or squads still travelling there.
+    internal Agent ContactObserver => _arrived && !_departing && !_returningToPost && !_shifting
+        && _main is { Completed: false } && _actor is { IsActive: true, SoloExtractRequested: false }
+        && _squad != null && !_squad.ExtractRequested && Near(_actor.Position, _post, 4f)
+            ? _actor : null;
+
     internal SniperPlan(RushPoint site, RushStyle style)
     { _site = site; _duration = Random.Range(style.SniperHoldMin, style.SniperHoldMax); }
 

@@ -74,6 +74,7 @@ public partial class DormancySystem
 
     public void Dispose()
     {
+        ClearSniperContacts();
         ClearStagedWakes();
         _wakeHumans.Clear(); _previousWakeHumans.Clear();
         NativeGhostSystem.Clear();
