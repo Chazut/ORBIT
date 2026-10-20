@@ -441,9 +441,9 @@ public static class RushDefaults
             new() { Id = "spawn-35", Name = "PMC spawn sector 35", Kind = "Spawn", X = 37.958f, Y = 21.445f, Z = 193.436f, Radius = 30f, SearchSeconds = 20f },
             new() { Id = "spawn-36", Name = "PMC spawn sector 36", Kind = "Spawn", X = 201.6f, Y = 19.35f, Z = -389.19f, Radius = 30f, SearchSeconds = 20f },
             new() { Id = "spawn-37", Name = "PMC spawn sector 37", Kind = "Spawn", X = 304.99f, Y = 18.88f, Z = -302.77f, Radius = 30f, SearchSeconds = 20f },
-            new() { Id = "bossTagilla-ZoneTagilla-1", Name = "ZoneTagilla 1", Kind = "Boss", Boss = "bossTagilla", Radius = 30f, SearchSeconds = 30f, X = -155.04f, Y = 21.38f, Z = -176.31f },
-            new() { Id = "bossTagilla-ZoneTagilla-2", Name = "ZoneTagilla 2", Kind = "Boss", Boss = "bossTagilla", Radius = 30f, SearchSeconds = 30f, X = -183.057f, Y = 21.373f, Z = -130.534f },
-            new() { Id = "bossTagilla-ZoneTagilla-3", Name = "ZoneTagilla 3", Kind = "Boss", Boss = "bossTagilla", Radius = 30f, SearchSeconds = 30f, X = -138.05f, Y = 21.37f, Z = -124.74f },
+            new() { Id = "bossTagilla-ZoneTagilla-1", Name = "ZoneTagilla 1", Kind = "Boss", Enabled = false, Boss = "bossTagilla", Radius = 30f, SearchSeconds = 30f, X = -155.04f, Y = 21.38f, Z = -176.31f },
+            new() { Id = "bossTagilla-ZoneTagilla-2", Name = "ZoneTagilla 2", Kind = "Boss", Enabled = false, Boss = "bossTagilla", Radius = 30f, SearchSeconds = 30f, X = -183.057f, Y = 21.373f, Z = -130.534f },
+            new() { Id = "bossTagilla-ZoneTagilla-3", Name = "ZoneTagilla 3", Kind = "Boss", Enabled = false, Boss = "bossTagilla", Radius = 30f, SearchSeconds = 30f, X = -138.05f, Y = 21.37f, Z = -124.74f },
         },
         ["Lighthouse@rework"] = new()
         {
