@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.Collections.Generic;
 using System.Reflection;
 using Comfort.Common;
 using EFT;
@@ -25,6 +26,31 @@ public static class SainPersonality
     private static PropertyInfo _instanceProperty;
     private static object _cachedBotManager;
     private static GameWorld _cachedBotManagerWorld;
+
+    private static readonly CachedProperty _valuesAccessor = new("Values");
+    private static readonly CachedProperty _playerAccessor = new("Player");
+    private static readonly CachedProperty _profileIdAccessor = new("ProfileId");
+    private static readonly CachedProperty _infoAccessor = new("Info");
+    private static readonly CachedProperty _personalityAccessor = new("Personality");
+
+    // Cache metadata only, never bot instances or personality values. Accessors remain valid across
+    // raids, and separate entries support mixed component/player types without repeating discovery.
+    private sealed class CachedProperty(string name)
+    {
+        private readonly Dictionary<Type, PropertyInfo> _properties = new();
+
+        public object Read(object instance)
+        {
+            if (instance == null) return null;
+            var type = instance.GetType();
+            if (!_properties.TryGetValue(type, out var property))
+            {
+                property = type.GetProperty(name);
+                _properties.Add(type, property);
+            }
+            return property?.GetValue(instance);
+        }
+    }
 
     public static bool IsSainAvailable => _typesResolved;
 
@@ -131,8 +157,6 @@ public static class SainPersonality
             var bots = _botsProperty.GetValue(manager);
             if (bots == null) return null;
 
-            // SAIN's Bots is a Dictionary<string, BotComponent> keyed by Profile.Id (string). Use the
-            // indexer.
             var profileId = bot.Profile?.Id;
             if (string.IsNullOrEmpty(profileId)) return null;
 
@@ -143,19 +167,19 @@ public static class SainPersonality
             // attempt of the same frame. Either way, raid-review reading the same dict at the same frame
             // succeeds with the iterate-Values approach. Slower (O(n) per lookup) but correct.
             object botComponent = null;
-            var values = bots.GetType().GetProperty("Values")?.GetValue(bots) as IEnumerable;
+            var values = _valuesAccessor.Read(bots) as IEnumerable;
             if (values == null) return null;
             foreach (var bc in values)
             {
-                var p = bc?.GetType().GetProperty("Player")?.GetValue(bc);
-                var pid = p?.GetType().GetProperty("ProfileId")?.GetValue(p) as string;
+                var p = _playerAccessor.Read(bc);
+                var pid = _profileIdAccessor.Read(p) as string;
                 if (pid == profileId) { botComponent = bc; break; }
             }
             if (botComponent == null) return null;
 
-            var info = botComponent.GetType().GetProperty("Info")?.GetValue(botComponent);
+            var info = _infoAccessor.Read(botComponent);
             if (info == null) return null;
-            var personality = info.GetType().GetProperty("Personality")?.GetValue(info);
+            var personality = _personalityAccessor.Read(info);
             if (personality == null) return null;
             if (Enum.IsDefined(_ePersonalityType, personality))
                 return Enum.GetName(_ePersonalityType, personality);
