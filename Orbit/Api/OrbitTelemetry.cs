@@ -146,6 +146,7 @@ public static class OrbitTelemetry
         var loc = obj.Location;
         var category = loc != null ? loc.Category.ToString() : "";
         if (loc?.IsAirdrop == true) category = "AirdropLoot";
+        if (agent.Squad?.Camp.Approach?.Owns(agent) == true) category = "AirdropApproach";
         if (agent.Squad?.Camp.Owns(agent) == true)
             category = agent.Squad.Camp.Looter == agent ? "AirdropLoot" : "Ambush" + agent.Squad.Camp.Site.Kind;
         else if (agent.Squad != null)

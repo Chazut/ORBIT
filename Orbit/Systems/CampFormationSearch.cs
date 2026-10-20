@@ -29,6 +29,8 @@ internal sealed class CampFormationSearch : IFrameSearch, IDisposable
     internal float Elapsed => Mathf.Max(0, Time.time - _started);
     internal bool TimedOut => Elapsed >= Mathf.Min(_timeout, ServerConfig.Ambush.TravelTimeout);
     internal string Rejections => _budget.Rejections;
+    private readonly AmbushSearchBudget _directBudget = new();
+    internal string DirectRejections => _directBudget.Rejections;
     internal bool Valid => InvalidReason == null;
     internal string InvalidReason
     {
@@ -98,7 +100,7 @@ internal sealed class CampFormationSearch : IFrameSearch, IDisposable
         { Success = true; yield break; }
         if (Site.Kind != CampSiteKind.Airdrop) yield break;
         Positions.Clear(); _occupied.Clear();
-        var budget = new AmbushSearchBudget();
+        var budget = _directBudget;
         var canApproach = false;
         DirectLoot = true;
         foreach (var member in _members)

@@ -16,6 +16,8 @@ internal sealed class CampPlan
     internal AmbushSite PendingAirdrop { get; private set; }
     internal float PendingSince { get; private set; }
     internal float FormationRetryAt;
+    internal AirdropApproach Approach { get; set; }
+    internal float AirdropFormationSince { get; set; }
     internal float AirdropCooldownUntil;
     internal AmbushSite AirdropTarget => PendingAirdrop ?? (Site?.Kind == CampSiteKind.Airdrop ? Site : null);
     internal string AirdropStage => AirdropTarget == null ? null : Looter != null ? "loot" : Holding ? "waiting" : "approach";
@@ -59,12 +61,14 @@ internal sealed class CampPlan
     {
         CancelMainRetry();
         PendingAirdrop = site;
+        Approach = null;
+        AirdropFormationSince = 0;
         PendingSince = FormationRetryAt = _lastTick = Time.time;
         _mission = squad.Objective.Location;
+        _missionDuration = squad.Objective.Duration;
         _held = 0;
         var style = AmbushDirector.Style(squad);
         _duration = Random.Range(style.AirdropDurationMin, style.AirdropDurationMax);
-        VisitedAirdrops.Add(site);
         Orbit.Api.OrbitTelemetry.MainObjectivesRevision++;
         Log.Info($"AMBUSH: {squad} selected released airdrop target={site.Position} hold={_duration:F0}s");
     }
@@ -73,6 +77,8 @@ internal sealed class CampPlan
         MainObjective main = null, bool directLoot = false)
     {
         CancelMainRetry();
+        Approach?.Release();
+        Approach = null;
         if (main?.Type == MainObjectiveType.ExtractCamp)
             (main.CampApproach ??= new ExtractCampApproach(main)).Release(squad, waypoints);
         Site = site;
@@ -242,6 +248,10 @@ internal sealed class CampPlan
         if (PendingAirdrop != null)
         {
             PauseMission(squad);
+            Approach?.Release();
+            Approach = null;
+            NextCheck = Time.time + ServerConfig.Ambush.Cooldown;
+            AirdropCooldownUntil = NextCheck;
             PendingAirdrop = null;
             Orbit.Api.OrbitTelemetry.MainObjectivesRevision++;
             Log.Info($"AMBUSH: {squad} cancelled released airdrop reason={reason}");

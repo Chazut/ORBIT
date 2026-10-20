@@ -99,12 +99,28 @@ internal sealed partial class AmbushDirector(WaypointSystem waypoints)
         var site = squad.Camp.PendingAirdrop;
         if (site == null) return false;
         squad.Camp.PauseMission(squad);
-        if (!ServerConfig.Ambush.Allows(squad.Leader?.BotCategory) || !ServerConfig.Ambush.Airdrops.Enabled
-            || !Available(squad) || !waypoints.IsAmbushSiteAvailable(site, squad.Leader?.BotCategory)
-            || Time.time - squad.Camp.PendingSince >= ServerConfig.Ambush.TravelTimeout)
+        var reason = !ServerConfig.Ambush.Allows(squad.Leader?.BotCategory) || !ServerConfig.Ambush.Airdrops.Enabled
+            ? "airdrops disabled" : UnavailableReason(squad)
+            ?? (!waypoints.IsAmbushSiteAvailable(site, squad.Leader?.BotCategory) ? "site unavailable" : null);
+        if (reason != null)
         {
             CancelFormation(squad);
-            squad.Camp.End(squad, "unavailable or formation timeout");
+            squad.Camp.End(squad, reason);
+            return false;
+        }
+        var approach = squad.Camp.Approach ??= new AirdropApproach(squad, site, waypoints);
+        if (!approach.Tick())
+        {
+            CancelFormation(squad);
+            squad.Camp.End(squad, approach.Failure ?? "approach interrupted");
+            return false;
+        }
+        if (!approach.Ready) { CancelFormation(squad); squad.Camp.AirdropFormationSince = 0; return true; }
+        if (squad.Camp.AirdropFormationSince == 0) squad.Camp.AirdropFormationSince = Time.time;
+        if (Time.time - squad.Camp.AirdropFormationSince >= Mathf.Min(15f, ServerConfig.Ambush.TravelTimeout))
+        {
+            CancelFormation(squad);
+            squad.Camp.End(squad, "local formation unavailable");
             return false;
         }
         if (_formations.ContainsKey(squad)) return ContinueFormation(squad) || squad.Camp.PendingAirdrop != null;
@@ -188,12 +204,12 @@ internal sealed partial class AmbushDirector(WaypointSystem waypoints)
         if (_candidates.Count == 0) { Decision(squad, null, "periodic", "no unvisited candidate in range"); return false; }
         var roll = Random.value;
         if (roll >= Style(squad).AirdropChance) { Decision(squad, null, "periodic", "roll rejected", roll); return false; }
-        _nextPlan = Time.time + .5f;
-        // One bounded formation attempt per opportunity, irrespective of nearby drop count.
+        // A late opportunity follows the same staged route, including after landing.
         var selected = _candidates[Random.Range(0, _candidates.Count)];
-        var started = TryFormation(squad, selected, null);
-        Decision(squad, selected, "periodic", started ? "selected" : "formation unavailable", roll);
-        return started;
+        Decision(squad, selected, "periodic", "selected", roll);
+        squad.Camp.SelectAirdrop(squad, selected);
+        if (!_active.Contains(squad)) _active.Add(squad);
+        return TryStartPending(squad);
     }
 
     private bool TryFormation(Squad squad, AmbushSite site, MainObjective main)
@@ -262,7 +278,18 @@ internal sealed partial class AmbushDirector(WaypointSystem waypoints)
         }
         if (main != null)
             Log.Debug($"AMBUSH: {squad} main={main.Type} waiting for reachable cover at {main.Position}");
-        else Decision(squad, search.Site, squad.Camp.PendingAirdrop != null ? "release" : "periodic", "formation unavailable");
+        else
+        {
+            Decision(squad, search.Site, squad.Camp.PendingAirdrop != null ? "release" : "periodic", "formation unavailable");
+            Log.Info($"AIRDROP SEARCH: {squad} rejected={search.Rejections} directRejected={search.DirectRejections} landed={search.Site.Landed}");
+            // Covers may be unreachable from this side of a distant obstacle. Continue
+            // connected legs all the way to the crate instead of repeating a static search.
+            if (squad.Camp.Approach is { ToCrate: false } approach)
+            {
+                approach.ContinueToCrate();
+                squad.Camp.AirdropFormationSince = 0;
+            }
+        }
         return false;
     }
 }

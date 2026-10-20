@@ -316,15 +316,18 @@ public partial class WaypointSystem
             var radius = i == 8 ? 0 : Mathf.Max(6f, spacing * 2f);
             var sample = site.Position + new Vector3(Mathf.Cos(angle), 0, Mathf.Sin(angle)) * radius;
             budget.Remaining--;
-            if (!NavMesh.SamplePosition(sample, out var hit, 3f, NavMesh.AllAreas)
-                || Mathf.Abs(hit.position.y - site.Position.y) > 3f) continue;
+            if (!NavMesh.SamplePosition(sample, out var hit, 3f, NavMesh.AllAreas))
+            { budget.Reject("no ground sample"); continue; }
+            if (Mathf.Abs(hit.position.y - site.Position.y) > 3f)
+            { budget.Reject("height"); continue; }
             var crowded = false;
             foreach (var used in occupied)
                 if ((used - hit.position).sqrMagnitude < spacing * spacing) { crowded = true; break; }
-            if (crowded) continue;
+            if (crowded) { budget.Reject("member spacing"); continue; }
             if (!NavMesh.CalculatePath(agent.Position, hit.position, NavMesh.AllAreas, _campPath)
                 || _campPath.status != NavMeshPathStatus.PathComplete
-                || PathHelper.TotalLength(_campPath.corners) > ServerConfig.Ambush.Airdrops.SearchRadius * 1.5f + 50f) continue;
+                || PathHelper.TotalLength(_campPath.corners) > ServerConfig.Ambush.Airdrops.SearchRadius * 1.5f + 50f)
+            { budget.Reject("incomplete or excessive path"); continue; }
             yield return new CoverPoint(hit.position, (site.Position - hit.position).normalized, CoverCategory.None, CoverLevel.Stay);
             yield break;
         }
