@@ -13,6 +13,7 @@ namespace Orbit.Systems;
 internal sealed class OperationPlan : IObjectiveWork
 {
     private readonly HermeticSwitchRecovery _hermeticRecovery = new();
+    private readonly OperationInteraction _nativeInteraction = new();
     private Squad _squad;
     private WaypointSystem _waypoints;
     void IObjectiveWork.ResumeObjectiveWork() => Tick(_squad, _waypoints, WaypointSystem.ObjectiveCombat(_squad));
@@ -30,8 +31,8 @@ internal sealed class OperationPlan : IObjectiveWork
     private readonly List<Vector3> _rejected = new();
     private readonly HashSet<int> _attemptedLoot = new();
     private Agent _actor;
-    private float _lastTick, _elapsed, _nextWork, _interactionAt, _regroupAt = -1;
-    private int _retries, _interactionRetries, _powerRetries;
+    private float _lastTick, _elapsed, _nextWork, _regroupAt = -1;
+    private int _retries, _powerRetries;
     private bool _paused, _interactionPending;
     private Vector3 _anchor;
     private Waypoint _loot;
@@ -103,6 +104,7 @@ internal sealed class OperationPlan : IObjectiveWork
         _squad = squad; _waypoints = waypoints;
         if (!Active) return false;
         var now = Time.time;
+        _nativeInteraction.Poll();
         var delta = Mathf.Clamp(now - _lastTick, 0, 1);
         _lastTick = now;
         if (!ServerConfig.MultiStep.Allows(squad.Leader?.BotCategory) || !Definition.AllowsCategory(squad.Leader?.BotCategory)
@@ -111,6 +113,7 @@ internal sealed class OperationPlan : IObjectiveWork
         // Paused orders may be replaced by the combat rally. Rebuild from current positions on resume.
         if (combat || now < squad.GhostFightUntil)
         {
+            _nativeInteraction.Reset();
             _hermeticRecovery.Reset();
             waypoints.CancelOperationWork(this);
             if (_regroupAt >= 0) _regroupAt += delta;
@@ -421,18 +424,15 @@ internal sealed class OperationPlan : IObjectiveWork
     private bool Interact(Squad squad, WaypointSystem waypoints, string recovery = null)
     {
         var step = Current;
-        var now = Time.time;
-        if (_interactionPending && now - _interactionAt < 5f) return true;
-        if (step.Object.DoorState == EDoorState.Interacting || step.Object.InteractingPlayer != null)
-            return true;
-        if (!step.Object.Operatable) return true;
+        var interaction = _nativeInteraction.Check(step.Object);
+        if (interaction == OperationInteraction.Result.Waiting) return true;
+        if (interaction == OperationInteraction.Result.Failed)
+        {
+            Log.Warning($"MULTISTEP INTERACTION: {squad} operation={Definition.Id} step={step.Label} result=failed attempts={_nativeInteraction.Attempts} state={step.Object.DoorState} reason={_nativeInteraction.Detail}");
+            return End(squad, waypoints, "interaction failed");
+        }
         if (step.Object is Door door && !MultiStepAccess.HasPower(door)) return true;
         if (step.Object is Switch sw && sw.DoorState == EDoorState.Locked) return true;
-        if (++_interactionRetries > 3)
-        {
-            if (!_persistent) return End(squad, waypoints, "interaction failed");
-            _interactionRetries = 0; _interactionPending = false; _nextWork = now + 3f; return true;
-        }
         try
         {
             if (recovery != null)
@@ -443,20 +443,23 @@ internal sealed class OperationPlan : IObjectiveWork
             _actor.Look.Type = LookType.Position;
             if (!_actor.IsDormant) LookSystem.LookToPoint(_actor, _interactionLookPoint, 360f);
             Log.Info($"MULTISTEP SURFACE: {squad} operation={Definition.Id} step={step.Label} target={step.Object.Id} {step.ReachDiagnostics}");
+            if (_actor.Player == null) return End(squad, waypoints, "interaction actor unavailable");
+            _nativeInteraction.Begin(step.Object, _actor.Player);
+            Log.Info($"MULTISTEP INTERACTION: {squad} operation={Definition.Id} step={step.Label} result=started attempts={_nativeInteraction.Attempts} state={step.Object.DoorState} actor={_actor} ghost={_actor.IsDormant}");
             if (step.Object is Door locked && locked.DoorState == EDoorState.Locked)
             {
-                var interaction = locked.GetInteractionParameters(_actor.Position); // Selects the real remote card reader.
+                var parameters = locked.GetInteractionParameters(_actor.Position); // Selects the real remote card reader.
                 if (locked is KeycardDoor)
                 {
-                    var gap = interaction.InteractionPosition - _actor.Position;
+                    var gap = parameters.InteractionPosition - _actor.Position;
                     if (gap.sqrMagnitude > 4f || Mathf.Abs(gap.y) > 1.5f)
-                    { RetryNavigation(squad, waypoints); return true; }
+                    { _nativeInteraction.Reset(); RetryNavigation(squad, waypoints); return true; }
                     // KeycardDoor's successful scan opens only from an interacting/unlocked state.
                     // Invoke its native success coroutine without creating or consuming an inventory key.
                     locked.LockForInteraction();
                     Log.Info($"MULTISTEP CARD: {squad} operation={Definition.Id} reader={locked.Id} scan requested without inventory card");
                 }
-                locked.Unlock();
+                _nativeInteraction.Unlock(locked);
                 Orbit.Api.OrbitDoorEvents.Raise(locked, Orbit.Api.OrbitDoorEvents.Operation.Unlock);
             }
             else
@@ -467,14 +470,15 @@ internal sealed class OperationPlan : IObjectiveWork
                 else Orbit.Api.OrbitInteractionEvents.Raise(step.Object, EInteractionType.Open);
             }
             _interactionPending = true;
-            _interactionAt = now;
             Status = "interacting";
             LogStep(squad);
         }
         catch (Exception error)
         {
-            _interactionAt = now; _interactionPending = true;
-            Log.Warning($"MULTISTEP: {squad} operation={Definition.Id} interaction={step.Label} failed: {error.Message}");
+            _interactionPending = true;
+            Log.Warning($"MULTISTEP: {squad} operation={Definition.Id} interaction={step.Label} failed: {error}");
+            _nativeInteraction.Fault();
+            Log.Info($"MULTISTEP INTERACTION: {squad} operation={Definition.Id} step={step.Label} result={(_nativeInteraction.RecoveryFailed ? "recovery-failed" : "recovered")} attempts={_nativeInteraction.Attempts} state={step.Object.DoorState} reason={_nativeInteraction.Detail}");
         }
         return true;
     }
@@ -566,11 +570,12 @@ internal sealed class OperationPlan : IObjectiveWork
 
     private void ResetStep(Squad squad, WaypointSystem waypoints, int index)
     {
+        _nativeInteraction.Reset();
         _hermeticRecovery.Reset();
         ReleaseOrders(squad, waypoints);
         Index = index;
         _stepActiveElapsed = 0;
-        _actor = null; _loot = null; _elapsed = 0; _regroupAt = -1; _retries = 0; _interactionRetries = 0; _interactionPending = false;
+        _actor = null; _loot = null; _elapsed = 0; _regroupAt = -1; _retries = 0; _interactionPending = false;
         _route.Reset(); _approachOnly = false; _approachHistory.Clear();
         _progress.Reset(); _accessDoor = null; _triedAccessDoors.Clear();
         _searchingRecorded = false; _recorded.Reset();
@@ -590,6 +595,7 @@ internal sealed class OperationPlan : IObjectiveWork
             return Advance(squad, waypoints);
         }
         waypoints.CancelOperationWork(this);
+        _nativeInteraction.Reset();
         ReleaseOrders(squad, waypoints);
         Active = false; Status = reason;
         if (Definition.Extraction && reason != "completed") squad.FailedOperationExits.Add(Definition.Id);
