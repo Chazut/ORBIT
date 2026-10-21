@@ -174,6 +174,7 @@
             @if (Kind == "Marked")
             {
                 <MudTextField @bind-Value="selected.DoorId" Label="Exact scene door ID" />
+                <MudText Typo="Typo.caption">In raid: F12 > ORBIT > Authoring tools can capture a door and save a prefilled point here. Captures with uncertain room placement stay disabled until reviewed. Export zones to include these points in your addon.</MudText>
                 <MudText Typo="Typo.caption">The PMC approaches this door's real interaction point and unlocks it with 100% success. Power-controlled doors cannot be bypassed.</MudText>
                 <MudStack Row="true" Wrap="Wrap.Wrap">
                     <MudNumericField T="float" Immediate="true" @bind-Value="selected.LootX" Label="Room loot X" />

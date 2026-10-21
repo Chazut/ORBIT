@@ -337,6 +337,23 @@ call chain in diagnostic logs. Updated Raid Review records deaths without a
 killer as KIA and reserves Extracted for confirmed extractions. Older ambiguous
 removals are shown as Removed.
 
+### Capture custom room rush points (3.0 beta 9)
+
+Enable **F12 > ORBIT > Authoring tools > Capture Rush door** (off by default).
+Face a door until its interaction prompt appears and press **Left Ctrl + F8**,
+or set your own **Capture door shortcut** in F12. The scene door ID is copied to
+the clipboard and a Marked Rush point is saved in the active preset, with the
+approach position, room loot position and radius prefilled. The tool only scans
+the scene when you press the shortcut.
+
+Review or rename the point in **Rush objectives > Marked**. Uncertain room
+placement is saved disabled so you can check the coordinates before enabling it.
+Existing points for that door keep their settings. Save or discard pending web
+editor changes before capturing; Default and addon presets become a personal
+copy. Changes apply next raid and are included when exporting zones for an addon.
+Both the client and server need this version of ORBIT. Powered access sequences
+and rooms already excluded from Marked Rush cannot be bypassed by this tool.
+
 ### Debug ZIP (next beta)
 
 Use **F12 > ORBIT > Create debug ZIP** on the player client. Solo and Fika hosts

@@ -53,6 +53,8 @@ public class Plugin : BaseUnityPlugin
     public static ConfigEntry<bool> QuietLogging;
     public static ConfigEntry<OrbitLogLevel> LogLevels;
     public static ConfigEntry<bool> PerfLogging;
+    public static ConfigEntry<bool> DoorCaptureEnabled;
+    public static ConfigEntry<KeyboardShortcut> DoorCaptureKey;
 
     // Faction-mod plugin GUIDs — same Chainloader detection raid-review uses.
     private const string UntarPluginGuid = "com.untargh.tacticaltoaster";
@@ -70,7 +72,10 @@ public class Plugin : BaseUnityPlugin
         Log.Refresh();
         PerformanceJournal.RefreshWriter();
         DebugExport.Refresh();
+        DoorCaptureTool.Update();
     }
+
+    private void OnGUI() => DoorCaptureTool.DrawStatus();
 
     private void OnApplicationQuit() => Log.Shutdown();
     private void OnDestroy() => Log.Shutdown();
@@ -343,6 +348,17 @@ public class Plugin : BaseUnityPlugin
         Config.Bind(essentials, "Debug report", string.Empty, new ConfigDescription(
             "Creates a ZIP with this client's log and the selected raid's diagnostics/replay. On Fika clients, requests matching host/headless files through your SPT server only when clicked. Keep the host running for the first collection. Completed snapshots are cached on the server for 24 hours. Transfers run in the background, limited to 1 MiB/s per direction. Saved in BepInEx/ORBIT/debug.",
             null, new ConfigurationManagerAttributes { Category = "", Order = -2, HideDefaultButton = true, CustomDrawer = DrawDebugExportButton }));
+
+        const string authoring = "02. Authoring tools";
+        DoorCaptureEnabled = Config.Bind(authoring, "Capture Marked Rush doors", false, new ConfigDescription(
+            "Enable the in-raid door capture shortcut. Facing a door copies its scene ID and saves a prefilled Marked Rush point in the active server preset. Protected presets become a personal copy. Uncertain room placement is saved disabled for review. Applies next raid.",
+            null, new ConfigurationManagerAttributes { Order = 2, DispName = "Capture Rush door" }));
+        DoorCaptureKey = Config.Bind(authoring, "Capture door shortcut", new KeyboardShortcut(KeyCode.F8, KeyCode.LeftControl), new ConfigDescription(
+            "Close menus and face a door until its interaction prompt appears, then press this shortcut. Requires the matching ORBIT server mod. Existing doors keep their settings; save or discard web editor changes before capturing.",
+            null, new ConfigurationManagerAttributes { Order = 1 }));
+        Config.Bind(authoring, "Last door capture", string.Empty, new ConfigDescription("Result of the last capture.",
+            null, new ConfigurationManagerAttributes { Order = 0, HideDefaultButton = true,
+                CustomDrawer = _ => GUILayout.Label(DoorCaptureTool.Status, new GUIStyle(GUI.skin.label) { wordWrap = true }) }));
     }
 
     private static void DrawDebugExportButton(ConfigEntryBase entry)

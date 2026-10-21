@@ -12,7 +12,7 @@ namespace Orbit.Server.Presets;
 /// authority after migration. The built-in Default is rebuilt from shipped defaults on each load.
 /// </summary>
 [Injectable(InjectionType.Singleton)]
-public sealed class PresetService(ConfigService configs, ZoneStoreService zones, EditHistoryService history, ISptLogger<PresetService> logger)
+public sealed partial class PresetService(ConfigService configs, ZoneStoreService zones, EditHistoryService history, ISptLogger<PresetService> logger)
 {
     private static readonly JsonSerializerOptions Json = new() { WriteIndented = true };
     private readonly object _gate = new();
