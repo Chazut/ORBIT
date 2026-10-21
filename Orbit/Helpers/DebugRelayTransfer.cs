@@ -202,7 +202,8 @@ internal sealed class DebugRelayTransfer
     private static void Copy(ZipArchiveEntry entry, ZipArchive output, string name)
     {
         using var input = entry.Open();
-        using var destination = output.CreateEntry(name, CompressionLevel.Fastest).Open();
+        using var destination = output.CreateEntry(name, name.EndsWith(".zip", StringComparison.Ordinal)
+            ? CompressionLevel.NoCompression : CompressionLevel.Fastest).Open();
         var buffer = new byte[81920];
         long written = 0;
         int read;

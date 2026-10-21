@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
+using System.IO.Compression;
 using System.Linq;
 using System.Net.Http;
 using System.Threading;
@@ -30,15 +31,17 @@ internal sealed class RaidReviewDebug
         public List<string> Warnings = new();
         public List<Transfer> Transfers = new();
         public string Positions = "Missing";
+        public string Archive = "Not requested";
     }
 
     internal sealed class Transfer
     {
-        public string Endpoint, Phase, Error;
+        public string Endpoint, Phase, Error, Warning;
         public int Attempt;
         public long Bytes;
         public double Seconds;
         public bool Success;
+        public bool Skipped;
     }
 
     internal sealed class Budget
@@ -60,6 +63,7 @@ internal sealed class RaidReviewDebug
     private readonly Action<string> _log;
     private readonly Budget _budget;
     private const long MaxFileBytes = 256L * 1024 * 1024;
+    internal const string ArchiveName = "raid-export.zip";
 
     internal RaidReviewDebug(string folder, HttpClient client = null, Action<string> log = null, Budget budget = null)
     { _folder = folder; _client = client ?? DefaultClient; _log = log; _budget = budget ?? new Budget(); }
@@ -67,9 +71,9 @@ internal sealed class RaidReviewDebug
     private void Report(string message) { try { _log?.Invoke("RR EXPORT: " + message); } catch { } }
 
     internal string FilePath(string orbitId, string name) => Path.Combine(_folder, "last-raid", orbitId + "-rr", name);
-    internal static bool IsExportFile(string name) => name == "raid.json" || Endpoints.Any(e => name == e + ".json");
+    internal static bool IsExportFile(string name) => name == "raid.json" || name == ArchiveName || Endpoints.Any(e => name == e + ".json");
 
-    internal async Task<Snapshot> Capture(DebugArchive.RaidRecord record, Context fallback = null)
+    internal async Task<Snapshot> Capture(DebugArchive.RaidRecord record, Context fallback = null, bool includeArchive = false)
     {
         if (record == null) return new Snapshot { Status = "No recorded ORBIT raid" };
         var saved = ReadSaved(record);
@@ -140,6 +144,9 @@ internal sealed class RaidReviewDebug
             foreach (var name in saved?.Files ?? Array.Empty<string>())
                 if (IsExportFile(name) && File.Exists(FilePath(record.Id, name)) && !files.Contains(name))
                 { files.Add(name); result.Cached = true; }
+            if (includeArchive)
+                await CaptureArchive(record, matched, server, prefix, files, result).ConfigureAwait(false);
+            if (files.Contains(ArchiveName)) bytes += new FileInfo(FilePath(record.Id, ArchiveName)).Length;
             result.Files = files.ToArray(); result.CapturedUtc = DateTime.UtcNow;
             result.Positions = !files.Contains("positions.json") ? "Missing" :
                 result.Transfers.Any(t => t.Endpoint.EndsWith("/positions") && t.Success) ? "Included" : "Cached";
@@ -159,10 +166,62 @@ internal sealed class RaidReviewDebug
             if (saved == null) return result;
             saved.Cached = true; saved.Warnings.AddRange(result.Warnings);
             saved.Positions = saved.Files.Contains("positions.json") ? "Cached" : "Missing";
+            saved.Archive = saved.Files.Contains(ArchiveName) ? "Cached" : "Unavailable";
             saved.Transfers ??= new(); saved.Transfers.AddRange(result.Transfers);
             saved.Status = "Partial";
             return saved;
         }
+    }
+
+    private async Task CaptureArchive(DebugArchive.RaidRecord record, JObject raid, Uri server, string prefix,
+        List<string> files, Snapshot result)
+    {
+        var path = FilePath(record.Id, ArchiveName);
+        try
+        {
+            if (!record.EndedUtc.HasValue || string.IsNullOrEmpty((string)raid["exitStatus"]))
+            { result.Archive = "Raid in progress"; return; }
+            // Only explicit debug exports request the portable ZIP. Keep its bounded budget separate
+            // from the existing JSON diagnostics so a slow archive cannot prevent their collection.
+            using var deadline = new CancellationTokenSource(_budget.Total);
+            var available = await Download(new Uri(server, prefix + "/export"), path + ".part", deadline.Token,
+                result, 512L * 1024 * 1024, archive: true).ConfigureAwait(false);
+            if (!available) { result.Archive = "Unsupported"; return; }
+            Promote(path + ".part", path);
+            if (!files.Contains(ArchiveName)) files.Add(ArchiveName);
+            result.Archive = "Included";
+            var warning = result.Transfers.LastOrDefault()?.Warning;
+            if (!string.IsNullOrEmpty(warning)) result.Warnings.Add("Importable RR archive: " + warning);
+        }
+        catch (Exception error)
+        {
+            result.Archive = "Missing";
+            result.Warnings.Add("Importable RR archive unavailable: " + error.Message);
+        }
+        finally
+        {
+            if (File.Exists(path + ".part")) File.Delete(path + ".part");
+            if (result.Archive != "Included" && files.Contains(ArchiveName))
+            { result.Archive = "Cached"; result.Cached = true; }
+            Report($"archive={result.Archive.Replace(' ', '-')} raid={result.RaidId}");
+        }
+    }
+
+    private static void ValidateArchive(string path, string raidId)
+    {
+        using var input = File.OpenRead(path);
+        using var zip = new ZipArchive(input, ZipArchiveMode.Read);
+        var metadata = zip.GetEntry("manifest.json");
+        if (metadata == null || metadata.Length > 64 * 1024 || zip.GetEntry("tables/raid.json") == null
+            || zip.Entries.Count > 32 || zip.Entries.Sum(e => e.Length) > 2L * 1024 * 1024 * 1024)
+            throw new InvalidDataException("Invalid RR export archive structure.");
+        using var text = new StreamReader(metadata.Open());
+        using var reader = new JsonTextReader(text) { MaxDepth = 16 };
+        var manifest = JObject.Load(reader);
+        if ((string)manifest["format"] != "raid-review" || (int?)manifest["version"] != 1
+            || (string)manifest["positionVersion"] != "V4"
+            || !string.Equals((string)manifest["raidId"], raidId, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException("RR export archive does not identify the selected raid or a supported format.");
     }
 
     internal static JObject Match(JArray raids, DebugArchive.RaidRecord record, Context context)
@@ -202,12 +261,22 @@ internal sealed class RaidReviewDebug
             if (!saved.Files.Contains("raid.json")) return null;
             saved.Warnings ??= new(); saved.Cached = true;
             saved.Positions = saved.Files.Contains("positions.json") ? "Cached" : "Missing";
+            if (saved.Files.Contains(ArchiveName))
+            {
+                try { ValidateArchive(FilePath(record.Id, ArchiveName), saved.RaidId); saved.Archive = "Cached"; }
+                catch (Exception error)
+                {
+                    saved.Files = saved.Files.Where(name => name != ArchiveName).ToArray();
+                    saved.Archive = "Missing";
+                    saved.Warnings.Add("Cached RR archive rejected: " + error.Message);
+                }
+            }
             return saved;
         }
         catch (Exception) { return null; }
     }
 
-    private async Task Download(Uri url, string path, CancellationToken deadline, Snapshot snapshot, long limit = MaxFileBytes)
+    private async Task<bool> Download(Uri url, string path, CancellationToken deadline, Snapshot snapshot, long limit = MaxFileBytes, bool archive = false)
     {
         var attempts = url.AbsolutePath.EndsWith("/positions") ? 2 : 1;
         for (var attempt = 1; ; attempt++)
@@ -217,9 +286,10 @@ internal sealed class RaidReviewDebug
             var watch = Stopwatch.StartNew();
             try
             {
-                await DownloadAttempt(url, path, deadline, limit, transfer).ConfigureAwait(false);
+                if (!await DownloadAttempt(url, path, deadline, limit, transfer, archive, snapshot.RaidId).ConfigureAwait(false))
+                { transfer.Skipped = true; transfer.Phase = "unsupported"; return false; }
                 transfer.Success = true;
-                return;
+                return true;
             }
             catch (Exception error)
             {
@@ -234,19 +304,27 @@ internal sealed class RaidReviewDebug
             finally
             {
                 transfer.Seconds = watch.Elapsed.TotalSeconds;
-                Report($"endpoint={transfer.Endpoint} attempt={attempt} phase={transfer.Phase} success={transfer.Success} bytes={transfer.Bytes} seconds={transfer.Seconds:F2} error={transfer.Error ?? "none"}");
+                if (!transfer.Skipped)
+                    Report($"endpoint={transfer.Endpoint} attempt={attempt} phase={transfer.Phase} success={transfer.Success} bytes={transfer.Bytes} seconds={transfer.Seconds:F2} error={transfer.Error ?? "none"}");
             }
         }
     }
 
-    private async Task DownloadAttempt(Uri url, string path, CancellationToken deadline, long limit, Transfer transfer)
+    private async Task<bool> DownloadAttempt(Uri url, string path, CancellationToken deadline, long limit, Transfer transfer,
+        bool archive, string raidId)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(deadline);
         timeout.CancelAfter(_budget.Headers);
         try
         {
             using var response = await _client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, timeout.Token).ConfigureAwait(false);
+            // Older RR servers may return their SPA HTML with HTTP 200 for unknown routes.
+            if (archive && ((int)response.StatusCode is 404 or 405
+                || response.IsSuccessStatusCode && response.Content.Headers.ContentType?.MediaType != "application/zip"))
+                return false;
             response.EnsureSuccessStatusCode();
+            if (archive && response.Headers.TryGetValues("X-RR-Warning", out var warnings))
+                transfer.Warning = string.Join("; ", warnings);
             transfer.Phase = "body";
             timeout.CancelAfter(_budget.Idle);
             if (response.Content.Headers.ContentLength > limit) throw new InvalidDataException($"RR response size {response.Content.Headers.ContentLength} exceeds {limit} byte limit.");
@@ -265,6 +343,15 @@ internal sealed class RaidReviewDebug
             // Parsing large replay files is bounded by the export deadline, not network inactivity.
             timeout.CancelAfter(Timeout.InfiniteTimeSpan);
             transfer.Phase = "validation";
+            if (archive)
+            {
+                timeout.Token.ThrowIfCancellationRequested();
+                if (response.Content.Headers.ContentLength.HasValue && transfer.Bytes != response.Content.Headers.ContentLength.Value)
+                    throw new InvalidDataException("Incomplete RR archive download.");
+                ValidateArchive(path, raidId);
+                transfer.Phase = "complete";
+                return true;
+            }
             using var reader = new JsonTextReader(File.OpenText(path)) { CloseInput = true };
             if (!reader.Read() || reader.TokenType is not (JsonToken.StartArray or JsonToken.StartObject))
                 throw new InvalidDataException("RR response is not JSON data.");
@@ -277,6 +364,7 @@ internal sealed class RaidReviewDebug
             if (!complete)
                 throw new InvalidDataException("RR response is incomplete JSON.");
             transfer.Phase = "complete";
+            return true;
         }
         catch { if (File.Exists(path)) File.Delete(path); throw; }
     }

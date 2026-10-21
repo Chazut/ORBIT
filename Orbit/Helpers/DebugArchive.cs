@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
+using System.Linq;
 using System.Net.Http;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
@@ -130,7 +131,7 @@ internal sealed class DebugArchive
                     { warnings.Add("Could not refresh the raid log snapshot: " + error.Message); }
                     Persist(record);
                 }
-                var rr = await _raidReview.Capture(record, raidReview).ConfigureAwait(false);
+                var rr = await _raidReview.Capture(record, raidReview, includeArchive: true).ConfigureAwait(false);
                 if (sameSession)
                 {
                     // Include this export's failures in the log as well as report.json.
@@ -230,6 +231,8 @@ internal sealed class DebugArchive
                     if (record != null && RaidReviewDebug.IsExportFile(name)
                         && AddFile(zip, _raidReview.FilePath(record.Id, name), "RaidReview/" + name, warnings)) rrFiles.Add(name);
                 if (rrFiles.Count != raidReview.Files.Length) raidReview.Status = "Partial";
+                if (raidReview.Files.Contains(RaidReviewDebug.ArchiveName) && !rrFiles.Contains(RaidReviewDebug.ArchiveName))
+                    raidReview.Archive = "Missing";
                 raidReview.Files = rrFiles.ToArray();
                 WriteText(zip, "report.json", JsonConvert.SerializeObject(new {
                     CreatedUtc = DateTime.UtcNow, ExporterVersion = _version, Raid = record,
@@ -239,6 +242,8 @@ internal sealed class DebugArchive
                 WriteText(zip, "README.txt", "ORBIT debug report\nAttach this ZIP to your bug report and describe what happened.\n"
                     + "The BepInEx log contains messages from installed mods and may include player names and local paths.\n"
                     + "RaidReview/ contains JSON replay data for this raid when available: players, positions, inventories, loot, combat and objectives.\n"
+                    + "When RR supports raid sharing and the raid is finished, RaidReview/raid-export.zip can be extracted and opened with RR's Import raid button.\n"
+                    + "RaidReview.Archive reports whether that optional ZIP was included, cached, unsupported or unavailable. The outer ORBIT debug ZIP is not an RR import file.\n"
                     + "RR is read through its configured server. Cached end-of-raid data can be used if that server is offline.\n"
                     + "report.json identifies the selected raid, lists missing files and records RR transfer attempts (phase, bytes, elapsed time and error).\n"
                     + "RaidReview.Positions states Included, Cached or Missing. Cached data may omit the end of a raid.\n"
@@ -270,7 +275,8 @@ internal sealed class DebugArchive
         try
         {
             using var input = OpenShared(path);
-            using var output = zip.CreateEntry(name, CompressionLevel.Fastest).Open();
+            using var output = zip.CreateEntry(name, name.EndsWith(".zip", StringComparison.Ordinal)
+                ? CompressionLevel.NoCompression : CompressionLevel.Fastest).Open();
             CopySnapshot(input, output);
             return true;
         }
