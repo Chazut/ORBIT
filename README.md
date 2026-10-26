@@ -4,8 +4,6 @@
 
 <h1 align="center">ORBIT</h1>
 
-**ORBIT 3.0.0**: [Full changelog](CHANGELOG.md) · [Fika addon 1.2.0](Orbit.Fika/CHANGELOG.md) · [Wiki](https://github.com/Chazut/ORBIT/wiki)
-
 <p align="center">
   <b>Objective-driven Raid Bot Intelligence Tactics</b><br/>
   Smarter bots. Real objectives. Raids that feel alive.
@@ -18,6 +16,8 @@
 </p>
 
 ---
+
+**ORBIT 3.0.0**: [Full changelog](CHANGELOG.md) · [Fika addon 1.2.0](Orbit.Fika/CHANGELOG.md) · [Wiki](https://github.com/Chazut/ORBIT/wiki)
 
 Every bot squad in your raid follows a plan: a rich area to strip, a
 PvP hotspot to hunt, a quest spot to visit. They work it as a team, loot
