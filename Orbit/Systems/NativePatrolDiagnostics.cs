@@ -203,6 +203,7 @@ public static class NativePatrolDiagnostics
             // Reading HavePath/CurPath is safe. CheckShouldMove would consume the route, so never use it.
             var path = route?.CurPath;
             Log.Info($"NATIVE PATROL: {bot.Profile?.Nickname} [{bot.ProfileId}] reason={reason} ghost={ghost} bodyActive={bot.gameObject.activeSelf} stillFor={Time.time - observation.StillSince:F1}s"
+                + $" brain={bot.Brain?.BaseBrain?.ShortName() ?? "none"} brainType={bot.Brain?.BaseBrain?.GetType().FullName ?? "none"}"
                 + $" decision={bot.Brain?.LastDecision} patrol={patrol?.Status} target={target} point={point?.Id}:{point?.name} pointType={point?.PatrolPointType}"
                 + $" way={way?.name}:{way?.PatrolType} action={point?.ActionData?.GetType().Name ?? "none"} chooser={patrol?.PointChooser?.GetType().Name ?? "none"}"
                 + $" sinceStay={stayFor} bossNextIn={nextPointIn} reserveNextIn={reserveNextIn} changeWayIn={changeWayIn}"

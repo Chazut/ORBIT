@@ -168,7 +168,15 @@ public class OrbitBrainLayer : CustomLayer
 
     public OrbitBrainLayer(BotOwner botOwner, int priority) : base(botOwner, priority)
     {
-        if (IsExcludedRole(botOwner))
+        var excluded = IsExcludedRole(botOwner);
+        try
+        {
+            Log.Info($"BRAIN REGISTRATION: {botOwner.Profile?.Nickname} [{botOwner.ProfileId}] role={botOwner.Profile?.Info?.Settings?.Role}"
+                + $" brain={botOwner.Brain?.BaseBrain?.ShortName() ?? "none"} brainType={botOwner.Brain?.BaseBrain?.GetType().FullName ?? "none"}"
+                + $" excluded={excluded} vanillaScavs={_vanillaScavs} playerScav={botOwner.Profile?.WillBeAPlayerScav()}");
+        }
+        catch { } // Diagnostics must never interrupt brain registration.
+        if (excluded)
         {
             _excluded = true;
             return;
