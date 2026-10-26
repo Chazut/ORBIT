@@ -185,7 +185,8 @@ internal static class BotLandingGuard
         }
         if (Time.time >= search.LogAt)
         {
-            Log.Warning($"GHOST WAKE GROUND: {bot.Profile.Nickname} activation deferred at={origin} reason={reason} nextProbe={search.Candidate}");
+            Log.Warning($"GHOST WAKE GROUND: {bot.Profile.Nickname} activation deferred at={origin} reason={reason} nextProbe={search.Candidate} "
+                + BotGroundPlacement.DescribeBody(player));
             search.LogAt = Time.time + 10f;
         }
         search.RetryAt = Time.time + .25f;

@@ -18,18 +18,23 @@ internal static class BotGroundPlacement
         internal int Mask;
     }
 
-    private static bool TryBody(Player player, out Body body)
+    private static bool TryBody(Player player, out Body body, out string reason)
     {
         body = default;
+        reason = "controller-unavailable";
         var controller = player?.CharacterController;
-        var collider = controller?.GetCollider();
-        if (collider == null || player.MovementContext == null) return false;
+        if (controller == null) return false;
+        var collider = controller.GetCollider();
+        if (collider == null) { reason = "controller-collider-unavailable"; return false; }
+        if (player.MovementContext == null) { reason = "movement-context-unavailable"; return false; }
         var transform = collider.transform;
         var scale = transform.lossyScale;
         var radius = controller.radius * Mathf.Max(Mathf.Abs(scale.x), Mathf.Abs(scale.z));
         var height = controller.height * Mathf.Abs(scale.y);
-        if (!Finite(radius) || !Finite(height) || radius < 0.05f || height < radius * 2f
-            || Vector3.Dot(transform.up, Vector3.up) < 0.99f) return false;
+        if (!Finite(radius) || !Finite(height) || radius < 0.05f || height <= 0f)
+        { reason = "controller-dimensions-invalid"; return false; }
+        if (!Finite(transform.up) || Vector3.Dot(transform.up, Vector3.up) < 0.99f)
+        { reason = "controller-axis-unsupported"; return false; }
         // Some impostor controllers have not copied their slope limit yet. Match the movement
         // context's standing/prone limits in that case, instead of treating every slope as a wall.
         var slope = controller.slopeLimit;
@@ -39,18 +44,23 @@ internal static class BotGroundPlacement
             Collider = collider,
             Center = transform.TransformPoint(controller.center) - player.Position,
             Radius = radius,
-            HalfSegment = height * 0.5f - radius,
+            // EFT requests height .3 while prone without reducing the radius. Like the game's
+            // ground check (max(height / 2, radius)), the capsule then has no cylindrical segment.
+            HalfSegment = Mathf.Max(0f, height * 0.5f - radius),
             SlopeCos = Mathf.Cos(Mathf.Clamp(slope, 1f, 60f) * Mathf.Deg2Rad),
             Mask = player.MovementContext.GroundMask
         };
-        return Finite(body.Center) && body.Mask != 0;
+        if (!Finite(body.Center)) { reason = "controller-center-invalid"; return false; }
+        if (body.Mask == 0) { reason = "ground-mask-unavailable"; return false; }
+        reason = null;
+        return true;
     }
 
     internal static bool TryResolve(Player player, Vector3 surface, out Vector3 landing, out string reason)
     {
         landing = default;
-        reason = "controller-unavailable";
-        if (!Finite(surface) || !TryBody(player, out var body)) return false;
+        reason = "invalid-surface";
+        if (!Finite(surface) || !TryBody(player, out var body, out reason)) return false;
         // Short casts stay on the intended floor. Never search from the roof down through a building.
         var origin = new Vector3(surface.x + body.Center.x, surface.y + FloorRange, surface.z + body.Center.z);
         if (!Physics.Raycast(origin, Vector3.down, out var floor, FloorRange * 2f, body.Mask, QueryTriggerInteraction.Ignore))
@@ -107,7 +117,7 @@ internal static class BotGroundPlacement
 
     internal static bool HasSupport(Player player)
     {
-        if (player?.MovementContext?.IsGrounded != true || !TryBody(player, out var body)) return false;
+        if (player?.MovementContext?.IsGrounded != true || !TryBody(player, out var body, out _)) return false;
         var bottom = player.Position + body.Center - Vector3.up * body.HalfSegment;
         if (!Physics.Raycast(bottom + Vector3.up * 0.15f, Vector3.down, out var hit,
                 body.Radius / body.SlopeCos + 0.3f, body.Mask, QueryTriggerInteraction.Ignore)
@@ -118,4 +128,15 @@ internal static class BotGroundPlacement
 
     internal static bool Finite(Vector3 p) => Finite(p.x) && Finite(p.y) && Finite(p.z);
     private static bool Finite(float value) => !float.IsNaN(value) && !float.IsInfinity(value);
+
+    // Only format this at the existing throttled warning, never for each candidate probe.
+    internal static string DescribeBody(Player player)
+    {
+        var controller = player?.CharacterController;
+        var collider = controller?.GetCollider();
+        var transform = collider != null ? collider.transform : null;
+        return $"controller={controller?.GetType().Name ?? "none"} prone={player?.MovementContext?.IsInPronePose}"
+            + $" height={controller?.height:F3} radius={controller?.radius:F3} center={controller?.center}"
+            + $" scale={transform?.lossyScale} up={transform?.up} mask={player?.MovementContext?.GroundMask}";
+    }
 }
