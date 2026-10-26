@@ -9,19 +9,25 @@
   Raids that feel alive, and a "Ghost Mode" to run it all at high fps.
 </p>
 
+<p align="center">
+  <img src="https://img.shields.io/github/stars/Chazut/ORBIT?style=flat-square&label=STARS&color=007ec6" />
+  <img src="https://img.shields.io/github/issues/Chazut/ORBIT?style=flat-square&label=ISSUES&color=44cc11" />
+  <img src="https://img.shields.io/github/downloads/Chazut/ORBIT/total?style=flat-square&label=DOWNLOADS&color=44cc11" />
+</p>
+
 > ⚠️ Built on Phobos's MIT-licensed foundation, with [Janky's](https://sp-mod.com/user/72916/jankytheclown) permission.
 
 Bots pursue objectives, loot, upgrade their gear and extract. Ghost Mode keeps distant activity going while reducing CPU load.
 
 **ORBIT 3.0 · SPT 4.1.x · Solo & Fika**
 
-[Full guide & technical deep dives](https://github.com/Chazut/ORBIT/wiki) · [Discord](https://discord.com/channels/875684761291599922/1509314495019745451) · [GitHub](https://github.com/Chazut/ORBIT)
+[Wiki](https://github.com/Chazut/ORBIT/wiki) · [Discord](https://discord.com/channels/875684761291599922/1509314495019745451) · [GitHub](https://github.com/Chazut/ORBIT)
 
 [Features](#features) · [Install & start](#install--start) · [Customize](#customize) · [Compatibility & Fika](#compatibility--fika) · [Help & FAQ](#help--faq) · [About ORBIT](#about-orbit) · [Credits & support](#credits--support)
 
 ---
 
-**ORBIT 3.0.0**: [Downloads](https://github.com/Chazut/ORBIT/releases) · [Full changelog](CHANGELOG.md) · [Fika addon 1.2.0](Orbit.Fika/CHANGELOG.md) · [Wiki](https://github.com/Chazut/ORBIT/wiki)
+**ORBIT 3.0.0**: [Downloads](https://github.com/Chazut/ORBIT/releases) · [Full changelog](CHANGELOG.md) · [Fika addon 1.2.0](Orbit.Fika/CHANGELOG.md)
 
 ## Features
 
