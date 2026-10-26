@@ -4,6 +4,8 @@
 
 <h1 align="center">ORBIT</h1>
 
+**ORBIT 3.0.0**: [Full changelog](CHANGELOG.md) · [Fika addon 1.2.0](Orbit.Fika/CHANGELOG.md) · [Wiki](https://github.com/Chazut/ORBIT/wiki)
+
 <p align="center">
   <b>Objective-driven Raid Bot Intelligence Tactics</b><br/>
   Smarter bots. Real objectives. Raids that feel alive.
@@ -233,7 +235,7 @@ mods (AILimit, Adaptive Bot Culling...). Their systems overlap with ORBIT's
 objectives, looting or Ghost Mode. Supported faction mods have their own
 **Take over** toggles; leave them OFF to retain the author's behaviour.
 
-### Bot Healing Fixes (next beta)
+### Bot Healing Fixes (3.0)
 
 Bot Healing Fixes 1.0.0 is detected automatically when installed. Its first-aid
 and surgery replacement keeps control of awake bots. For native bots in Ghost,
@@ -245,7 +247,7 @@ the log explains the fallback. Other Bot Healing Fixes patches remain unchanged.
 
 ## Troubleshooting
 
-### Sprint stability (next beta)
+### Sprint stability (3.0)
 
 Awake bots controlled by ORBIT walk through short cover adjustments and sharp
 turns. Sprint starts require an aligned, stable direction for 0.35 seconds and
@@ -285,7 +287,7 @@ searching for stairs instead of treating the space underneath the door as its
 destination. Opening still requires the native standing position, physical
 reach and an unobstructed interaction on arrival.
 
-### Boss rush completion and loot (next beta)
+### Boss rush completion and loot (3.0)
 
 A squad's own boss kill completes its Boss Rush search, even if the killer dies.
 Finding the target boss's corpse within 30 m also completes the search, with a
@@ -296,7 +298,7 @@ dies or cannot collect it. Combat pauses collection, native transfers finish,
 and unavailable bodies or a bounded collection timeout let the squad move on.
 Urgent extraction and disabled looting retain their normal priority.
 
-### Sniper alert retention (next beta)
+### Sniper alert retention (3.0)
 
 While holding a sniper post, the scoped member occasionally moves to another nearby cover or sightline, roughly every 45 to 75 seconds when enough camp time remains. Candidate searches use the shared planning budget and prefer native cover with a clear view. Every path corner must remain within 12 metres of the first occupied post and within 0.75 metres of its height, including the path returned by the movement queue. Blocked moves are abandoned without a teleport, jump recovery or resetting the camp timer. Followers keep their own guard positions. Combat interrupts the move and SAIN keeps priority; the existing return-to-post behaviour resumes after the alert.
 
@@ -314,7 +316,7 @@ After the alert, an active sniper objective returns to its post with the
 original remaining hold time. `SNIPER ALERT` logs identify holding, rejected
 routes, local moves, release reasons and return/resume events.
 
-### Other rush behaviors (next beta)
+### Other rush behaviors (3.0)
 
 In **Rush objectives > Other**, each point can search/patrol, camp, loot, or camp
 then loot. Camp duration starts on arrival and pauses during combat or own-kill
@@ -325,7 +327,7 @@ Other points on another floor use the expanded search for stair access, includin
 detours away from the target. An unreachable point is still skipped after the
 existing retry or travel limit.
 
-### Ghost wake placement (next beta)
+### Ghost wake placement (3.0)
 
 Ghost wake-ups validate physical ground and body clearance on the current floor.
 If the current spot is blocked, ORBIT tries nearby lateral positions with a short,
@@ -337,7 +339,7 @@ call chain in diagnostic logs. Updated Raid Review records deaths without a
 killer as KIA and reserves Extracted for confirmed extractions. Older ambiguous
 removals are shown as Removed.
 
-### Capture custom room rush points (3.0 beta 9)
+### Capture custom room rush points (3.0)
 
 Enable **F12 > ORBIT > Authoring tools > Capture Rush door** (off by default).
 Face a door until its interaction prompt appears and press **Left Ctrl + F8**,
@@ -354,7 +356,7 @@ copy. Changes apply next raid and are included when exporting zones for an addon
 Both the client and server need this version of ORBIT. Powered access sequences
 and rooms already excluded from Marked Rush cannot be bypassed by this tool.
 
-### Debug ZIP (next beta)
+### Debug ZIP (3.0)
 
 Use **F12 > ORBIT > Create debug ZIP** on the player client. Solo and Fika hosts
 export their local report. Fika clients automatically request the matching
@@ -395,19 +397,22 @@ first). Then come say hi on the [ORBIT thread](https://discord.com/channels/8756
 
 ## Roadmap highlights
 
-No ETA, no promises: post-combat self-heal,
-squad splitting with radio comms, boss hunting and faction rivalries
-(Firefly's idea), a "rally flare" item that pulls the
-whole map onto a point, multi-step objectives (Kiba alarm, ULTRA power,
-Reserve D-2...), switch-gated and Red-Rebel-style exfils, cross-raid
-player heatmaps feeding bot routing (Fiodor's idea), per-map ORBIT
-and Ghost Mode settings. Suggestions land on the Discord thread.
+No ETA, no promises: post-combat self-heal, squad splitting with radio
+comms, faction rivalries (Firefly's idea), a "rally flare" item that
+pulls the whole map onto a point, additional special extracts and
+cross-raid player heatmaps feeding bot routing (Fiodor's idea).
+Suggestions land on the Discord thread.
+
+**Planned for 3.1 (Shynd's idea):** a configurable, weighted chance to
+send bots toward zones tied to the player's active kill quests, when
+the raid takes place on the relevant map.
 
 ## Known issues
 
 - Some native or modded actions require bots to stay awake. Bosses that
   normally hold position may also remain still in Ghost.
-- ORBIT can't operate extraction switches yet (for example, Reserve's D-2).
+- Complex or disconnected routes can still block special objectives and
+  extracts. Mysterious marked room remains excluded from Marked Rush.
 - Faction-mod takeover (RUAF / UNTAR / Black Division) can misbehave;
   leave those toggles OFF if it does. Ghost Mode can still be used.
 - Labs security gates can trap bots (BSG pathing quirk, checkpoint
