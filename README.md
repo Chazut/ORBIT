@@ -421,24 +421,35 @@ the raid takes place on the relevant map.
   may land in YOUR tagged containers). Investigating.
 - Bots can still occasionally get stuck on map geometry.
 
-## About AI
+## About ORBIT
 
-Full transparency: I build ORBIT with **Claude**.
+### AI usage
 
-I'll be honest, I barely open an IDE these days, at work or at home:
-Claude writes most of this code. I still read it, question it, and own
-every design decision in it.
+**I'm a C# developer with over 10 years of experience, and I use AI to generate ORBIT's code.**
 
-The ideas don't come from the AI. Neither do the evenings spent in test
-raids watching bots live, digging through logs and replays, and
-finetuning values until a raid finally feels right. This project eats a
-LOT of personal time, and that's the part no assistant can do for me.
+**In my view, writing code is only a small part of creating a mod on this scale.** Much of the work is deciding how everything should behave and making it work together: extensive test raids, reproducing bugs, analysing logs and Raid Review recordings, building diagnostic dashboards, tuning performance and checking for regressions.
 
-Without the AI, ORBIT simply wouldn't exist: a project this size doesn't
-fit in one person's free time otherwise.
+AI lets me spend less time writing the implementation and more time on that work. I still have to question its output, test it against what actually happens in-game, and keep iterating until the result feels right. The design choices and responsibility for what I release remain mine.
 
-If that's a dealbreaker for you, no hard feelings. If you judge a mod on
-what it does, give it a try.
+**I'm proud of ORBIT's stability, reliability and quality today.** They reflect that ongoing work and the feedback of people testing it. I hope you'll judge the mod by how it plays and how it is maintained.
+
+### Origins & lessons learned
+
+ORBIT started as a personal project: a fork of **Phobos**, with looting code from **Looting Bots**. It grew from there into the mod you see today.
+
+**I made a mistake when I first shared it:** I published on the Forge without asking either author for permission first. I wrongly assumed the MIT licenses were all I needed, without checking the Forge's additional permission requirements. Looking back, I feel bad about how I handled it, and I understand why the authors were upset.
+
+I took the mod down and contacted them. **Janky gave permission to continue using Phobos. Arch did not give permission to reuse Looting Bots' code**, so I removed that implementation and rebuilt the looting system from scratch before republishing.
+
+Phobos remains part of ORBIT's foundation. Looting Bots was part of its beginnings, and Questing Bots inspired the quest-routing concept without any code being reused. Those contributions deserve clear credit, however much ORBIT has changed since.
+
+**ORBIT wouldn't exist without AI, or without the work modders did long before these tools existed.** AI learns from human-created material, including publicly available code. I don't know which specific mod repositories were in its training data, but I want to acknowledge the people who built and shared the knowledge these tools draw on.
+
+For ORBIT's new systems, I've taken care not to copy code from other mod repositories. The reused Phobos foundation and credited contributions remain openly acknowledged.
+
+That experience changed how I approach sharing my work: check permissions first, be clear about what comes from other projects, and own my mistakes. The credits are part of that history.
+
+**ORBIT 3.0 is a very different mod from its first release.** Everything has been rebuilt except Phobos's advection system, and many custom features have been added along the way. Please judge ORBIT for what it is today, rather than for its first version or how it started.
 
 ## Credits
 
