@@ -28,9 +28,7 @@
         {
             var preset = Presets.Choices.FirstOrDefault(p => p.Id == id)
                 ?? throw new InvalidOperationException("This preset is no longer available.");
-            var parts = await PresetScopeDialog.ChooseSelection(Dialogs, preset);
-            if (parts == null) return;
-            Presets.Switch(id, parts.Value);
+            if (!await PresetReviewDialog.ChooseAndApply(Dialogs, Presets, preset)) return;
             Snackbar.Add($"{Presets.ActiveName} selected. Previous edits saved. Applies next raid; faction takeover and brain lists need a game restart.", Severity.Success);
             if (Presets.MirrorWarning != null) Snackbar.Add(Presets.MirrorWarning, Severity.Warning);
         }

@@ -13,7 +13,7 @@
     <MudText Typo="Typo.body2" Class="mb-5" Style="opacity:.7">
         Choose config, zones or both when selecting a preset at the top of any page.
         Selecting just one part creates a personal Custom copy and keeps the other part of your current setup.
-        Switching saves your current edits. Save applies the selected preset from the next raid;
+        Review the differences from ORBIT Default and tweak before applying. Applying saves your current edits and the new setup for the next raid;
         faction takeover and personality brain lists need a game restart.
     </MudText>
 
@@ -131,10 +131,11 @@
         {
             var preset = Store.Choices.FirstOrDefault(p => p.Id == id)
                 ?? throw new InvalidOperationException("This preset is no longer available.");
-            var parts = await PresetScopeDialog.ChooseSelection(Dialogs, preset);
-            if (parts != null) Run(() => Store.Switch(id, parts.Value), parts == PresetParts.ConfigAndZones
-                ? "Preset selected. Previous edits saved. Applies next raid."
-                : "Custom copy created and selected. The other part of your setup was kept. Applies next raid.");
+            if (await PresetReviewDialog.ChooseAndApply(Dialogs, Store, preset))
+            {
+                Snackbar.Add($"{Store.ActiveName} selected. Previous edits saved. Applies next raid.", Severity.Success);
+                if (Store.MirrorWarning != null) Snackbar.Add(Store.MirrorWarning, Severity.Warning);
+            }
         }
         catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
         finally { _choosing = false; }

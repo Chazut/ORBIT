@@ -58,7 +58,7 @@
     <DialogActions>
         <MudButton OnClick="Cancel">Cancel</MudButton>
         <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@(Exporting && (NameError != null || VersionError != null))" OnClick="Confirm">
-            @(Exporting ? "Create ZIP" : _parts == PresetParts.ConfigAndZones ? "Use preset" : "Create Custom copy")
+            @(Exporting ? "Create ZIP" : "Review changes")
         </MudButton>
     </DialogActions>
 </MudDialog>

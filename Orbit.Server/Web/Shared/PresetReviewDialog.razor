@@ -1,0 +1,240 @@
+@using System.Globalization
+@using System.Text.Json
+@using System.Text.Json.Nodes
+@using Orbit.Server.Presets
+@inject PresetService Store
+
+<style>
+    .preset-review-list { border-top: 1px solid var(--mud-palette-lines-default); }
+    .preset-review-row { display:grid; grid-template-columns:minmax(160px, 1.4fr) minmax(100px, .8fr) minmax(180px, 1fr) 44px; gap:16px; padding:16px 0; align-items:center; border-bottom:1px solid var(--mud-palette-lines-default); }
+    .preset-review-label, .preset-review-default, .preset-review-value { min-width:0; overflow-wrap:anywhere; }
+    @@media(max-width:700px) {
+        .preset-review-row { grid-template-columns:minmax(0, 1fr) 44px; gap:8px; }
+        .preset-review-label, .preset-review-default, .preset-review-value { grid-column:1; }
+        .preset-review-reset { grid-column:2; grid-row:3; }
+    }
+</style>
+
+<MudDialog>
+    <DialogContent>
+        <MudText Typo="Typo.h5">@Review.Name</MudText>
+        <MudText Typo="Typo.body2" Class="mt-1 mb-3">
+            Review your resulting setup against ORBIT's built-in Default. Adjust any value before applying.
+        </MudText>
+        <MudAlert Severity="Severity.Info" Dense="true" Class="mb-3">
+            @ScopeDescription
+            @if (Review.CreatesCopy)
+            {
+                <span> This will create a personal Custom copy. It will not follow addon updates.</span>
+            }
+            else if (Review.IsAddon)
+            {
+                <span> Unchanged addons stay linked to their updates.</span>
+            }
+        </MudAlert>
+        <div class="d-flex flex-wrap align-center mb-2" style="gap:12px">
+            <MudChip T="string" Color="Color.Primary" Variant="Variant.Outlined">@_fields.Count(f => f.Changed) differences from Default</MudChip>
+            <MudSwitch T="bool" Value="_changesOnly" ValueChanged="ChangesOnly" Color="Color.Primary" Label="Differences only" />
+            <MudSpacer />
+            <MudButton Size="Size.Small" OnClick="ResetTweaks" Disabled="@(!Review.Modified && _inputErrors.Count == 0)">Undo my tweaks</MudButton>
+        </div>
+        <MudGrid Spacing="2" Class="mb-3">
+            <MudItem xs="12" sm="7">
+                <MudTextField T="string" Label="Find a setting, point or map" Value="_search" ValueChanged="Search" Immediate="true"
+                              Variant="Variant.Outlined" Margin="Margin.Dense" Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" />
+            </MudItem>
+            <MudItem xs="12" sm="5">
+                <MudSelect T="string" Label="Section" Value="_group" ValueChanged="Group" Variant="Variant.Outlined" Margin="Margin.Dense">
+                    <MudSelectItem T="string" Value='@("All sections")'>All sections</MudSelectItem>
+                    @foreach (var group in _fields.Select(f => f.Group).Distinct().Order())
+                    {
+                        <MudSelectItem T="string" Value="@group">@group</MudSelectItem>
+                    }
+                </MudSelect>
+            </MudItem>
+        </MudGrid>
+        @if (_error != null)
+        {
+            <MudAlert Severity="Severity.Error" Dense="true" Class="mb-3">@_error</MudAlert>
+        }
+        @if (Filtered.Count == 0)
+        {
+            <MudText Class="pa-4">@(_search.Length > 0 || _group != "All sections" ? "No matching settings." : "This setup matches ORBIT Default. Turn off Differences only to customize it.")</MudText>
+        }
+        else
+        {
+            <MudForm @ref="_form">
+            <div class="preset-review-list">
+                @foreach (var field in PageFields)
+                {
+                    <div class="preset-review-row" @key="(field.Key, field.DefaultText, field.Label)">
+                        <div class="preset-review-label">
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">@field.Group</MudText>
+                            <MudText Typo="Typo.body1">@field.Label</MudText>
+                            @if (field.Context.Length > 0)
+                            {
+                                <MudText Typo="Typo.caption" Style="opacity:.65">@field.Context</MudText>
+                            }
+                        </div>
+                        <div class="preset-review-default">
+                            <MudText Typo="Typo.caption" Style="opacity:.6">ORBIT Default</MudText>
+                            <MudText Typo="Typo.body2">@field.DefaultText</MudText>
+                        </div>
+                        <div class="preset-review-value">
+                            @if (!field.Exists)
+                            {
+                                <MudText Typo="Typo.body2" Color="Color.Warning">Removed from this preset</MudText>
+                            }
+                            else if (field.Kind is JsonValueKind.True or JsonValueKind.False)
+                            {
+                                <MudSwitch T="bool" Value="@(field.Kind == JsonValueKind.True)" ValueChanged="@(v => Change(field, JsonValue.Create(v)))"
+                                           Color="Color.Primary" Label="@field.Label" />
+                            }
+                            else if (field.Kind == JsonValueKind.Number || field.NullableNumber)
+                            {
+                                <MudNumericField T="double?" Value="@(field.Value?.GetValue<double>())" ValueChanged="@(v => Number(field, v))"
+                                                 Label="@(field.NullableNumber ? "Your value (blank = inherit)" : "Your value")" Variant="Variant.Outlined" Margin="Margin.Dense" Culture="CultureInfo.InvariantCulture" Required="@(!field.NullableNumber)" Immediate="true"
+                                                 Error="@_inputErrors.ContainsKey(field.Key)" ErrorText="@_inputErrors.GetValueOrDefault(field.Key)" />
+                            }
+                            else if (field.Options.Length > 0)
+                            {
+                                <MudSelect T="string" Value="@field.Value?.ToString()" ValueChanged="@(v => Change(field, JsonValue.Create(v)))"
+                                           Label="Your value" Variant="Variant.Outlined" Margin="Margin.Dense">
+                                    @foreach (var option in field.Options)
+                                    {
+                                        <MudSelectItem T="string" Value="@option">@PresetSelectionReview.Label(option)</MudSelectItem>
+                                    }
+                                </MudSelect>
+                            }
+                            else if (field.Kind == JsonValueKind.Array)
+                            {
+                                <MudTextField T="string" Value="@ArrayText(field)" ValueChanged="@(v => List(field, v))" Lines="3"
+                                              Label="One entry per line" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                              Error="@_inputErrors.ContainsKey(field.Key)" ErrorText="@_inputErrors.GetValueOrDefault(field.Key)" />
+                            }
+                            else if (field.Kind == JsonValueKind.Null && !field.OptionalText)
+                            {
+                                <MudText Typo="Typo.body2">Inherit / not overridden</MudText>
+                            }
+                            else
+                            {
+                                <MudTextField T="string" Value="@field.Value?.ToString()" ValueChanged="@(v => Change(field, field.OptionalText && string.IsNullOrWhiteSpace(v) ? null : JsonValue.Create(v ?? "")))"
+                                              Label="Your value" Variant="Variant.Outlined" Margin="Margin.Dense" Immediate="true" />
+                            }
+                        </div>
+                        <div class="preset-review-reset">
+                            <MudTooltip Text="Use ORBIT Default for this entry">
+                                <MudIconButton Icon="@Icons.Material.Filled.SettingsBackupRestore" Color="Color.Primary"
+                                               Disabled="@(!field.HasDefault || !field.Changed)" OnClick="@(() => Restore(field))"
+                                               aria-label="@($"Restore default: {field.Label}")" />
+                            </MudTooltip>
+                        </div>
+                    </div>
+                }
+            </div>
+            </MudForm>
+            <div class="d-flex align-center justify-center mt-3" style="gap:12px">
+                <MudButton Disabled="@(_page == 0)" OnClick="Previous">Previous</MudButton>
+                <MudText Typo="Typo.caption">@(_page * PageSize + 1)-@(Math.Min((_page + 1) * PageSize, Filtered.Count)) of @Filtered.Count</MudText>
+                <MudButton Disabled="@((_page + 1) * PageSize >= Filtered.Count)" OnClick="Next">Next</MudButton>
+            </div>
+        }
+        <MudText Typo="Typo.caption" Class="mt-4" Style="opacity:.7">
+            Nothing is saved until you apply. Your previous preset's edits will be saved too.
+            Applies next raid; faction takeover and brain lists need a game restart.
+        </MudText>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="Apply" Disabled="@(_applying || _inputErrors.Count > 0)">
+            @(Review.CreatesCopy ? "Apply as Custom copy" : "Apply preset")
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance Dialog { get; set; } = null!;
+    [Parameter, EditorRequired] public PresetSelectionReview Review { get; set; } = null!;
+    private IReadOnlyList<PresetReviewField> _fields = [];
+    private readonly Dictionary<string, string> _inputErrors = new();
+    private readonly HashSet<string> _touched = new();
+    private string _search = "", _group = "All sections";
+    private string? _error;
+    private bool _changesOnly = true, _applying;
+    private MudForm? _form;
+    private int _page;
+    private const int PageSize = 40;
+    private string ScopeDescription => Review.Parts switch
+    {
+        PresetParts.ConfigOnly => "Config selected. Your current zones and rush points are kept and included in this comparison.",
+        PresetParts.ZonesOnly => "Zones selected, including rush points. Your current behavior settings are kept and included in this comparison.",
+        _ => "Config + zones selected. Any part missing from the addon keeps your current setup."
+    };
+    private List<PresetReviewField> Filtered => _fields.Where(f => (!_changesOnly || f.Changed || _touched.Contains(f.Key) || _inputErrors.ContainsKey(f.Key))
+        && (_group == "All sections" || f.Group == _group)
+        && $"{f.Group} {f.Context} {f.Label}".Contains(_search, StringComparison.OrdinalIgnoreCase)).ToList();
+    private IEnumerable<PresetReviewField> PageFields => Filtered.Skip(_page * PageSize).Take(PageSize);
+    protected override void OnInitialized() => Refresh();
+    private void Refresh() { _fields = Review.Fields(); _page = Math.Min(_page, Math.Max(0, (Filtered.Count - 1) / PageSize)); }
+    private void Search(string value) { _search = value ?? ""; _page = 0; }
+    private void Group(string value) { _group = value; _page = 0; }
+    private void ChangesOnly(bool value) { _changesOnly = value; _page = 0; }
+    private void Previous() => _page--;
+    private void Next() => _page++;
+    private void Cancel() => Dialog.Cancel();
+    private void ResetTweaks() { Review.ResetTweaks(); _inputErrors.Clear(); _touched.Clear(); _error = null; Refresh(); }
+    private void Change(PresetReviewField field, JsonNode? value)
+    {
+        Review.Set(field, value); _touched.Add(field.Key); _inputErrors.Remove(field.Key); _error = null; Refresh();
+    }
+    private void Number(PresetReviewField field, double? value)
+    {
+        if (value == null && field.NullableNumber) { Change(field, null); return; }
+        if (!value.HasValue || !double.IsFinite(value.Value)) { _inputErrors[field.Key] = "Enter a number."; return; }
+        Change(field, JsonValue.Create(value.Value));
+    }
+    private static string ArrayText(PresetReviewField field) => string.Join("\n", field.Value!.AsArray().Select(n => n?.ToString()));
+    private void List(PresetReviewField field, string value)
+    {
+        var array = new JsonArray();
+        var numeric = field.Value!.AsArray().Any(n => n?.GetValueKind() == JsonValueKind.Number);
+        foreach (var entry in (value ?? "").Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (numeric)
+            {
+                if (!double.TryParse(entry, NumberStyles.Float, CultureInfo.InvariantCulture, out var number) || !double.IsFinite(number))
+                { _inputErrors[field.Key] = "Enter one number per line."; return; }
+                array.Add(number);
+            }
+            else array.Add(entry);
+        }
+        Change(field, array);
+    }
+    private void Restore(PresetReviewField field) { Review.RestoreDefault(field); _touched.Add(field.Key); _inputErrors.Remove(field.Key); _error = null; Refresh(); }
+    private async Task Apply()
+    {
+        if (_applying || _inputErrors.Count > 0) return;
+        _applying = true;
+        try
+        {
+            if (_form != null)
+            {
+                await _form.ValidateAsync();
+                if (!_form.IsValid) { _error = "Check the highlighted values before applying."; return; }
+            }
+            Store.ApplyReview(Review); Dialog.Close(DialogResult.Ok(true));
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _applying = false; }
+    }
+
+    public static async Task<bool> ChooseAndApply(IDialogService dialogs, PresetService store, PresetChoice preset)
+    {
+        var parts = await PresetScopeDialog.ChooseSelection(dialogs, preset);
+        if (parts == null) return false;
+        var review = store.ReviewSelection(preset.Id, parts.Value);
+        var dialog = await dialogs.ShowAsync<PresetReviewDialog>("Review preset", new DialogParameters { [nameof(Review)] = review },
+            new DialogOptions { MaxWidth = MaxWidth.ExtraLarge, FullWidth = true, CloseButton = true, BackdropClick = false });
+        return await dialog.Result is { Canceled: false, Data: true };
+    }
+}
