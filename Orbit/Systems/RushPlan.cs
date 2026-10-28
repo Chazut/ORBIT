@@ -545,5 +545,6 @@ internal sealed partial class RushPlan : IObjectiveWork
         }
         _orders.Clear();
         _customSlots.Clear();
+        ClearCustomCamp();
     }
 }

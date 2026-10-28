@@ -140,12 +140,12 @@
                     <MudSelectItem Value="@("CampThenLoot")">Camp, then loot</MudSelectItem>
                 </MudSelect>
             }
-            <OrbitSlider T="float" @bind-Value="selected.Radius" Label="@(Kind == "Sniper" ? "Post search radius" : Kind == "Custom" ? "Patrol / squad spacing radius" : "Search / loot radius")" Unit="m" Min="1" Max="200" Step="1" />
+            <OrbitSlider T="float" @bind-Value="selected.Radius" Label="@(Kind == "Sniper" ? "Post search radius" : Kind == "Custom" ? selected.CustomMode is "Camp" or "CampThenLoot" ? "Camp area radius" : "Patrol / squad spacing radius" : "Search / loot radius")" Unit="m" Min="1" Max="200" Step="1" />
             @if (Kind is not ("Sniper" or "Marked") && (Kind != "Custom" || selected.CustomMode == "Search")) { <OrbitSlider T="float" @bind-Value="selected.SearchSeconds" Label="Search duration" Unit="s" Min="1" Max="600" Step="1" /> }
             @if (Kind == "Custom" && selected.CustomMode is "Camp" or "CampThenLoot")
             {
                 <OrbitSlider T="float" @bind-Value="selected.CampSeconds" Label="Camp duration after arrival" Unit="s" Min="0" Max="1800" Step="5" />
-                <MudText Typo="Typo.caption">Hold the point and watch the surroundings. Combat and own-kill looting pause the timer; it resumes after returning.</MudText>
+                <MudText Typo="Typo.caption">Bots find cover within this area, or use a reachable random spot if none is available. The timer starts once they are in position. Combat and own-kill looting pause it.</MudText>
             }
             @if (Kind == "Custom" && selected.CustomMode is "Loot" or "CampThenLoot")
             {

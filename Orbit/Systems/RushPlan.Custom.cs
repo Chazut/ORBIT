@@ -12,24 +12,18 @@ internal sealed partial class RushPlan
     private bool _customArrived, _customCampDone;
     private float _customCampHeld, _customLootHeld;
     private readonly HashSet<Agent> _customSlots = new();
+    private readonly Dictionary<Agent, CoverPoint> _customCampPositions = new();
+    private readonly List<Vector3> _customCampOccupied = new();
+    private IEnumerator<CoverPoint?> _customCampSearch;
+    private Agent _customCampMember;
 
     private bool TickCustom(Squad squad, WaypointSystem w, RushPoint site, float delta)
     {
         var camping = !_customCampDone && site.CustomMode is "Camp" or "CampThenLoot";
         if (camping)
         {
-            if ((_actor.Position - _anchor).sqrMagnitude > 9f || _actor.Objective.Status == ObjectiveStatus.Failed)
-            {
-                if (_actor.Objective.Status == ObjectiveStatus.Failed && ++_retries >= 3)
-                    return Skip(squad, w, "camp position unreachable");
-                // Resume the ordinary staged approach, retaining time already spent camping.
-                Release(squad, w); _route.Reset(); _customArrived = false;
-                SetStatus(squad, "returning to camp"); return true;
-            }
-            _actor.Guard.CoverPoint = new CoverPoint(_anchor, new Vector3(0, 0, 1), CoverCategory.None, CoverLevel.Stay);
-            if (Status != "camping") SetStatus(squad, "camping");
-            if (_actor.Objective.Status == ObjectiveStatus.Finished) _customCampHeld += delta;
-            if (_customCampHeld < site.CampSeconds) { HoldCustomMembers(squad, w, site); return true; }
+            if (!PrepareCustomCamp(squad, w, site, delta)) return !Main.Completed;
+            if (_customCampHeld < site.CampSeconds) return true;
             _customCampDone = true;
             if (site.CustomMode == "Camp") return Visit(squad, w);
             delta = 0;
@@ -63,6 +57,74 @@ internal sealed partial class RushPlan
             return Visit(squad, w);
         }
         return true;
+    }
+
+    private bool PrepareCustomCamp(Squad squad, WaypointSystem w, RushPoint site, float delta)
+    {
+        var arrived = true;
+        for (var i = -1; i < squad.Members.Count; i++)
+        {
+            var member = i < 0 ? _actor : squad.Members[i];
+            if (i >= 0 && member == _actor || !member.IsActive || member.Bot.IsDead || member.SoloExtractRequested
+                || CorpseEscort.InFlight(member)) continue;
+            if (!_customCampPositions.TryGetValue(member, out var cover))
+            {
+                _elapsed += delta;
+                if (Status != "finding camp cover") SetStatus(squad, "finding camp cover");
+                if (!w.TryOperationWork(this)) return false;
+                if (_customCampMember != member)
+                {
+                    _customCampSearch?.Dispose(); _customCampMember = member;
+                    _customCampOccupied.Clear();
+                    foreach (var pair in _customCampPositions)
+                        if (squad.Members.Contains(pair.Key) && !pair.Key.Bot.IsDead && !pair.Key.SoloExtractRequested)
+                            _customCampOccupied.Add(pair.Value.Position);
+                    _customCampSearch = w.SearchCustomCamp(member, site, _customCampOccupied).GetEnumerator();
+                }
+                if (!_customCampSearch.MoveNext())
+                { Skip(squad, w, "no reachable camp position"); return false; }
+                if (_customCampSearch.Current.HasValue)
+                {
+                    cover = _customCampSearch.Current.Value;
+                    _customCampSearch.Dispose(); _customCampSearch = null; _customCampMember = null;
+                    _customCampPositions.Add(member, cover); _customSlots.Add(member);
+                    SetOrder(member, Point(w, cover.Position, "Camp " + site.Name), w);
+                    member.Guard.CoverPoint = cover;
+                    if (member == _actor) squad.Objective.Location = _orders[member];
+                }
+                w.ContinueOperationWork(this);
+                return false;
+            }
+            if (member.Objective.Status == ObjectiveStatus.Failed)
+            {
+                if (++_retries >= 3) { Skip(squad, w, "camp position unreachable"); return false; }
+                Release(squad, w); _route.Reset(); _customArrived = false;
+                SetStatus(squad, "returning to camp"); return false;
+            }
+            if (!_orders.TryGetValue(member, out var order) || member.Objective.Location != order
+                || member.Objective.Status == ObjectiveStatus.Finished && (member.Position - cover.Position).sqrMagnitude > 4f)
+            {
+                SetOrder(member, Point(w, cover.Position, "Camp " + site.Name), w);
+                member.Guard.CoverPoint = cover;
+                if (member == _actor) squad.Objective.Location = _orders[member];
+            }
+            arrived &= member.Objective.Status == ObjectiveStatus.Finished && (member.Position - cover.Position).sqrMagnitude <= 4f;
+        }
+        if (!arrived)
+        {
+            _elapsed += delta;
+            if (Status != "approaching camp cover") SetStatus(squad, "approaching camp cover");
+            return false;
+        }
+        if (Status == "camping") _customCampHeld += delta;
+        else SetStatus(squad, "camping");
+        return true;
+    }
+
+    private void ClearCustomCamp()
+    {
+        _customCampSearch?.Dispose(); _customCampSearch = null; _customCampMember = null;
+        _customCampPositions.Clear(); _customCampOccupied.Clear();
     }
 
     private void HoldCustomMembers(Squad squad, WaypointSystem w, RushPoint site)
