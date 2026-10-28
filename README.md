@@ -77,6 +77,8 @@ Use builds compatible with your **SPT 4.1.x** version:
 - [BigBrain](https://sp-mod.com/mod/902/bigbrain)
 - [Waypoints](https://sp-mod.com/mod/827/waypoints-expanded-navmesh)
 
+> **Highly recommended: [SAIN Personality Mixer](https://github.com/Chazut/SAIN-Personality-Mixer).** This optional SAIN addon lets you set PMC personality chances in F12, regardless of level or gear, for more varied ORBIT behavior.
+
 ### Installation
 
 1. Close the game and SPT server.
@@ -145,6 +147,7 @@ Only **ORBIT-controlled bots** follow zones. For regular Scavs, increase **Scavs
 | Mod or system | What to know |
 |---|---|
 | **SAIN** | (Required) Turn its extraction OFF when using ORBIT extraction. |
+| **[SAIN Personality Mixer](https://github.com/Chazut/SAIN-Personality-Mixer)** | (Highly recommended) Custom PMC personality chances for more varied ORBIT behavior. Optional. |
 | **Spawn & loadout mods** | (Recommended) [ABPS](https://sp-mod.com/mod/2097/abps-acids-bot-placement-system) and [APBS](https://sp-mod.com/mod/1594/apbs-acids-progressive-bot-system) handle spawns/gear independently of ORBIT. |
 | **[Raid Review](https://sp-mod.com/mod/1479/raid-review)** | (Recommended) Replay of routes, objectives, looting and Ghost activity. |
 | **Faction mods** | (Compatible) Per-faction takeover and supported native Ghost behaviour. Some actions require waking. |
