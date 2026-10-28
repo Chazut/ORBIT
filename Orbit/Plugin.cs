@@ -77,8 +77,8 @@ public class Plugin : BaseUnityPlugin
 
     private void OnGUI() => DoorCaptureTool.DrawStatus();
 
-    private void OnApplicationQuit() => Log.Shutdown();
-    private void OnDestroy() => Log.Shutdown();
+    private void OnApplicationQuit() { DebugExport.Shutdown(); Log.Shutdown(); }
+    private void OnDestroy() { DebugExport.Shutdown(); Log.Shutdown(); }
 
     private void Awake()
     {

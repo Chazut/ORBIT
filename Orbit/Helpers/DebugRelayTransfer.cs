@@ -72,7 +72,7 @@ internal sealed class DebugRelayTransfer
         await Send(new DebugRelayRequest { Operation = "complete", Raid = raid, Ticket = ticket }, cancel).ConfigureAwait(false);
     }
 
-    // The request command occurs only in this user-initiated path, never in a heartbeat.
+    // The request command occurs only in this user-initiated path, never when subscribing to notifications.
     internal async Task<string> Collect(string localZip, DebugRaidLink raid,
         Action<DebugTransferProgress> progress, CancellationToken cancel)
     {

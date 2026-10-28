@@ -45,6 +45,10 @@ public sealed class DebugRelayReply
 
 public static class DebugRelayProtocol
 {
+    public const string Route = "/orbit/debug/relay";
+    public const string SocketRoute = "/orbit/debug/notifications";
+    // Also retained for older hosts using the HTTP relay. New hosts use socket presence.
+    public static readonly TimeSpan HostTimeout = TimeSpan.FromSeconds(60);
     public const int ChunkBytes = 128 * 1024;
     public const int BytesPerSecond = 1024 * 1024;
     public const long MaxArchiveBytes = 256L * 1024 * 1024;

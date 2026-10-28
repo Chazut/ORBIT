@@ -41,6 +41,10 @@
       <Reference Include="Newtonsoft.Json">
         <HintPath>$(SptRoot)\EscapeFromTarkov_Data\Managed\Newtonsoft.Json.dll</HintPath>
       </Reference>
+      <Reference Include="websocket-sharp">
+        <HintPath>$(SptRoot)\EscapeFromTarkov_Data\Managed\websocket-sharp.dll</HintPath>
+        <Private>false</Private>
+      </Reference>
       <Reference Include="Sirenix.Serialization">
         <HintPath>$(SptRoot)\EscapeFromTarkov_Data\Managed\Sirenix.Serialization.dll</HintPath>
       </Reference>

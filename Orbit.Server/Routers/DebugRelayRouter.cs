@@ -21,7 +21,7 @@ public sealed class DebugRelayEnvelope : IRequestData
 
 [Injectable]
 public sealed class DebugRelayRouter(JsonUtil json, DebugRelayService relay) : StaticRouter(json, [
-    new RouteAction<DebugRelayEnvelope>("/orbit/debug/relay",
+    new RouteAction<DebugRelayEnvelope>(DebugRelayProtocol.Route,
         (url, request, session, output, cancellation) => new ValueTask<string>(
             json.Serialize(relay.Store.Handle(session.ToString(), request.Payload))!))
 ]);

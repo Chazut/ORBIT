@@ -16,6 +16,9 @@ public sealed class DebugRelayStore
         public DateTime Created { get; set; }
         public DateTime Seen { get; set; }
         public DateTime Requested { get; set; }
+        public bool Accepted { get; set; }
+        [System.Text.Json.Serialization.JsonIgnore]
+        public bool Push { get; set; }
         public string State { get; set; } = "idle";
         public string Ticket { get; set; } = "";
         public string Hash { get; set; } = "";
@@ -29,9 +32,52 @@ public sealed class DebugRelayStore
     private readonly string _root;
     private readonly object _gate = new();
     private readonly Dictionary<string, Entry> _entries = [];
+    private readonly Dictionary<string, HostSubscription> _hosts = [];
     private readonly Func<DateTime> _now;
     private const long MaxCacheBytes = 1024L * 1024 * 1024;
     private const int MaxRaids = 32;
+
+    private sealed class HostSubscription(DebugRelayStore owner, string key,
+        Func<DebugRelayReply, bool> notify, Func<bool> connected, Action close) : IDisposable
+    {
+        public bool Connected => connected();
+        public bool Notify(DebugRelayReply reply) => notify(reply);
+        public void Close() => close();
+        public void Dispose()
+        {
+            lock (owner._gate)
+                if (owner._hosts.GetValueOrDefault(key) == this) owner._hosts.Remove(key);
+        }
+    }
+
+    // Notification callbacks only enqueue small messages; they must never do network I/O under the store lock.
+    public IDisposable Subscribe(string profile, DebugRelayRequest request, Func<DebugRelayReply, bool> notify,
+        Func<bool> connected, Action close)
+    {
+        lock (_gate)
+        {
+            if (request?.Raid == null || !DebugRelayProtocol.Valid(request.Raid) || !request.Raid.Authority || profile != request.Raid.Host)
+                throw new UnauthorizedAccessException("Only the raid host can subscribe to debug requests.");
+            HandleLocked(profile, new DebugRelayRequest { Operation = "join", Raid = request.Raid });
+            var key = DebugRelayProtocol.Key(request.Raid);
+            var e = _entries[key];
+            e.Push = true; e.Ended = request.Final;
+            var subscription = new HostSubscription(this, key, notify, connected, close);
+            if (_hosts.TryGetValue(key, out var previous)) previous.Close();
+            _hosts[key] = subscription;
+            if (!notify(new DebugRelayReply { State = "subscribed" })
+                || e.State == "pending" && !notify(Reply(e)))
+            {
+                subscription.Dispose();
+                throw new IOException("Debug notification connection unavailable.");
+            }
+            return subscription;
+        }
+    }
+
+    private bool HostAvailable(string key, Entry e, DateTime now) => e.Push
+        ? _hosts.TryGetValue(key, out var host) && host.Connected
+        : now - e.Seen <= DebugRelayProtocol.HostTimeout;
 
     public DebugRelayStore(string root, Func<DateTime>? now = null)
     {
@@ -116,18 +162,23 @@ public sealed class DebugRelayStore
         {
             if (e.State == "ready" && e.SnapshotFinal) return Reply(e, cached: true);
             if (e.State is "pending" or "uploading") { e.Requesters.Add(profile); return Reply(e); }
-            if (now - e.Seen > TimeSpan.FromSeconds(20))
+            if (!HostAvailable(key, e, now))
                 return new DebugRelayReply { State = "unavailable", Error = "Host/headless is offline or has no matching raid snapshot. Keep it running and update ORBIT on both machines and the SPT server." };
             DeletePayload(key);
-            e.State = "pending"; e.Ticket = Guid.NewGuid().ToString("N"); e.Requested = now;
+            e.State = "pending"; e.Ticket = Guid.NewGuid().ToString("N"); e.Requested = now; e.Accepted = false;
             e.Offset = e.Length = 0; e.Hash = e.Error = ""; e.SnapshotFinal = false;
             e.Requesters.Clear(); e.Requesters.Add(profile);
             Save(key, e);
+            if (e.Push && (!_hosts.TryGetValue(key, out var host) || !host.Notify(Reply(e))))
+            {
+                e.State = "failed"; e.Error = "Host notification could not be delivered. Export again.";
+                Save(key, e);
+            }
             return Reply(e);
         }
         if (q.Operation == "status")
         {
-            if (e.State is "pending" or "uploading" && now - e.Seen > TimeSpan.FromSeconds(20))
+            if (e.State is "pending" or "uploading" && !HostAvailable(key, e, now))
                 return new DebugRelayReply { State = "unavailable", Ticket = e.Ticket, Error = "Host/headless disconnected before the transfer finished." };
             return Reply(e);
         }
@@ -154,6 +205,12 @@ public sealed class DebugRelayStore
             return reply;
         }
         if (!owner) throw new UnauthorizedAccessException("Only the registered host can upload this raid.");
+        if (q.Operation == "accept")
+        {
+            if (e.State != "pending") throw new InvalidDataException("Debug request is no longer pending.");
+            e.Accepted = true;
+            return new DebugRelayReply { State = "accepted", Ticket = e.Ticket };
+        }
         if (q.Operation == "fail")
         {
             if (e.State != "pending" && e.State != "uploading") return Reply(e);
@@ -216,6 +273,8 @@ public sealed class DebugRelayStore
             var e = pair.Value;
             if (_now() - e.Created > TimeSpan.FromHours(24))
             { DeletePayload(pair.Key); File.Delete(Path.Combine(_root, pair.Key + ".json")); _entries.Remove(pair.Key); }
+            else if (e.Push && e.State == "pending" && !e.Accepted && _now() - e.Requested > DebugRelayProtocol.HostTimeout)
+            { e.State = "failed"; e.Error = "Host did not acknowledge the debug request within 60 seconds."; Save(pair.Key, e); }
             else if (e.State is "pending" or "uploading" && _now() - e.Requested > TimeSpan.FromMinutes(10))
             { DeletePayload(pair.Key); e.State = "failed"; e.Error = "Debug transfer timed out."; e.Length = e.Offset = 0; Save(pair.Key, e); }
         }

@@ -20,13 +20,14 @@ internal static class DebugExport
     private static readonly DebugRelayTransfer Relay = new(Post);
     private static readonly Task<DebugArchive.RaidRecord> Restore = Archive.LoadLastRaid();
     private static Task<string> _export;
-    private static Task<DebugRelayReply> _heartbeat;
+    private static Task<DebugRelayReply> _accept;
+    private static DebugRelayListener _listener;
     private static Task _serving;
-    private static DebugArchive.RaidRecord _record, _pollRecord;
+    private static DebugArchive.RaidRecord _record, _acceptRecord, _listenerRecord;
     private static GameWorld _world;
     private static bool _restored;
-    private static DateTime _nextPoll;
-    private static string _joined, _status = "Create a ZIP to attach to your bug report.";
+    private static DateTime _retryListener;
+    private static string _servingTicket, _status = "Create a ZIP to attach to your bug report.";
     private static CancellationTokenSource _cancel;
     private static DebugTransferProgress _progress;
     private static volatile bool _hostTransfer;
@@ -64,14 +65,13 @@ internal static class DebugExport
         Archive.SetFika(link, link == null && Chainloader.PluginInfos.ContainsKey("com.fika.core")
             ? "Fika raid identity unavailable. Only local files can be included; check compatible ORBIT/Fika versions." : null);
         _record = Archive.Snapshot();
-        _restored = true; _joined = null; _nextPoll = DateTime.MinValue;
+        _restored = true;
     }
     internal static void RegisterDiagnostic(string path) => Archive.RegisterDiagnostic(path);
     internal static void FinishRaid(Task writers)
     {
         Archive.FinishRaid(writers, Log.DebugFlush(), Log.ReportSettings("raid-end"));
         _record = Archive.Snapshot() ?? _record;
-        _nextPoll = DateTime.MinValue;
     }
     internal static void WorldEnded()
     {
@@ -122,7 +122,7 @@ internal static class DebugExport
     internal static void Refresh()
     {
         try { RefreshRelay(); }
-        catch (Exception e) { _nextPoll = DateTime.UtcNow.AddSeconds(30); Log.Warning("DEBUG ZIP relay unavailable: " + e.Message); }
+        catch (Exception e) { _retryListener = DateTime.UtcNow.AddSeconds(30); Log.Warning("DEBUG ZIP relay unavailable: " + e.Message); }
         if (_export?.IsCompleted != true) return;
         try
         {
@@ -141,41 +141,46 @@ internal static class DebugExport
             _restored = true;
             if (Restore.Status == TaskStatus.RanToCompletion) _record = Restore.Result;
         }
-        if (_heartbeat?.IsCompleted == true)
+        var record = _record;
+        var canListen = _restored && record?.Fika?.Authority == true && record.Fika.Host == RequestHandler.SessionId
+            && Chainloader.PluginInfos.ContainsKey("com.fika.core");
+        if ((!ReferenceEquals(record, _listenerRecord) || canListen != (_listener != null)) && DateTime.UtcNow >= _retryListener)
         {
-            if (_heartbeat.Status == TaskStatus.RanToCompletion && _pollRecord?.Id == _record?.Id
-                && _heartbeat.Result.State == "pending" && _record.Fika.Authority && (_serving == null || _serving.IsCompleted))
+            _listener?.Dispose(); _listener = null; _listenerRecord = record;
+            if (canListen && DebugRelayProtocol.Valid(record.Fika))
             {
-                var record = _pollRecord;
-                var ticket = _heartbeat.Result.Ticket;
-                // Capture live diagnostics on the Unity thread; compression and networking stay off it.
-                var archive = Archive.Create(DiagnosticCapture.PrepareExport(), Log.DebugFlush(), expectedRaid: record.Id,
-                    logging: Log.ReportSettings("host-export"));
+                using var request = RequestHandler.HttpClient.CreateNewHttpRequest(HttpMethod.Get, DebugRelayProtocol.SocketRoute);
+                _listener = new DebugRelayListener(request.RequestUri, RequestHandler.SessionId, record.Fika,
+                    record.EndedUtc.HasValue, Log.Warning);
+            }
+        }
+        if (_accept?.IsCompleted == true)
+        {
+            if (_accept.Status == TaskStatus.RanToCompletion && _accept.Result.State == "accepted"
+                && _acceptRecord.Id == record?.Id && canListen
+                && DebugRelayProtocol.Key(_acceptRecord.Fika) == DebugRelayProtocol.Key(record.Fika))
+            {
+                var ticket = _accept.Result.Ticket;
+                _servingTicket = ticket;
+                // Capture live diagnostics only on the Unity thread after the server confirms this ticket.
+                Task<string> archive;
+                try { archive = Archive.Create(DiagnosticCapture.PrepareExport(), Log.DebugFlush(), expectedRaid: record.Id,
+                    logging: Log.ReportSettings("host-export")); }
+                catch (Exception e) { archive = Task.FromException<string>(e); }
                 _serving = Task.Run(() => Serve(record.Fika, ticket, archive));
             }
-            if (_heartbeat.IsFaulted) _joined = null;
-            _heartbeat = null;
+            // Cancellation or a new raid may invalidate a queued request. Never export it anyway.
+            if (_accept.IsFaulted) _ = _accept.Exception;
+            _accept = null;
         }
-        if (!_restored || !DebugRelayProtocol.Valid(_record?.Fika) || !Chainloader.PluginInfos.ContainsKey("com.fika.core")
-            || _heartbeat != null || DateTime.UtcNow < _nextPoll) return;
-        var key = DebugRelayProtocol.Key(_record.Fika);
-        if (!_record.Fika.Authority && _joined == key) return;
-        _nextPoll = DateTime.UtcNow.AddSeconds(5);
-        _pollRecord = _record;
-        var selected = _pollRecord;
-        var needsJoin = _joined != key;
-        _heartbeat = Task.Run(async () =>
-        {
-            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-            if (needsJoin)
-                await Relay.Send(new DebugRelayRequest { Operation = "join", Raid = selected.Fika }, deadline.Token).ConfigureAwait(false);
-            _joined = key;
-            return selected.Fika.Authority
-                ? await Relay.Send(new DebugRelayRequest { Operation = "poll", Raid = selected.Fika,
-                    Final = selected.EndedUtc.HasValue }, deadline.Token).ConfigureAwait(false)
-                : new DebugRelayReply { State = "joined" };
-        });
+        if (_accept != null || _serving?.IsCompleted == false || !canListen) return;
+        var notice = _listener?.TakeRequest();
+        if (notice == null || notice.Ticket == _servingTicket) return;
+        _acceptRecord = record;
+        _accept = Task.Run(() => Relay.Send(new DebugRelayRequest { Operation = "accept", Raid = record.Fika, Ticket = notice.Ticket }));
     }
+
+    internal static void Shutdown() { _listener?.Dispose(); _listener = null; _listenerRecord = null; _cancel?.Cancel(); }
 
     private static async Task Serve(DebugRaidLink link, string ticket, Task<string> archive)
     {
@@ -216,7 +221,7 @@ internal static class DebugExport
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancel);
         timeout.CancelAfter(TimeSpan.FromSeconds(10));
         var client = RequestHandler.HttpClient;
-        using var request = client.CreateNewHttpRequest(HttpMethod.Post, "/orbit/debug/relay");
+        using var request = client.CreateNewHttpRequest(HttpMethod.Post, DebugRelayProtocol.Route);
         var body = System.Text.Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(new { Payload = payload }));
         request.Content = new ByteArrayContent(SPT.Common.Utils.Zlib.Compress(body, SPT.Common.Utils.ZlibCompression.Maximum));
         using var response = await client.HttpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token).ConfigureAwait(false);

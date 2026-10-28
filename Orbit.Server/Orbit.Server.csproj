@@ -25,6 +25,7 @@
     <Reference Include="SPTarkov.Server.Web"><HintPath>$(SPT_DIR)\SPTarkov.Server.Web.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="SPTarkov.DI"><HintPath>$(SPT_DIR)\SPTarkov.DI.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="SPTarkov.Common"><HintPath>$(SPT_DIR)\SPTarkov.Common.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Spectre.Console.Ansi"><HintPath>$(SPT_DIR)\Spectre.Console.Ansi.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="SemanticVersioning"><HintPath>$(SPT_DIR)\SemanticVersioning.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="MudBlazor"><HintPath>$(SPT_DIR)\MudBlazor.dll</HintPath><Private>false</Private></Reference>
   </ItemGroup>
