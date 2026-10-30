@@ -1136,6 +1136,8 @@ public partial class WaypointSystem
                 if (requirement != null) names.Add(requirement.Requirement.ToString());
             if (names.Count > 0) requirements = string.Join("+", names);
         }
+        if (FlareExfil.RequiresSignal(exfil))
+            requirements = requirements == "<none>" ? "SignalFlare" : requirements + "+SignalFlare";
         var kind = exfil is SharedExfiltrationPoint ? "Shared" : exfil is ScavExfiltrationPoint ? "ScavExfil" : "Exfil";
         Log.Debug($"  - {exfil.name} dist={distance:F0}m kind={kind} status={exfil.Status} entries={entries} reqs={requirements} → {verdict}");
     }
@@ -2431,6 +2433,7 @@ public partial class WaypointSystem
         }
         if (loc.Category != WaypointCategory.Exfil) return true;
         if (loc.Target is not ExfiltrationPoint exfil) return true;
+        if (FlareExfil.RequiresSignal(exfil)) return false;
 
         // Faction-level extract gate. Scavs / bloodhounds / raiders / bosses / Goons normally don't extract
         // in Tarkov — they despawn, stay on the map, or leave on a script. PlayerScavs share WildSpawnType

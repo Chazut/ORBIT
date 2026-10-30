@@ -85,6 +85,11 @@ public class ExtractAction(AgentData dataset, float hysteresis) : Task<Agent>(hy
     private void UpdateAgent(Agent agent)
     {
         if (!agent.IsActive || agent.Objective.Status != ObjectiveStatus.Extracting) return;
+        if (RejectFlareExit(agent))
+        {
+            _footExtractStartTime.Remove(agent.Id);
+            return;
+        }
         var loc = agent.Objective.Location;
         if (loc == null || loc.Category != WaypointCategory.Exfil
             || loc.Target is not ExfiltrationPoint exfil)
@@ -358,6 +363,8 @@ public class ExtractAction(AgentData dataset, float hysteresis) : Task<Agent>(hy
 
     private static bool DespawnAgent(Agent agent, bool recoverNoBackpack = false, bool preserveApproach = false)
     {
+        // Also protect stale targets and every arrival/watchdog fallback.
+        if (RejectFlareExit(agent)) return false;
         // Also protects emergency watchdog and arrival-fallback callers from bypassing backpack requirements.
         if (!(recoverNoBackpack ? NoBackpackExfil.CanRecover(agent, agent.Objective.Location)
                 : NoBackpackExfil.CanFinish(agent, agent.Objective.Location)))
@@ -400,9 +407,17 @@ public class ExtractAction(AgentData dataset, float hysteresis) : Task<Agent>(hy
         return true;
     }
 
-    // Despawn immediately, bypassing the Status==Extracting / IsActive gating. Used by the emergency-extract
-    // watchdog for a committed extracter that can never reach the exfil — e.g. it started healing, which detaches
-    // ORBIT so this action otherwise never runs for it.
+    private static bool RejectFlareExit(Agent agent)
+    {
+        var location = agent.Objective.Location;
+        if (location?.Target is not ExfiltrationPoint exit || !FlareExfil.RequiresSignal(exit)) return false;
+        Log.Info($"EXFIL BLOCKED: {agent} exit={location.Name} reason=requires signal flare; selecting another exit");
+        ExfilArrival.Abandon(agent, location);
+        return true;
+    }
+
+    // A stalled extraction can be completed without the normal action ticking,
+    // but the final removal still rejects unsupported exits.
     internal static bool ForceDespawn(Agent agent)
     {
         if (agent.Objective.Location?.Target is not ExfiltrationPoint exit
