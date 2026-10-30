@@ -1,6 +1,6 @@
 # ORBIT Fika addon
 
-**Version 1.2.0 for ORBIT 3.0**: [Full changelog](CHANGELOG.md)
+**Version 1.2.0 for ORBIT 3.0 and 3.1**: [Full changelog](CHANGELOG.md)
 
 PiP Disabler scoped wake support requires the updated ORBIT client and addon on the host or
 headless and playing clients. PiP itself is only needed on players using it. While PiP handles
@@ -9,11 +9,11 @@ times per second. Reports expire after 1.5 seconds and are cleared when PiP stop
 optic or the player disconnects. Normal scope behavior remains unchanged for other players.
 This capability is negotiated through the existing handshake; older addons receive no new packets.
 
-Version 1.2.0 synchronizes the host's Ghost firefight shot timing and stops queued audio when a shooter dies, wakes or leaves the fight. Use the matching ORBIT 3.0 and update the addon on every participant.
+Version 1.2.0 synchronizes the host's Ghost firefight shot timing and stops queued audio when a shooter dies, wakes or leaves the fight. Use the same ORBIT version and addon 1.2.0 on every participant.
 
 It retains PiP Disabler scoped wake synchronization and synchronization of switches activated by ORBIT's multi-step objectives,
 alongside door synchronization and Ghost fight audio. It requires ORBIT 3.0.0 or newer. Use the
-matching ORBIT 3.0 client and addon on the host or headless and every playing client.
+same ORBIT client version (3.0 or 3.1) and addon 1.2.0 on the host or headless and every playing client.
 Older addons do not synchronize these switch interactions. Door compatibility is requested once
 per network session, with a warning if the host does not respond; use matching addon versions.
 

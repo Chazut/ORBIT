@@ -19,7 +19,7 @@
 
 Bots pursue objectives, loot, upgrade their gear and extract. Ghost Mode keeps distant activity going while reducing CPU load.
 
-**ORBIT 3.0 · SPT 4.1.x · Solo & Fika**
+**ORBIT 3.1 · SPT 4.1.x · Solo & Fika**
 
 [Wiki](https://github.com/Chazut/ORBIT/wiki) · [Discord](https://discord.com/channels/875684761291599922/1509314495019745451) · [GitHub](https://github.com/Chazut/ORBIT)
 
@@ -27,7 +27,7 @@ Bots pursue objectives, loot, upgrade their gear and extract. Ghost Mode keeps d
 
 ---
 
-**ORBIT 3.0.0**: [Downloads](https://github.com/Chazut/ORBIT/releases) · [Full changelog](CHANGELOG.md) · [Fika addon 1.2.0](CHANGELOG.md#orbit-fika-addon-120)
+**ORBIT 3.1.0**: [Downloads](https://github.com/Chazut/ORBIT/releases) · [Full changelog](CHANGELOG.md) · [Fika addon 1.2.0](CHANGELOG.md#orbit-fika-addon-120)
 
 ## Features
 

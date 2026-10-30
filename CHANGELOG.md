@@ -1,3 +1,42 @@
+# ORBIT 3.1.0
+
+For SPT 4.1.x. Changes since ORBIT 3.0.0. Fika addon 1.2.0 remains compatible and unchanged.
+
+## Preset review and web UI
+
+- Review a preset before applying it. Compare its settings, zones and rush points with ORBIT Default, and adjust values in a temporary draft.
+- A summary groups behavior changes by settings section and map changes by location. Each zone or rush point is counted once, with Added, Modified or Removed labels.
+- Search for a setting, map or point, and switch between differences only and the complete setup.
+- Click a zone or rush point to preview that entry on its map. Compare its default and preset positions, switch floors and zoom in without displaying every other change. Room-rush previews show both the door and loot area.
+- Edit values, restore defaults or undo draft tweaks before applying. Cancel leaves the active setup unchanged. Modified presets become custom copies; an unchanged addon selection keeps receiving addon updates.
+- Applying config only or zones only preserves the other part of the current setup. Missing addon sections also keep the current setup.
+- Refresh the home page with feature shortcuts, preset guidance and links to the wiki. Recommend the optional SAIN Personality Mixer for more varied PMC personalities.
+
+## Custom rush camps
+
+- Camp and CampThenLoot points look for reachable cover inside their configured area and on the correct floor, instead of making bots wait directly on the point.
+- When native cover is unavailable, try sheltered positions near walls or doors, then fall back to a reachable random position within the area.
+- Squad members use separate holding positions. The camp timer starts after arrival, and combat and urgent extraction retain priority.
+- Cover searches remain bounded and spread across frames.
+
+## Extraction
+
+- Exclude flare-required exits, including Klimov Street, from bot extraction choices. Recheck the selected exit before extraction and abandon a flare exit if it was already assigned.
+- Filter extract-camp targets using supported exit requirements and current eligibility. Unsupported co-op exits are excluded, while supported conversions to paid exits remain usable. Multi-step exits require an active supported operation.
+- Raise default loot extraction thresholds: Timmy **250,000-500,000 RUB**, Cautious **400,000-800,000 RUB**. Existing custom values are preserved.
+
+## Debug exports
+
+- Request remote host/headless debug exports on demand through server notifications, removing the repeated idle HTTP relay checks.
+- Acknowledge a request before collecting the archive, with bounded waits and reconnection handling.
+- Log only routine `/orbit/debug/relay` request messages at Debug instead of Info. Other Info messages, warnings and errors are unaffected; no SPT files need editing.
+
+## Fika addon and updating
+
+- **Fika addon 1.2.0 is unchanged and works with ORBIT 3.1.0.** Keep it installed when using Fika.
+- Update both ORBIT client and server files. For Fika, use ORBIT 3.1.0 and addon 1.2.0 on the host/headless and every playing client.
+- Existing presets and settings are preserved. Refresh the web UI after updating, using Ctrl+Shift+R if it is cached.
+
 # ORBIT 3.0.0 + Fika Addon 1.2.0
 
 For SPT 4.1.x. Cumulative changes since ORBIT 2.1.1 and Fika addon 1.1.0, including the 3.0 betas and addon release candidates.
