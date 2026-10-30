@@ -1,0 +1,147 @@
+@using System.Globalization
+@using Orbit.Server.Presets
+@using Orbit.Zones
+
+<MudDialog Class="preset-entry-map-dialog">
+    <DialogContent>
+        <MudText Typo="Typo.body2" Class="mb-2">@PresetSelectionReview.Label(MapId) · @Entry.Category · @Entry.Status. Only this entry is shown.</MudText>
+        @if (_view != null && _preview.HasGeometry)
+        {
+            <div class="entry-map-toolbar">
+                <MudCheckBox T="bool" @bind-Value="_before" Disabled="@(_preview.Default.Count == 0)" Label="ORBIT Default (dashed)" />
+                <MudCheckBox T="bool" @bind-Value="_after" Color="Color.Primary" Disabled="@(_preview.Draft.Count == 0)" Label="Preset (solid)" />
+                <MudSpacer />
+                @if (_floors.Length > 1)
+                {
+                    <MudSelect T="string" @bind-Value="_floorId" Label="Floor background" Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:150px;max-width:220px">
+                        @foreach (var floor in _floors) { <MudSelectItem T="string" Value="@floor.Id">@floor.Name</MudSelectItem> }
+                    </MudSelect>
+                }
+                <MudIconButton Icon="@Icons.Material.Filled.Remove" OnClick="@(() => Zoom(1.5f))" aria-label="Zoom out" />
+                <MudIconButton Icon="@Icons.Material.Filled.Add" OnClick="@(() => Zoom(1f / 1.5f))" aria-label="Zoom in" />
+                <MudButton Size="Size.Small" OnClick="FocusEntry">Focus entry</MudButton>
+                <MudButton Size="Size.Small" OnClick="FullMap">Full map</MudButton>
+            </div>
+            <svg class="entry-map-canvas" viewBox="@ViewBox" role="img" aria-label="@($"Map preview of {Entry.Name} only")">
+                @if (_floors.FirstOrDefault() is { } baseFloor)
+                {
+                    <ZoneFloorBackground MapId="MapId" Floor="baseFloor" View="_view" Height="_height" Opacity="@(_floorId == baseFloor.Id ? .85f : .3f)" />
+                    @if (_floors.FirstOrDefault(f => f.Id == _floorId) is { } selected && selected.Id != baseFloor.Id)
+                    { <ZoneFloorBackground MapId="MapId" Floor="selected" View="_view" Height="_height" /> }
+                }
+                @if (_before) { @Shapes(_preview.Default, true) }
+                @if (_after) { @Shapes(_preview.Draft, false) }
+            </svg>
+            <div class="entry-map-note">
+                <span>@GeometryNote</span>
+                <a href="https://tarkov.dev" target="_blank" rel="noopener noreferrer">Map: tarkov.dev</a>
+            </div>
+        }
+        else
+        {
+            <MudAlert Severity="Severity.Info" Dense="true">
+                @(Entry.Category == "Convergence" ? "Convergence follows the player, so it has no fixed position on the map." : "No known map position for this entry. Its changes are listed below.")
+            </MudAlert>
+        }
+        <details class="entry-map-changes">
+            <summary>Changes from ORBIT Default (@Entry.Fields.Count(f => f.Changed))</summary>
+            <div class="entry-map-table">
+                <table><thead><tr><th>Setting</th><th>ORBIT Default</th><th>Preset</th></tr></thead><tbody>
+                    @foreach (var field in Entry.Fields.Where(f => f.Changed))
+                    {
+                        <tr><td>@FieldName(field)</td><td>@field.DefaultText</td><td>@(field.Exists ? field.Text : "Not included")</td></tr>
+                    }
+                </tbody></table>
+            </div>
+        </details>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => Dialog.Close(DialogResult.Ok(true)))">Edit values</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="@(() => Dialog.Cancel())">Back to changes</MudButton>
+    </DialogActions>
+</MudDialog>
+
+<style>
+    .entry-map-toolbar { display:flex; flex-wrap:wrap; align-items:center; gap:4px; margin:8px 0; }
+    .entry-map-canvas { display:block; width:100%; height:clamp(240px,50vh,480px); background:#0a0e17; border:1px solid #354052; border-radius:8px; }
+    .entry-map-note { display:flex; justify-content:space-between; gap:12px; margin-top:8px; font-size:.8rem; color:#adb6c7; }
+    .entry-map-note a { color:inherit; white-space:nowrap; }
+    .entry-map-changes { margin-top:16px; }
+    .entry-map-changes summary { cursor:pointer; }
+    .entry-map-table { max-height:220px; overflow:auto; margin-top:8px; }
+    .entry-map-table table { width:100%; border-collapse:collapse; font-size:.85rem; }
+    .entry-map-table td, .entry-map-table th { text-align:left; padding:8px; border-bottom:1px solid #354052; overflow-wrap:anywhere; }
+</style>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance Dialog { get; set; } = null!;
+    [Parameter, EditorRequired] public string MapId { get; set; } = "";
+    [Parameter, EditorRequired] public PresetReviewEntry Entry { get; set; } = null!;
+    private PresetEntryMapPreview _preview = new([], []);
+    private MapView? _view;
+    private MapFloor[] _floors = [];
+    private string _floorId = "base";
+    private bool _before = true, _after = true;
+    private float _minX, _maxZ, _scale, _height, _cx, _cy, _width;
+    private string ViewBox => $"{F(_cx - _width / 2)} {F(_cy - _width / 3.2f)} {F(_width)} {F(_width / 1.6f)}";
+    private string GeometryNote => _preview.SameFootprint ? "Same position, radius and floor as ORBIT Default."
+        : Entry.Category == "Built-in zone" ? "Min/max radius rings. Centers use the Zone Editor's reference positions."
+        : "Only the selected entry's default and preset footprints are shown.";
+
+    protected override void OnInitialized()
+    {
+        _preview = PresetEntryMapPreview.Create(MapId, Entry);
+        _before = _preview.Default.Count > 0;
+        _after = _preview.Draft.Count > 0;
+        if (!MapViews.Views.TryGetValue(MapId, out _view)) return;
+        var a = MapViews.Rot(_view.X1, _view.Z1, _view.Rot); var b = MapViews.Rot(_view.X2, _view.Z2, _view.Rot);
+        _minX = MathF.Min(a.x, b.x); _maxZ = MathF.Max(a.z, b.z);
+        _scale = 1000 / MathF.Max(1, MathF.Abs(b.x - a.x));
+        _height = MathF.Abs(b.z - a.z) * _scale;
+        _floors = FloorCatalog.For(MapId)?.Floors ?? [];
+        var preferred = _preview.Draft.FirstOrDefault()?.FloorId ?? _preview.Default.FirstOrDefault()?.FloorId;
+        _floorId = _floors.FirstOrDefault(f => preferred?.Split('|').Contains(f.Id) == true)?.Id ?? _floors.FirstOrDefault()?.Id ?? "base";
+        FocusEntry();
+    }
+
+    private (float X, float Y) Position(PresetMapShape shape)
+    {
+        var p = MapViews.Rot(shape.X, shape.Z, _view!.Rot);
+        return ((p.x - _minX) * _scale, (_maxZ - p.z) * _scale);
+    }
+    private void FocusEntry()
+    {
+        var shapes = _preview.Default.Concat(_preview.Draft).ToArray();
+        if (shapes.Length == 0) { FullMap(); return; }
+        var left = shapes.Min(s => Position(s).X - s.MaxRadius * _scale);
+        var right = shapes.Max(s => Position(s).X + s.MaxRadius * _scale);
+        var top = shapes.Min(s => Position(s).Y - s.MaxRadius * _scale);
+        var bottom = shapes.Max(s => Position(s).Y + s.MaxRadius * _scale);
+        _cx = (left + right) / 2; _cy = (top + bottom) / 2;
+        _width = MathF.Max(60 * _scale, MathF.Max(right - left, (bottom - top) * 1.6f) * 1.2f);
+    }
+    private void FullMap() { _cx = 500; _cy = _height / 2; _width = MathF.Max(1000, _height * 1.6f); }
+    private void Zoom(float factor) => _width = Math.Clamp(_width * factor, 10 * _scale, MathF.Max(2000, _height * 3.2f));
+    private static string F(float value) => value.ToString("0.###", CultureInfo.InvariantCulture);
+    private static string FieldName(PresetReviewField field) => string.Join(" / ", field.Labels.Skip(PresetReviewSummary.EntryDepth(field))) is { Length: > 0 } name ? name : field.Label;
+
+    private RenderFragment Shapes(IReadOnlyList<PresetMapShape> shapes, bool baseline) => @<text>
+        @foreach (var shape in shapes)
+        {
+            var p = Position(shape);
+            var color = baseline ? "#d1d9e6" : "#ffb454";
+            var dash = baseline ? "7 5" : "none";
+            <g data-preview-layer="@(baseline ? "default" : "preset")" data-entry="@Entry.Key" data-part="@shape.Label">
+                <title>@(baseline ? "ORBIT Default" : "Preset"): @Entry.Name (@shape.Label)</title>
+                <circle cx="@F(p.X)" cy="@F(p.Y)" r="@F(shape.MaxRadius * _scale)" fill="@color" fill-opacity="@(baseline ? "0.025" : "0.09")" stroke="@color" stroke-width="2" stroke-dasharray="@dash" vector-effect="non-scaling-stroke" />
+                @if (shape.MinRadius != shape.MaxRadius)
+                { <circle cx="@F(p.X)" cy="@F(p.Y)" r="@F(shape.MinRadius * _scale)" fill="none" stroke="@color" stroke-width="1" stroke-dasharray="@dash" vector-effect="non-scaling-stroke" /> }
+                <circle cx="@F(p.X)" cy="@F(p.Y)" r="@F(_width / 180)" fill="@color" stroke="#0a0e17" stroke-width="1" vector-effect="non-scaling-stroke" />
+                @if (shapes.Count > 1)
+                {
+                    @((MarkupString)$"<text x='{F(p.X)}' y='{F(p.Y - shape.MaxRadius * _scale - _width / 80)}' fill='{color}' text-anchor='middle' font-size='{F(_width / 42)}' stroke='#0a0e17' stroke-width='{F(_width / 350)}' paint-order='stroke'>{System.Net.WebUtility.HtmlEncode(shape.Label)}</text>")
+                }
+            </g>
+        }
+    </text>;
+}

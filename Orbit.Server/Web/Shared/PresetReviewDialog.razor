@@ -3,75 +3,294 @@
 @using System.Text.Json.Nodes
 @using Orbit.Server.Presets
 @inject PresetService Store
+@inject IDialogService Dialogs
 
 <style>
-    .preset-review-list { border-top: 1px solid var(--mud-palette-lines-default); }
-    .preset-review-row { display:grid; grid-template-columns:minmax(160px, 1.4fr) minmax(100px, .8fr) minmax(180px, 1fr) 44px; gap:16px; padding:16px 0; align-items:center; border-bottom:1px solid var(--mud-palette-lines-default); }
+    .preset-review-dialog { height:calc(100dvh - 48px); }
+    .preset-review-dialog .mud-dialog-content { display:flex; flex-direction:column; min-height:0; overflow:hidden; }
+    .review-form, .review-tabs { display:flex; flex-direction:column; min-height:0; overflow:hidden; flex:1; }
+    .review-tabs > .mud-tabs-panels { min-height:0; overflow:auto; flex:1; padding-right:6px; }
+    .review-stats, .review-cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); gap:12px; }
+    .review-card { display:block; text-align:left; color:inherit; background:var(--mud-palette-background-gray); border:1px solid var(--mud-palette-lines-default); border-radius:10px; padding:16px; cursor:pointer; }
+    .review-card:hover, .review-card:focus-visible { border-color:var(--mud-palette-primary); background:var(--mud-palette-action-default-hover); }
+    .review-card strong, .review-card span { display:block; }
+    .review-card strong { font-size:1.05rem; margin-bottom:6px; }
+    .review-card span { font-size:.82rem; opacity:.75; }
+    .review-stat { background:var(--mud-palette-background-gray); border-radius:10px; padding:16px; }
+    .review-stat b { display:block; font-size:1.6rem; color:var(--mud-palette-primary); }
+    .review-stat span, .review-note { font-size:.85rem; opacity:.75; }
+    .review-toolbar { display:flex; align-items:center; flex-wrap:wrap; gap:12px; margin:8px 0; }
+    .review-toolbar > div { flex:1; min-width:200px; }
+    .review-section-title { margin:24px 0 12px; font-size:1.1rem; font-weight:600; }
+    .review-entry-title { display:flex; align-items:center; gap:12px; width:100%; min-width:0; }
+    .review-entry-title > div { flex:1; min-width:0; }
+    .review-entry-title strong { display:block; overflow-wrap:anywhere; }
+    .review-entry-title small { display:block; font-weight:normal; opacity:.7; margin-top:3px; }
+    .review-entry { border-bottom:1px solid var(--mud-palette-lines-default); padding:6px 0; }
+    .review-entry-heading { display:flex; align-items:center; gap:4px; }
+    .review-entry-open { display:block; color:inherit; text-align:left; flex:1; min-width:0; padding:12px; border-radius:6px; cursor:pointer; }
+    .review-entry-open:hover, .review-entry-open:focus-visible { background:var(--mud-palette-action-default-hover); }
+    .review-entry-editor { padding:4px 12px 12px; }
+    .review-status { border-radius:6px; padding:3px 8px; font-size:.75rem; flex-shrink:0; background:var(--mud-palette-background-gray); }
+    .review-status.added { color:#81c995; background:#81c99515; }
+    .review-status.modified { color:#ffd580; background:#ffd58015; }
+    .review-status.removed { color:#f28b82; background:#f28b8215; }
+    .review-position { margin-top:12px; border:1px solid var(--mud-palette-lines-default); border-radius:8px; padding:12px; }
+    .review-position summary { cursor:pointer; font-size:.9rem; }
+    .preset-review-list { border-top:1px solid var(--mud-palette-lines-default); }
+    .preset-review-row { display:grid; grid-template-columns:minmax(150px,1.4fr) minmax(100px,.8fr) minmax(160px,1fr) 44px; gap:16px; padding:12px 0; align-items:center; border-bottom:1px solid var(--mud-palette-lines-default); }
     .preset-review-label, .preset-review-default, .preset-review-value { min-width:0; overflow-wrap:anywhere; }
     @@media(max-width:700px) {
-        .preset-review-row { grid-template-columns:minmax(0, 1fr) 44px; gap:8px; }
+        .review-stats, .review-cards { grid-template-columns:1fr; }
+        .preset-review-row { grid-template-columns:minmax(0,1fr) 44px; gap:8px; }
         .preset-review-label, .preset-review-default, .preset-review-value { grid-column:1; }
         .preset-review-reset { grid-column:2; grid-row:3; }
     }
 </style>
 
-<MudDialog>
+<MudDialog Class="preset-review-dialog">
     <DialogContent>
-        <MudText Typo="Typo.h5">@Review.Name</MudText>
-        <MudText Typo="Typo.body2" Class="mt-1 mb-3">
-            Review your resulting setup against ORBIT's built-in Default. Adjust any value before applying.
-        </MudText>
         <MudAlert Severity="Severity.Info" Dense="true" Class="mb-3">
             @ScopeDescription
-            @if (Review.CreatesCopy)
-            {
-                <span> This will create a personal Custom copy. It will not follow addon updates.</span>
-            }
-            else if (Review.IsAddon)
-            {
-                <span> Unchanged addons stay linked to their updates.</span>
-            }
+            @if (Review.CreatesCopy) { <span> Applies as a personal Custom copy, without addon updates.</span> }
+            else if (Review.IsAddon) { <span> Keep it unchanged to receive addon updates.</span> }
         </MudAlert>
-        <div class="d-flex flex-wrap align-center mb-2" style="gap:12px">
-            <MudChip T="string" Color="Color.Primary" Variant="Variant.Outlined">@_fields.Count(f => f.Changed) differences from Default</MudChip>
+        <div class="review-toolbar">
+            <div><MudTextField T="string" Label="Find a setting, map or point" Value="_search" ValueChanged="Search" Immediate="true"
+                Variant="Variant.Outlined" Margin="Margin.Dense" Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" /></div>
             <MudSwitch T="bool" Value="_changesOnly" ValueChanged="ChangesOnly" Color="Color.Primary" Label="Differences only" />
-            <MudSpacer />
             <MudButton Size="Size.Small" OnClick="ResetTweaks" Disabled="@(!Review.Modified && _inputErrors.Count == 0)">Undo my tweaks</MudButton>
         </div>
-        <MudGrid Spacing="2" Class="mb-3">
-            <MudItem xs="12" sm="7">
-                <MudTextField T="string" Label="Find a setting, point or map" Value="_search" ValueChanged="Search" Immediate="true"
-                              Variant="Variant.Outlined" Margin="Margin.Dense" Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" />
-            </MudItem>
-            <MudItem xs="12" sm="5">
-                <MudSelect T="string" Label="Section" Value="_group" ValueChanged="Group" Variant="Variant.Outlined" Margin="Margin.Dense">
-                    <MudSelectItem T="string" Value='@("All sections")'>All sections</MudSelectItem>
-                    @foreach (var group in _fields.Select(f => f.Group).Distinct().Order())
+        @if (_error != null) { <MudAlert Severity="Severity.Error" Dense="true" Class="mb-3">@_error</MudAlert> }
+        @if (_inputErrors.Count > 0)
+        {
+            <MudAlert Severity="Severity.Error" Dense="true" Class="mb-3">
+                Check @_inputErrors.Count invalid value(s) before applying.
+                <MudButton Size="Size.Small" OnClick="ShowError">Show invalid value</MudButton>
+            </MudAlert>
+        }
+        <MudForm @ref="_form" Class="review-form">
+        <MudTabs @key="(_tab, _group, _map, _category, _search)" ActivePanelIndex="_tab" ActivePanelIndexChanged="TabChanged" Rounded="true" Border="true" Class="review-tabs mt-2">
+            <MudTabPanel Text="Summary">
+                <div class="review-stats mt-4">
+                    <div class="review-stat"><b>@_summary.SettingChanges</b><span>settings differ from Default</span></div>
+                    <div class="review-stat"><b>@_summary.MapChanges</b><span>maps with changes</span></div>
+                    <div class="review-stat"><b>@_summary.EntryChanges</b><span>map entries changed, counted once each</span></div>
+                </div>
+                <h3 class="review-section-title">Behavior settings</h3>
+                <div class="review-cards">
+                    @foreach (var section in VisibleSections)
                     {
-                        <MudSelectItem T="string" Value="@group">@group</MudSelectItem>
+                        <button type="button" class="review-card" @onclick="@(() => OpenSection(section.Name))">
+                            <strong>@section.Name</strong><span>@section.Changes settings changed</span>
+                        </button>
                     }
-                </MudSelect>
-            </MudItem>
-        </MudGrid>
-        @if (_error != null)
+                </div>
+                @if (!VisibleSections.Any()) { <p class="review-note">@EmptyMessage("settings")</p> }
+                <h3 class="review-section-title">Zones &amp; rush points</h3>
+                <div class="review-cards">
+                    @foreach (var map in VisibleMaps)
+                    {
+                        <button type="button" class="review-card" @onclick="@(() => OpenMap(map.Id))">
+                            <strong>@map.Name</strong><span>@MapTotals(map)</span>
+                            <span class="mt-2">@MapChanges(map)</span>
+                        </button>
+                    }
+                </div>
+                @if (!VisibleMaps.Any()) { <p class="review-note">@EmptyMessage("maps")</p> }
+            </MudTabPanel>
+            <MudTabPanel Text="Settings">
+                <div class="review-toolbar">
+                    <div><MudSelect T="string" Label="Category" Value="_group" ValueChanged="Group" Variant="Variant.Outlined" Margin="Margin.Dense">
+                        @foreach (var section in _summary.Settings)
+                        { <MudSelectItem T="string" Value="@section.Name">@section.Name (@section.Changes changed)</MudSelectItem> }
+                    </MudSelect></div>
+                    <span class="review-note">@(_search.Length > 0 ? "Search results across all categories." : "Only this category is shown. Turn off Differences only to customize other values.")</span>
+                </div>
+                @FieldList(SettingFields.Take(_shown))
+                @if (SettingFields.Count == 0) { <p class="review-note pa-4">@EmptyMessage("settings in this category")</p> }
+                @if (SettingFields.Count > _shown)
+                { <MudButton Class="mt-3" OnClick="ShowMore">Show more settings (@(SettingFields.Count - _shown) remaining)</MudButton> }
+            </MudTabPanel>
+            <MudTabPanel Text="Zones &amp; rush points">
+                <div class="review-toolbar">
+                    <div><MudSelect T="string" Label="Map" Value="_map" ValueChanged="Map" Variant="Variant.Outlined" Margin="Margin.Dense">
+                        @foreach (var map in _summary.Maps)
+                        { <MudSelectItem T="string" Value="@map.Id">@map.Name (@map.Changes changed)</MudSelectItem> }
+                    </MudSelect></div>
+                    <div><MudSelect T="string" Label="Type" Value="_category" ValueChanged="Category" Variant="Variant.Outlined" Margin="Margin.Dense">
+                        <MudSelectItem T="string" Value='@("All entries")'>All entries</MudSelectItem>
+                        @foreach (var category in CurrentMap?.Entries.Select(e => e.Category).Distinct() ?? [])
+                        { <MudSelectItem T="string" Value="@category">@category</MudSelectItem> }
+                    </MudSelect></div>
+                </div>
+                @if (CurrentMap is { } selectedMap)
+                {
+                    <MudText Typo="Typo.h6">@selectedMap.Name</MudText>
+                    <p class="review-note mb-3">@MapTotals(selectedMap) · @MapChanges(selectedMap)</p>
+                    <p class="review-note mb-2">Click a zone or point to preview it alone on the map. Use the pencil to edit its values.</p>
+                    <div>
+                        @foreach (var entry in ZoneEntries.Take(_shown))
+                        {
+                            <div class="review-entry" @key="entry.Key">
+                                <div class="review-entry-heading">
+                                <button type="button" class="review-entry-open" @onclick="@(() => PreviewEntry(entry))" aria-label="@($"Preview {entry.Name} on map")">
+                                    <div class="review-entry-title"><div><strong>@entry.Name</strong><small>@entry.Category · @entry.Description</small></div>
+                                        <span class="review-status @entry.Status.ToLowerInvariant()">@entry.Status</span></div>
+                                </button>
+                                <MudIconButton Icon="@(_expandedEntry == entry.Key ? Icons.Material.Filled.ExpandLess : Icons.Material.Filled.Edit)"
+                                    OnClick="@(() => Expand(entry.Key, _expandedEntry != entry.Key))" aria-label="@($"Edit values: {entry.Name}")" />
+                                </div>
+                                    @if (_expandedEntry == entry.Key)
+                                    {
+                                        var visible = EntryFields(entry);
+                                        <div class="review-entry-editor">
+                                        @FieldList(visible.Where(f => !PresetReviewEntry.IsPosition(f)), true)
+                                        @if (visible.Any(PresetReviewEntry.IsPosition))
+                                        {
+                                            <details class="review-position" open="@visible.Any(f => PresetReviewEntry.IsPosition(f) && _inputErrors.ContainsKey(f.Key))"><summary>Position, floors &amp; door (@visible.Count(PresetReviewEntry.IsPosition))</summary>
+                                                @FieldList(visible.Where(PresetReviewEntry.IsPosition), true)
+                                            </details>
+                                        }
+                                        @if (visible.Count == 0) { <p class="review-note">Matches Default. Turn off Differences only to edit this entry.</p> }
+                                        </div>
+                                    }
+                            </div>
+                        }
+                    </div>
+                }
+                @if (ZoneEntries.Count == 0) { <p class="review-note pa-4">@EmptyMessage("entries on this map")</p> }
+                @if (ZoneEntries.Count > _shown)
+                { <MudButton Class="mt-3" OnClick="ShowMore">Show more entries (@(ZoneEntries.Count - _shown) remaining)</MudButton> }
+            </MudTabPanel>
+        </MudTabs>
+        </MudForm>
+        <MudText Typo="Typo.caption" Class="mt-4" Style="opacity:.7">
+            Nothing is saved until you apply. Your previous preset's edits will be saved too.
+            Applies next raid; faction takeover and brain lists need a game restart.
+        </MudText>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="Apply" Disabled="@(_applying || _inputErrors.Count > 0)">
+            @(Review.CreatesCopy ? "Apply as Custom copy" : "Apply preset")
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance Dialog { get; set; } = null!;
+    [Parameter, EditorRequired] public PresetSelectionReview Review { get; set; } = null!;
+    private IReadOnlyList<PresetReviewField> _fields = [];
+    private PresetReviewSummary _summary = new([]);
+    private readonly Dictionary<string, string> _inputErrors = new();
+    private readonly HashSet<string> _touched = new();
+    private string _search = "", _group = "", _map = "", _category = "All entries";
+    private string? _error, _expandedEntry;
+    private bool _changesOnly = true, _applying;
+    private MudForm? _form;
+    private int _tab, _shown = 40;
+    private string ScopeDescription => Review.Parts switch
+    {
+        PresetParts.ConfigOnly => "Config selected. Your current zones and rush points are kept and included below.",
+        PresetParts.ZonesOnly => "Zones selected, including rush points. Your current behavior settings are kept and included below.",
+        _ => "Config + zones selected. Anything missing from the addon keeps your current setup."
+    };
+    private bool Included(PresetReviewField f) => !_changesOnly || f.Changed || _touched.Contains(f.Key) || _inputErrors.ContainsKey(f.Key);
+    private bool Matches(PresetReviewField f) => $"{f.Group} {f.Context} {f.Label} {f.Text}".Contains(_search, StringComparison.OrdinalIgnoreCase);
+    private IEnumerable<PresetReviewSection> VisibleSections => _summary.Settings.Where(s => s.Fields.Any(f => Included(f) && Matches(f)));
+    private IEnumerable<PresetReviewMap> VisibleMaps => _summary.Maps.Where(m => m.Entries.Any(e => e.Fields.Any(f => Included(f) && Matches(f))));
+    private List<PresetReviewField> SettingFields => (_search.Length > 0 ? _summary.Settings.SelectMany(s => s.Fields)
+        : _summary.Settings.FirstOrDefault(s => s.Name == _group)?.Fields ?? []).Where(f => Included(f) && Matches(f)).ToList();
+    private PresetReviewMap? CurrentMap => _summary.Maps.FirstOrDefault(m => m.Id == _map);
+    private List<PresetReviewEntry> ZoneEntries => CurrentMap?.Entries.Where(e => (_category == "All entries" || e.Category == _category)
+        && e.Fields.Any(f => Included(f) && Matches(f))).ToList() ?? [];
+    private List<PresetReviewField> EntryFields(PresetReviewEntry e) => e.Fields.Where(Included).ToList();
+    private static string MapTotals(PresetReviewMap m) => $"{m.CurrentZones} zones · {m.CurrentRushPoints} rush points in this setup";
+    private static string MapChanges(PresetReviewMap m) => m.Changes == 0 ? "Matches Default" : $"{m.Added} added · {m.Updated} modified · {m.Removed} removed";
+    private string EmptyMessage(string what) => _search.Length > 0 ? $"No {what} match your search." : $"No differences in {what}. Turn off Differences only to explore everything.";
+    protected override void OnInitialized() => Refresh();
+    private void Refresh()
+    {
+        _fields = Review.Fields(); _summary = new(_fields);
+        if (!_summary.Settings.Any(s => s.Name == _group)) _group = _summary.Settings.OrderByDescending(s => s.Changes).FirstOrDefault()?.Name ?? "";
+        if (!_summary.Maps.Any(m => m.Id == _map)) _map = _summary.Maps.OrderByDescending(m => m.Changes).FirstOrDefault()?.Id ?? "";
+    }
+    private void Search(string value) { _search = value ?? ""; _shown = 40; _category = "All entries"; FindMatchingMap(); }
+    private void FindMatchingMap()
+    {
+        if (_tab == 2 && _search.Length > 0 && !VisibleMaps.Any(m => m.Id == _map) && VisibleMaps.FirstOrDefault() is { } match)
+            Map(match.Id);
+    }
+    private void Group(string value) { _group = value; _shown = 40; }
+    private void Map(string value) { _map = value; _category = "All entries"; _expandedEntry = null; _shown = 40; }
+    private void Category(string value) { _category = value; _expandedEntry = null; _shown = 40; }
+    private void ChangesOnly(bool value) { _changesOnly = value; _shown = 40; }
+    private void TabChanged(int value) { _tab = value; _shown = 40; FindMatchingMap(); }
+    private void OpenSection(string name) { Group(name); _tab = 1; }
+    private void OpenMap(string id) { Map(id); _tab = 2; }
+    private void Expand(string key, bool expanded) { if (expanded) _expandedEntry = key; else if (_expandedEntry == key) _expandedEntry = null; }
+    private async Task PreviewEntry(PresetReviewEntry entry)
+    {
+        var preview = await Dialogs.ShowAsync<PresetEntryMapDialog>(entry.Name,
+            new DialogParameters { [nameof(PresetEntryMapDialog.MapId)] = _map, [nameof(PresetEntryMapDialog.Entry)] = entry },
+            new DialogOptions { MaxWidth = MaxWidth.Large, FullWidth = true, CloseButton = true });
+        if (await preview.Result is { Canceled: false, Data: true }) _expandedEntry = entry.Key;
+    }
+    private void ShowMore() => _shown += 40;
+    private void ShowError()
+    {
+        _search = "";
+        var key = _inputErrors.Keys.First();
+        var section = _summary.Settings.FirstOrDefault(s => s.Fields.Any(f => f.Key == key));
+        if (section != null) { OpenSection(section.Name); _shown = section.Fields.Count; return; }
+        var map = _summary.Maps.First(m => m.Entries.Any(e => e.Fields.Any(f => f.Key == key)));
+        OpenMap(map.Id); _shown = map.Entries.Count;
+        _expandedEntry = map.Entries.First(e => e.Fields.Any(f => f.Key == key)).Key;
+    }
+    private void Cancel() => Dialog.Cancel();
+    private void ResetTweaks() { Review.ResetTweaks(); _inputErrors.Clear(); _touched.Clear(); _expandedEntry = null; _error = null; Refresh(); }
+    private void Change(PresetReviewField field, JsonNode? value)
+    {
+        Review.Set(field, value); _touched.Add(field.Key); _inputErrors.Remove(field.Key); _error = null; Refresh();
+    }
+    private void Number(PresetReviewField field, double? value)
+    {
+        if (value == null && field.NullableNumber) { Change(field, null); return; }
+        if (!value.HasValue || !double.IsFinite(value.Value)) { _inputErrors[field.Key] = "Enter a number."; return; }
+        Change(field, JsonValue.Create(value.Value));
+    }
+    private static string ArrayText(PresetReviewField field) => string.Join("\n", field.Value!.AsArray().Select(n => n?.ToString()));
+    private void List(PresetReviewField field, string value)
+    {
+        var array = new JsonArray();
+        var numeric = field.Value!.AsArray().Any(n => n?.GetValueKind() == JsonValueKind.Number);
+        foreach (var entry in (value ?? "").Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
         {
-            <MudAlert Severity="Severity.Error" Dense="true" Class="mb-3">@_error</MudAlert>
+            if (numeric)
+            {
+                if (!double.TryParse(entry, NumberStyles.Float, CultureInfo.InvariantCulture, out var number) || !double.IsFinite(number))
+                { _inputErrors[field.Key] = "Enter one number per line."; return; }
+                array.Add(number);
+            }
+            else array.Add(entry);
         }
-        @if (Filtered.Count == 0)
-        {
-            <MudText Class="pa-4">@(_search.Length > 0 || _group != "All sections" ? "No matching settings." : "This setup matches ORBIT Default. Turn off Differences only to customize it.")</MudText>
-        }
-        else
-        {
-            <MudForm @ref="_form">
+        Change(field, array);
+    }
+    private void Restore(PresetReviewField field) { Review.RestoreDefault(field); _touched.Add(field.Key); _inputErrors.Remove(field.Key); _error = null; Refresh(); }
+
+    private static string FieldLabel(PresetReviewField field, bool mapEntry) => mapEntry && field.Labels.Length > PresetReviewSummary.EntryDepth(field)
+        ? string.Join(" / ", field.Labels.Skip(PresetReviewSummary.EntryDepth(field))) : field.Label;
+
+    private RenderFragment FieldList(IEnumerable<PresetReviewField> fields, bool mapEntry = false) => @<text>
             <div class="preset-review-list">
-                @foreach (var field in PageFields)
+                @foreach (var field in fields)
                 {
                     <div class="preset-review-row" @key="(field.Key, field.DefaultText, field.Label)">
                         <div class="preset-review-label">
-                            <MudText Typo="Typo.caption" Color="Color.Secondary">@field.Group</MudText>
-                            <MudText Typo="Typo.body1">@field.Label</MudText>
-                            @if (field.Context.Length > 0)
+                            @if (!mapEntry && _search.Length > 0) { <MudText Typo="Typo.caption" Color="Color.Secondary">@field.Group</MudText> }
+                            <MudText Typo="Typo.body1">@FieldLabel(field, mapEntry)</MudText>
+                            @if (!mapEntry && field.Context.Length > 0)
                             {
                                 <MudText Typo="Typo.caption" Style="opacity:.65">@field.Context</MudText>
                             }
@@ -132,85 +351,9 @@
                     </div>
                 }
             </div>
-            </MudForm>
-            <div class="d-flex align-center justify-center mt-3" style="gap:12px">
-                <MudButton Disabled="@(_page == 0)" OnClick="Previous">Previous</MudButton>
-                <MudText Typo="Typo.caption">@(_page * PageSize + 1)-@(Math.Min((_page + 1) * PageSize, Filtered.Count)) of @Filtered.Count</MudText>
-                <MudButton Disabled="@((_page + 1) * PageSize >= Filtered.Count)" OnClick="Next">Next</MudButton>
-            </div>
-        }
-        <MudText Typo="Typo.caption" Class="mt-4" Style="opacity:.7">
-            Nothing is saved until you apply. Your previous preset's edits will be saved too.
-            Applies next raid; faction takeover and brain lists need a game restart.
-        </MudText>
-    </DialogContent>
-    <DialogActions>
-        <MudButton OnClick="Cancel">Cancel</MudButton>
-        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="Apply" Disabled="@(_applying || _inputErrors.Count > 0)">
-            @(Review.CreatesCopy ? "Apply as Custom copy" : "Apply preset")
-        </MudButton>
-    </DialogActions>
-</MudDialog>
 
-@code {
-    [CascadingParameter] private IMudDialogInstance Dialog { get; set; } = null!;
-    [Parameter, EditorRequired] public PresetSelectionReview Review { get; set; } = null!;
-    private IReadOnlyList<PresetReviewField> _fields = [];
-    private readonly Dictionary<string, string> _inputErrors = new();
-    private readonly HashSet<string> _touched = new();
-    private string _search = "", _group = "All sections";
-    private string? _error;
-    private bool _changesOnly = true, _applying;
-    private MudForm? _form;
-    private int _page;
-    private const int PageSize = 40;
-    private string ScopeDescription => Review.Parts switch
-    {
-        PresetParts.ConfigOnly => "Config selected. Your current zones and rush points are kept and included in this comparison.",
-        PresetParts.ZonesOnly => "Zones selected, including rush points. Your current behavior settings are kept and included in this comparison.",
-        _ => "Config + zones selected. Any part missing from the addon keeps your current setup."
-    };
-    private List<PresetReviewField> Filtered => _fields.Where(f => (!_changesOnly || f.Changed || _touched.Contains(f.Key) || _inputErrors.ContainsKey(f.Key))
-        && (_group == "All sections" || f.Group == _group)
-        && $"{f.Group} {f.Context} {f.Label}".Contains(_search, StringComparison.OrdinalIgnoreCase)).ToList();
-    private IEnumerable<PresetReviewField> PageFields => Filtered.Skip(_page * PageSize).Take(PageSize);
-    protected override void OnInitialized() => Refresh();
-    private void Refresh() { _fields = Review.Fields(); _page = Math.Min(_page, Math.Max(0, (Filtered.Count - 1) / PageSize)); }
-    private void Search(string value) { _search = value ?? ""; _page = 0; }
-    private void Group(string value) { _group = value; _page = 0; }
-    private void ChangesOnly(bool value) { _changesOnly = value; _page = 0; }
-    private void Previous() => _page--;
-    private void Next() => _page++;
-    private void Cancel() => Dialog.Cancel();
-    private void ResetTweaks() { Review.ResetTweaks(); _inputErrors.Clear(); _touched.Clear(); _error = null; Refresh(); }
-    private void Change(PresetReviewField field, JsonNode? value)
-    {
-        Review.Set(field, value); _touched.Add(field.Key); _inputErrors.Remove(field.Key); _error = null; Refresh();
-    }
-    private void Number(PresetReviewField field, double? value)
-    {
-        if (value == null && field.NullableNumber) { Change(field, null); return; }
-        if (!value.HasValue || !double.IsFinite(value.Value)) { _inputErrors[field.Key] = "Enter a number."; return; }
-        Change(field, JsonValue.Create(value.Value));
-    }
-    private static string ArrayText(PresetReviewField field) => string.Join("\n", field.Value!.AsArray().Select(n => n?.ToString()));
-    private void List(PresetReviewField field, string value)
-    {
-        var array = new JsonArray();
-        var numeric = field.Value!.AsArray().Any(n => n?.GetValueKind() == JsonValueKind.Number);
-        foreach (var entry in (value ?? "").Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
-        {
-            if (numeric)
-            {
-                if (!double.TryParse(entry, NumberStyles.Float, CultureInfo.InvariantCulture, out var number) || !double.IsFinite(number))
-                { _inputErrors[field.Key] = "Enter one number per line."; return; }
-                array.Add(number);
-            }
-            else array.Add(entry);
-        }
-        Change(field, array);
-    }
-    private void Restore(PresetReviewField field) { Review.RestoreDefault(field); _touched.Add(field.Key); _inputErrors.Remove(field.Key); _error = null; Refresh(); }
+    </text>;
+
     private async Task Apply()
     {
         if (_applying || _inputErrors.Count > 0) return;
@@ -233,7 +376,7 @@
         var parts = await PresetScopeDialog.ChooseSelection(dialogs, preset);
         if (parts == null) return false;
         var review = store.ReviewSelection(preset.Id, parts.Value);
-        var dialog = await dialogs.ShowAsync<PresetReviewDialog>("Review preset", new DialogParameters { [nameof(Review)] = review },
+        var dialog = await dialogs.ShowAsync<PresetReviewDialog>("Review preset: " + review.Name, new DialogParameters { [nameof(Review)] = review },
             new DialogOptions { MaxWidth = MaxWidth.ExtraLarge, FullWidth = true, CloseButton = true, BackdropClick = false });
         return await dialog.Result is { Canceled: false, Data: true };
     }

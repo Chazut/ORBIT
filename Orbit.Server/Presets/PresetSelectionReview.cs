@@ -118,11 +118,12 @@ public sealed class PresetSelectionReview
 public sealed class PresetReviewField(string[] path, string[] labels, JsonNode? value, JsonNode? baseline, bool exists, bool hasDefault, string? discriminator = null)
 {
     public string[] Path { get; } = path;
+    public string[] Labels { get; } = labels;
     public string Key => string.Join('/', Path) + (discriminator == null ? "" : "|" + discriminator);
-    public string Group => Path[0] == "Maps" ? "Zones / " + labels[1]
-        : Path.Length > 3 && Path[1] == "rush" && Path[2] == "maps" ? "Rush points / " + labels[3] : labels[1];
-    public string Label => labels[^1];
-    public string Context => string.Join(" / ", labels.Skip(Path[0] == "Maps" ? 2 : Group.StartsWith("Rush points / ") ? 4 : 2).SkipLast(1));
+    public string Group => Path[0] == "Maps" ? "Zones / " + Labels[1]
+        : Path.Length > 3 && Path[1] == "rush" && Path[2] == "maps" ? "Rush points / " + Labels[3] : Labels[1];
+    public string Label => Labels[^1];
+    public string Context => string.Join(" / ", Labels.Skip(Path[0] == "Maps" ? 2 : Group.StartsWith("Rush points / ") ? 4 : 2).SkipLast(1));
     public JsonNode? Value { get; } = value?.DeepClone();
     public JsonNode? Default { get; } = baseline?.DeepClone();
     public bool Exists { get; } = exists;
