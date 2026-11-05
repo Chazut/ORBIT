@@ -1027,8 +1027,9 @@ public partial class DormancySystem
             for (var i = 0; i < squad.Members.Count; i++)
                 // Awake or initializing newcomers already own their body. Never PostActivate them here.
                 if (squad.Members[i].IsDormant) WakeAgentWithReason(squad.Members[i], reason);
+            RetainGroundWake(squad, squad, null, reason);
             if (SquadDormantCount(squad) == before) return;
-            squad.DormancySleepAllowedAt = Time.time + reason.CooldownSeconds;
+            ProtectWake(squad, squad, reason);
             _windowWakes++;
             RecordWake(reason.Cause);
             Log.Info($"{squad} awake: {reason.Message} ({_dormantAgents.Count} still dormant) wakeCause={reason.Cause} retryAfter={reason.CooldownSeconds:F0}s");
@@ -2581,7 +2582,7 @@ public partial class DormancySystem
                     NativeAwakeGrenadeDiagnostics.ObserveAgent(owner, agent.IsDormant);
                     // A late brain registration transfers ownership back to the normal circuit.
                     if (WakeVanillaBot(owner) && agent.Squad != null)
-                        agent.Squad.DormancySleepAllowedAt = Time.time + new GhostWakeReason(GhostWakeCause.GroupChanged, null).CooldownSeconds;
+                        ProtectWake(agent.Squad, agent.Squad, new GhostWakeReason(GhostWakeCause.GroupChanged, null));
                     continue;
                 }
                 var role = owner.Profile?.Info?.Settings?.Role;
@@ -2788,8 +2789,9 @@ public partial class DormancySystem
             var activated = 0;
             for (var i = 0; i < group.Count; i++)
                 if (WakeVanillaBotWithReason(group[i], reason)) activated++;
+            RetainGroundWake(key, null, group, reason);
             if (activated == 0) return;
-            _vanillaSleepAllowedAt[key] = Time.time + reason.CooldownSeconds;
+            ProtectWake(key, null, reason);
             _windowWakes++;
             RecordWake(reason.Cause);
             Log.Info($"vanilla group ({group[0].GetPlayer?.Profile?.Nickname} +{group.Count - 1}) awake: {reason.Message} ({_vanillaDormant.Count} vanilla dormant) wakeCause={reason.Cause} retryAfter={reason.CooldownSeconds:F0}s");

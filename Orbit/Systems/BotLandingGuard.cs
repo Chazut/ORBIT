@@ -147,8 +147,9 @@ internal static class BotLandingGuard
             if (WakeSearches.Count >= 256) WakeSearches.Clear();
             WakeSearches[bot] = search = new WakeSearch { Origin = origin };
         }
-        if ((search.Origin - origin).sqrMagnitude > .01f)
-        { search.Origin = origin; search.Candidate = 0; search.RetryAt = 0; }
+        // Recenter on the moving Ghost without restarting the ring cursor or the retry budget.
+        // Otherwise even a 10 cm step prevents us from ever testing the outer rings.
+        search.Origin = origin;
         if (Time.time < search.RetryAt) return false;
         var reason = "rejected-position";
         if (!IsRejected(bot, origin) && BotGroundPlacement.TryResolve(player, origin, out var current, out reason)
@@ -158,6 +159,7 @@ internal static class BotLandingGuard
             WakeSearches.Remove(bot);
             return true;
         }
+        var initialReason = reason;
         // Resume a bounded lateral search across retries. Never probe another height band:
         // a mesh point above or below the sleeper is not proof of its intended floor.
         for (var probe = 0; probe < 8; probe++)
@@ -185,7 +187,7 @@ internal static class BotLandingGuard
         }
         if (Time.time >= search.LogAt)
         {
-            Log.Warning($"GHOST WAKE GROUND: {bot.Profile.Nickname} activation deferred at={origin} reason={reason} nextProbe={search.Candidate} "
+            Log.Warning($"GHOST WAKE GROUND: {bot.Profile.Nickname} activation deferred at={origin} reason={reason} initialReason={initialReason} nextProbe={search.Candidate} "
                 + BotGroundPlacement.DescribeBody(player));
             search.LogAt = Time.time + 10f;
         }

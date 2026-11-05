@@ -134,6 +134,14 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                 continue;
             }
 
+            // Keep individual extraction/recovery running, but do not time or redispatch a
+            // shared objective nobody is pursuing. A recovered member can resume it.
+            if (SuspendSoloObjective(squad))
+            {
+                UpdateAgents(squad, out _);
+                if (SuspendSoloObjective(squad)) continue;
+            }
+
             // Corpse-stuck watchdog: only bites when nothing completes (unreachable corpse, hung loot, or a
             // stuck member keeps the en-route blacklist below from firing) and would otherwise pin the squad
             // on the body forever.
@@ -389,16 +397,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                     // UpdateAgents counts a departing solo-extracter as "finished", so finishedCount can reach
                     // squad.Size with zero real path attempts. Treating that as an en-route failure would
                     // wrongly blacklist the objective — hold it instead so a rejoining member resumes it.
-                    var anyMemberPursuing = false;
-                    for (var m = 0; m < squad.Size; m++)
-                    {
-                        if (!squad.Members[m].SoloExtractRequested) { anyMemberPursuing = true; break; }
-                    }
-                    if (!anyMemberPursuing)
-                    {
-                        Log.Debug($"{squad} 'all finished' is only solo-extract departures — holding {squadObjective.Location}, not counting an en-route failure");
-                        continue;
-                    }
+                    if (SuspendSoloObjective(squad)) continue;
 
                     // Every member's path attempt came back Failed without anyone reaching the POI. After
                     // enough in a row the POI is effectively unreachable for this squad — blacklist it so the
@@ -534,8 +533,21 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
     // when a partial heal plateaued just under the +RecoverFraction recover bar that never cancels.
     private const float EmergencyBleedStoppedSeconds = 12f;
 
+    private static bool SuspendSoloObjective(Squad squad)
+    {
+        var suspended = squad.Size > 0;
+        foreach (var member in squad.Members) suspended &= member.SoloExtractRequested;
+        if (suspended) squad.CorpseWatchdogSince = Time.time;
+        if (suspended != squad.ObjectiveSuspendedForSoloExtraction)
+        {
+            Log.Debug($"{squad} shared objective {(suspended ? "suspended: all members extracting solo" : "resumed: member returned")}");
+            squad.ObjectiveSuspendedForSoloExtraction = suspended;
+        }
+        return suspended;
+    }
+
     // Only PMCs / PlayerScavs extract via exfils in ORBIT; everyone else despawns, so a solo run is moot.
-    // "Extract allowed for" gates this too — None (or a set excluding this bot) means don't peel a wounded
+    // "Extract allowed for" gates this too. None (or a set excluding this bot) means don't peel a wounded
     // bot off its squad for a run it can't finish. PlayerScavs share WildSpawnType.assault so route to the
     // PlayerScav flag explicitly instead of collapsing onto Scav.
     private static bool CanSoloExtract(Agent agent)

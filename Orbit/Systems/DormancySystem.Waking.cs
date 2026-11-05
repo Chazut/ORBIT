@@ -161,12 +161,15 @@ public partial class DormancySystem
     private bool TryStageWake(Squad squad, GhostWakeReason reason)
     {
         var first = squad.Members.Count > 0 ? squad.Members[0].Bot : null;
-        if (!StageableReason(reason)) return BypassWake(reason, "wake-cause", first);
         if (_wakingGroups.TryGetValue(squad, out var existing))
         {
+            existing.Reason = StrongerWakeReason(existing.Reason, reason);
             var urgent = StagedWakeUrgency(existing);
-            return !urgent.HasValue || BypassWake(reason, urgent.Value.Message, first);
+            if (urgent.HasValue || !StageableReason(reason))
+                FinishStagedWake(existing, urgent ?? reason, forced: true);
+            return true;
         }
+        if (!StageableReason(reason)) return BypassWake(reason, "wake-cause", first);
         if (!IsSquadDormant(squad)) return BypassWake(reason, "group-not-fully-ghost", first);
         if (squad.GhostFightUntil > Time.time) return BypassWake(reason, "active-ghost-fight", first);
         foreach (var agent in squad.Members)
@@ -185,12 +188,15 @@ public partial class DormancySystem
     private bool TryStageWake(object key, List<BotOwner> group, GhostWakeReason reason)
     {
         var first = group.Count > 0 ? group[0] : null;
-        if (!StageableReason(reason)) return BypassWake(reason, "wake-cause", first);
         if (_wakingGroups.TryGetValue(key, out var existing))
         {
+            existing.Reason = StrongerWakeReason(existing.Reason, reason);
             var urgent = StagedWakeUrgency(existing);
-            return !urgent.HasValue || BypassWake(reason, urgent.Value.Message, first);
+            if (urgent.HasValue || !StageableReason(reason))
+                FinishStagedWake(existing, urgent ?? reason, forced: true);
+            return true;
         }
+        if (!StageableReason(reason)) return BypassWake(reason, "wake-cause", first);
         if (group.Count == 0 || VanillaDormantCount(group) != group.Count)
             return BypassWake(reason, "group-not-fully-ghost", first);
         foreach (var bot in group)
@@ -206,13 +212,41 @@ public partial class DormancySystem
         return true;
     }
 
-    private void AddStagedWake(PendingWake pending)
+    private static GhostWakeReason StrongerWakeReason(GhostWakeReason original, GhostWakeReason incoming)
+        => incoming.CooldownSeconds > original.CooldownSeconds ? incoming : original;
+
+    // Urgency may bypass pacing, never physical safety or an existing combat wake request.
+    private bool RetainGroundWake(object key, Squad squad, List<BotOwner> group, GhostWakeReason reason, PendingWake previous = null)
+    {
+        if (squad != null ? SquadDormantCount(squad) == 0 : group == null || VanillaDormantCount(group) == 0) return false;
+        var pending = new PendingWake { Key = key, Squad = squad, Reason = reason,
+            Started = previous?.Started ?? Time.realtimeSinceStartup, GroundRetryAt = Time.realtimeSinceStartup + .25f };
+        if (squad != null)
+            foreach (var agent in squad.Members) { pending.Bots.Add(agent.Bot); pending.Agents.Add(agent); }
+        else pending.Bots.AddRange(group);
+        AddStagedWake(pending, previous == null);
+        for (var i = 0; i < pending.RetryAt.Count; i++) pending.RetryAt[i] = pending.GroundRetryAt;
+        pending.Activated = pending.Bots.Count - (squad != null ? SquadDormantCount(squad) : VanillaDormantCount(group));
+        return true;
+    }
+
+    private void ProtectWake(object key, Squad squad, GhostWakeReason reason)
+    {
+        var until = Time.time + reason.CooldownSeconds;
+        if (squad != null) squad.DormancySleepAllowedAt = Math.Max(squad.DormancySleepAllowedAt, until);
+        else { _vanillaSleepAllowedAt.TryGetValue(key, out var previous); _vanillaSleepAllowedAt[key] = Math.Max(previous, until); }
+    }
+
+    private void AddStagedWake(PendingWake pending, bool trace = true)
     {
         _wakingGroups.Add(pending.Key, pending);
         _stagedWakes.Add(pending);
         foreach (var bot in pending.Bots) { _wakingBots.Add(bot, pending); pending.RetryAt.Add(0f); }
-        TraceWakeDecision("queued", pending.Reason, "safe-to-delay", pending.Bots[0]);
-        Log.Info($"GHOST WAKE QUEUE: queued members={pending.Bots.Count} cause={pending.Reason.Cause} first={pending.Bots[0].ProfileId}");
+        if (trace)
+        {
+            TraceWakeDecision("queued", pending.Reason, "safe-to-delay", pending.Bots[0]);
+            Log.Info($"GHOST WAKE QUEUE: queued members={pending.Bots.Count} cause={pending.Reason.Cause} first={pending.Bots[0].ProfileId}");
+        }
     }
 
     private void CancelStagedWake(object key)
@@ -419,6 +453,8 @@ public partial class DormancySystem
 
     private void FinishStagedWake(PendingWake pending, GhostWakeReason reason, bool forced)
     {
+        pending.Reason = reason = StrongerWakeReason(pending.Reason, reason);
+        if (forced && Time.realtimeSinceStartup < pending.GroundRetryAt) return;
         if (forced)
         {
             TraceWakeDecision("urgent", reason, reason.Message, pending.Bots[0], (Time.realtimeSinceStartup - pending.Started) * 1000f);
@@ -466,9 +502,10 @@ public partial class DormancySystem
                 }
             }
         }
-        if (pending.Squad != null) pending.Squad.DormancySleepAllowedAt = Time.time + reason.CooldownSeconds;
-        else _vanillaSleepAllowedAt[pending.Key] = Time.time + reason.CooldownSeconds;
+        ProtectWake(pending.Key, pending.Squad, reason);
         if (forced) _wakeFrameBudget.Complete(Stopwatch.GetTimestamp(), _cfg.WakeIntervalMs);
+        _vanillaGroups.TryGetValue(pending.Key, out var remainingGroup);
+        if (RetainGroundWake(pending.Key, pending.Squad, remainingGroup, reason, pending)) return;
         TraceWakeDecision("complete", reason, forced ? "immediate" : "paced", pending.Bots[0], (Time.realtimeSinceStartup - pending.Started) * 1000f);
         _windowWakes++;
         RecordWake(reason.Cause);

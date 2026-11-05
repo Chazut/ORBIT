@@ -316,6 +316,7 @@ public class Squad(int id, float[] taskScores, int targetMembersCount) : Entity(
     public readonly HashSet<int> FailedDoorUnlockIds = new();
 
     public Agent Leader;
+    public bool ObjectiveSuspendedForSoloExtraction;
 
     public int Size
     {
