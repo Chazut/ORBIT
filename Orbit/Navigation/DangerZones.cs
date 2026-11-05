@@ -18,12 +18,14 @@ public static class DangerZones
     public static void Refresh()
     {
         _zones = Object.FindObjectsOfType<BorderZone>();
+        DirectionalMineSafety.Refresh();
         _skipped = 0;
         Log.Info($"DangerZones: {_zones.Length} border zone(s) (minefields etc.) on this map");
     }
 
     public static bool IsInside(Vector3 position)
     {
+        if(DirectionalMineSafety.IsInside(position))return true;
         var zones = _zones;
         for (var i = 0; i < zones.Length; i++)
         {
@@ -43,4 +45,5 @@ public static class DangerZones
         }
         return false;
     }
+    public static void Clear(){_zones=System.Array.Empty<BorderZone>();_skipped=0;DirectionalMineSafety.Clear();}
 }

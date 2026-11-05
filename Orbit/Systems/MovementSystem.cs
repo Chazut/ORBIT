@@ -311,6 +311,8 @@ public partial class MovementSystem
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void StartMovement(Agent agent, NavJob job)
     {
+        if(job.Status!=NavMeshPathStatus.PathInvalid&&DirectionalMineSafety.Blocks(agent.Position,job.Path,out _))
+            job.Status=NavMeshPathStatus.PathInvalid;
         if (job.Status == NavMeshPathStatus.PathInvalid)
         {
             agent.Movement.Failures.FailedRoute(agent.Position);

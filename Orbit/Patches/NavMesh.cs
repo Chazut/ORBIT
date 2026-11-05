@@ -23,6 +23,7 @@ public class DoorCarverShrinkPatch : ModulePatch
         Orbit.Helpers.DebugExport.WorldStarted();
         Orbit.Helpers.PerformanceJournal.RaidStarted();
         var processed = new HashSet<NavMeshDoorLink>();
+        Orbit.Helpers.DoorNavMesh.Clear();
         var doorsController = UnityEngine.Object.FindObjectOfType<BotDoorsController>();
 
         if (doorsController == null)

@@ -24,6 +24,10 @@ public static class DoorNavMesh
     private static readonly Dictionary<int, NavMeshDoorLink> _linksByDoorInstanceId = new();
     private static readonly Dictionary<string, NavMeshDoorLink> _linksByDoorId = new();
     private static readonly HashSet<int> _carverOpenedDoorIds = new();
+    public static void Clear()
+    {
+        _linksByDoorInstanceId.Clear();_linksByDoorId.Clear();_carverOpenedDoorIds.Clear();
+    }
 
     /// <summary>Registers a link at boot from BotDoorsController._navMeshDoorLinks.</summary>
     public static void RegisterLink(NavMeshDoorLink link)

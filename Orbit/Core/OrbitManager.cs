@@ -132,6 +132,8 @@ public class OrbitManager
     {
         foreach (var agent in _liveAgents) agent.LootHandler?.Retire();
         Orbit.Navigation.OperationSwitchReach.Reset();
+        Orbit.Navigation.DangerZones.Clear();
+        Orbit.Helpers.DoorNavMesh.Clear();
         SniperCombat.Clear();
         Orbit.Patches.AirdropLandedPatch.OnAirdropLanded -= WaypointSystem.RegisterLandedAirdrop;
         Orbit.Patches.AirdropReleasedPatch.OnAirdropReleased -= OnAirdropReleased;
