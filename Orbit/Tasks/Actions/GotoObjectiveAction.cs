@@ -274,6 +274,7 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
 
                     var inRadius = false;
                     var arrivalRefusal = "distance";
+                    RaycastHit arrivalHit = default;
                     if (distanceSqr <= objective.Location.RadiusSqr)
                     {
                         // Quest arrival uses simulated feet for both awake and sleeping agents. Loot keeps
@@ -286,14 +287,19 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                         }
                         else if (RequiresArrivalLoSCheck(objective.Location.Category) && !agent.IsDormant)
                         {
-                            if (HasArrivalLineOfSight(agent, objective.Location.Position))
+                            if (HasArrivalLineOfSight(agent, objective.Location, out arrivalHit))
                             {
                                 inRadius = true;
                                 ClearLoSBlockedTracking(agent);
                             }
                             else
                             {
-                                Log.Debug($"{agent} within {Mathf.Sqrt(distanceSqr):F1}m of {objective.Location} but Physics raycast BLOCKED — wall in between, holding off arrival");
+                                if (objective.Location.IsAirdrop)
+                                {
+                                    if (agent.LoSBlockedPoiId != objective.Location.Id)
+                                        LogAirdropArrival(agent, objective.Location, arrivalHit, false);
+                                }
+                                else Log.Debug($"{agent} within {Mathf.Sqrt(distanceSqr):F1}m of {objective.Location} but Physics raycast BLOCKED, holding off arrival");
                                 arrivalRefusal = "line-of-sight";
                                 if (TrackLoSBlocked(agent, objective.Location)) continue;
                             }
@@ -312,7 +318,7 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                     {
                         var arrivalClear = objective.Location.Category == WaypointCategory.Quest
                             ? QuestArrivalAllowed(agent, objective.Location, out arrivalRefusal)
-                            : HasArrivalLineOfSight(agent, objective.Location.Position);
+                            : HasArrivalLineOfSight(agent, objective.Location, out arrivalHit);
                         if (arrivalClear)
                         {
                             Log.Debug($"{agent} BSG nav-snap arrival rescue: stopped {Mathf.Sqrt(distanceSqr):F1}m off {objective.Location}, approach clear, checking target floor");
@@ -344,6 +350,8 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                         {
                             if (waypointSystem.TryClaim(objective.Location.Id, agent.Id))
                             {
+                                if (objective.Location.IsAirdrop && !agent.IsDormant)
+                                    LogAirdropArrival(agent, objective.Location, arrivalHit, true);
                                 objective.Status = ObjectiveStatus.Looting;
                                 // Looting keeps the bot stationary for several seconds. If we leave the path
                                 // pointing at the previous destination, BSG's BotMover eventually decides the
@@ -458,6 +466,9 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                              && Time.time - objective.DispatchTime > DispatchGraceSeconds)
                     {
                         objective.Status = ObjectiveStatus.Failed;
+                        if (objective.Location.IsAirdrop && arrivalRefusal == "line-of-sight"
+                            && agent.LoSBlockedPoiId != objective.Location.Id)
+                            LogAirdropArrival(agent, objective.Location, arrivalHit, false);
                         Log.Debug($"{agent} stopped outside {objective.Location} arrival radius ({Mathf.Sqrt(distanceSqr):F1}m / {Mathf.Sqrt(objective.Location.RadiusSqr):F1}m), reason={arrivalRefusal} botY={agent.Position.y:F2} targetY={objective.Location.Position.y:F2}: failing objective to unblock re-dispatch");
                         TrackArrivalFailure(agent, objective.Location);
                     }
@@ -691,17 +702,30 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
 
     // 3D world-space line-of-sight check between the bot's head and the POI, using the same
     // HighPolyWithTerrainMask BSG uses for cover and vision tests. Real Tarkov walls are HighPoly colliders
-    // so any wall between head and POI registers as a Physics.Raycast hit.
-    private static bool HasArrivalLineOfSight(Agent agent, Vector3 poiPosition)
+    // so any wall between head and POI registers as a Physics.Raycast hit. Airdrops use the crate's
+    // visibility target and accept its own collider, matching discovery rather than aiming at the ground.
+    private static bool HasArrivalLineOfSight(Agent agent, Waypoint point, out RaycastHit hit)
     {
+        hit = default;
         Vector3 head;
         var lookSensor = agent.Bot?.LookSensor;
         head = lookSensor != null ? lookSensor.HeadPoint : agent.Position + new Vector3(0f, 1f, 0f);
-        var direction = poiPosition - head;
+        if (point.IsAirdrop && point.Category == WaypointCategory.ContainerLoot)
+            return AirdropVisibility.Check(head, point.Target as LootableContainer, out hit);
+        var direction = point.Position - head;
         var dist = direction.magnitude;
         if (dist < 0.01f) return true; // basically on top of the POI
         var blocked = Physics.Raycast(head, direction / dist, dist, LayersMaskController.HighPolyWithTerrainMask);
         return !blocked;
+    }
+
+    private static void LogAirdropArrival(Agent agent, Waypoint point, RaycastHit hit, bool clear)
+    {
+        var container = point.Target as LootableContainer;
+        var target = container != null ? AirdropVisibility.Target(container) : point.Position;
+        Log.Debug($"AIRDROP ARRIVAL: {agent} point={point.Id} clear={clear} "
+            + $"collider={hit.collider?.name ?? "none"} hitDistance={hit.distance:F2} "
+            + $"bot={agent.Position} target={target} targetMissing={container == null}");
     }
 
     internal static bool IsLootableForAgent(Agent agent, Waypoint location)

@@ -69,13 +69,9 @@ public partial class WaypointSystem
             var point = AirdropPoint(container);
             if (point == null || squad.CompletedPoiIds.Contains(point.Id) || agent.ValueSkippedPoiIds.Contains(point.Id)
                 || IsClaimedByOther(point.Id, agent.Id) || !GotoObjectiveAction.IsLootableForAgent(agent, point)) continue;
-            var target = container.transform.position + Vector3.up;
+            var target = AirdropVisibility.Target(container);
             if (!agent.Bot.LookSensor.IsPointInVisibleSector(target)) continue;
-            var head = agent.Bot.LookSensor.HeadPoint;
-            var ray = target - head;
-            if (Physics.Raycast(head, ray.normalized, out var hit, ray.magnitude,
-                LayersMaskController.HighPolyWithTerrainMask, QueryTriggerInteraction.Ignore)
-                && hit.transform != container.transform && !hit.transform.IsChildOf(container.transform)) continue;
+            if (!AirdropVisibility.Check(agent.Bot.LookSensor.HeadPoint, container, out _)) continue;
             if (Time.time < _nextAirdropPath) return null;
             _nextAirdropPath = Time.time + .2f;
             if (!CalculateTimedPath(agent.Position, point.Position, _airdropPath, TransitionPhase.WaypointPath,
