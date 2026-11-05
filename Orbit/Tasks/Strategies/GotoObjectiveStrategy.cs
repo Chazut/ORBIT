@@ -505,11 +505,11 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
     private HashSet<int> UnionWithAgentSkips(HashSet<int> baseSet, Agent agent)
     {
         var skips = agent?.ValueSkippedPoiIds;
-        if (skips == null || skips.Count == 0) return baseSet;
+        if (agent == null) return baseSet;
         _agentSkipScratch.Clear();
         foreach (var id in baseSet) _agentSkipScratch.Add(id);
-        foreach (var id in skips) _agentSkipScratch.Add(id);
-        Log.Debug($"{agent} splinter dispatch: filtering +{skips.Count} agent value-skipped POIs (total exclude={_agentSkipScratch.Count})");
+        if (skips != null) foreach (var id in skips) _agentSkipScratch.Add(id);
+        agent.AccessRejectedPoiIds.AddTo(_agentSkipScratch, agent.Position, Time.time);
         return _agentSkipScratch;
     }
 

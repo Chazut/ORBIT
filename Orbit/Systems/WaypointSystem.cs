@@ -738,7 +738,7 @@ public partial class WaypointSystem
         // Value-skipped means this agent already opened the body and took nothing (full inventory / bypass
         // item). Without this, the killer re-routes onto it every tick, re-loots, re-skips — a loop the 180s
         // watchdog only ends much later. It's per-agent, so a squadmate with room can still be dispatched.
-        if (agent.ValueSkippedPoiIds.Contains(locId)) return null;
+        if (agent.ValueSkippedPoiIds.Contains(locId) || agent.AccessRejectedPoiIds.Contains(locId, agent.Position, Time.time)) return null;
         if (_claims.ContainsKey(locId)) return null;
         if (!_waypointCells.TryGetValue(locId, out var coords)) return null;
         // Stale-kill gate from the KILLER's cell: don't chase a body left far behind after a long detour.
@@ -872,7 +872,7 @@ public partial class WaypointSystem
                         if (squad.CompletedPoiIds.Contains(loc.Id)) continue;
                         // Per-agent (not squad-wide CompletedPoiIds): without this the same member re-detects
                         // its own value-skip on LoS and oscillates back forever; a keener member can still take it.
-                        if (member.ValueSkippedPoiIds.Contains(loc.Id)) continue;
+                        if (member.ValueSkippedPoiIds.Contains(loc.Id) || member.AccessRejectedPoiIds.Contains(loc.Id, member.Position, Time.time)) continue;
                         if (_claims.ContainsKey(loc.Id)) continue;
 
                         var delta = loc.Position - memberPos;
@@ -1278,6 +1278,7 @@ public partial class WaypointSystem
                     if (squad != null && squad.CompletedPoiIds.Contains(loc.Id)) continue;
                     if (!CanSelectMemberDoorTarget(squad, loc)) continue;
                     if (agentSkips != null && agentSkips.Contains(loc.Id)) continue;
+                    if (agent != null && agent.AccessRejectedPoiIds.Contains(loc.Id, agent.Position, Time.time)) continue;
                     if (_claims.ContainsKey(loc.Id)) continue;
                     if (IsSquadKnownUnreachable(squad, loc.Id)) continue;
                     var distSqr = (loc.Position - botPos).sqrMagnitude;

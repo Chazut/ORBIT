@@ -181,6 +181,7 @@ public class Agent(int id, BotOwner bot, float[] taskScores) : Entity(id, taskSc
     /// <see cref="Squad.CompletedPoiIds"/> is untouched).
     /// </summary>
     public readonly HashSet<int> ValueSkippedPoiIds = new();
+    public readonly Orbit.Navigation.MemberWaypointRejections AccessRejectedPoiIds = new();
 
     private readonly BifacialTransform _bodyTransform = bot.Mover._player.PlayerBones.BodyTransform;
 

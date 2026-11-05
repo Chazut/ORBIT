@@ -72,6 +72,13 @@ public partial class WaypointSystem
     internal bool TryPrepareMemberWaypoint(Agent member, Waypoint pick, Waypoint parent, out bool pending)
     {
         pending = false;
+        if(pick.LockedDoorsOnPath is {Count:>0})
+        {
+            bool open=true;
+            foreach(var door in pick.LockedDoorsOnPath)if(door!=null&&door.DoorState==EFT.Interactive.EDoorState.Locked){open=false;break;}
+            if(open)member.AccessRejectedPoiIds.DoorOpened(pick.Id);
+        }
+        if (member.AccessRejectedPoiIds.Contains(pick.Id, member.Position, Time.time)) { CancelMemberAccess(member); return false; }
         var squad = member.Squad;
         if (_memberAccess.TryGetValue(member, out var search)
             && (!search.Valid || !ReferenceEquals(search.Pick, pick)))
@@ -93,6 +100,7 @@ public partial class WaypointSystem
         if (!CanSelectMemberDoorTarget(squad, pick))
         {
             CancelMemberAccess(member);
+            RejectMemberAccess(member, pick, "door-access");
             RejectMemberAnchor(squad, pick);
             return false;
         }
@@ -110,6 +118,8 @@ public partial class WaypointSystem
             CancelMemberAccess(member);
             if (!search.Valid || !search.Reachable)
             {
+                // Invalidated asynchronous work is not evidence that the loot is unreachable.
+                if (search.Valid) RejectMemberAccess(member, pick, "unreachable");
                 RejectMemberAnchor(squad, pick);
                 return false;
             }
@@ -117,6 +127,7 @@ public partial class WaypointSystem
 
         // The check above discovers doors even for splinters that never went through PickFromCell.
         if (TryPrepareMemberWaypoint(squad, pick)) return true;
+        RejectMemberAccess(member, pick, "door-permission");
         RejectMemberAnchor(squad, pick);
         return false;
     }
@@ -130,5 +141,10 @@ public partial class WaypointSystem
             squad.Objective.RepickRequested = true;
             Log.Debug($"{squad} member access rejected squad anchor {pick}; requesting a new waypoint");
         }
+    }
+    private static void RejectMemberAccess(Agent member, Waypoint pick, string reason)
+    {
+        if (member.AccessRejectedPoiIds.Reject(pick.Id, member.Position, Time.time, reason!="unreachable"))
+            Log.Info($"{member} member access cooldown: {pick} reason={reason} retry=15s approachReset=5m");
     }
 }
