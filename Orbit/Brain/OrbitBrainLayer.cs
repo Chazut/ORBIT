@@ -290,15 +290,16 @@ public class OrbitBrainLayer : CustomLayer
             return true;
         }
         var timeSinceSainCombatEnded = _sainCombatActive ? 0f : Time.time - _sainCombatEndedAt;
-        var inCombatWindow = _sainCombatActive || timeSinceSainCombatEnded < 15f;
-        var medsWorking = BotOwner.Medecine.Using || BotOwner.Medecine.SurgicalKit.HaveWork || BotOwner.Medecine.FirstAid.Have2Do;
-        var isHealing = medsWorking && (_sainCombatActive || timeSinceSainCombatEnded < 60f);
-        var isInCombat = BotOwner.Memory.IsUnderFire || inCombatWindow;
-        var active = !isHealing && !isInCombat;
+        var medicineUsing = BotOwner.Medecine?.Using == true;
+        var medicalHands = BotOwner.GetPlayer?.HandsController is IMedsController;
+        var underFire = BotOwner.Memory.IsUnderFire;
+        var active = OrbitControlPolicy.CanTakeControl(false, _sainCombatActive, underFire,
+            timeSinceSainCombatEnded, medicineUsing, medicalHands);
 
-        if (!active && (active != _lastIsActive || Time.time - _lastIsActiveDiagAt > 5f))
+        if (active != _lastIsActive || !active && Time.time - _lastIsActiveDiagAt > 5f)
         {
-            Log.Debug($"{_agent} IsActive=false: sainCombatActive={_sainCombatActive}, timeSinceSainEnd={timeSinceSainCombatEnded:F1}s, IsUnderFire={BotOwner.Memory.IsUnderFire}, medsWorking={medsWorking} (Using={BotOwner.Medecine.Using}, Surgical={BotOwner.Medecine.SurgicalKit.HaveWork}, FirstAid={BotOwner.Medecine.FirstAid.Have2Do})");
+            // Read need flags only for the throttled diagnostic, never as control gates.
+            Log.Debug($"{_agent} IsActive={active}: sainCombatActive={_sainCombatActive}, timeSinceSainEnd={timeSinceSainCombatEnded:F1}s, IsUnderFire={underFire}, medicalUsing={medicineUsing}, medicalHands={medicalHands}, surgeryNeeded={BotOwner.Medecine?.SurgicalKit?.HaveWork}, firstAidNeeded={BotOwner.Medecine?.FirstAid?.Have2Do}");
             _lastIsActiveDiagAt = Time.time;
         }
         if (active != _lastIsActive)
