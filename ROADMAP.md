@@ -1,5 +1,13 @@
 # ORBIT roadmap
 
+## Planned for 3.1.1
+
+Target release: early in the week of November 9, 2026 (tentative).
+
+- A public API for other mods to keep selected bots awake, preventing them from entering Ghost Mode after spawning or respawning (Harmony's request). Include a short integration example.
+
+## Other ideas
+
 No ETA, no promises:
 
 - A "rally flare" item that pulls the whole map onto a point.
