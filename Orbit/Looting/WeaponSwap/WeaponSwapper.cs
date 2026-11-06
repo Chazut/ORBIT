@@ -17,7 +17,7 @@ namespace Orbit.Looting.WeaponSwap;
 /// needed. Scavs are restricted to equipping into empty slots (no swap). PMCs and PlayerScavs use the full
 /// score-and-displace path.
 /// </summary>
-public static class WeaponSwapper
+public static partial class WeaponSwapper
 {
     public enum Outcome
     {
@@ -206,8 +206,10 @@ public static class WeaponSwapper
             var selector = bot?.WeaponManager?.Selector;
             if (selector == null) return false;
             selector.UpdateWeaponsList();
-            if (!selector.ChangeToMain()) return false;
             try { bot.AIData?.CalcPower(); } catch { }
+            if (MainWeaponReady(bot)) return true;
+            if (selector.IsChanging || bot.GetPlayer.InventoryController.IsChangingWeapon) return false;
+            if (!selector.ChangeToMain()) return false;
             Log.Debug($"GHOST HANDS: {who} main weapon redraw requested");
             return true;
         }
@@ -451,7 +453,7 @@ public static class WeaponSwapper
                 return Outcome.Swapped;
             }
             SyncBotBetweenSwaps(bot, nick);
-            await WaitForIsChangingWeaponAsync(bot, nick, ct);
+            if (!await WaitForIsChangingWeaponAsync(bot, nick, ct)) return Outcome.Swapped;
             LootActorGuard.RequireCurrent(bot, ct);
             if (!await SwapInPlaceAsync(bot, candidate, current1, nick, ct))
             {
@@ -752,52 +754,6 @@ public static class WeaponSwapper
         catch (System.Exception e) { Log.Warning($"WeaponSwap.SyncBetween({nick}): UpdateWeaponsList THREW {e.Message}"); }
         try { bot.AIData?.CalcPower(); }
         catch (System.Exception e) { Log.Warning($"WeaponSwap.SyncBetween({nick}): CalcPower THREW {e.Message}"); }
-    }
-
-    // Wait for the hands controller's IsChangingWeapon flag to clear before the next op. Polled instead of
-    // blind-delayed so the typical sub-1s case doesn't hold up the bot.
-    private static async Task WaitForIsChangingWeaponAsync(BotOwner bot, string nick, CancellationToken ct)
-    {
-        LootActorGuard.RequireCurrent(bot, ct);
-        const int maxWaitMs = 5000;
-        const int pollIntervalMs = 100;
-        var ic = bot?.GetPlayer?.InventoryController;
-        if (ic == null) return;
-        var elapsed = 0;
-        while (elapsed < maxWaitMs)
-        {
-            bool changing;
-            try { changing = ic.IsChangingWeapon; }
-            catch { changing = false; }
-            if (!changing) return;
-            await Task.Delay(pollIntervalMs, ct);
-            LootActorGuard.RequireCurrent(bot, ct);
-            elapsed += pollIntervalMs;
-        }
-        Log.Warning($"WeaponSwap.WaitForIsChangingWeapon({nick}): hit {maxWaitMs}ms cap — proceeding");
-    }
-
-    // UpdateWeaponsList alone only rebuilds the selector's list while the hands controller still holds the
-    // discarded gun, so the bot "fires" a dead reference until BSG re-selects; ChangeToMain forces the re-draw.
-    private static async Task FinalizeWeaponSwapAsync(BotOwner bot, string nick, CancellationToken ct)
-    {
-        LootActorGuard.RequireCurrent(bot, ct);
-        try
-        {
-            await WaitForIsChangingWeaponAsync(bot, nick, ct);
-            LootActorGuard.RequireCurrent(bot, ct);
-            var selector = bot?.WeaponManager?.Selector;
-            if (selector == null) return;
-            selector.UpdateWeaponsList();
-            selector.ChangeToMain();
-            try { bot.AIData?.CalcPower(); } catch { }
-            Log.Debug($"WeaponSwap.Finalize({nick}): refreshed weapon list + re-drew main weapon so SAIN fires the new gun");
-        }
-        catch (System.OperationCanceledException) { throw; }
-        catch (System.Exception e)
-        {
-            Log.Warning($"WeaponSwap.Finalize({nick}): THREW {e.Message}");
-        }
     }
 
     private static bool BotHasGoodPenWeapon(BotOwner bot, List<Item> inventoryItems)
