@@ -495,7 +495,7 @@ public partial class DormancySystem
             if (AnyRemainingAwakeBotNear(squad)) { _blockedProximity++; continue; }
 
             SleepSquad(squad);
-            awakeStandard -= standard;
+            awakeStandard -= standard - SquadAwakeStandardCount(squad);
         }
         WakeIncompleteSquads(squads);
         UpdateVanilla(ref awakeStandard, floor);
@@ -692,6 +692,8 @@ public partial class DormancySystem
                 _farBlockedCombat++;
                 return ReportInitialSleepCombatBlock(bot, "targeted", targeting);
             }
+            // Observe busy hands too, so the settling timer starts only after their operation ends.
+            if (!GhostSleepReadiness.Ready(bot)) { _farBlockedHands++; return false; }
             var bodyReady = loot != null ? loot.CanEnterGhost : !GhostBodyTransition.Busy(agent.Player);
             if (!bodyReady)
             {
@@ -793,6 +795,8 @@ public partial class DormancySystem
         for (var i = 0; i < squad.Members.Count; i++)
         {
             var agent = squad.Members[i];
+            if (agent.IsDormant && agent.LootHandler?.NeedsAwakeInventory == true)
+                return new(GhostWakeCause.GroupChanged, $"{agent} inventory operation needs an awake body");
             if (agent.SoloExtractRequested && (agent.SoloExtractIsEmergency || NearOwnExfil(agent)))
             {
                 reason ??= new GhostWakeReason(GhostWakeCause.Extraction,
@@ -947,6 +951,10 @@ public partial class DormancySystem
         if (IsWaking(squad)) return;
         using var timing = TransitionPerformance.Measure(TransitionPhase.SleepGroup);
         var joining = SquadDormantCount(squad) > 0;
+        // Admission and mutation are separate passes. Recheck every awake body before
+        // changing any member, including deferred hands requests from another hook.
+        for (var i = 0; i < squad.Members.Count; i++)
+            if (!squad.Members[i].IsDormant && !GhostSleepReadiness.Ready(squad.Members[i].Bot)) return;
         var added = 0;
         var minHumanSqr = float.MaxValue;
         for (var i = 0; i < squad.Members.Count; i++)
@@ -1065,6 +1073,7 @@ public partial class DormancySystem
             UnthrottleBrain(bot);
             using (TransitionPerformance.Measure(TransitionPhase.WakeBody))
                 bot.gameObject.SetActive(true);
+            if (agent.LootHandler != null) agent.LootHandler.NeedsAwakeInventory = false;
             wakePose.RestoreIfMoved("body activation");
             bot.PatrollingData.Unpause();
             wakePose.RestoreIfMoved("patrol resume");
@@ -2655,7 +2664,8 @@ public partial class DormancySystem
                 var standard = NativeStandardCount(group);
                 if (standard > 0 && awakeStandard - standard < floor) { _blockedFloor++; continue; }
                 SleepVanillaGroup(kv.Key, group);
-                awakeStandard -= standard;
+                for (var i = 0; i < group.Count; i++)
+                    if (_vanillaDormant.Contains(group[i]) && !IsDefaultDormant(group[i])) awakeStandard--;
             }
         }
     }
@@ -2682,6 +2692,7 @@ public partial class DormancySystem
             if (_targetedBy.ContainsKey(player.ProfileId)) return Refuse("targeted");
             if (humanDistance * humanDistance <= gate) return Refuse("human-distance");
             if (InScopedView(player.Position, out _)) return Refuse("scoped-view");
+            if (!GhostSleepReadiness.Ready(bot)) return Refuse("hands-not-settled");
             if (_cfg.NativeGhostMovement && GhostMovementEnabled && !_nativeGhosts.CanSleep(bot, humanDistance, group.Count)) return false;
 
             // Same bleed gate as ORBIT squads.
@@ -2731,6 +2742,15 @@ public partial class DormancySystem
         using var timing = TransitionPerformance.Measure(TransitionPhase.SleepGroup);
         var native = _cfg.NativeGhostMovement && GhostMovementEnabled;
         var joining = VanillaDormantCount(group) > 0;
+        // The stationary fallback freezes the same body and needs the same hands guard.
+        // Check the whole group before changing any member.
+        for (var i = 0; i < group.Count; i++)
+        {
+            var bot = group[i];
+            if (_vanillaDormant.Contains(bot)) continue;
+            if (joining && bot.BotState is EBotState.PreActive or EBotState.NonActive) continue;
+            if (!GhostSleepReadiness.Ready(bot)) return;
+        }
         var added = 0;
         for (var i = 0; i < group.Count; i++)
         {

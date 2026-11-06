@@ -173,6 +173,7 @@ public sealed partial class NativeGhostSystem
             var decision = bot.Brain.LastDecision;
             if (!decision.HasValue) return Refuse("no-decision");
             NativeReloadRecovery.BeforeSleep(bot);
+            if (!GhostSleepReadiness.Ready(bot)) return Refuse("hands-not-settled");
             var bodyReason = BodyReason(bot);
             if (bodyReason != null) return Refuse(bodyReason);
             if (CombatRequiresBody(bot)) return Refuse("native-combat");

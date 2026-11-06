@@ -759,6 +759,8 @@ internal class BotLootState
     private float _lootedAtStart;
     private float _beganAt;
     private bool _started;
+    private int _inventoryRetries;
+    private float _inventoryRetryAt;
 
     public bool IsDone { get; private set; }
     public bool Success { get; private set; }
@@ -843,7 +845,7 @@ internal class BotLootState
         // Snapshot cumulative looted value so we can tell at the end whether the bot actually pocketed
         // anything (vs. opening the container and skipping everything because items were below the value
         // threshold).
-        _lootedAtStart = _brain.Stats != null ? _brain.Stats.TotalGained : 0f;
+        if (_inventoryRetries == 0) _lootedAtStart = _brain.Stats != null ? _brain.Stats.TotalGained : 0f;
 
         // Immersion: crouch and face the loot before kicking off the transaction. Wrapped defensively because
         // some BotOwner specialisations (boss followers, event bots) don't expose every steering/mover hook.
@@ -871,6 +873,14 @@ internal class BotLootState
     public void Tick()
     {
         if (IsDone) return;
+        if (_inventoryRetryAt > 0f)
+        {
+            if (_agent.Bot?.Memory?.HaveEnemy == true || _agent.Bot?.Memory?.IsUnderFire == true)
+            { Cancel(); return; }
+            if (Time.time < _inventoryRetryAt) return;
+            _inventoryRetryAt = 0f;
+            Begin();
+        }
         if (!_started) return;
 
         // Pickup can destroy or pool the target. Reconcile a completed transfer before inspecting that
@@ -880,9 +890,18 @@ internal class BotLootState
                             || (_location.Target is LootItem item && item.Item == null);
         if (!_brain.LootTaskRunning)
         {
-            ItemsTaken = lootedNow > _lootedAtStart;
-            Success = ItemsTaken || (!_brain.LastSessionCancelled && !targetMissing);
-            Log.Debug($"{_agent} BotLootState.Tick: brain.LootTaskRunning=false -> done, lootedDelta={(lootedNow - _lootedAtStart):N0}₽, ItemsTaken={ItemsTaken}, cancelled={_brain.LastSessionCancelled}, success={Success}");
+            ItemsTaken = ItemsTaken || _brain.Stats?.LastItemsTaken == true || lootedNow > _lootedAtStart;
+            if (_brain.LastSessionRetryable && !_brain.LastSessionCancelled && !targetMissing && _inventoryRetries < 3)
+            {
+                _inventoryRetries++;
+                _inventoryRetryAt = Time.time + 2f;
+                _started = false;
+                Log.Info($"LOOT RETRY: {_agent} location={_location} attempt={_inventoryRetries}/3 reason=inventory-pending");
+                return;
+            }
+            // A partial transfer does not prove the rest of a failed inspection was completed.
+            Success = !_brain.LastSessionFailed && (ItemsTaken || (!_brain.LastSessionCancelled && !targetMissing));
+            Log.Info($"LOOT RESULT: {_agent} location={_location} itemsTaken={ItemsTaken} failed={_brain.LastSessionFailed} retryable={_brain.LastSessionRetryable} retries={_inventoryRetries} cancelled={_brain.LastSessionCancelled} success={Success}");
             IsDone = true;
             CleanupBrainTarget();
             return;

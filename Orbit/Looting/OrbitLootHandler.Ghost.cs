@@ -10,6 +10,7 @@ public partial class OrbitLootHandler
     internal bool CanEnterGhost => !_bodyGate.Busy && !_inventoryGate.Busy && !GhostBodyTransition.Busy(_bot?.GetPlayer);
 
     internal void TrackInventoryTransaction(System.Threading.Tasks.Task task) => _inventoryGate.Track(task);
+    internal bool NeedsAwakeInventory;
 
     internal void EnterGhost(Agent agent)
     {

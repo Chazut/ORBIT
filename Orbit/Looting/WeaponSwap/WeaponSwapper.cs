@@ -490,6 +490,9 @@ public static class WeaponSwapper
         where T : IOperationResult
     {
         LootActorGuard.RequireCurrent(bot, ct);
+        var handler = Singleton<BotRoster>.Instance?.GetAgent(bot)?.LootHandler;
+        // Non-loot callers also use this helper; only the owning session records its outcome.
+        handler?.CheckInventoryForSession(ct);
         var ic = bot.GetPlayer.InventoryController;
         Log.Debug($"WeaponSwap.{label}({nick}): tx STARTED (awaiting TryRunNetworkTransaction)");
         using var timeoutCts = new CancellationTokenSource(NetworkTransactionTimeoutMs);
@@ -501,6 +504,8 @@ public static class WeaponSwapper
             LootActorGuard.RequireCurrent(bot, ct);
             if (!result.Succeed)
             {
+                handler?.ReportInventoryFailure(ct, false);
+                handler?.CheckInventoryForSession(ct);
                 Log.Warning($"WeaponSwap.{label}({nick}): tx FAILED, {result.Error}");
                 if (result.Error == "Can not execute")
                     Log.Warning($"WeaponSwap.{label}({nick}): refusal detail: {DescribeRefusal(bot, op.Value)}");
@@ -516,14 +521,17 @@ public static class WeaponSwapper
         {
             LootActorGuard.RequireCurrent(bot, ct);
             Log.Warning($"WeaponSwap.{label}({nick}): tx TIMEOUT after {NetworkTransactionTimeoutMs}ms, fast-forwarding hands controller");
+            handler?.ReportInventoryFailure(ct, true);
             try { bot.GetPlayer.FastForwardCurrentOperations(); }
             catch (System.Exception ffEx) { Log.Warning($"WeaponSwap.{label}({nick}): FastForward THREW {ffEx.Message}"); }
             return false;
         }
+        catch (LootInventoryBusyException) { throw; }
         catch (System.OperationCanceledException) { throw; }
         catch (System.Exception e)
         {
             LootActorGuard.RequireCurrent(bot, ct);
+            handler?.ReportInventoryFailure(ct, false);
             Log.Warning($"WeaponSwap.{label}({nick}): tx THREW {e}");
             return false;
         }

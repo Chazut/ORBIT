@@ -21,6 +21,8 @@ public interface ILootHandler
 
     /// <summary>True when the last session ended through a cancel rather than completing.</summary>
     bool LastSessionCancelled { get; }
+    bool LastSessionFailed { get; }
+    bool LastSessionRetryable { get; }
 
     void Init(BotOwner bot);
     void StartLooting();

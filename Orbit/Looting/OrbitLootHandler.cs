@@ -111,6 +111,15 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
     /// loot so the squad blacklists the POI — without it a hang-cancelled loose item was re-picked
     /// forever (observed: 'doom' looping 6 times on the same sewing kit).</summary>
     public bool LastSessionCancelled { get; private set; }
+    public bool LastSessionFailed { get; private set; }
+    public bool LastSessionRetryable { get; private set; }
+
+    internal void ReportInventoryFailure(CancellationToken ct, bool retryable)
+    {
+        if (!OwnsSession(ct) || !LootTaskRunning) return;
+        LastSessionFailed = true;
+        LastSessionRetryable |= retryable;
+    }
 
     public InteractableObject CurrentTarget { get; set; }
     public LootKind CurrentTargetKind { get; set; } = LootKind.None;
@@ -181,6 +190,8 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
         _cts = new CancellationTokenSource();
         LootTaskRunning = true;
         LastSessionCancelled = false;
+        LastSessionFailed = false;
+        LastSessionRetryable = false;
         Stats.LastItemsTaken = false;
         Stats.LastMaxPerSlotSeen = 0f;
         Stats.LastHadBypassItem = false;
@@ -209,6 +220,7 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
         try
         {
             CheckSession(ct);
+            EnsureInventoryAvailable(ct);
             if (!DormantMode)
             {
                 FreezeBotForLootSession();
@@ -247,6 +259,11 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
             }
             CheckSession(ct);
         }
+        catch (LootInventoryBusyException)
+        {
+            ReportInventoryFailure(ct, true);
+            Log.Info($"LOOT RETRY: {Nick} target={targetName} reason=inventory-pending itemsTaken={Stats.LastItemsTaken}");
+        }
         catch (System.OperationCanceledException)
         {
             if (OwnsSession(ct)) LastSessionCancelled = true;
@@ -254,6 +271,7 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
         }
         catch (System.Exception e)
         {
+            ReportInventoryFailure(ct, false);
             Log.Warning($"OrbitLootHandler.RunAsync({Nick}, {kind}) THREW: {e}");
         }
         finally
@@ -1586,6 +1604,7 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
     private async Task<bool> RunTransactionAsync(OperationResult<IItemOperationResult> place, string name, CancellationToken ct)
     {
         CheckSession(ct);
+        EnsureInventoryAvailable(ct);
         var inventoryController = _bot.GetPlayer?.InventoryController;
         if (inventoryController == null) return false;
         try
@@ -1595,14 +1614,21 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
             var result = await LootActorGuard.AwaitTransaction(transaction, ct);
             CheckSession(ct);
             if (!result.Succeed) Log.Warning($"OrbitLootHandler.Pickup({Nick}): TX FAILED on {name} (Error={result.Error})");
+            if (!result.Succeed)
+            {
+                ReportInventoryFailure(ct, false);
+                EnsureInventoryAvailable(ct);
+            }
             if (!result.Succeed && result.Error == "Can not execute")
                 Log.Warning($"OrbitLootHandler.Pickup({Nick}): refusal detail: {WeaponSwapper.DescribeRefusal(_bot, place.Value)}");
             return result.Succeed;
         }
+        catch (LootInventoryBusyException) { throw; }
         catch (System.OperationCanceledException) { throw; }
         catch (System.Exception e)
         {
             CheckSession(ct);
+            ReportInventoryFailure(ct, false);
             Log.Warning($"OrbitLootHandler.Pickup({Nick}, {name}): tx THREW {e}");
             return false;
         }
