@@ -78,7 +78,13 @@ public partial class WaypointSystem
             foreach(var door in pick.LockedDoorsOnPath)if(door!=null&&door.DoorState==EFT.Interactive.EDoorState.Locked){open=false;break;}
             if(open)member.AccessRejectedPoiIds.DoorOpened(pick.Id);
         }
-        if (member.AccessRejectedPoiIds.Contains(pick.Id, member.Position, Time.time)) { CancelMemberAccess(member); return false; }
+        if (member.AccessRejectedPoiIds.Contains(pick.Id, member.Position, Time.time))
+        {
+            CancelMemberAccess(member);
+            if (member.Squad != null && !CanSelectMemberDoorTarget(member.Squad, pick))
+                RejectMemberAnchor(member.Squad, pick);
+            return false;
+        }
         var squad = member.Squad;
         if (_memberAccess.TryGetValue(member, out var search)
             && (!search.Valid || !ReferenceEquals(search.Pick, pick)))

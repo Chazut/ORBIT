@@ -714,6 +714,7 @@ public partial class WaypointSystem
             }
             if (corpse == null) continue;
             if (corpse.Category != WaypointCategory.Corpse) continue;
+            if (!CanSelectMemberDoorTarget(squad, corpse)) continue;
             if (!IsWaypointReachable(corpse, squad)) continue;
             if (!_lastLoggedOwnKillCorpse.TryGetValue(squad.Id, out var lastLogged) || lastLogged != corpse.Id)
             {
@@ -1673,6 +1674,23 @@ public partial class WaypointSystem
     private static bool CanSelectMemberDoorTarget(Squad squad, Waypoint pick)
     {
         if (HasFailedDoorOnPath(squad, pick)) return false;
+        // Selection and member dispatch must use the same temporary access exclusions.
+        // Otherwise a main anchor/fallback is re-offered every frame after a failed path.
+        bool alive = false, available = false;
+        bool doorsOpened = pick.LockedDoorsOnPath is { Count: > 0 };
+        if (doorsOpened)
+            foreach (var door in pick.LockedDoorsOnPath)
+                if (door != null && door.DoorState == EDoorState.Locked) { doorsOpened = false; break; }
+        foreach (var member in squad.Members)
+        {
+            if (member?.Bot == null || member.Bot.IsDead) continue;
+            alive = true;
+            if (doorsOpened) member.AccessRejectedPoiIds.DoorOpened(pick.Id);
+            if (!member.ValueSkippedPoiIds.Contains(pick.Id)
+                && !member.AccessRejectedPoiIds.Contains(pick.Id, member.Position, Time.time))
+            { available = true; break; }
+        }
+        if (alive && !available) return false;
         var doors = pick.LockedDoorsOnPath;
         if (doors == null) return true;
         foreach (var door in doors)
@@ -2001,6 +2019,7 @@ public partial class WaypointSystem
                 if (hasBlacklist && squad.CompletedPoiIds.Contains(loc.Id)) continue;
                 if (_claims.ContainsKey(loc.Id)) continue;
                 if (HasFailedDoorOnPath(squad, loc)) continue;
+                if (!CanSelectMemberDoorTarget(squad, loc)) continue;
                 Log.Debug($"PickFromCell: {squad} priority-picked own kill {loc}");
                 return loc;
             }
@@ -2013,6 +2032,9 @@ public partial class WaypointSystem
                 if (!MatchesDestinationFloor(zoneFloor, loc)) continue;
                 if (!IsWaypointMainAnchorOfSquad(squad, loc)) continue;
                 // Apply the standard hard filters before priority-picking.
+                if (loc.Category == WaypointCategory.Exfil
+                    && (!squad.ExtractRequested || loc != squad.NearestExfilCached)) continue;
+                if (IsSquadKnownUnreachable(squad, loc.Id)) continue;
                 if (loc.Category == WaypointCategory.Quest && !SquadOwnsQuest(squad, loc)) continue;
                 if (hasBlacklist && squad.CompletedPoiIds.Contains(loc.Id)) continue;
                 if (_claims.ContainsKey(loc.Id)) continue;
@@ -2163,7 +2185,7 @@ public partial class WaypointSystem
             {
                 var loc = waypoints[i];
                 if (!MatchesDestinationFloor(zoneFloor, loc)) continue;
-                if (loc.Category == WaypointCategory.Exfil && !squad.ExtractRequested) continue;
+                if (loc.Category == WaypointCategory.Exfil && (!squad.ExtractRequested || loc != squad.NearestExfilCached)) continue;
                 if (loc.Category == WaypointCategory.Quest
                     && !SquadOwnsQuest(squad, loc)) continue;
                 if (hasBlacklist && squad.CompletedPoiIds.Contains(loc.Id)) continue;
