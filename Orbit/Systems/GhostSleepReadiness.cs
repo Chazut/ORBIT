@@ -16,6 +16,8 @@ internal static class GhostSleepReadiness
         internal float ReadyAt;
         internal float ReportAt;
         internal bool Blocked;
+        internal float BlockedAt;
+        internal string Reason;
     }
     private static readonly ConditionalWeakTable<Player, State> States = new();
     internal const float SettleSeconds = 0.75f;
@@ -30,7 +32,11 @@ internal static class GhostSleepReadiness
             if (bot.WeaponManager?.Grenades?.ThrowindNow == true) return "grenade-operation";
             if (bot.WeaponManager?.Reload?.Reloading == true) return "reload-operation";
             var selector = bot.WeaponManager?.Selector;
-            if (selector?.IsChanging == true || selector?.IsWeaponReady == false) return "weapon-return-pending";
+            // Native OnWeaponTaken clears IsChanging for knives, but the
+            // firearm-ready flag is only restored by UpdateHandsController's
+            // firearm branch. A settled knife must not wait for that flag.
+            if (selector?.IsChanging == true || selector?.IsWeaponReady == false
+                && player.HandsController is not Player.KnifeController) return "weapon-return-pending";
             if (player.HandsController is not Player.FirearmController
                 && player.HandsController is not Player.KnifeController
                 && player.HandsController is not Player.EmptyHandsController) return "temporary-hands-controller";
@@ -58,10 +64,13 @@ internal static class GhostSleepReadiness
         if (reason == null && Time.time < state.ReadyAt) reason = "hands-settling";
         if (reason != null)
         {
+            if(!state.Blocked || state.Reason!=reason)state.BlockedAt=Time.time;
+            state.Reason=reason;
             if (!state.Blocked || Time.time >= state.ReportAt)
             {
-                Log.Info($"GHOST HANDS WAIT: {player.ProfileId} reason={reason}");
-                PerformanceJournal.Event("ghost-hands-wait", player.ProfileId, detail: reason);
+                var detail=$"{reason} waited={Math.Max(0,Time.time-state.BlockedAt):F2}s {Describe(bot)}";
+                Log.Info($"GHOST HANDS WAIT: {player.ProfileId} reason={detail}");
+                PerformanceJournal.Event("ghost-hands-wait", player.ProfileId, detail: detail);
                 state.ReportAt = Time.time + 10f;
             }
             state.Blocked = true;
@@ -74,5 +83,14 @@ internal static class GhostSleepReadiness
             state.Blocked = false;
         }
         return true;
+    }
+    private static string Describe(BotOwner bot)
+    {
+        try
+        {
+            var p=bot.GetPlayer;var selector=bot.WeaponManager?.Selector;
+            return $"hands={p.HandsController?.GetType().Name ?? "none"} changing={selector?.IsChanging} weaponReady={selector?.IsWeaponReady} bodyBusy={GhostBodyTransition.Busy(p)} inventoryBlocked={p.InventoryController?.IsInventoryBlocked()}";
+        }
+        catch{return "state=unavailable";}
     }
 }
