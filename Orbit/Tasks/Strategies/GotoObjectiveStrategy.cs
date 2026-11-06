@@ -1057,16 +1057,23 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                     }
                     else if (localKillRoam || squadObjective.Location != null
                              && (finishedAnchorInRoam
-                                 || (squadObjective.Location.Position - agent.Position).sqrMagnitude <= squadObjective.Location.RadiusSqr))
+                                 || (squadObjective.Location.Position - agent.Position).sqrMagnitude <= squadObjective.Location.RadiusSqr
+                                 || squadObjective.Location.Category == WaypointCategory.Synthetic
+                                    && (squad.RecentlyVisitedPoiCooldowns.TryGetValue(squadObjective.Location.Id, out var fallbackVisitExpiry)
+                                        && Time.time < fallbackVisitExpiry
+                                        || (squadObjective.Location.Position - agent.Position).sqrMagnitude
+                                           < Math.Pow(Math.Sqrt(squadObjective.Location.RadiusSqr) + 10f, 2))))
                     {
                         // This search, rather than an arbitrary null objective, proves local exhaustion.
                         // Once all members settle, re-evaluate the wider cell instead of waiting at this POI.
                         targetLoc = null;
                         splinterParent = null;
-                        locallyExhausted = localKillRoam;
+                        // Guard can move the member just outside the anchor radius after arrival.
+                        // Nulling the assignment must not erase the visit or bypass the splinter
+                        // picker's minimum patrol leg on the next tick (raid388, Synthetic_1990).
+                        locallyExhausted = true;
                         if (trackLootExhaustion)
                         {
-                            locallyExhausted = true;
                             locallyExhaustedLootCount++;
                         }
                     }

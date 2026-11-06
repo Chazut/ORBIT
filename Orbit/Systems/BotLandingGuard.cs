@@ -37,8 +37,8 @@ internal static class BotLandingGuard
     private sealed class WakeSearch
     {
         internal Vector3 Origin;
-        internal int Candidate;
-        internal float RetryAt, LogAt;
+        internal int Candidate, Attempts, Probes;
+        internal float RetryAt, LogAt, Started;
     }
     private static readonly Dictionary<BotOwner, WakeSearch> WakeSearches = new();
     private const float WakeHeightLimit = 0.65f;
@@ -145,19 +145,25 @@ internal static class BotLandingGuard
         if (!WakeSearches.TryGetValue(bot, out var search))
         {
             if (WakeSearches.Count >= 256) WakeSearches.Clear();
-            WakeSearches[bot] = search = new WakeSearch { Origin = origin };
+            WakeSearches[bot] = search = new WakeSearch { Origin = origin, Started = Time.time };
         }
         // Recenter on the moving Ghost without restarting the ring cursor or the retry budget.
         // Otherwise even a 10 cm step prevents us from ever testing the outer rings.
         search.Origin = origin;
         if (Time.time < search.RetryAt) return false;
+        search.Attempts++;
         var reason = "rejected-position";
-        if (!IsRejected(bot, origin) && BotGroundPlacement.TryResolve(player, origin, out var current, out reason)
-            && SameWakeFloor(origin, current) && ClearOfOtherBodies(bot, current))
+        if (!IsRejected(bot, origin) && BotGroundPlacement.TryResolve(player, origin, out var current, out reason))
         {
-            if ((current - origin).sqrMagnitude > .0001f) player.Teleport(current);
-            WakeSearches.Remove(bot);
-            return true;
+            if(!SameWakeFloor(origin,current)) reason="different-floor";
+            else if(!ClearOfOtherBodies(bot,current)) reason="another-body";
+            else
+            {
+                if ((current - origin).sqrMagnitude > .0001f) player.Teleport(current);
+                WakeSearches.Remove(bot);
+                if(search.Attempts>1) Log.Info($"GHOST WAKE GROUND: {bot.Profile.Nickname} supported before activation from={origin} to={current} sameFloor=True attempts={search.Attempts} probes={search.Probes} elapsedMs={(Time.time-search.Started)*1000f:F1} source=current");
+                return true;
+            }
         }
         var initialReason = reason;
         // Resume a bounded lateral search across retries. Never probe another height band:
@@ -165,12 +171,19 @@ internal static class BotLandingGuard
         for (var probe = 0; probe < 8; probe++)
         {
             if (!TakeProbe()) { reason = "query-budget"; break; }
+            search.Probes++;
             var index = search.Candidate;
             search.Candidate = (index + 1) % 32;
-            var radius = index < 8 ? .5f : index < 16 ? 1f : index < 24 ? 2f : WakeRadius;
-            var angle = index % 8 * Mathf.PI / 4f;
+            // Interleave radii: an overlapping squad must reach free space outside
+            // its own bodies on the first batch, not wait through three inner rings.
+            var ring=index%4;
+            var radius = ring==0 ? .5f : ring==1 ? 1f : ring==2 ? 2f : WakeRadius;
+            var angle = index / 4 * Mathf.PI / 4f;
             var candidate = origin + new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle)) * radius;
-            if (!NavMesh.SamplePosition(candidate, out var hit, .35f, NavMesh.AllAreas))
+            // Ghost bodies can be above the mesh within the permitted floor band.
+            // A .35 m sample discarded those meshes before the .65 m floor check.
+            // Larger sample radius does NOT relax landing height, wall or route checks.
+            if (!NavMesh.SamplePosition(candidate, out var hit, .75f, NavMesh.AllAreas))
             { reason = "no-local-mesh"; continue; }
             if (!SameWakeFloor(origin, hit.position)) { reason = "different-floor"; continue; }
             if (DangerZones.IsInside(hit.position) || IsRejected(bot, hit.position))
@@ -182,13 +195,13 @@ internal static class BotLandingGuard
             { reason = "blocked-segment"; continue; }
             player.Teleport(landing);
             WakeSearches.Remove(bot);
-            Log.Info($"GHOST WAKE GROUND: {bot.Profile.Nickname} supported before activation from={origin} to={landing} sameFloor=True");
+            Log.Info($"GHOST WAKE GROUND: {bot.Profile.Nickname} supported before activation from={origin} to={landing} sameFloor=True attempts={search.Attempts} probes={search.Probes} elapsedMs={(Time.time-search.Started)*1000f:F1} source=lateral");
             return true;
         }
         if (Time.time >= search.LogAt)
         {
             Log.Warning($"GHOST WAKE GROUND: {bot.Profile.Nickname} activation deferred at={origin} reason={reason} initialReason={initialReason} nextProbe={search.Candidate} "
-                + BotGroundPlacement.DescribeBody(player));
+                + $"attempts={search.Attempts} probes={search.Probes} elapsedMs={(Time.time-search.Started)*1000f:F1} " + BotGroundPlacement.DescribeBody(player));
             search.LogAt = Time.time + 10f;
         }
         search.RetryAt = Time.time + .25f;
