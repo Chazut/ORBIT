@@ -38,6 +38,11 @@ internal sealed partial class SniperPlan : IObjectiveWork
     private float _activeTravel, _rescueTravel;
     private int _candidate, _retries;
     private int _relocationMember;
+    private int _spacingMember;
+    private bool _formation;
+    private bool _spacingTurn = true;
+    private Vector3 _formationAnchor;
+    private float _nextSpacing;
     private float _nextRelocation;
     private bool _resolved, _partial, _arrived, _paused, _returningToPost;
     internal string Status { get; private set; } = "pending";
@@ -178,6 +183,12 @@ internal sealed partial class SniperPlan : IObjectiveWork
             _nextEquipment = now + 5;
         }
         if (TryRecordedTransit(w, now)) return true;
+        if (!_formation && !_orders.ContainsKey(_actor))
+        { _formation = true; _formationAnchor = _actor.Position; _nextSpacing = 0; }
+        // Space the approach and survey too, not just the final occupied post.
+        if (_formation && _spacingTurn && SpaceFollowers(squad, w, now))
+        { _spacingTurn = false; return true; }
+        _spacingTurn = true;
         if (!_arrived && !_recorded.Active)
         {
             var target = _resolved ? _post : _recording == null
@@ -275,35 +286,54 @@ internal sealed partial class SniperPlan : IObjectiveWork
             SetStatus(squad, "holding");
             SniperCombat.Refresh(_actor, _post, now + 2);
         }
-        // Followers occupy distinct connected positions. No reservation across squads.
+        return true;
+    }
+
+    private bool SpaceFollowers(Squad squad, WaypointSystem w, float now)
+    {
+        if (now < _nextSpacing || squad.Size < 2) return false;
+        // One connected candidate per shared work slot, round-robin on failures.
         var index = 0;
-        foreach (var member in squad.Members)
+        for (var i = 0; i < squad.Size; i++)
         {
-            index++;
+            index = (_spacingMember + i) % squad.Size;
+            var member = squad.Members[index];
             if (member == _actor || !member.IsActive || member.SoloExtractRequested || CorpseEscort.InFlight(member)) continue;
             if (_orders.TryGetValue(member, out var previous))
             {
-                if (member.Objective.Status != ObjectiveStatus.Failed) continue;
+                if (member.Objective.Status != ObjectiveStatus.Failed && Near(previous.Position, _formationAnchor, 9f)
+                    && FreeFormationPosition(previous.Position, member)) continue;
                 w.ReleaseClaim(previous.Id, member.Id);
                 _orders.Remove(member);
                 member.Objective.Location = null; member.Objective.Status = ObjectiveStatus.None;
                 member.Guard.CoverPoint = null; member.Look.Target = null;
             }
             if (!w.TryOperationWork(this)) return true;
+            _spacingMember = (index + 1) % squad.Size;
+            _nextSpacing = now + .15f;
             _coverAttempts.TryGetValue(member, out var attempts);
             // Squad spacing is optional; a missing follower position must not cancel the sniper post.
             _coverAttempts[member] = (attempts + 1) % 12;
             var offset = Direction(_site.WatchYaw + 120 + index * 65 + attempts * 90, 0) * (3 + index % 3);
-            var target = _leg + offset;
+            var target = _formationAnchor + offset;
             if (NavMesh.SamplePosition(target, out var hit, 1.5f, NavMesh.AllAreas)
-                && Mathf.Abs(hit.position.y - _leg.y) < 1.5f
-                && NavMesh.CalculatePath(_leg, hit.position, NavMesh.AllAreas, _path) && _path.status == NavMeshPathStatus.PathComplete)
+                && Mathf.Abs(hit.position.y - _formationAnchor.y) < 1.5f && FreeFormationPosition(hit.position, member)
+                && NavMesh.CalculatePath(_formationAnchor, hit.position, NavMesh.AllAreas, _path) && _path.status == NavMeshPathStatus.PathComplete)
             {
                 Assign(member, hit.position, w, "Follow sniper");
                 member.Guard.CoverPoint = new CoverPoint(hit.position, offset.normalized, CoverCategory.None, CoverLevel.Stay);
+                Log.Info($"SNIPER SPACING: {member} phase={Status} anchor={_formationAnchor} target={hit.position} separation={(hit.position - _formationAnchor).magnitude:F1}m");
             }
-            break;
+            return true;
         }
+        return false;
+    }
+
+    private bool FreeFormationPosition(Vector3 position, Agent member)
+    {
+        if ((position - _formationAnchor).sqrMagnitude < 2.5f * 2.5f) return false;
+        foreach (var pair in _orders)
+            if (pair.Key != member && pair.Key != _actor && (position - pair.Value.Position).sqrMagnitude < 2.5f * 2.5f) return false;
         return true;
     }
 
@@ -372,7 +402,12 @@ internal sealed partial class SniperPlan : IObjectiveWork
                 _progress.ReachedLeg();
                 _recorded.RememberPartialLeg();
                 OperationRouteSearch.Remember(_approachHistory, _actor.Position);
-                Release(squad, w); _route.Reset(); _retries = 0;
+                // Keep the followers' separated waiting positions during the survey.
+                var actorOrder = _orders[_actor];
+                w.ReleaseClaim(actorOrder.Id, _actor.Id); _orders.Remove(_actor);
+                if (_actor.Objective.Location == actorOrder) { _actor.Objective.Location = null; _actor.Objective.Status = ObjectiveStatus.None; }
+                if (squad.Objective.Location == actorOrder) squad.Objective.Location = null;
+                _route.Reset(); _retries = 0;
             }
             else if (_actor.Objective.Status == ObjectiveStatus.Failed)
             {
@@ -398,9 +433,7 @@ internal sealed partial class SniperPlan : IObjectiveWork
         }
         _progress.BeginLeg(_recorded.Active && !_recorded.Complete ? _recorded.RouteCorners : _route.RouteCorners, _travel);
         _progress.ObserveLeg(_actor.Position, _travel);
-        foreach (var member in squad.Members)
-            if (member.IsActive && !member.SoloExtractRequested && !CorpseEscort.InFlight(member))
-                Assign(member, _leg, w, "Sniper site approach");
+        Assign(_actor, _leg, w, "Sniper site approach");
         squad.Objective.Location = _orders[_actor]; squad.Objective.Status = SquadObjectiveState.Active;
         return true;
     }
@@ -547,9 +580,11 @@ internal sealed partial class SniperPlan : IObjectiveWork
         }
         _orders.Clear();
         _coverAttempts.Clear();
+        _formation = false;
     }
     private void Assign(Agent member, Vector3 position, WaypointSystem w, string name)
     {
+        if (member == _actor) { _formation = true; _formationAnchor = position; _nextSpacing = 0; }
         if (member.Objective.Location != null) w.ReleaseClaim(member.Objective.Location.Id, member.Id);
         var radiusSqr = member == _actor && _recorded.Active && !_recorded.Complete ? .5f : 1.5f;
         var point = new Waypoint(w.NewRuntimeWaypointId(), WaypointCategory.Synthetic, name, position, radiusSqr, new(), new(), null);
