@@ -37,6 +37,7 @@ internal static class BotLandingGuard
     private sealed class WakeSearch
     {
         internal Vector3 Origin;
+        internal Vector3 LastChecked;
         internal int Candidate, Attempts, Probes;
         internal float RetryAt, LogAt, Started;
     }
@@ -150,7 +151,12 @@ internal static class BotLandingGuard
         // Recenter on the moving Ghost without restarting the ring cursor or the retry budget.
         // Otherwise even a 10 cm step prevents us from ever testing the outer rings.
         search.Origin = origin;
-        if (Time.time < search.RetryAt) return false;
+        // Moving Ghosts can cross a narrow supported area between two lateral batches.
+        // Recheck their current floor after meaningful motion, while keeping expensive
+        // NavMesh searches on the original shared budget and retry cadence.
+        bool lateralDue = Time.time >= search.RetryAt;
+        if (!lateralDue && (origin-search.LastChecked).sqrMagnitude < .16f) return false;
+        search.LastChecked = origin;
         search.Attempts++;
         var reason = "rejected-position";
         if (!IsRejected(bot, origin) && BotGroundPlacement.TryResolve(player, origin, out var current, out reason))
@@ -166,6 +172,7 @@ internal static class BotLandingGuard
             }
         }
         var initialReason = reason;
+        if (!lateralDue) return false;
         // Resume a bounded lateral search across retries. Never probe another height band:
         // a mesh point above or below the sleeper is not proof of its intended floor.
         for (var probe = 0; probe < 8; probe++)
@@ -173,13 +180,13 @@ internal static class BotLandingGuard
             if (!TakeProbe()) { reason = "query-budget"; break; }
             search.Probes++;
             var index = search.Candidate;
-            search.Candidate = (index + 1) % 32;
+            search.Candidate = (index + 1) % 33;
             // Interleave radii: an overlapping squad must reach free space outside
             // its own bodies on the first batch, not wait through three inner rings.
             var ring=index%4;
             var radius = ring==0 ? .5f : ring==1 ? 1f : ring==2 ? 2f : WakeRadius;
             var angle = index / 4 * Mathf.PI / 4f;
-            var candidate = origin + new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle)) * radius;
+            var candidate = index==32 ? origin : origin + new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle)) * radius;
             // Ghost bodies can be above the mesh within the permitted floor band.
             // A .35 m sample discarded those meshes before the .65 m floor check.
             // Larger sample radius does NOT relax landing height, wall or route checks.
