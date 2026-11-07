@@ -191,6 +191,7 @@ public class SoftStuck
 public class Stuck
 {
     internal readonly Orbit.Systems.OrbitMovementRecovery Recovery = new();
+    internal readonly Orbit.Systems.TravelProgressWatch TravelProgress = new();
     public readonly TimePacing Pacing = new(0.1f);
 
     public HardStuck Hard = new();

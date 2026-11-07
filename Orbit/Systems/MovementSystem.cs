@@ -68,6 +68,7 @@ public partial class MovementSystem
 
             if (!agent.IsActive)
             {
+                agent.Stuck.TravelProgress.Reset();
                 ObserveRescueProgress(agent, paused: true);
                 agent.Movement.Failures.Reset();
                 agent.Stuck.IdleRescueSince = -1f;
@@ -104,6 +105,7 @@ public partial class MovementSystem
             // (world keeps moving); everything else waits for the wake resync in DormancySystem.
             if (agent.IsDormant)
             {
+                agent.Stuck.TravelProgress.Reset();
                 agent.Stuck.Recovery.Suspend();
                 // Pinned while a simulated ghost fight plays out: nobody walks their route mid-firefight.
                 if (agent.Squad != null && Time.time < agent.Squad.GhostFightUntil)
@@ -2053,6 +2055,7 @@ public partial class MovementSystem
             if (stuck.Pacing.Blocked())
                 return;
 
+            if (movementSystem.CheckTravelProgress(agent)) return;
             _softRemediation.Update(agent);
             _hardRemediation.Update(agent);
         }
@@ -2116,17 +2119,23 @@ public partial class MovementSystem
             switch (stuck.Status)
             {
                 case SoftStuckStatus.None when stuck.Timer >= VaultAttemptDelay:
-                    agent.Movement.AwakeMotion.TraceRecovery(agent, "vault-request", stuck.Timer, distanceMoved, stuckThreshold);
-                    Log.Debug($"{agent} is stuck, attempting to vault.");
                     stuck.Status = SoftStuckStatus.Vaulting;
-                    agent.Player.MovementContext?.TryVaulting();
+                    if (agent.Stuck.TravelProgress.TryAssist())
+                    {
+                        agent.Movement.AwakeMotion.TraceRecovery(agent, "vault-request", stuck.Timer, distanceMoved, stuckThreshold);
+                        Log.Debug($"{agent} is stuck, attempting to vault.");
+                        agent.Player.MovementContext?.TryVaulting();
+                    }
                     break;
                 case SoftStuckStatus.Vaulting when stuck.Timer >= JumpAttemptDelay:
-                    agent.Movement.AwakeMotion.TraceRecovery(agent, "jump-request", stuck.Timer, distanceMoved, stuckThreshold);
-                    agent.Movement.AwakeMotion.Jump.Request(agent);
-                    Log.Debug($"{agent} is stuck, attempting to jump.");
                     stuck.Status = SoftStuckStatus.Jumping;
-                    agent.Player.MovementContext?.TryJump();
+                    if (agent.Stuck.TravelProgress.TryAssist())
+                    {
+                        agent.Movement.AwakeMotion.TraceRecovery(agent, "jump-request", stuck.Timer, distanceMoved, stuckThreshold);
+                        Log.Debug($"{agent} is stuck, attempting to jump.");
+                        agent.Movement.AwakeMotion.Jump.Request(agent);
+                        agent.Player.MovementContext?.TryJump();
+                    }
                     break;
                 case SoftStuckStatus.Jumping when stuck.Timer >= FailedDelay:
                     agent.Movement.AwakeMotion.TraceRecovery(agent, "failed", stuck.Timer, distanceMoved, stuckThreshold);
