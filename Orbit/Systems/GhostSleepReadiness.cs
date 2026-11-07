@@ -18,6 +18,8 @@ internal static class GhostSleepReadiness
         internal bool Blocked;
         internal float BlockedAt;
         internal string Reason;
+        internal float StableSwitchSince = -1f;
+        internal object StableWeapon;
     }
     private static readonly ConditionalWeakTable<Player, State> States = new();
     internal const float SettleSeconds = 0.75f;
@@ -56,6 +58,25 @@ internal static class GhostSleepReadiness
         var state = States.GetValue(player, _ => new State { ReadyAt = Time.time + SettleSeconds });
         var reason = BlockReason(bot);
         var hands = player.HandsController;
+        // A native selector callback can leave IsChanging set after the gun is
+        // already idle. Do not freeze a genuine transition or force a weapon draw.
+        if (reason == "weapon-return-pending" && SettledSwitch(bot))
+        {
+            var weapon = ((Player.FirearmController)hands).Item;
+            if (!ReferenceEquals(state.Hands, hands) || !ReferenceEquals(state.StableWeapon, weapon)
+                || state.StableSwitchSince < 0f || Time.time < state.StableSwitchSince)
+            { state.StableSwitchSince = Time.time; state.StableWeapon = weapon; }
+            if (Time.time - state.StableSwitchSince >= 3f)
+            {
+                bot.WeaponManager.Selector.IsChanging = false;
+                state.StableSwitchSince = -1f;
+                state.ReadyAt = Time.time + SettleSeconds;
+                reason = BlockReason(bot);
+                Log.Info($"GHOST HANDS RECOVERY: {player.ProfileId} cleared stale selector after stable idle weapon confirmation");
+                PerformanceJournal.Event("ghost-hands-recovery", player.ProfileId, detail: "stable-idle-selector");
+            }
+        }
+        else { state.StableSwitchSince = -1f; state.StableWeapon = null; }
         if (reason != null || !ReferenceEquals(state.Hands, hands))
         {
             state.Hands = hands;
@@ -83,6 +104,23 @@ internal static class GhostSleepReadiness
             state.Blocked = false;
         }
         return true;
+    }
+    private static bool SettledSwitch(BotOwner bot)
+    {
+        try
+        {
+            var p = bot.GetPlayer; var wm = bot.WeaponManager; var selector = wm?.Selector;
+            if (selector?.IsChanging != true || !selector.IsWeaponReady || !wm.IsReady
+                || p.HandsController is not Player.FirearmController gun
+                || gun.CurrentOperation is not Player.FirearmController.Idling
+                || gun.IsInReloadOperation() || GhostBodyTransition.Busy(p)
+                || p.InventoryController.IsInventoryBlocked()
+                || !ReferenceEquals(wm.ShootController, gun) || !ReferenceEquals(wm.CurrentWeapon, gun.Item)
+                || !ReferenceEquals(p.Inventory.Equipment.GetSlot(selector.EquipmentSlot).ContainedItem, gun.Item)) return false;
+            foreach (var op in p.InventoryController.SelectEvents<ItemEventArgs>()) return false;
+            return true;
+        }
+        catch { return false; }
     }
     private static string Describe(BotOwner bot)
     {
