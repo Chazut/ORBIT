@@ -49,6 +49,9 @@ public class OrbitBrainLayer : CustomLayer
 
     // Diag throttling — log gate state on transition and every 5s if off.
     private bool _lastIsActive = true;
+    private readonly NativeDangerGrace _nativeDangerGrace = new();
+    private bool _nativeDangerLayer;
+    private float _dangerReportAt;
     private float _lastIsActiveDiagAt;
 
     // Substrings (case-insensitive) of WildSpawnType names whose bots should NOT be hijacked. Populated at
@@ -221,6 +224,10 @@ public class OrbitBrainLayer : CustomLayer
         var wasActive = _agent.IsActive;
         _agent.IsActive = false;
         var layerName = layer.Name();
+        bool dangerLayer = layerName.IndexOf("AvoidDanger", StringComparison.OrdinalIgnoreCase) >= 0;
+        if (dangerLayer || _nativeDangerLayer)
+            _nativeDangerGrace.Observe(Time.time);
+        _nativeDangerLayer = dangerLayer;
         var sainCombatNow = layerName == SainCombatLayerName;
         if (_sainCombatActive && !sainCombatNow)
             _sainCombatEndedAt = Time.time;
@@ -288,6 +295,18 @@ public class OrbitBrainLayer : CustomLayer
                 _lastIsActive = true;
             }
             return true;
+        }
+        bool btrDanger = false;
+        try { btrDanger = BotOwner.BewareBTR?.ShallRunAway() == true; } catch { }
+        if (btrDanger || _nativeDangerLayer) _nativeDangerGrace.Observe(Time.time);
+        if (_nativeDangerGrace.Blocks(Time.time))
+        {
+            if (Time.time >= _dangerReportAt)
+            {
+                _dangerReportAt = Time.time + 5f;
+                Log.Debug($"{_agent} native danger hold: btr={btrDanger} layer={_nativeDangerLayer} quietWindow=3s; ORBIT movement remains released");
+            }
+            return false;
         }
         var timeSinceSainCombatEnded = _sainCombatActive ? 0f : Time.time - _sainCombatEndedAt;
         var medicineUsing = BotOwner.Medecine?.Using == true;
