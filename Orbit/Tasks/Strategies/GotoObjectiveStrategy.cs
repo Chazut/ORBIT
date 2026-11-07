@@ -976,7 +976,6 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                 //   5. Fallback to squad anchor (no splinter found).
                 Waypoint targetLoc;
                 Waypoint splinterParent;
-                var locallyExhausted = false;
                 var tookOwnKillCorpse = false;
                 var anchorReservedForOwnKill = squadObjective.Location != null
                                                && AnyMemberDesignatedForCorpse(squad, squadObjective.Location.Id);
@@ -1071,7 +1070,6 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                         // Guard can move the member just outside the anchor radius after arrival.
                         // Nulling the assignment must not erase the visit or bypass the splinter
                         // picker's minimum patrol leg on the next tick (raid388, Synthetic_1990).
-                        locallyExhausted = true;
                         if (trackLootExhaustion)
                         {
                             locallyExhaustedLootCount++;
@@ -1150,14 +1148,17 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                 if (targetLoc != null && !waypointSystem.TryPrepareMemberWaypoint(agent, targetLoc, splinterParent, out var accessPending))
                 {
                     if (accessPending) continue;
-                    Log.Debug($"{agent} member waypoint access rejected: {targetLoc}; selecting another target");
+                    // RejectMemberAccess already logs the real failure and cooldown.
+                    // Polling that cached refusal is not another failed route attempt.
+                    if (!agent.AccessRejectedPoiIds.Contains(targetLoc.Id, agent.Position, Time.time))
+                        Log.Debug($"{agent} member waypoint access rejected: {targetLoc}; selecting another target");
                     targetLoc = null;
                     splinterParent = null;
                 }
 
                 // Keep searching on later ticks (claims can be released and corpses can appear), but do not
                 // repeatedly reset/log the same empty assignment while another member is still looting.
-                if (locallyExhausted && agentObjective.Location == null
+                if (targetLoc == null && agentObjective.Location == null
                     && agentObjective.SplinterParent == null && agentObjective.Status == ObjectiveStatus.None)
                     continue;
 

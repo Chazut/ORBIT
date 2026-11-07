@@ -142,7 +142,7 @@ public partial class WaypointSystem
     {
         // Leave other members' ongoing loot alone, and do not mark the item consumed.
         // The ordinary dispatcher will apply the new door/unreachable filter on the next tick.
-        if (squad != null && ReferenceEquals(squad.Objective.Location, pick))
+        if (squad != null && ReferenceEquals(squad.Objective.Location, pick) && !squad.Objective.RepickRequested)
         {
             squad.Objective.RepickRequested = true;
             Log.Debug($"{squad} member access rejected squad anchor {pick}; requesting a new waypoint");
@@ -151,6 +151,6 @@ public partial class WaypointSystem
     private static void RejectMemberAccess(Agent member, Waypoint pick, string reason)
     {
         if (member.AccessRejectedPoiIds.Reject(pick.Id, member.Position, Time.time, reason!="unreachable"))
-            Log.Info($"{member} member access cooldown: {pick} reason={reason} retry=15s approachReset=5m");
+            Log.Info($"{member} member access cooldown: {pick} reason={reason} retry=15s minimumRetry=3s approachReset=5m origin={member.Position}");
     }
 }
