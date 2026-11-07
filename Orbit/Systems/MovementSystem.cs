@@ -230,7 +230,9 @@ public partial class MovementSystem
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void MoveRetry(Agent agent, Vector3 destination)
     {
-        ResetPath(agent);
+        // Replanning is still travel. Stopped made GotoObjectiveAction fail the
+        // objective while its asynchronous replacement path was still queued.
+        ResetPath(agent, MovementStatus.Moving);
 
         if (agent.Movement.Retry >= RetryLimit)
         {
@@ -242,6 +244,7 @@ public partial class MovementSystem
 
         ScheduleMoveJob(agent, destination);
         agent.Movement.Retry++;
+        Log.Debug($"MOVEMENT RETRY: {agent} action=queued retry={agent.Movement.Retry} revision={agent.Movement.PathRevision} target={destination} status={agent.Movement.Status}");
     }
 
     private void ScheduleMoveJob(Agent agent, Vector3 destination, bool styledTravel = false)
@@ -1015,6 +1018,7 @@ public partial class MovementSystem
                     Log.Debug($"DoorWatch: failed to finalize door Id={watch.Door.Id}: {e.Message}");
                 }
             }
+            FinishWatchedDoorInteraction(watch.Agent, watch.Door);
             _doorWatchRemoveBuffer.Add(kv.Key);
         }
         for (var i = 0; i < _doorWatchRemoveBuffer.Count; i++) _pendingDoorOpens.Remove(_doorWatchRemoveBuffer[i]);
