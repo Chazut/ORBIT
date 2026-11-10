@@ -189,7 +189,7 @@ internal sealed class OperationPlan : IObjectiveWork
             if (_accessDoor != null)
             {
                 if (_accessDoor.DoorState == EDoorState.Open
-                    && Mathf.Abs(Mathf.DeltaAngle(_accessDoor.CurrentAngle, _accessDoor.GetAngle(EDoorState.Open))) < 5f)
+                    && OperationInteraction.OpenPoseSettled(_accessDoor))
                 {
                     _accessDoor = null; _route.Reset(); _approachHistory.Clear(); _progress.Reset(); _retries = 0;
                 }
@@ -550,7 +550,7 @@ internal sealed class OperationPlan : IObjectiveWork
     {
         if (step.Object == null || step.Object.DoorState != EDoorState.Open) return false;
         if (step.Object is Door door)
-            return Mathf.Abs(Mathf.DeltaAngle(door.CurrentAngle, door.GetAngle(EDoorState.Open))) < 5f;
+            return OperationInteraction.OpenPoseSettled(door);
         return true;
     }
 

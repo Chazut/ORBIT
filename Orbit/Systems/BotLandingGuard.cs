@@ -179,8 +179,10 @@ internal static class BotLandingGuard
         {
             if (!TakeProbe()) { reason = "query-budget"; break; }
             search.Probes++;
-            var index = search.Candidate;
-            search.Candidate = (index + 1) % 33;
+            // A narrow supported strip may exist only under the moving body. Probe
+            // its mesh height first on every batch, then resume the lateral cursor.
+            var index = probe == 0 ? 32 : search.Candidate;
+            if (probe != 0) search.Candidate = (index + 1) % 32;
             // Interleave radii: an overlapping squad must reach free space outside
             // its own bodies on the first batch, not wait through three inner rings.
             var ring=index%4;

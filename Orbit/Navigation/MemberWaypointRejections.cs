@@ -9,9 +9,9 @@ public sealed class MemberWaypointRejections
 {
     private const float RetryCooldown = 15f;
     private const float MinimumRetryDelay = 3f;
-    private readonly Dictionary<int, (Vector3 origin, float until, bool door)> entries = new();
-    private static bool Active((Vector3 origin, float until, bool door) e, Vector3 origin, float now)
-        => now < e.until && (now < e.until - RetryCooldown + MinimumRetryDelay || (origin - e.origin).sqrMagnitude < 25f);
+    private readonly Dictionary<int, (Vector3 origin, float until, float minimum, bool door, bool temporary)> entries = new();
+    private static bool Active((Vector3 origin, float until, float minimum, bool door, bool temporary) e, Vector3 origin, float now)
+        => now < e.until && (now < e.minimum || (origin - e.origin).sqrMagnitude < 25f);
     private readonly List<int> expired = new();
     public bool Contains(int id, Vector3 origin, float now)
     {
@@ -22,7 +22,13 @@ public sealed class MemberWaypointRejections
         entries.Remove(id); return false;
     }
     public void DoorOpened(int id){if(entries.TryGetValue(id,out var e)&&e.door)entries.Remove(id);}
+    public void ClearTemporary(int id){if(entries.TryGetValue(id,out var e)&&e.temporary)entries.Remove(id);}
     public bool Reject(int id, Vector3 origin, float now, bool door=false)
+        => Record(id, origin, now, RetryCooldown, MinimumRetryDelay, door, false);
+    // Claims and inventory eligibility are not evidence of a broken route.
+    public bool RejectTemporarily(int id, Vector3 origin, float now)
+        => Record(id, origin, now, 1f, 1f, false, true);
+    private bool Record(int id, Vector3 origin, float now, float delay, float minimum, bool door, bool temporary)
     {
         if (Contains(id, origin, now)) return false;
         if (entries.Count >= 64)
@@ -31,7 +37,7 @@ public sealed class MemberWaypointRejections
             foreach (var e in entries) if (e.Value.until < until) { oldest = e.Key; until = e.Value.until; }
             entries.Remove(oldest);
         }
-        entries[id] = (origin, now + RetryCooldown, door); return true;
+        entries[id] = (origin, now + delay, now + minimum, door, temporary); return true;
     }
     public void AddTo(HashSet<int> excluded, Vector3 origin, float now)
     {

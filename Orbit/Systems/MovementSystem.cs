@@ -458,6 +458,13 @@ public partial class MovementSystem
         }
 
         var next = pos + toCorner * (step / dist);
+        var grounded = Orbit.Navigation.GhostPathHeight.Project(next, Time.time, Time.frameCount, ref movement.NextGhostHeightCheck);
+        if (Mathf.Abs(grounded.y - next.y) >= .3f && Time.time >= movement.NextGhostHeightLog)
+        {
+            movement.NextGhostHeightLog = Time.time + 5f;
+            Log.Debug($"GHOST PATH HEIGHT: {agent} from={next} to={grounded} localSurface=True");
+        }
+        next = grounded;
         if (Orbit.Navigation.DangerZones.IsInside(next))
         {
             SkipGhostDangerSegment(agent, movement, next);

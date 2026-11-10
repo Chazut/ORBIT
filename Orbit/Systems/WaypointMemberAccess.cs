@@ -72,6 +72,12 @@ public partial class WaypointSystem
     internal bool TryPrepareMemberWaypoint(Agent member, Waypoint pick, Waypoint parent, out bool pending)
     {
         pending = false;
+        var squad = member.Squad;
+        var unavailable = IsUnavailableLooseLoot(pick);
+        var eligibility = squad == null ? "no-squad" : squad.CompletedPoiIds.Contains(pick.Id) ? "already-completed"
+            : member.ValueSkippedPoiIds.Contains(pick.Id) ? "personal-value-skip" : unavailable ? "loot-unavailable"
+            : _claims.TryGetValue(pick.Id, out var claimant) && claimant != member.Id ? "claimed-by-another-member" : null;
+        if (eligibility == null) member.AccessRejectedPoiIds.ClearTemporary(pick.Id);
         if(pick.LockedDoorsOnPath is {Count:>0})
         {
             bool open=true;
@@ -85,21 +91,20 @@ public partial class WaypointSystem
                 RejectMemberAnchor(member.Squad, pick);
             return false;
         }
-        var squad = member.Squad;
         if (_memberAccess.TryGetValue(member, out var search)
             && (!search.Valid || !ReferenceEquals(search.Pick, pick)))
         { CancelMemberAccess(member); search = null; }
 
         // Recheck live eligibility before consuming a result or opening any carver.
-        if (squad == null || squad.CompletedPoiIds.Contains(pick.Id)
-            || member.ValueSkippedPoiIds.Contains(pick.Id) || IsUnavailableLooseLoot(pick)
-            || (_claims.TryGetValue(pick.Id, out var claimant) && claimant != member.Id))
+        if (eligibility != null)
         {
             CancelMemberAccess(member);
+            if (member.AccessRejectedPoiIds.RejectTemporarily(pick.Id, member.Position, Time.time))
+                Log.Debug($"{member} member waypoint temporarily skipped: {pick} reason={eligibility} retry=1s; route not tested");
             // A finished/value-skipped anchor must not be offered again on every member tick.
             // Let the shared dispatcher choose a target another member can actually use.
             if (squad != null && (squad.CompletedPoiIds.Contains(pick.Id)
-                || IsUnavailableLooseLoot(pick) || AllAliveMembersValueSkipped(squad, pick.Id)))
+                || unavailable || AllAliveMembersValueSkipped(squad, pick.Id)))
                 RejectMemberAnchor(squad, pick);
             return false;
         }

@@ -46,7 +46,7 @@ internal sealed class OperationInteraction
         }
         var settled = !_unlockRunning && _target.DoorState != EDoorState.Interacting;
         if (_target is Door door && door.DoorState == EDoorState.Open)
-            settled &= Mathf.Abs(Mathf.DeltaAngle(door.CurrentAngle, door.GetAngle(EDoorState.Open))) < 5f;
+            settled &= OpenPoseSettled(door);
         if (settled)
         {
             Release(false);
@@ -55,7 +55,8 @@ internal sealed class OperationInteraction
         else if (now - _started >= 12f)
         {
             Detail = "owned interaction timed out";
-            Log.Warning($"MULTISTEP INTERACTION: target={_target.Id} result=timeout attempts={Attempts} state={_target.DoorState}");
+            var expected = _target is Door opening ? opening.GetAngle(EDoorState.Open) : float.NaN;
+            Log.Warning($"MULTISTEP INTERACTION: target={_target.Id} result=timeout attempts={Attempts} state={_target.DoorState} angle={_target.CurrentAngle:F1} expected={expected:F1}");
             Release(true);
             _retryAt = now + 2f;
         }
@@ -133,6 +134,10 @@ internal sealed class OperationInteraction
         Attempts = 0; _busySince = -1; _retryAt = 0; Detail = null; _cleanupFailed = false;
     }
 
+    internal static bool OpenPoseSettled(Door door) => door.DoorState == EDoorState.Open
+        && (Mathf.Abs(Mathf.DeltaAngle(door.CurrentAngle, door.GetAngle(EDoorState.Open))) < 5f
+            || door.IsBroken && Mathf.Abs(Mathf.DeltaAngle(door.CurrentAngle, door.GetAngle(EDoorState.Breaching))) < 5f);
+
     private void Release(bool cancel)
     {
         var target = _target;
@@ -143,7 +148,8 @@ internal sealed class OperationInteraction
             {
                 // Switch animations can own delayed chains. Let those native effects finish;
                 // only a door transition can be restored here.
-                if (cancel && target is Door && (target.DoorState == EDoorState.Interacting || _unlockRunning))
+                if (cancel && target is Door ownedDoor && (target.DoorState == EDoorState.Interacting || _unlockRunning
+                    || target.DoorState == EDoorState.Open && !OpenPoseSettled(ownedDoor)))
                 {
                     // Stop our animation before restoring its pre-interaction state. Never
                     // force Open, reset another actor's transition or consume a credential.

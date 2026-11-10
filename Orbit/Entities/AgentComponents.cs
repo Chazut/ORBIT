@@ -114,6 +114,7 @@ public class Movement
     public bool GhostExhausted;
     public bool GhostIndoors;
     public float NextGhostIndoorCheck;
+    public float NextGhostHeightCheck, NextGhostHeightLog;
 
     public bool HasPath
     {
