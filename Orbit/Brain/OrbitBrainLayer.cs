@@ -171,7 +171,8 @@ public class OrbitBrainLayer : CustomLayer
 
     public OrbitBrainLayer(BotOwner botOwner, int priority) : base(botOwner, priority)
     {
-        var excluded = IsExcludedRole(botOwner);
+        var excluded = Orbit.Api.OrbitBotControl.IsBotExcluded(botOwner)
+            || IsExcludedRole(botOwner);
         try
         {
             Log.Info($"BRAIN REGISTRATION: {botOwner.Profile?.Nickname} [{botOwner.ProfileId}] role={botOwner.Profile?.Info?.Settings?.Role}"
@@ -191,6 +192,7 @@ public class OrbitBrainLayer : CustomLayer
 
         _orbit = Singleton<OrbitManager>.Instance;
         _agent = _orbit.AddAgent(botOwner);
+        if (_agent == null) { _excluded = true; return; }
 
         botOwner.Brain.BaseBrain.OnLayerChangedTo += OnLayerChanged;
         botOwner.GetPlayer.OnPlayerDead += OnDead;
@@ -219,6 +221,12 @@ public class OrbitBrainLayer : CustomLayer
 
     private void OnLayerChanged(AICoreLayer<BotLogicDecision> layer)
     {
+        if (Orbit.Api.OrbitBotControl.IsBotExcluded(BotOwner))
+        {
+            _agent.IsActive = false;
+            BotOwner.Brain.BaseBrain.OnLayerChangedTo -= OnLayerChanged;
+            return;
+        }
         // BigBrain has already selected the new layer. Release our movement hooks before any
         // physical operation can throw, otherwise both controllers can keep driving this bot.
         var wasActive = _agent.IsActive;
@@ -281,7 +289,7 @@ public class OrbitBrainLayer : CustomLayer
 
     public override bool IsActive()
     {
-        if (_excluded) return false;
+        if (_excluded || Orbit.Api.OrbitBotControl.IsBotExcluded(BotOwner)) return false;
         // A sleeper never hands its inactive body to BSG. Healing and combat cannot happen on it, and
         // when the meds gate below let PatrolAssault take a dormant bot, BSG started a first aid on a
         // body whose animator was off: Medecine.Using stayed stuck and the bot could not walk a single

@@ -57,6 +57,7 @@ public class OrbitManager
     public readonly SquadRegistry SquadRegistry;
 
     private readonly BotRoster _botRoster;
+    internal readonly BotExclusions BotExclusions;
     private readonly BotsController _botsController;
     private readonly List<Agent> _destroyedScratch = new();
     private readonly List<Agent> _liveAgents;
@@ -76,6 +77,7 @@ public class OrbitManager
         Orbit.Looting.LootWorkBudget.Reset(true);
 
         var gameWorld = Singleton<GameWorld>.Instance;
+        BotExclusions = new BotExclusions(this, botRoster);
 
         MapId = gameWorld.LocationId;
         MapVariant = Orbit.Helpers.MapVariants.Detect(MapId);
@@ -130,6 +132,7 @@ public class OrbitManager
 
     public void Dispose()
     {
+        BotExclusions.Dispose();
         foreach (var agent in _liveAgents) agent.LootHandler?.Retire();
         Orbit.Navigation.OperationSwitchReach.Reset();
         Orbit.Navigation.DangerZones.Clear();
@@ -158,6 +161,7 @@ public class OrbitManager
 
     public Agent AddAgent(BotOwner bot)
     {
+        if (BotExclusions.Contains(bot)) return null;
         // A runtime brain swap (e.g. MoreBotsAPI on custom bots) makes BigBrain rebuild the brain and re-enter
         // here for a BotOwner that already has an Agent. Without this dedup each swap leaves an orphan agent that
         // holds a squad slot and never moves (its layer is dead), stalling the squad on the "all arrived" gate.
@@ -184,6 +188,7 @@ public class OrbitManager
     /// </summary>
     private void OnBotRemoved(BotOwner bot)
     {
+        BotExclusions.Forget(bot);
         DormancySystem.OnVanillaRemoved(bot);
         var agent = _botRoster.GetAgent(bot);
         if (agent == null) return;
@@ -224,7 +229,9 @@ public class OrbitManager
         return _destroyedScratch.Count;
     }
 
-    public void RemoveAgent(Agent agent)
+    public void RemoveAgent(Agent agent) => RemoveAgent(agent, detachedAlive: false);
+
+    internal void RemoveAgent(Agent agent, bool detachedAlive)
     {
         using var timing = TransitionPerformance.Measure(TransitionPhase.AgentRemove);
         // Death can fire RemoveAgent once per brain layer wired for this bot (each layer's OnPlayerDead survives
@@ -238,9 +245,11 @@ public class OrbitManager
         // inside an inactive GameObject).
         DormancySystem.OnAgentRemoved(agent);
 
+        // A live handoff can be retried. Stop tasks before removing their entity/component storage.
+        if (detachedAlive) ActionManager.RemoveEntity(agent);
         AgentData.RemoveEntity(agent);
-        SquadRegistry.RemoveAgent(agent);
-        ActionManager.RemoveEntity(agent);
+        SquadRegistry.RemoveAgent(agent, detachedAlive);
+        if (!detachedAlive) ActionManager.RemoveEntity(agent);
         _botRoster.RemoveAgent(agent);
     }
 
@@ -249,6 +258,7 @@ public class OrbitManager
         var captureStart = Orbit.Helpers.DiagnosticCapture.BeginFrame();
         try
         {
+            BotExclusions.Tick();
             using (TransitionPerformance.Measure(TransitionPhase.UpdatePurge))
                 PurgeDestroyedAgents();
             using (TransitionPerformance.Measure(TransitionPhase.UpdateLanding))

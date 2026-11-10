@@ -120,7 +120,9 @@ public class SquadRegistry(SquadData squadData, StrategyManager strategyManager,
         Log.Debug($"Added {agent} to {squad} with {squad.Size} members");
     }
 
-    public void RemoveAgent(Agent agent)
+    public void RemoveAgent(Agent agent) => RemoveAgent(agent, detachedAlive: false);
+
+    internal void RemoveAgent(Agent agent, bool detachedAlive)
     {
         var squad = agent.Squad;
         squad.RemoveAgent(agent);
@@ -131,7 +133,8 @@ public class SquadRegistry(SquadData squadData, StrategyManager strategyManager,
         // reason to bee-line for the exfil. Re-eval BEFORE the leader-reassign / empty-squad cleanup so
         // we don't compute against a half-deconstructed squad. Pass the dead agent so the re-eval can
         // also arm a dead-member-loot-recovery dispatch (survivors bee-line to the corpse).
-        LootContainerAction.ReevaluateExtractOnDeath(squad, agent);
+        if (!detachedAlive) LootContainerAction.ReevaluateExtractOnDeath(squad, agent);
+        else LootContainerAction.ReevaluateExtractForSquad(squad);
 
         if (squad.Size > 0)
         {

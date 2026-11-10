@@ -4,7 +4,7 @@
 
 Target release: early in the week of November 9, 2026 (tentative).
 
-- A public API for other mods to keep selected bots awake, preventing them from entering Ghost Mode after spawning or respawning (Harmony's request). Include a short integration example.
+- Implemented: [per-bot control exclusion API](BOT_CONTROL_API.md) for Harmony/PBT and other integrations. The calling mod selects bots explicitly; ORBIT wakes them and relinquishes control for that lifetime. Reapply on each spawn. Automated checks pass; in-raid PBT validation is still pending.
 
 ## Other ideas
 

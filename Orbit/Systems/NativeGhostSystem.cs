@@ -161,6 +161,7 @@ public sealed partial class NativeGhostSystem
 
     public bool CanSleep(BotOwner bot, float humanDistance = -1f, int groupSize = 1)
     {
+        if (Orbit.Api.OrbitBotControl.IsBotExcluded(bot)) return false;
         bool Refuse(string reason) => NativeGhostDiagnostics.Refuse(bot, reason, humanDistance, groupSize);
         if (!DecisionGuardReady || !BrainBridgeReady || bot?.Brain?.Agent == null || bot.Mover == null)
             return Refuse("brain-bridge");
@@ -235,6 +236,7 @@ public sealed partial class NativeGhostSystem
 
     public void Add(BotOwner bot)
     {
+        if (Orbit.Api.OrbitBotControl.IsBotExcluded(bot)) return;
         NativePatrolDiagnostics.BeforeSleep(bot);
         var state = new Sleeper
         {
@@ -481,6 +483,7 @@ public sealed partial class NativeGhostSystem
         skip = false;
         if (!Brains.TryGetValue(brain, out var state)) return false;
         skip = true;
+        if (Orbit.Api.OrbitBotControl.IsBotExcluded(state.Bot)) return true;
         if (state.WakeReason != null || Time.time < state.PinnedUntil || Time.time < state.NextDecision)
             return true;
         state.NextDecision = Time.time + DecisionInterval;
@@ -634,6 +637,7 @@ public sealed partial class NativeGhostSystem
 
     public void Move(BotOwner bot)
     {
+        if (Orbit.Api.OrbitBotControl.IsBotExcluded(bot)) return;
         if (!Sleepers.TryGetValue(bot, out var state)) return;
         try
         {
