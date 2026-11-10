@@ -137,13 +137,22 @@ internal sealed partial class SniperPlan
     private bool TryShiftCandidate(Vector3 sample, out Vector3 target)
     {
         target = default;
-        if (!NavMesh.SamplePosition(sample, out var nav, .75f, NavMesh.AllAreas)
-            || !WithinRoof(nav.position) || (nav.position - _post).sqrMagnitude < 9f) return false;
+        ResetViewSurvey();
+        if (!NavMesh.SamplePosition(sample, out var nav, .75f, NavMesh.AllAreas))
+        { ReportSurvey("reposition", _shiftCandidate, "post mesh missing", sample, null); return false; }
+        if (!WithinRoof(nav.position))
+        { ReportSurvey("reposition", _shiftCandidate, Mathf.Abs(nav.position.y - _roofOrigin.y) > RoofHeightTolerance ? "post shift height mismatch" : "post outside roof radius", sample, nav.position); return false; }
+        if ((nav.position - _post).sqrMagnitude < 9f)
+        { ReportSurvey("reposition", _shiftCandidate, "post too close to current", sample, nav.position); return false; }
         foreach (var member in _squad.Members)
-            if (member != _actor && !member.Bot.IsDead && (member.Position - nav.position).sqrMagnitude < 4f) return false;
-        if (!NavMesh.CalculatePath(_actor.Position, nav.position, NavMesh.AllAreas, _path)
-            || _path.status != NavMeshPathStatus.PathComplete
-            || !SafePostShiftPath(_shiftCorners, _path.GetCornersNonAlloc(_shiftCorners), nav.position)) return false;
+            if (member != _actor && !member.Bot.IsDead && (member.Position - nav.position).sqrMagnitude < 4f)
+            { ReportSurvey("reposition", _shiftCandidate, "squad spacing", sample, nav.position); return false; }
+        if (!NavMesh.CalculatePath(_actor.Position, nav.position, NavMesh.AllAreas, _path))
+        { ReportSurvey("reposition", _shiftCandidate, "post shift path unavailable", sample, nav.position); return false; }
+        if (_path.status != NavMeshPathStatus.PathComplete)
+        { ReportSurvey("reposition", _shiftCandidate, "post shift path incomplete", sample, nav.position); return false; }
+        if (!SafePostShiftPath(_shiftCorners, _path.GetCornersNonAlloc(_shiftCorners), nav.position))
+        { ReportSurvey("reposition", _shiftCandidate, "unsafe local route", sample, nav.position); return false; }
         _shiftViews.Clear();
         _shiftPose = .5f;
         for (var stance = 0; stance < 2 && _shiftViews.Count == 0; stance++)
@@ -154,10 +163,12 @@ internal sealed partial class SniperPlan
             for (var i = 0; i < count; i++)
             {
                 var direction = Direction(_site.WatchYaw - _site.WatchArc / 2 + i * _site.WatchArc / 4, _site.WatchPitch);
-                if (OpenView(head, direction)) _shiftViews.Add(direction);
+                if (ProbeView(head, direction, out var visible)) _shiftViews.Add(visible);
             }
         }
-        if (_shiftViews.Count == 0) return false;
+        if (_shiftViews.Count == 0)
+        { ReportSurvey("reposition", _shiftCandidate, "sightline blocked", sample, nav.position); return false; }
+        ReportSurvey("reposition", _shiftCandidate, "usable view and local route", sample, nav.position);
         target = nav.position;
         return true;
     }

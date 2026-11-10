@@ -500,6 +500,7 @@ internal sealed partial class SniperPlan : IObjectiveWork
 
     private bool Survey(Vector3 origin)
     {
+        ResetViewSurvey();
         var n = _candidate++;
         var angle = n * 137.5f;
         var radius = n == 0 ? 0 : _site.Radius * Mathf.Sqrt(n / 24f);
@@ -509,14 +510,18 @@ internal sealed partial class SniperPlan : IObjectiveWork
         {
             // Start above the authored seed; accept only a roof in the documented elevation band.
             if (!Physics.Raycast(sample + Vector3.up * 16, Vector3.down, out var roof, 13,
-                LayersMaskController.HighPolyWithTerrainMask, QueryTriggerInteraction.Ignore)) return RejectSurvey("roof missing");
+                LayersMaskController.HighPolyWithTerrainMask, QueryTriggerInteraction.Ignore))
+                return RejectPost("roof missing", sample, null);
             sample = roof.point;
         }
-        if (!NavMesh.SamplePosition(sample, out var nav, 1.5f, NavMesh.AllAreas)
-            || Mathf.Abs(nav.position.y - sample.y) > 1.25f
-            || _recording == null && _site.Elevated && nav.position.y < _site.Y + 3) return RejectSurvey("post mesh or height");
+        if (!NavMesh.SamplePosition(sample, out var nav, 1.5f, NavMesh.AllAreas))
+            return RejectPost("post mesh missing", sample, null);
+        if (Mathf.Abs(nav.position.y - sample.y) > 1.25f)
+            return RejectPost("post height mismatch", sample, nav.position);
+        if (_recording == null && _site.Elevated && nav.position.y < _site.Y + 3)
+            return RejectPost("post below roof band", sample, nav.position);
         foreach (var rejected in _rejectedPosts)
-            if ((nav.position - rejected).sqrMagnitude < 9f) return RejectSurvey("previously unreachable post");
+            if ((nav.position - rejected).sqrMagnitude < 9f) return RejectPost("previously unreachable post", sample, nav.position);
         // A usable view from the actual eye height, not a ground-level ray through a parapet.
         _pose = .5f;
         var head = nav.position + Vector3.up * 1.25f;
@@ -525,10 +530,12 @@ internal sealed partial class SniperPlan : IObjectiveWork
         {
             _pose = 1; head = nav.position + Vector3.up * 1.65f;
             SurveyDirections(head);
-            if (_watchDirections.Count == 0) return RejectSurvey("sightline blocked");
+            if (_watchDirections.Count == 0) return RejectPost("sightline blocked", sample, nav.position);
         }
         // Survey certifies the local post. The staged route search owns connectivity and stairs.
-        _post = nav.position; return true;
+        _post = nav.position;
+        ReportSurvey("survey", _candidate, "usable view; route pending", sample, nav.position);
+        return true;
     }
 
     private void SurveyDirections(Vector3 head)
@@ -538,14 +545,9 @@ internal sealed partial class SniperPlan : IObjectiveWork
         for (var i = 0; i < count; i++)
         {
             var direction = Direction(_site.WatchYaw - _site.WatchArc / 2 + i * _site.WatchArc / 4, _site.WatchPitch);
-            if (OpenView(head, direction)) _watchDirections.Add(direction);
+            if (ProbeView(head, direction, out var visible)) _watchDirections.Add(visible);
         }
     }
-
-    private bool OpenView(Vector3 head, Vector3 direction)
-        => !Physics.Raycast(head, direction, out var hit, _site.WatchDistance,
-            LayersMaskController.HighPolyWithTerrainMask, QueryTriggerInteraction.Ignore)
-            || hit.distance >= Mathf.Min(_site.WatchDistance, ServerConfig.Rush.SniperDisengageDistance);
 
     internal bool Watch(Agent agent)
     {
