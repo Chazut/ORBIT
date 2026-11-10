@@ -30,6 +30,8 @@ internal sealed class OperationRouteSearch
     internal int Samples { get; private set; }
     internal int PartialPaths { get; private set; }
     internal int InvalidPaths { get; private set; }
+    internal int LocalDestinations { get; private set; }
+    internal bool InvalidDestination { get; private set; }
     internal Vector3[] RouteCorners { get; private set; }
     private const int LocalCandidates = 20;
     private const int DirectCandidates = LocalCandidates + 3;
@@ -37,11 +39,12 @@ internal sealed class OperationRouteSearch
 
     internal string Diagnostics => $"complete={_completePaths} invalidQueries={_invalidQueries} approachChecks={_checks} approachRejected={_rejected}"
         + $" searchTarget={_target} lastRejected={_lastRejected} lastRejection={_lastRejection}"
-        + $" filters=[no-sample:{_noSample},floor:{_wrongFloor},outside-target:{_outsideTarget},no-corners:{_noCorners},near:{_tooClose},no-progress:{_noProgress},visited:{_visited},scope:{_outsideScope},interaction:{_blockedInteraction}] localAccess={_localAccess} groundedTarget={_groundedTarget}";
+        + $" filters=[no-sample:{_noSample},floor:{_wrongFloor},outside-target:{_outsideTarget},no-corners:{_noCorners},near:{_tooClose},no-progress:{_noProgress},visited:{_visited},scope:{_outsideScope},interaction:{_blockedInteraction}] localAccess={_localAccess} groundedTarget={_groundedTarget} localDestinations={LocalDestinations} invalidDestination={InvalidDestination}";
 
     internal void Reset()
     {
         _candidate = Samples = PartialPaths = InvalidPaths = 0;
+        LocalDestinations = 0; InvalidDestination = false;
         _complete.Clear(); _partial.Clear();
         _completePaths = _checks = _rejected = _invalidQueries = 0;
         _noSample = _wrongFloor = _outsideTarget = _noCorners = _tooClose = _noProgress = _visited = 0;
@@ -55,7 +58,7 @@ internal sealed class OperationRouteSearch
     internal bool Find(Vector3 origin, Vector3 target, out Vector3 point, out bool final,
         int expansion = 0, IReadOnlyList<Vector3> avoided = null, bool floorAware = false, float finalHeightTolerance = 2.5f,
         Func<Vector3, bool> allowedPoint = null, Func<Vector3, bool> finalPoint = null, bool localAccess = false,
-        bool groundedTarget = false)
+        bool groundedTarget = false, bool requireLocalDestination = false)
     {
         point = default;
         _target = target;
@@ -78,6 +81,7 @@ internal sealed class OperationRouteSearch
         var work = 0;
         while (_candidate < totalCandidates && work < 3)
         {
+            if (MissingDestination(requireLocalDestination)) return false;
             work++;
             var index = _candidate++;
             var local = index < LocalCandidates;
@@ -156,6 +160,9 @@ internal sealed class OperationRouteSearch
             if (local && Mathf.Abs(hit.position.y - target.y) > (groundedTarget ? .6f : finalHeightTolerance))
             { _wrongFloor++; continue; }
             if (local && HorizontalDistance(hit.position, target) > 3f) { _outsideTarget++; continue; }
+            // Geometry only: an upstairs destination can be valid even when its path
+            // is partial and reaching it requires stairs or a distant detour.
+            if (local) LocalDestinations++;
             if (allowedPoint != null && !allowedPoint(hit.position)) { _outsideScope++; continue; }
             if (local && finalPoint != null && !finalPoint(hit.position)) { _blockedInteraction++; continue; }
             Samples++;
@@ -188,6 +195,7 @@ internal sealed class OperationRouteSearch
             if (Visited(end, avoided, separation)) { _visited++; continue; }
             RememberApproach(end, score, _path.status == NavMeshPathStatus.PathComplete);
         }
+        if (MissingDestination(requireLocalDestination)) return false;
         if (_candidate < totalCandidates) { Pending = true; return false; }
         // Verify in score order, continuing with another candidate after an invalid endpoint.
         // These calls consume the same slice as enumeration, including after a deferred resume.
@@ -216,6 +224,14 @@ internal sealed class OperationRouteSearch
                 : _path.status == NavMeshPathStatus.PathPartial ? "partial-endpoint" : "invalid-endpoint");
         }
         return false;
+    }
+
+    private bool MissingDestination(bool required)
+    {
+        if (!required || _candidate < LocalCandidates || LocalDestinations > 0) return false;
+        InvalidDestination = true;
+        _lastRejection = "no-local-mesh";
+        return true;
     }
 
     private void RememberApproach(Vector3 point, float score, bool complete)

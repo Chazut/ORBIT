@@ -201,7 +201,13 @@ internal sealed partial class RushPlan : IObjectiveWork
             var found = !_searchingRecorded && _route.Find(_actor.Position, target, out _anchor, out final, _retries, _approachHistory,
                 floorAware: (Kind is "Marked" or "Boss" or "Custom") && Mathf.Abs(_actor.Position.y - target.y) > 2.5f,
                 finalPoint: door != null && !_inside && _doorApproach ? DoorStep(door).InteractionCheck : null,
-                localAccess: door != null && !_inside && _doorApproach);
+                localAccess: door != null && !_inside && _doorApproach,
+                requireLocalDestination: Kind == "Custom");
+            if (_route.InvalidDestination)
+            {
+                ReportInvalidDestination(squad, site, target);
+                return Skip(squad, waypoints, "no NavMesh near configured point");
+            }
             if (_searchingRecorded)
             {
                 found = _recorded.Find(_actor.Position, out _anchor);
@@ -440,6 +446,18 @@ internal sealed partial class RushPlan : IObjectiveWork
         if (Kind == "Spawn") detail += $" candidates={_nearbySpawnCandidates} radius={_nearbySpawnRadius:F1}m";
         Log.Info($"{(selected ? "RUSH SELECT" : "RUSH ROUTE")}: {squad} {detail}");
         PerformanceJournal.Event(selected ? "rush-select" : "rush-route", squad.Leader?.Bot?.Profile?.Id, detail, squad.Id);
+    }
+
+    private void ReportInvalidDestination(Squad squad, RushPoint site, Vector3 target)
+    {
+        if (!Log.InfoEnabled && !PerformanceJournal.Enabled) return;
+        // One record per rejected site, using the existing sliced route probes.
+        // Never snap a malformed target onto a different floor or spend its travel
+        // timeout searching for stairs to a destination with no local NavMesh.
+        var detail = $"kind={Kind} site={site.Name} id={site.Id} mode={site.CustomMode} target={target} from={_actor.Position}"
+            + $" reason=no-local-mesh {_route.Diagnostics}";
+        Log.Info($"RUSH TARGET REJECTED: {squad} {detail}");
+        PerformanceJournal.Event("rush-target-rejected", _actor.Bot.Profile.Id, detail, squad.Id);
     }
 
     private bool Visit(Squad squad, WaypointSystem waypoints)
