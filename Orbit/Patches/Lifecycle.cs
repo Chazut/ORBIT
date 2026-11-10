@@ -142,6 +142,9 @@ public class OrbitDisposePatch : ModulePatch
         }
         finally
         {
+            // Door links exist independently of the manager. Release them even if runtime
+            // initialization was skipped or an earlier subsystem failed during teardown.
+            DoorNavMesh.Clear();
             try { DebugExport.WorldEnded(); }
             catch (System.Exception e) { Plugin.LogSource.LogWarning("Debug snapshot cleanup failed: " + e.Message); }
         }
