@@ -32,11 +32,17 @@ public partial class WaypointSystem
         return true;
     }
 
-    internal void CollectCorpseEscortCover(Vector3 center, List<CoverPoint> result, bool ambush = false)
+    internal void CollectCorpseEscortCover(Vector3 center, List<CoverPoint> result, bool ambush = false,
+        AmbushSearchBudget diagnostics = null)
     {
         result.Clear();
+        if (diagnostics != null) diagnostics.NativeQueries++;
         var data = _botsController?.CoversData;
-        if (data == null) return;
+        if (data == null)
+        {
+            if (diagnostics != null) diagnostics.NativeDataMissing++;
+            return;
+        }
         var index = data.GetIndexes(center);
         var voxels = data.GetVoxelesExtended(index.x, index.y, index.z, 3, true);
         for (var i = 0; i < voxels.Count; i++)
@@ -45,10 +51,20 @@ public partial class WaypointSystem
             for (var p = 0; p < points.Count; p++)
             {
                 var point = points[p];
+                if (diagnostics != null) diagnostics.NativePoints++;
                 var delta = point.Position - center;
-                if ((!ambush && delta.sqrMagnitude < 16f) || delta.sqrMagnitude > 225f
-                    || Mathf.Abs(delta.y) > (ambush ? 4f : 2f)) continue;
+                if ((!ambush && delta.sqrMagnitude < 16f) || delta.sqrMagnitude > 225f)
+                {
+                    if (diagnostics != null) diagnostics.NativeRangeRejected++;
+                    continue;
+                }
+                if (Mathf.Abs(delta.y) > (ambush ? 4f : 2f))
+                {
+                    if (diagnostics != null) diagnostics.NativeHeightRejected++;
+                    continue;
+                }
                 var cover = new CoverPoint(point.Position, point.WallDirection, point.CoverType, point.CoverLevel);
+                if (cover.Category == CoverCategory.None && diagnostics != null) diagnostics.NativeTypeRejected++;
                 if (cover.Category != CoverCategory.None && !result.Contains(cover)) result.Add(cover);
                 if (result.Count >= 64) return;
             }

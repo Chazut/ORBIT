@@ -236,6 +236,7 @@ public partial class WaypointSystem
         List<Vector3> occupied, AmbushSearchBudget budget, float distanceMax = 0)
     {
         if (distanceMax <= 0) distanceMax = rule.DistanceMax;
+        budget.CachedCandidates += site.Covers.Count;
         if (distanceMax > site.CoversRadius + .1f)
         { site.CoversRadius = distanceMax; site.CoversReady = false; site.CoverProbe = 0; }
         // A shared target can be queried by several squads. Publish readiness only after all probes.
@@ -246,9 +247,19 @@ public partial class WaypointSystem
             { site.CoversReady = true; break; }
             if (site.Kind == CampSiteKind.Extract && NavMesh.SamplePosition(sample, out var ground, 12f, NavMesh.AllAreas))
                 sample = ground.position;
-            CollectCorpseEscortCover(sample, _campCoverScratch, ambush: true);
+            else if (site.Kind == CampSiteKind.Hotspot)
+            {
+                // Follow local terrain when collecting hints, but never cross the requested floor.
+                if (!NavMesh.SamplePosition(sample, out ground, 8f, NavMesh.AllAreas))
+                { budget.GroundMisses++; continue; }
+                if (!MatchesZoneFloor(site.Scope?.FloorId, ground.position))
+                { budget.GroundFloorRejected++; continue; }
+                sample = ground.position;
+            }
+            CollectCorpseEscortCover(sample, _campCoverScratch, ambush: true, diagnostics: budget);
             foreach (var cover in _campCoverScratch)
-                if (!site.Covers.Contains(cover) && site.Covers.Count < 512) site.Covers.Add(cover);
+                if (!site.Covers.Contains(cover) && site.Covers.Count < 512)
+                { site.Covers.Add(cover); budget.NativeCandidates++; }
         }
         if (site.Covers.Count >= 512) site.CoversReady = true;
         var covers = site.Covers.ToArray();
@@ -261,24 +272,27 @@ public partial class WaypointSystem
                 var cover = covers[(firstCover + i) % covers.Length];
                 if (cover.Category != category) continue;
                 // Keep a few path queries for physical cover when baked hints are disconnected.
-                if (site.Kind == CampSiteKind.Extract && budget.Remaining <= 4) break;
+                if (site.Kind is CampSiteKind.Extract or CampSiteKind.Hotspot && budget.Remaining <= 4) break;
                 yield return null;
                 if (ValidateAmbushPosition(agent, site, rule, cover.Position, occupied, budget, out var position, distanceMax))
-                { yield return new CoverPoint(position, cover.Direction, cover.Category, cover.Level); yield break; }
+                { budget.Source = "native-or-cached"; yield return new CoverPoint(position, cover.Direction, cover.Category, cover.Level); yield break; }
             }
         // Some scenes have sparse or missing baked cover hints. Discover nearby physical shelter
         // only after native candidates fail, and validate it with the same floor/path/spacing rules.
-        if (site.Kind == CampSiteKind.Extract)
+        if (site.Kind is CampSiteKind.Extract or CampSiteKind.Hotspot)
             for (var probe = 0; probe < 256 && budget.Remaining > 0
                 && AmbushCoverProbe.Sample(site.Position, distanceMax, probe, out var sample); probe++)
                 for (var heading = 0; heading < 4 && budget.Remaining > 0; heading++)
                 {
                     yield return null;
+                    budget.GeometryProbes++;
                     if (!AmbushCoverProbe.Geometry(sample, heading, out var cover)) continue;
+                    budget.GeometryCandidates++;
                     yield return null;
                     if (!ValidateAmbushPosition(agent, site, rule, cover.Position, occupied, budget, out var position, distanceMax)) continue;
                     if (site.Covers.Count < 512 && !site.Covers.Contains(cover)) site.Covers.Add(cover);
-                    Log.Info($"AMBUSH COVER: {agent.Squad} source=geometry category={cover.Category} position={position}");
+                    budget.Source = "geometry";
+                    if (Log.InfoEnabled) Log.Info($"AMBUSH COVER: {agent.Squad} source=geometry category={cover.Category} position={position} kind={site.Kind} radius={distanceMax:F1}m");
                     yield return new CoverPoint(position, cover.Direction, cover.Category, cover.Level);
                     yield break;
                 }
@@ -290,7 +304,7 @@ public partial class WaypointSystem
                 var radius = (rule.DistanceMin + distanceMax) * .5f;
                 var sample = site.Position + new Vector3(Mathf.Cos(angle), 0, Mathf.Sin(angle)) * radius;
                 if (ValidateAmbushPosition(agent, site, rule, sample, occupied, budget, out var position, distanceMax))
-                { yield return new CoverPoint(position, (site.Position - position).normalized, CoverCategory.None, CoverLevel.Stay); yield break; }
+                { budget.Source = "open"; yield return new CoverPoint(position, (site.Position - position).normalized, CoverCategory.None, CoverLevel.Stay); yield break; }
             }
         if (budget.Remaining <= 0) budget.Reject("query budget");
     }
@@ -337,6 +351,7 @@ public partial class WaypointSystem
         List<Vector3> occupied, AmbushSearchBudget budget, out Vector3 position, float distanceMax)
     {
         position = candidate;
+        budget.CandidatesTested++;
         if (site.Kind == CampSiteKind.Hotspot
             && XzDistanceSqr(candidate, site.ZoneCenter) > site.ZoneRadius * site.ZoneRadius) return budget.Reject("outside main zone");
         var delta = candidate - site.Position;

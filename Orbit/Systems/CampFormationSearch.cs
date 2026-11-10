@@ -23,6 +23,8 @@ internal sealed class CampFormationSearch : IFrameSearch, IDisposable
     private readonly AmbushSearchBudget _budget = new();
     private readonly float _started;
     private readonly float _timeout;
+    private readonly float _distanceMax;
+    private bool _finished;
     private readonly int _firstFrame;
     private int _slices;
     internal bool Done, Success, DirectLoot, Cancelled;
@@ -54,6 +56,14 @@ internal sealed class CampFormationSearch : IFrameSearch, IDisposable
     {
         _waypoints = waypoints; Squad = squad; Site = site; Main = main;
         _target = site.Position; _started = Time.time; _firstFrame = Time.frameCount;
+        // Extract attempts deliberately expand. Other camps use the current configured radius.
+        _distanceMax = site.Kind == CampSiteKind.Extract && main?.CampSearchRadius > 0
+            ? main.CampSearchRadius : ServerConfig.Ambush.For(site.Kind).DistanceMax;
+        if (main != null && main.CampSearchRadius != _distanceMax)
+        {
+            main.CampSearchRadius = _distanceMax;
+            Orbit.Api.OrbitTelemetry.MainObjectivesRevision++;
+        }
         _timeout = AmbushDirector.IsInitialKillSearch(main) ? AmbushDirector.InitialKillSearchRemaining(main) : float.MaxValue;
         _members = new List<Agent>(squad.Members);
         foreach (var member in _members) _origins.Add(member.Position);
@@ -68,6 +78,7 @@ internal sealed class CampFormationSearch : IFrameSearch, IDisposable
         try
         {
             if (_steps.MoveNext()) return true;
+            _finished = true;
             Dispose();
             if (PerformanceJournal.Enabled)
             {
@@ -86,7 +97,7 @@ internal sealed class CampFormationSearch : IFrameSearch, IDisposable
         var hasCover = false;
         foreach (var member in _members)
         {
-            foreach (var cover in _waypoints.SearchAmbushCover(member, Site, rule, _occupied, _budget, Main?.CampSearchRadius ?? 0))
+            foreach (var cover in _waypoints.SearchAmbushCover(member, Site, rule, _occupied, _budget, _distanceMax))
             {
                 if (!cover.HasValue) { yield return true; continue; }
                 Positions.Add(member, cover.Value); _occupied.Add(cover.Value.Position);
@@ -118,5 +129,15 @@ internal sealed class CampFormationSearch : IFrameSearch, IDisposable
         Success = canApproach;
     }
 
-    public void Dispose() { if (Done) return; Done = true; _steps.Dispose(); }
+    public void Dispose()
+    {
+        if (Done) return;
+        Done = true; _steps.Dispose();
+        if (!Log.InfoEnabled && !PerformanceJournal.Enabled) return;
+        var state = _finished ? "completed" : "cancelled";
+        var detail = $"squad={Squad.Id} kind={Site.Kind} radius={_distanceMax:F1}m state={state} success={Success} members={Positions.Count}/{_members.Count} {_budget.Diagnostics} rejected={Rejections}";
+        if (Log.InfoEnabled) Log.Info("CAMP COVER SEARCH: " + detail);
+        if (PerformanceJournal.Enabled)
+            PerformanceJournal.Event("camp-cover-search", Squad.Leader?.Bot?.Profile?.Id, detail, Squad.Id);
+    }
 }

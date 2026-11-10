@@ -19,6 +19,7 @@ internal sealed partial class AmbushDirector
     private bool StartInitialKillSearch(Squad squad, MainObjective main)
     {
         if (main.CampSearchAttempt == 0) main.CampSearchAttempt = 1;
+        main.CampSearchRadius = ServerConfig.Ambush.Hotspots.DistanceMax;
         if (InitialKillSearchRemaining(main) <= 0)
         {
             FailInitialKillSearchAttempt(squad, main, "initial search budget exhausted", "none", 0);
@@ -90,6 +91,6 @@ internal sealed partial class AmbushDirector
     {
         if (!Log.InfoEnabled) return;
         var anchor = main.CampSite != null ? main.CampSite.Position.ToString() : "none";
-        Log.Info($"KILL AMBUSH SEARCH: {squad} state={state} attempt={main.CampSearchAttempt}/{InitialKillAnchorLimit} anchor={anchor} zone={main.KillZoneCenter} radius={main.KillZoneRadius:F1}m floor={main.ZoneFloorId ?? "all"} searchTime={main.CampInitialSearchElapsed + elapsed:F1}s reason={reason} rejected={rejected}");
+        Log.Info($"KILL AMBUSH SEARCH: {squad} state={state} attempt={main.CampSearchAttempt}/{InitialKillAnchorLimit} anchor={anchor} zone={main.KillZoneCenter} radius={main.KillZoneRadius:F1}m floor={main.ZoneFloorId ?? "all"} searchTime={main.CampInitialSearchElapsed + elapsed:F1}s reason={reason} searchRadius={main.CampSearchRadius:F1}m rejected={rejected}");
     }
 }
