@@ -121,6 +121,13 @@ public class LootContainerAction(AgentData dataset, WaypointSystem waypointSyste
 
         if (!state.IsDone) return;
 
+        if (!state.Success && agent.Squad?.Camp.PreserveInterruptedAirdropLoot(agent.Squad, location, waypointSystem) == true)
+        {
+            waypointSystem.ReleaseClaim(location.Id, agent.Id);
+            _states.Remove(agent.Id);
+            return;
+        }
+
         var squadWasExtracting = agent.Squad?.ExtractRequested == true;
         var wasSoloExtracting = agent.SoloExtractRequested;
 
@@ -634,6 +641,9 @@ public class LootContainerAction(AgentData dataset, WaypointSystem waypointSyste
         // The room planner owns the next pickup; an ordinary sweep may lead through floors or walls.
         if (agent.Squad?.Rush?.CollectingMarkedRoom == true) return false;
         if (agent.Squad?.Camp.Active == true) return false;
+        // Finish this kill detour, then resume the already chosen crate instead of
+        // extending the interruption into an unrelated chain of nearby pickups.
+        if (agent.Squad?.Camp.PendingAirdrop != null) return false;
         // A second live session may finish during an escort, but only the shared looter extends
         // that detour. Everyone else rejoins after releasing their current transfer normally.
         if (agent.Squad?.CorpseEscort.Active == true && !agent.Squad.CorpseEscort.Owns(agent))

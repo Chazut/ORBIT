@@ -71,7 +71,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
             if (operatingSquad.MainObjectives != null)
                 foreach (var main in operatingSquad.MainObjectives) main.CampApproach?.Release(operatingSquad, waypointSystem);
         }
-        if (entity is Squad campingSquad) campingSquad.Camp.End(campingSquad, "strategy deactivated");
+        if (entity is Squad campingSquad) campingSquad.Camp.Interrupt(campingSquad, "strategy deactivated");
         if (entity is Squad squad) squad.CorpseEscort.End(squad, waypointSystem, "strategy deactivated");
         if (entity is Squad bossSquad) bossSquad.BossLoot.Cancel(bossSquad, waypointSystem, "strategy deactivated");
         // Return any assignments before deactivating.
@@ -875,7 +875,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
 
             if (squad.CorpseEscort.UpdateMember(squad, agent, i, waypointSystem)) continue;
             if (squad.BossLoot.Owns(agent)) continue;
-            if (squad.Camp.PendingAirdrop != null || squad.Camp.RetryMain != null || squad.Camp.Owns(agent)) continue;
+            if (squad.Camp.ReservesPendingAirdrop || squad.Camp.RetryMain != null || squad.Camp.Owns(agent)) continue;
             if (squad.Operation?.Owns(agent) == true || squad.Rush?.Owns(agent) == true
                 || squad.MainApproach.Owns(agent) || ExtractCampApproach.Owns(squad, agent)) continue;
 

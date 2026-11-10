@@ -49,9 +49,13 @@ internal sealed class AirdropApproach(Squad squad, AmbushSite site, WaypointSyst
     internal bool Tick()
     {
         if (_released || Failure != null) return false;
-        if (squad.Camp.PendingAirdrop != site || !AmbushDirector.Available(squad)
+        if (squad.Camp.PendingAirdrop != site
             || !waypoints.IsAmbushSiteAvailable(site, squad.Leader?.BotCategory))
             return Fail("interrupted or site unavailable");
+        // A queued route slice can run before the strategy sees combat. Let the director
+        // suspend the intent; do not turn a temporary interruption into a failed route.
+        if (!AmbushDirector.Available(squad))
+        { waypoints.CancelOperationWork(this); return true; }
         if (_members.Count != 0 && (_members.Count != squad.Size
             || !AllMembersPresent())) return Fail("group or assignment changed");
 

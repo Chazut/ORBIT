@@ -9,7 +9,7 @@ using Random = UnityEngine.Random;
 namespace Orbit.Systems;
 
 /// <summary>Holds a main objective or an airdrop detour from separate, stable cover positions.</summary>
-internal sealed class CampPlan
+internal sealed partial class CampPlan
 {
     internal readonly Dictionary<Agent, Waypoint> Slots = new();
     internal AmbushSite Site;
@@ -20,7 +20,7 @@ internal sealed class CampPlan
     internal float AirdropFormationSince { get; set; }
     internal float AirdropCooldownUntil;
     internal AmbushSite AirdropTarget => PendingAirdrop ?? (Site?.Kind == CampSiteKind.Airdrop ? Site : null);
-    internal string AirdropStage => AirdropTarget == null ? null : Looter != null ? "loot" : Holding ? "waiting" : "approach";
+    internal string AirdropStage => AirdropTarget == null ? null : AirdropPaused ? "paused" : Looter != null ? "loot" : Holding ? "waiting" : "approach";
     internal float Held => _held;
     internal float Duration => _duration;
     internal bool Active => Site != null;
@@ -60,6 +60,8 @@ internal sealed class CampPlan
     internal void SelectAirdrop(Squad squad, AmbushSite site)
     {
         CancelMainRetry();
+        ResetAirdropContinuation();
+        _directLoot = false;
         PendingAirdrop = site;
         Approach = null;
         AirdropFormationSince = 0;
@@ -85,9 +87,11 @@ internal sealed class CampPlan
         Main = main;
         if (main?.Type == MainObjectiveType.Kills) main.CampInitialSearchResolved = true;
         main?.SetCampState("approach");
-        _held = _holdTick = 0;
+        var continuingAirdrop = site.Kind == CampSiteKind.Airdrop && PendingAirdrop == site;
+        if (!continuingAirdrop) _held = 0;
+        _holdTick = 0;
         Holding = false;
-        _directLoot = directLoot && site.Kind == CampSiteKind.Airdrop;
+        _directLoot = site.Kind == CampSiteKind.Airdrop && (directLoot || continuingAirdrop && _directLoot);
         _mission = squad.Objective.Location;
         _missionDuration = squad.Objective.Duration;
         _waypoints = waypoints;
@@ -101,7 +105,6 @@ internal sealed class CampPlan
         else if (PendingAirdrop != site) _duration = Random.Range(style.AirdropDurationMin, style.AirdropDurationMax);
         if (_directLoot) _duration = 0;
         PendingAirdrop = null;
-        if (site.Kind == CampSiteKind.Airdrop) VisitedAirdrops.Add(site);
         foreach (var pair in positions)
         {
             var agent = pair.Key;
@@ -126,14 +129,30 @@ internal sealed class CampPlan
     {
         if (!Active) return false;
         PauseMission(squad);
+        if (Site.Kind == CampSiteKind.Airdrop)
+        {
+            // A completed pickup can itself trigger extraction, or finish just before combat.
+            // Record that success before considering a new interruption.
+            if (AirdropLootCompleted) { End(squad, "airdrop loot completed"); return false; }
+            var terminal = AirdropAbandonReason(squad)
+                ?? (!waypoints.IsAmbushSiteAvailable(Site, squad.Leader?.BotCategory) ? "target unavailable" : null);
+            if (terminal != null) { End(squad, terminal); return false; }
+            var busy = AmbushDirector.AirdropBusyReason(squad, waypoints);
+            if (busy != null) { SuspendAirdrop(squad, busy); return false; }
+        }
         var cfg = ServerConfig.Ambush;
         var reason = !cfg.Allows(squad.Leader?.BotCategory) || !cfg.For(Site.Kind).Enabled ? "disabled"
             : !AmbushDirector.Available(squad) ? "combat, extraction or member unavailable"
             : squad.Objective.Location != _mission ? "mission changed"
             : !waypoints.IsAmbushSiteAvailable(Site, squad.Leader.BotCategory) ? "target unavailable" : null;
-        if (reason != null) { End(squad, reason); return false; }
+        if (reason != null)
+        {
+            if (reason == "mission changed") Interrupt(squad, reason);
+            else End(squad, reason);
+            return false;
+        }
         // A late member needs a new formation. Release the detour instead of leaving it behind.
-        if (Slots.Count != squad.Size) { End(squad, "group changed"); return false; }
+        if (Slots.Count != squad.Size) { Interrupt(squad, "group changed"); return false; }
         // Cover failure removes the ambush delay, including when the crate lands during approach.
         if (_directLoot && Looter == null && Site.Landed && !BeginLoot(squad, waypoints))
         { End(squad, "direct airdrop loot unavailable"); return false; }
@@ -141,11 +160,13 @@ internal sealed class CampPlan
         foreach (var pair in Slots)
         {
             var agent = pair.Key;
-            if (!squad.Members.Contains(agent) || !Owns(agent) || agent.Objective.Status == ObjectiveStatus.Failed)
-            { End(squad, "route failed or assignment changed"); return false; }
+            if (!squad.Members.Contains(agent) || !Owns(agent))
+            { Interrupt(squad, "assignment changed"); return false; }
+            if (agent.Objective.Status == ObjectiveStatus.Failed)
+            { End(squad, agent == Looter ? "airdrop loot failed" : "route failed or assignment changed"); return false; }
             if (agent == Looter)
             {
-                if (agent.Objective.Status is ObjectiveStatus.Finished or ObjectiveStatus.Failed)
+                if (agent.Objective.Status == ObjectiveStatus.Finished)
                 { End(squad, "airdrop loot completed"); return false; }
                 if (Time.time - _lootStartedAt >= cfg.TravelTimeout && !CorpseEscort.InFlight(agent))
                 { End(squad, "airdrop loot approach timeout"); return false; }
@@ -154,7 +175,7 @@ internal sealed class CampPlan
             if (agent.Objective.Status == ObjectiveStatus.Finished)
             {
                 if ((agent.Position - pair.Value.Position).sqrMagnitude > 16f)
-                { End(squad, "member displaced"); return false; }
+                { Interrupt(squad, "member displaced"); return false; }
                 arrived = true;
             }
             else if (Time.time - _startedAt >= cfg.TravelTimeout)
@@ -245,6 +266,13 @@ internal sealed class CampPlan
     internal void End(Squad squad, string reason)
     {
         CancelMainRetry();
+        var airdrop = AirdropTarget;
+        if (airdrop != null)
+        {
+            VisitedAirdrops.Add(airdrop);
+            AirdropEvent(squad, reason == "airdrop loot completed" ? "completed" : "abandoned", reason);
+        }
+        ResetAirdropContinuation();
         if (PendingAirdrop != null)
         {
             PauseMission(squad);
@@ -259,6 +287,32 @@ internal sealed class CampPlan
         if (!Active) return;
         PauseMission(squad);
         Log.Info($"AMBUSH: {squad} ended kind={Site.Kind} reason={reason}");
+        ReleaseSlots(squad);
+        if (squad.Objective.Location == _mission) squad.Objective.Duration = Main?.Completed == true ? 0 : _missionDuration;
+        if (Main != null)
+        {
+            Main.SetCampState(Main.Completed ? "completed" : "paused", Main.Completed ? null : reason);
+            if (Main.Type == MainObjectiveType.ExtractCamp && reason is ("route failed or assignment changed" or "travel timeout" or "member displaced"))
+                Main.CampApproach?.Retry(squad, _waypoints, reason);
+            if (!Main.Completed) { Main.CampSearchAttempt = 0; Main.CampSearchRadius = 0; }
+            Main.CampRetryAt = Time.time + 5f;
+            if (Main.Type == MainObjectiveType.Kills && !Main.Completed
+                && reason is ("route failed or assignment changed" or "travel timeout" or "member displaced"))
+                RetryMainAfterFailure(squad, Main, reason);
+            Orbit.Api.OrbitTelemetry.MainObjectivesRevision++;
+        }
+        if (Site.Kind == CampSiteKind.Airdrop) Orbit.Api.OrbitTelemetry.MainObjectivesRevision++;
+        Looter = null;
+        Site = null;
+        Main = null;
+        Holding = false;
+        _directLoot = false;
+        NextCheck = Time.time + ServerConfig.Ambush.Cooldown;
+        AirdropCooldownUntil = NextCheck;
+    }
+
+    private void ReleaseSlots(Squad squad)
+    {
         foreach (var pair in Slots)
         {
             var agent = pair.Key;
@@ -276,28 +330,7 @@ internal sealed class CampPlan
             squad.RecentlyVisitedPoiCooldowns.Remove(pair.Value.Id);
             agent.ArrivalFailures.Forget(pair.Value.Id);
         }
-        if (squad.Objective.Location == _mission) squad.Objective.Duration = Main?.Completed == true ? 0 : _missionDuration;
-        if (Main != null)
-        {
-            Main.SetCampState(Main.Completed ? "completed" : "paused", Main.Completed ? null : reason);
-            if (Main.Type == MainObjectiveType.ExtractCamp && reason is ("route failed or assignment changed" or "travel timeout" or "member displaced"))
-                Main.CampApproach?.Retry(squad, _waypoints, reason);
-            if (!Main.Completed) { Main.CampSearchAttempt = 0; Main.CampSearchRadius = 0; }
-            Main.CampRetryAt = Time.time + 5f;
-            if (Main.Type == MainObjectiveType.Kills && !Main.Completed
-                && reason is ("route failed or assignment changed" or "travel timeout" or "member displaced"))
-                RetryMainAfterFailure(squad, Main, reason);
-            Orbit.Api.OrbitTelemetry.MainObjectivesRevision++;
-        }
-        if (Site.Kind == CampSiteKind.Airdrop) Orbit.Api.OrbitTelemetry.MainObjectivesRevision++;
         Slots.Clear();
-        Looter = null;
-        Site = null;
-        Main = null;
-        Holding = false;
-        _directLoot = false;
-        NextCheck = Time.time + ServerConfig.Ambush.Cooldown;
-        AirdropCooldownUntil = NextCheck;
     }
 
     internal void CancelMainRetry() => RetryMain = null;

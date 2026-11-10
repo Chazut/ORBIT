@@ -18,6 +18,22 @@ internal sealed partial class AmbushDirector(WaypointSystem waypoints)
 
     internal static bool Available(Squad squad) => UnavailableReason(squad) == null;
 
+    internal static string AirdropBusyReason(Squad squad, WaypointSystem waypoints)
+    {
+        var reason = UnavailableReason(squad);
+        if (reason != null) return reason;
+        foreach (var member in squad.Members)
+        {
+            var objective = member.Objective;
+            if (objective.Location?.Category == WaypointCategory.Corpse
+                && objective.Status is not (ObjectiveStatus.Finished or ObjectiveStatus.Failed)
+                && !squad.CompletedPoiIds.Contains(objective.Location.Id)) return "own-kill or corpse approach";
+            if (member.OwnKillCorpseIds.Count > 0
+                && waypoints.TryGetNextOwnKillCorpseForAgent(squad, member) != null) return "own-kill loot pending";
+        }
+        return null;
+    }
+
     private static string UnavailableReason(Squad squad)
     {
         if (squad.Leader == null || squad.Size == 0) return "no leader or members";
@@ -99,8 +115,7 @@ internal sealed partial class AmbushDirector(WaypointSystem waypoints)
         var site = squad.Camp.PendingAirdrop;
         if (site == null) return false;
         squad.Camp.PauseMission(squad);
-        var reason = !ServerConfig.Ambush.Allows(squad.Leader?.BotCategory) || !ServerConfig.Ambush.Airdrops.Enabled
-            ? "airdrops disabled" : UnavailableReason(squad)
+        var reason = squad.Camp.AirdropAbandonReason(squad)
             ?? (!waypoints.IsAmbushSiteAvailable(site, squad.Leader?.BotCategory) ? "site unavailable" : null);
         if (reason != null)
         {
@@ -108,11 +123,22 @@ internal sealed partial class AmbushDirector(WaypointSystem waypoints)
             squad.Camp.End(squad, reason);
             return false;
         }
+        if (!squad.Camp.ResumeCheckDue()) return false;
+        var busy = AirdropBusyReason(squad, waypoints);
+        if (busy != null)
+        {
+            CancelFormation(squad);
+            squad.Camp.SuspendAirdrop(squad, busy);
+            return false;
+        }
+        squad.Camp.ResumeAirdrop(squad);
         var approach = squad.Camp.Approach ??= new AirdropApproach(squad, site, waypoints);
         if (!approach.Tick())
         {
             CancelFormation(squad);
-            squad.Camp.End(squad, approach.Failure ?? "approach interrupted");
+            if (approach.Failure is "group or assignment changed" or "assignment changed")
+                squad.Camp.Interrupt(squad, approach.Failure);
+            else squad.Camp.End(squad, approach.Failure ?? "approach interrupted");
             return false;
         }
         if (!approach.Ready) { CancelFormation(squad); squad.Camp.AirdropFormationSince = 0; return true; }
