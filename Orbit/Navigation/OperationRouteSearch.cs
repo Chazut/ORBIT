@@ -21,7 +21,7 @@ internal sealed class OperationRouteSearch
     private const int MaxApproachesPerKind = 8;
     private int _completePaths, _checks, _rejected, _invalidQueries;
     private int _noSample, _wrongFloor, _outsideTarget, _noCorners, _tooClose, _noProgress, _visited;
-    private int _outsideScope, _blockedInteraction;
+    private int _outsideScope, _blockedInteraction, _destinationScope;
     private Vector3 _lastRejected;
     private Vector3 _target;
     private bool _localAccess, _groundedTarget;
@@ -39,7 +39,7 @@ internal sealed class OperationRouteSearch
 
     internal string Diagnostics => $"complete={_completePaths} invalidQueries={_invalidQueries} approachChecks={_checks} approachRejected={_rejected}"
         + $" searchTarget={_target} lastRejected={_lastRejected} lastRejection={_lastRejection}"
-        + $" filters=[no-sample:{_noSample},floor:{_wrongFloor},outside-target:{_outsideTarget},no-corners:{_noCorners},near:{_tooClose},no-progress:{_noProgress},visited:{_visited},scope:{_outsideScope},interaction:{_blockedInteraction}] localAccess={_localAccess} groundedTarget={_groundedTarget} localDestinations={LocalDestinations} invalidDestination={InvalidDestination}";
+        + $" filters=[no-sample:{_noSample},floor:{_wrongFloor},outside-target:{_outsideTarget},no-corners:{_noCorners},near:{_tooClose},no-progress:{_noProgress},visited:{_visited},scope:{_outsideScope},interaction:{_blockedInteraction},destination-scope:{_destinationScope}] localAccess={_localAccess} groundedTarget={_groundedTarget} localDestinations={LocalDestinations} invalidDestination={InvalidDestination}";
 
     internal void Reset()
     {
@@ -48,7 +48,7 @@ internal sealed class OperationRouteSearch
         _complete.Clear(); _partial.Clear();
         _completePaths = _checks = _rejected = _invalidQueries = 0;
         _noSample = _wrongFloor = _outsideTarget = _noCorners = _tooClose = _noProgress = _visited = 0;
-        _outsideScope = _blockedInteraction = 0;
+        _outsideScope = _blockedInteraction = _destinationScope = 0;
         _lastRejected = _target = default; _lastRejection = "none";
         _localAccess = _groundedTarget = false;
         Pending = false;
@@ -58,7 +58,8 @@ internal sealed class OperationRouteSearch
     internal bool Find(Vector3 origin, Vector3 target, out Vector3 point, out bool final,
         int expansion = 0, IReadOnlyList<Vector3> avoided = null, bool floorAware = false, float finalHeightTolerance = 2.5f,
         Func<Vector3, bool> allowedPoint = null, Func<Vector3, bool> finalPoint = null, bool localAccess = false,
-        bool groundedTarget = false, bool requireLocalDestination = false)
+        bool groundedTarget = false, bool requireLocalDestination = false,
+        Func<Vector3, bool> destinationScope = null, float destinationRadius = 0)
     {
         point = default;
         _target = target;
@@ -87,7 +88,16 @@ internal sealed class OperationRouteSearch
             var local = index < LocalCandidates;
             var sampleRadius = local ? 1.25f : 3f;
             Vector3 sample;
-            if (index < 4 && groundedTarget)
+            if (local && destinationRadius > 0)
+            {
+                // An area objective needs a reachable point in its disk, not its exact
+                // center. Keep the authored height even when a lower landing is nearer.
+                var angle = index * 2.399963f;
+                var radius = index < 8 ? Mathf.Min(2.25f, destinationRadius) * Mathf.Sqrt(index / 7f)
+                    : destinationRadius * Mathf.Sqrt((index - 7) / 12f);
+                sample = target + new Vector3(Mathf.Cos(angle) * radius, 0, Mathf.Sin(angle) * radius);
+            }
+            else if (index < 4 && groundedTarget)
             {
                 // Probe the standing point and small horizontal alternatives, not the switch's pivot.
                 sample = target + (index == 1 ? new Vector3(.25f, 0, 0)
@@ -159,7 +169,8 @@ internal sealed class OperationRouteSearch
             if (floorAware && !local && Mathf.Abs(hit.position.y - sample.y) > 2.5f) { _wrongFloor++; continue; }
             if (local && Mathf.Abs(hit.position.y - target.y) > (groundedTarget ? .6f : finalHeightTolerance))
             { _wrongFloor++; continue; }
-            if (local && HorizontalDistance(hit.position, target) > 3f) { _outsideTarget++; continue; }
+            if (local && HorizontalDistance(hit.position, target) > (destinationRadius > 0 ? destinationRadius : 3f)) { _outsideTarget++; continue; }
+            if (local && destinationScope != null && !destinationScope(hit.position)) { _destinationScope++; continue; }
             // Geometry only: an upstairs destination can be valid even when its path
             // is partial and reaching it requires stairs or a distant detour.
             if (local) LocalDestinations++;

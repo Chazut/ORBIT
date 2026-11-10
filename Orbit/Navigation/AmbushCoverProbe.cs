@@ -25,10 +25,10 @@ internal static class AmbushCoverProbe
         return false;
     }
 
-    internal static bool Geometry(Vector3 sample, int heading, out CoverPoint cover)
+    internal static bool Geometry(Vector3 sample, int heading, out CoverPoint cover, float groundRadius = 8f)
     {
         cover = default;
-        if (!NavMesh.SamplePosition(sample, out var ground, 8f, NavMesh.AllAreas)) return false;
+        if (!NavMesh.SamplePosition(sample, out var ground, groundRadius, NavMesh.AllAreas)) return false;
         var angle = heading * Mathf.PI / 2f;
         var direction = new Vector3(Mathf.Cos(angle), 0, Mathf.Sin(angle));
         var mask = LayersMaskController.HighPolyWithTerrainMask | LayersMaskController.Foliage;

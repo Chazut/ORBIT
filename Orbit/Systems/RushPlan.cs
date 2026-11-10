@@ -199,10 +199,12 @@ internal sealed partial class RushPlan : IObjectiveWork
             // Marked rooms, boss areas and Other points on another floor may need distant stairs.
             var final = false;
             var found = !_searchingRecorded && _route.Find(_actor.Position, target, out _anchor, out final, _retries, _approachHistory,
-                floorAware: (Kind is "Marked" or "Boss" or "Custom") && Mathf.Abs(_actor.Position.y - target.y) > 2.5f,
+                floorAware: Kind == "Custom" || (Kind is "Marked" or "Boss") && Mathf.Abs(_actor.Position.y - target.y) > 2.5f,
                 finalPoint: door != null && !_inside && _doorApproach ? DoorStep(door).InteractionCheck : null,
                 localAccess: door != null && !_inside && _doorApproach,
-                requireLocalDestination: Kind == "Custom");
+                requireLocalDestination: Kind == "Custom",
+                destinationScope: Kind == "Custom" ? point => waypoints.CustomRushInZone(site, point) : null,
+                destinationRadius: Kind == "Custom" && (site.CustomMode is "Camp" or "CampThenLoot") ? site.Radius : 0);
             if (_route.InvalidDestination)
             {
                 ReportInvalidDestination(squad, site, target);
@@ -226,6 +228,7 @@ internal sealed partial class RushPlan : IObjectiveWork
                 return true;
             }
             _partial = !final;
+            if (Kind == "Custom") ReportCustomApproach(squad, site, final ? "final" : "leg", "route selected");
             if (_partial) Log.Info($"RUSH APPROACH: {squad} kind={Kind} site={site.Name} leg={_anchor} target={target} remaining={Vector3.Distance(_anchor, target):F1}m");
             SetOrder(_actor, Point(waypoints, _anchor, site.Name), waypoints);
             squad.Objective.Location = _orders[_actor]; squad.Objective.Status = SquadObjectiveState.Active;
@@ -259,6 +262,16 @@ internal sealed partial class RushPlan : IObjectiveWork
         if (Status == "searching" && _held >= site.SearchSeconds * _searchScale) return Visit(squad, waypoints);
         if (Status != "searching" && (_actor.Position - _anchor).sqrMagnitude > (door != null ? 1f : 9f)) return true;
         if (_partial) return true;
+        // Proximity to a destination upstairs is not arrival. A mover may stop on a
+        // landing within the ordinary three-metre arrival radius.
+        if (Kind == "Custom" && !waypoints.CustomRushInZone(site, _actor.Position))
+        {
+            if (_actor.Objective.Status != ObjectiveStatus.Finished) return true;
+            ReportCustomApproach(squad, site, "rejected", "arrival outside zone or floor");
+            Release(squad, waypoints); _route.Reset();
+            if (++_retries >= 3) return Skip(squad, waypoints, "arrival outside zone or floor");
+            return true;
+        }
         if (door != null && !_inside && !_doorApproach)
         {
             _doorApproach = true; Release(squad, waypoints); _route.Reset(); _approachHistory.Clear(); _retries = 0; return true;
@@ -277,6 +290,7 @@ internal sealed partial class RushPlan : IObjectiveWork
             var sample = Position(site) + new Vector3(offset.x, 0, offset.y);
             if (NavMesh.SamplePosition(sample, out var hit, 2, NavMesh.AllAreas)
                 && Mathf.Abs(hit.position.y - site.Y) < 2.5f
+                && (Kind != "Custom" || waypoints.CustomRushInZone(site, hit.position))
                 && NavMesh.CalculatePath(_actor.Position, hit.position, NavMesh.AllAreas, _path)
                 && _path.status == NavMeshPathStatus.PathComplete)
                 SetOrder(_actor, Point(waypoints, hit.position, "Search " + site.Name), waypoints);

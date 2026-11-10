@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using Orbit.Entities;
+using Orbit.Helpers;
 using Orbit.Navigation;
 using Orbit.Settings;
 using UnityEngine;
@@ -101,6 +102,13 @@ internal sealed partial class RushPlan
                 Release(squad, w); _route.Reset(); _customArrived = false;
                 SetStatus(squad, "returning to camp"); return false;
             }
+            if (member.Objective.Status == ObjectiveStatus.Finished && !w.CustomRushInZone(site, member.Position))
+            {
+                ReportCustomApproach(squad, site, "rejected", $"camp member={member.Id} outside zone or floor at={member.Position}");
+                if (++_retries >= 3) { Skip(squad, w, "camp position unreachable"); return false; }
+                Release(squad, w); _route.Reset(); _customArrived = false;
+                SetStatus(squad, "returning to camp"); return false;
+            }
             if (!_orders.TryGetValue(member, out var order) || member.Objective.Location != order
                 || member.Objective.Status == ObjectiveStatus.Finished && (member.Position - cover.Position).sqrMagnitude > 4f)
             {
@@ -127,6 +135,15 @@ internal sealed partial class RushPlan
         _customCampPositions.Clear(); _customCampOccupied.Clear();
     }
 
+    private void ReportCustomApproach(Squad squad, RushPoint site, string state, string reason)
+    {
+        if (!Log.InfoEnabled && !PerformanceJournal.Enabled) return;
+        var detail = $"site={site.Name} id={site.Id} mode={site.CustomMode} state={state} reason={reason}"
+            + $" from={_actor.Position} target={Position(site)} anchor={_anchor} floor={site.FloorId ?? "auto"} radius={site.Radius:F1}m {_route.Diagnostics}";
+        Log.Info($"RUSH CUSTOM APPROACH: {squad} {detail}");
+        PerformanceJournal.Event("rush-custom-approach", _actor.Bot.Profile.Id, detail, squad.Id);
+    }
+
     private void HoldCustomMembers(Squad squad, WaypointSystem w, RushPoint site)
     {
         // One follower placement per shared work slot, retained until combat or a detour.
@@ -140,6 +157,7 @@ internal sealed partial class RushPlan
             var offset = new Vector3(Mathf.Cos(angle), 0, Mathf.Sin(angle)) * Mathf.Min(site.Radius, 3f + i);
             if (NavMesh.SamplePosition(_anchor + offset, out var hit, 1f, NavMesh.AllAreas)
                 && Mathf.Abs(hit.position.y - _anchor.y) <= .65f
+                && w.CustomRushInZone(site, hit.position)
                 && (hit.position - _anchor).sqrMagnitude <= site.Radius * site.Radius
                 && NavMesh.CalculatePath(member.Position, hit.position, NavMesh.AllAreas, _path)
                 && _path.status == NavMeshPathStatus.PathComplete)
