@@ -36,9 +36,11 @@ public class OrbitBrainLayer : CustomLayer
     private const string LayerName = "OrbitBrainLayer";
 
     private readonly OrbitManager _orbit;
-    private readonly Agent _agent;
+    private Agent _agent;
     private readonly bool _excluded;
-    private readonly Collider _botCollider;
+    private Collider _botCollider;
+    private readonly System.Action _restoreControl;
+    private readonly BaseBrain _brain;
 
     // Tracks SAIN combat layer state from OnLayerChanged. Replaces BotOwner.Memory.LastEnemyTimeSeen which
     // SAIN keeps fresh long past actual combat (sticky enemy memory), trapping ORBIT off.
@@ -171,8 +173,11 @@ public class OrbitBrainLayer : CustomLayer
 
     public OrbitBrainLayer(BotOwner botOwner, int priority) : base(botOwner, priority)
     {
-        var excluded = Orbit.Api.OrbitBotControl.IsBotExcluded(botOwner)
-            || IsExcludedRole(botOwner);
+        _orbit = Singleton<OrbitManager>.Instance;
+        _brain = botOwner.Brain.BaseBrain;
+        _restoreControl = AttachAgent;
+        _excluded = IsExcludedRole(botOwner);
+        var excluded = _excluded || Orbit.Api.OrbitBotControl.IsBotExcluded(botOwner);
         try
         {
             Log.Info($"BRAIN REGISTRATION: {botOwner.Profile?.Nickname} [{botOwner.ProfileId}] role={botOwner.Profile?.Info?.Settings?.Role}"
@@ -180,22 +185,39 @@ public class OrbitBrainLayer : CustomLayer
                 + $" excluded={excluded} vanillaScavs={_vanillaScavs} playerScav={botOwner.Profile?.WillBeAPlayerScav()}");
         }
         catch { } // Diagnostics must never interrupt brain registration.
-        if (excluded)
+        if (_excluded)
         {
-            _excluded = true;
+            _orbit?.BotExclusions.UnregisterLayer(botOwner);
             return;
         }
 
-        // BSG would otherwise deactivate the bot when far from the player.
-        botOwner.StandBy.CanDoStandBy = false;
-        botOwner.StandBy.Activate();
-
-        _orbit = Singleton<OrbitManager>.Instance;
-        _agent = _orbit.AddAgent(botOwner);
-        if (_agent == null) { _excluded = true; return; }
-
-        botOwner.Brain.BaseBrain.OnLayerChangedTo += OnLayerChanged;
+        _orbit.BotExclusions.RegisterLayer(botOwner, _restoreControl);
+        _brain.OnLayerChangedTo += OnLayerChanged;
         botOwner.GetPlayer.OnPlayerDead += OnDead;
+        if (!excluded) AttachAgent();
+    }
+
+    private void AttachAgent()
+    {
+        // A replacement brain may have no ORBIT layer at all. Never revive a stale layer.
+        if (!ReferenceEquals(_brain, BotOwner.Brain.BaseBrain))
+        {
+            _orbit.BotExclusions.UnregisterLayer(BotOwner);
+            return;
+        }
+        // BSG would otherwise deactivate the bot when far from the player.
+        BotOwner.StandBy.CanDoStandBy = false;
+        BotOwner.StandBy.Activate();
+
+        _agent = _orbit.AddAgent(BotOwner);
+        if (_agent == null) throw new InvalidOperationException("ORBIT agent attachment was refused");
+        var layerName = BotOwner.Brain.ActiveLayerName();
+        _sainCombatActive = layerName == SainCombatLayerName;
+        _nativeDangerLayer = layerName?.IndexOf("AvoidDanger", StringComparison.OrdinalIgnoreCase) >= 0;
+        if (_nativeDangerLayer) _nativeDangerGrace.Observe(Time.time);
+        // Exclude + enable can both be requested before BigBrain switches away from ORBIT.
+        // Do not wait for a layer-change event that may never arrive in that case.
+        _agent.IsActive = layerName == LayerName;
 
         // Bot<->door collision is managed per door state by DoorSystem: the bot physically stops at a CLOSED
         // leaf (so it can't phase through a carved-open locked door) and passes freely through an open / opening
@@ -207,6 +229,10 @@ public class OrbitBrainLayer : CustomLayer
     private void OnDead(Player player, IPlayer lastAggressor, DamageInfo damageInfo, EBodyPart part)
     {
         player.OnPlayerDead -= OnDead;
+        _brain.OnLayerChangedTo -= OnLayerChanged;
+        if (!_orbit.BotExclusions.IsCurrentLayer(BotOwner, _restoreControl)) return;
+        _orbit.BotExclusions.Forget(BotOwner);
+        if (!_orbit.HasAgent(_agent)) return;
         _agent.IsActive = false;
         if (_botCollider != null) _orbit.DoorSystem.UnregisterBot(_botCollider);
         var squad = _agent.Squad;
@@ -221,16 +247,12 @@ public class OrbitBrainLayer : CustomLayer
 
     private void OnLayerChanged(AICoreLayer<BotLogicDecision> layer)
     {
-        if (Orbit.Api.OrbitBotControl.IsBotExcluded(BotOwner))
+        if (!_orbit.BotExclusions.IsCurrentLayer(BotOwner, _restoreControl)
+            || !ReferenceEquals(_brain, BotOwner.Brain.BaseBrain))
         {
-            _agent.IsActive = false;
-            BotOwner.Brain.BaseBrain.OnLayerChangedTo -= OnLayerChanged;
+            _brain.OnLayerChangedTo -= OnLayerChanged;
             return;
         }
-        // BigBrain has already selected the new layer. Release our movement hooks before any
-        // physical operation can throw, otherwise both controllers can keep driving this bot.
-        var wasActive = _agent.IsActive;
-        _agent.IsActive = false;
         var layerName = layer.Name();
         bool dangerLayer = layerName.IndexOf("AvoidDanger", StringComparison.OrdinalIgnoreCase) >= 0;
         if (dangerLayer || _nativeDangerLayer)
@@ -240,6 +262,17 @@ public class OrbitBrainLayer : CustomLayer
         if (_sainCombatActive && !sainCombatNow)
             _sainCombatEndedAt = Time.time;
         _sainCombatActive = sainCombatNow;
+
+        // Keep observing combat while excluded, but never drive the detached agent or mover.
+        if (Orbit.Api.OrbitBotControl.IsBotExcluded(BotOwner) || _agent == null)
+        {
+            if (_agent != null) _agent.IsActive = false;
+            return;
+        }
+        // BigBrain has already selected the new layer. Release our movement hooks before any
+        // physical operation can throw, otherwise both controllers can keep driving this bot.
+        var wasActive = _agent.IsActive;
+        _agent.IsActive = false;
 
         try
         {
@@ -289,7 +322,9 @@ public class OrbitBrainLayer : CustomLayer
 
     public override bool IsActive()
     {
-        if (_excluded || Orbit.Api.OrbitBotControl.IsBotExcluded(BotOwner)) return false;
+        if (_excluded || _agent == null || Orbit.Api.OrbitBotControl.IsBotExcluded(BotOwner)
+            || !_orbit.BotExclusions.IsCurrentLayer(BotOwner, _restoreControl)
+            || !ReferenceEquals(_brain, BotOwner.Brain.BaseBrain)) return false;
         // A sleeper never hands its inactive body to BSG. Healing and combat cannot happen on it, and
         // when the meds gate below let PatrolAssault take a dormant bot, BSG started a first aid on a
         // body whose animator was off: Medecine.Using stayed stuck and the bot could not walk a single
@@ -341,6 +376,8 @@ public class OrbitBrainLayer : CustomLayer
 
     public override void BuildDebugText(StringBuilder sb)
     {
+        if (_excluded || _agent == null || Orbit.Api.OrbitBotControl.IsBotExcluded(BotOwner))
+        { sb.AppendLine("ORBIT control excluded"); return; }
         var pose = BotOwner.GetPlayer.MovementContext.PoseLevel;
         var actualSpeed = _agent.Player.MovementContext.CharacterMovementSpeed;
 

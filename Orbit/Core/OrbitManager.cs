@@ -161,13 +161,14 @@ public class OrbitManager
 
     public Agent AddAgent(BotOwner bot)
     {
-        if (BotExclusions.Contains(bot)) return null;
+        if (BotExclusions.BlocksRegistration(bot)) return null;
         // A runtime brain swap (e.g. MoreBotsAPI on custom bots) makes BigBrain rebuild the brain and re-enter
         // here for a BotOwner that already has an Agent. Without this dedup each swap leaves an orphan agent that
         // holds a squad slot and never moves (its layer is dead), stalling the squad on the "all arrived" gate.
         var existing = _botRoster.GetAgent(bot);
         if (existing != null)
         {
+            if (!ReferenceEquals(existing.Bot, bot)) return null;
             Log.Debug($"AddAgent: reusing {existing} (brain re-instantiation, no duplicate agent created)");
             return existing;
         }
@@ -231,13 +232,16 @@ public class OrbitManager
 
     public void RemoveAgent(Agent agent) => RemoveAgent(agent, detachedAlive: false);
 
+    internal bool HasAgent(Agent agent)
+        => agent != null && ReferenceEquals(_botRoster.GetAgent(agent.Bot), agent);
+
     internal void RemoveAgent(Agent agent, bool detachedAlive)
     {
         using var timing = TransitionPerformance.Measure(TransitionPhase.AgentRemove);
         // Death can fire RemoveAgent once per brain layer wired for this bot (each layer's OnPlayerDead survives
         // brain swaps), but the teardown below is not idempotent (id slots get recycled). Bail unless this agent
         // is still the live registration; the first pass nulls the roster slot and later passes no-op.
-        if (_botRoster.GetAgent(agent.Bot) != agent) return;
+        if (!HasAgent(agent)) return;
 
         agent.LootHandler?.Retire();
 

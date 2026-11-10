@@ -4,7 +4,7 @@
 
 Target release: early in the week of November 9, 2026 (tentative).
 
-- Implemented: [per-bot control exclusion API](BOT_CONTROL_API.md) for Harmony/PBT and other integrations. The calling mod selects bots explicitly; ORBIT wakes them and relinquishes control for that lifetime. Reapply on each spawn. Automated checks pass; in-raid PBT validation is still pending.
+- Implemented: [per-bot control API](BOT_CONTROL_API.md) for Harmony/PBT and other integrations. The calling mod explicitly excludes a bot with `ExcludeBot` (wake and release control), then can restore normal ORBIT/Ghost eligibility with `EnableBot`. Reapply exclusions on each spawn. Automated checks pass; in-raid PBT validation is still pending.
 
 ## Other ideas
 
