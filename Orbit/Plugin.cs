@@ -131,6 +131,8 @@ public class Plugin : BaseUnityPlugin
         EnableSafe(new DoorInteractionCollisionEndPatch());
 
         EnableSafe(new SoftTeleportTracePatch());
+        EnableSafe(new RotationRequestDiagnosticPatch());
+        EnableSafe(new RotationStateDiagnosticPatch());
         EnableSafe(new OrbitMoverHandoffFallbackPatch());
         EnableSafe(new OrbitMoverHandoffLinkedPatch());
         EnableSafe(new HardTeleportTracePatch());
