@@ -1,3 +1,63 @@
+# ORBIT 3.1.1
+
+For SPT 4.1.x. Changes since ORBIT 3.1.0. This patch focuses on looting, movement, Ghost transitions and objective recovery, and adds a public API for other mods.
+
+## Airdrops and looting
+
+- Fix bots reaching an airdrop but refusing to loot because the crate's own collider blocked the arrival check. The check now targets the crate and accepts its own colliders while still rejecting unrelated obstacles. Thanks to **Scootis_McPootis** for the report and debug ZIP.
+- Preserve a selected airdrop through combat, looting a kill and temporary assignment changes. Bots can resume the same drop without another chance roll, retaining their camp progress. Extraction, completion and an unavailable crate still end the detour.
+- Prevent Ghost sleep during unsettled weapon or inventory operations. Wake a sleeping bot when a loot transfer needs its active inventory, and recover stale weapon-selection flags only after verifying that the weapon and hands are settled.
+- Retry temporary inventory failures on the same loot target, preserve partial loot, and stop reporting failed inspections as successfully completed.
+- Apply temporary access exclusions consistently to objective selection, fallback targets and own-kill loot. Keep inaccessible items available to other eligible squad members and allow later retries when access changes.
+- Reduce rapid retries and repeated logs for rejected loot targets. Distinguish temporary bot unavailability from a genuinely unreachable route.
+- Avoid redundant weapon redraws and wait for conflicting inventory operations to finish before starting another transfer.
+- Use the corpse or airdrop's own floor for arrival checks instead of an unrelated overlapping zone.
+
+## Camps, ambushes and sniper objectives
+
+- Fix **Camp** and **Camp then loot** approaches choosing the wrong floor. Search for a reachable approach within the configured area, including when its center is not walkable, and check the floor again before counting camp time.
+- Improve cover selection and fallback positions throughout the camp area. Preserve squad spacing, combat interruptions and the camp-before-loot order, with bounded searches and stair detours.
+- Reject custom rush destinations with no suitable nearby navigable ground before spending a long time searching for a route. Add clearer placement and path rejection diagnostics.
+- Add a physical-cover fallback for Kill ambushes when normal cover hints are missing or unusable. Keep the configured area, floor, spacing and visibility checks.
+- Report the actual ambush search radius to RaidReview instead of an incorrect `0 m`.
+- Correct sniper sightline checks and add detailed reasons for rejected posts, including floor, mesh and obstruction failures.
+- Keep sniper squad members at separate approach and holding positions instead of stacking everyone on the sniper's point.
+
+## Doors, navigation and control
+
+- Preserve ORBIT's registered bot/door collision rules after the game's interaction cleanup, including delayed cleanup. Thanks to **Kaanori (Kaan)** for the investigation and proposed fixes in [issue #22](https://github.com/Chazut/ORBIT/issues/22).
+- Pause stuck recovery during door animations within a bounded recovery window. Prevent recovery from closing an occupied doorway or reopening a closed or locked door from stale state.
+- Release completed owned door interactions and verify the door's physical open position before completing an operation.
+- Keep a bot waiting for a queued replacement route in the moving state instead of prematurely failing its objective.
+- Track actual travel progress across jumps, short airborne pauses and route changes. Replan or abandon persistent stalls instead of repeating physical assists indefinitely, while preserving deliberate waits and combat interruptions.
+- Avoid active directional mine trigger areas during navigation, accounting for their orientation and floor.
+- Distinguish a medical need from active treatment so bots can return to ORBIT after combat when they are not actually using medicine. Preserve active treatment and danger avoidance, including a short quiet period after danger clears.
+- Require a real extraction request and the selected exit before accepting an extraction waypoint as an objective or fallback.
+- Prevent repeated visits to exhausted synthetic patrol points. Suspend shared-objective recovery while every member is extracting solo.
+
+## Ghost Mode and raid cleanup
+
+- Retain pending wake requests when safe placement is temporarily unavailable, including the full real-fight awake protection period.
+- Improve ground checks for moving Ghosts and overlapping squads. Recheck beneath the bot and distribute placement attempts while preserving floor, clearance and query-budget limits.
+- Clear door-navigation references at raid end and before registering the next raid's doors, including when the manager is absent or cleanup fails. Thanks to **R_F** for identifying references retained from previous raids.
+- Add bounded diagnostics for wake placement, loot outcomes, door recovery, brain attachment and rotation problems. Rotation diagnostics observe behavior without changing steering.
+
+## Public bot-control API
+
+- Add `Orbit.Api.OrbitBotControl.ExcludeBot` and `EnableBot` so another mod can release a bot from ORBIT and Ghost Mode, then restore its normal eligibility. Thanks to **Harmony** for the request and integration testing.
+- Add `SetBotSleepAllowed` and `IsBotSleepBlocked` for mods that want ORBIT to keep driving a bot while keeping it awake. Thanks to **DeepMitze** for requesting this mode. Managed squads share sleep state, so keeping one member awake also keeps its ORBIT squad awake.
+- Keep full exclusion and sleep-only policies independent. Requests are scoped to the spawned bot, use safe wake handling, and are cleared when the bot is removed or the raid ends. Calling mods choose the bots; ORBIT does not automatically identify PBT cheaters.
+- Fix a brain-initialization exception found during Harmony's API test, when custom layers were created before the native brain agent was ready.
+- See the [API documentation](https://github.com/Chazut/ORBIT/blob/main/BOT_CONTROL_API.md) for calls, readiness checks and optional integration. Calls belong on the Unity thread of the machine running the bots: solo, Fika host or headless.
+
+## Updating and Fika
+
+- Replace both the ORBIT client and server files. Existing settings and presets are preserved.
+- The **Fika addon remains at 1.2.0**, with no addon changes in this release. Use ORBIT **3.1.1** on the host/headless and every playing client, and keep the Fika addon installed when using Fika.
+- This patch does not replace addon-authored zone coordinates. Check for updates from your preset's author if a custom point itself is misplaced.
+
+Thanks again to R_F, Kaanori, Scootis_McPootis, Harmony, DeepMitze and everyone who supplied reports and raid logs.
+
 # ORBIT 3.1.0
 
 For SPT 4.1.x. Changes since ORBIT 3.0.0. Fika addon 1.2.0 remains compatible and unchanged.

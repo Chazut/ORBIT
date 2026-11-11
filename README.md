@@ -27,7 +27,7 @@ Bots pursue objectives, loot, upgrade their gear and extract. Ghost Mode keeps d
 
 ---
 
-**ORBIT 3.1.0**: [Downloads](https://github.com/Chazut/ORBIT/releases) · [Full changelog](CHANGELOG.md) · [Fika addon 1.2.0](CHANGELOG.md#orbit-fika-addon-120)
+**ORBIT 3.1.1**: [Downloads](https://github.com/Chazut/ORBIT/releases) · [Full changelog](CHANGELOG.md) · [Fika addon 1.2.0](CHANGELOG.md#orbit-fika-addon-120)
 
 ## Features
 
