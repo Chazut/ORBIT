@@ -1422,27 +1422,12 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
         Log.Warning($"OrbitLootHandler.WaitForHandsControllerSettleAsync({Nick}): timed out after {maxWaitMs}ms — proceeding anyway");
     }
 
-    /// <summary>
-    /// End-of-session sync. Bot is no longer in the loot animation cycle: fast-forward the hands controller
-    /// and call SetSlotItem so BSG re-picks and draws the new best weapon.
-    /// </summary>
+    // Reconcile after inventory completion, including cancellation into combat. Never fast-forward
+    // the new owner's medical/reload operation or redraw from a cancelled loot continuation.
     private void SyncBotWeaponStateAtSessionEnd()
     {
-        if (!HasLiveOwner) return;
-        try
-        {
-            var player = _bot?.GetPlayer;
-            if (player == null) return;
-            try { player.HandsController?.FastForwardCurrentState(); }
-            catch (System.Exception ffEx) { Log.Warning($"OrbitLootHandler.SyncBotWeaponStateAtSessionEnd({Nick}): FastForward THREW {ffEx.Message}"); }
-            try { _bot.WeaponManager?.Selector?.SetSlotItem(new Callback<IHandsController>(_ => { }), true); }
-            catch (System.Exception ssEx) { Log.Warning($"OrbitLootHandler.SyncBotWeaponStateAtSessionEnd({Nick}): SetSlotItem THREW {ssEx.Message}"); }
-            Log.Debug($"OrbitLootHandler.SyncBotWeaponStateAtSessionEnd({Nick}): triggered weapon-draw animation after {_swappedWeaponIds.Count} swapped weapon(s)");
-        }
-        catch (System.Exception e)
-        {
-            Log.Warning($"OrbitLootHandler.SyncBotWeaponStateAtSessionEnd({Nick}) THREW: {e}");
-        }
+        if (HasLiveOwner)
+            Orbit.Systems.LootHandsRecovery.Queue(Singleton<BotRoster>.Instance?.GetAgent(_bot));
     }
 
     private bool IsDescendantOfSwappedWeapon(Item item)

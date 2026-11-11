@@ -596,6 +596,8 @@ public static partial class WeaponSwapper
             Log.Warning($"WeaponSwap.Swap({nick}, {itemA.LocalizedName()}@{descA} ↔ {itemB.LocalizedName()}@{descB}): build FAILED — {op.Error}");
             return false;
         }
+        if (itemA is Weapon || itemB is Weapon)
+            Orbit.Systems.LootHandsRecovery.Queue(Singleton<BotRoster>.Instance?.GetAgent(bot));
         return await RunGuardedTransactionAsync(bot, op, $"Swap({itemA.LocalizedName()}@{descA} ↔ {itemB.LocalizedName()}@{descB})", nick, ct);
     }
 
@@ -708,6 +710,8 @@ public static partial class WeaponSwapper
             Log.Warning($"WeaponSwap.Move({nick}, {item.LocalizedName()} from {fromDesc} → {destSlotId}): build FAILED — {op.Error}");
             return false;
         }
+        if (item is Weapon)
+            Orbit.Systems.LootHandsRecovery.Queue(Singleton<BotRoster>.Instance?.GetAgent(bot));
         return await RunGuardedTransactionAsync(bot, op, $"Move({item.LocalizedName()}: {fromDesc}→{destSlotId})", nick, ct);
     }
 

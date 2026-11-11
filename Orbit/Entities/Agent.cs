@@ -40,6 +40,11 @@ public class Agent(int id, BotOwner bot, float[] taskScores) : Entity(id, taskSc
     internal bool GhostHandsDrawPending;
     internal float GhostHandsRetryAt;
 
+    // A native weapon transaction can outlive the loot task cancelled by combat.
+    internal bool LootHandsPending;
+    internal int LootHandsAttempts;
+    internal float LootHandsRetryAt;
+
     /// <summary>Diagnostic timer for inventory operations preventing sleep, -1 when none.
     /// An expired timer never releases an operation that is still pending.</summary>
     public float InventoryBusySince = -1f;

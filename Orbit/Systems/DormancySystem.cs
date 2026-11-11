@@ -380,7 +380,11 @@ public partial class DormancySystem
     public void Update(List<Agent> liveAgents, List<Squad> squads)
     {
         // Redraws can finish after a wake, including when spectators suspend Ghost Mode.
-        for (var i = 0; i < liveAgents.Count; i++) GhostHandsRecovery.Tick(liveAgents[i]);
+        for (var i = 0; i < liveAgents.Count; i++)
+        {
+            LootHandsRecovery.Tick(liveAgents[i]);
+            GhostHandsRecovery.Tick(liveAgents[i]);
+        }
         if (!_enabled) return;
         using (TransitionPerformance.Measure(TransitionPhase.GhostWeaponVisuals)) GhostWeaponVisuals.Tick();
         // Check before scheduled shots/kills: spectators must see live combat after waking.
@@ -683,7 +687,7 @@ public partial class DormancySystem
             if (!bot.gameObject.activeSelf) { _farBlockedState++; return false; } // someone else owns the GameObject — never fight over it
             if (agent.SoloExtractRequested && (agent.SoloExtractIsEmergency || NearOwnExfil(agent))) { _farBlockedExtract++; return false; }
             var loot = agent.LootHandler;
-            if (agent.GhostHandsResync) { _farBlockedHands++; return false; }
+            if (agent.GhostHandsResync || agent.LootHandsPending) { _farBlockedHands++; return false; }
             if (loot != null && loot.LootTaskRunning && !_cfg.GhostLooting)
             { _farBlockedLoot++; return false; }
             if (bot.Memory != null && (bot.Memory.GoalEnemy != null || bot.Memory.IsUnderFire))
