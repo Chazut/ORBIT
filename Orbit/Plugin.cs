@@ -127,6 +127,8 @@ public class Plugin : BaseUnityPlugin
 
         EnableSafe(new DoorCarverShrinkPatch());
         EnableSafe(new DoorUnlockTracePatch());
+        EnableSafe(new DoorInteractionCollisionPatch());
+        EnableSafe(new DoorInteractionCollisionEndPatch());
 
         EnableSafe(new SoftTeleportTracePatch());
         EnableSafe(new OrbitMoverHandoffFallbackPatch());

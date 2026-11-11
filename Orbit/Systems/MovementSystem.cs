@@ -68,6 +68,7 @@ public partial class MovementSystem
 
             if (!agent.IsActive)
             {
+                agent.Movement.DoorRecovery.Reset();
                 agent.Stuck.TravelProgress.Reset();
                 ObserveRescueProgress(agent, paused: true);
                 agent.Movement.Failures.Reset();
@@ -85,6 +86,7 @@ public partial class MovementSystem
                 ObserveAwakeRecovery(agent, CanRecoverAirborneFall(agent.Player));
                 continue;
             }
+            if (HoldForDoorRecovery(agent)) continue;
             if (HoldForTravelObservation(agent)) { ObserveRescueProgress(agent, paused: true); continue; }
             if (agent.SniperReturn?.Tick(this, _waypointSystem) == true) { ObserveRescueProgress(agent, paused: true); continue; }
 
@@ -725,11 +727,7 @@ public partial class MovementSystem
         // corner for the animation window instead of advancing. Observed in testing: at full walking
         // speed the door never finishes opening and the bot phases through; the only passes that opened
         // it were the ones where the bot happened to slow down.
-        if (Time.time < movement.DoorInteractHoldUntil)
-        {
-            HoldForDoorInteraction(agent);
-            return;
-        }
+        if (HoldForDoorRecovery(agent)) return;
 
         // Speed
         var movementSpeed = movement.Speed * moveSpeedMult;
@@ -1167,9 +1165,8 @@ public partial class MovementSystem
     /// and produces the proper internal transition struct), then fire ExecuteInteraction with THAT result. The
     /// previous implementation built an InteractionResult by hand — BSG silently no-op'd when the missing
     /// internal fields were stale, which manifested as our PHANTOM-WALK signature on Customs dorm doors
-    /// (148 interactions initiated, 0 logged successfully opened, 7 phantom-walks). Also pre-enables
-    /// IgnoreInteractionCollision so the bot doesn't bounce off the door's collider during the animation
-    /// window.
+    /// (148 interactions initiated, 0 logged successfully opened, 7 phantom-walks).
+    /// DoorSystem alone owns the collision policy as the door changes state.
     /// </summary>
     private bool OpenDoor(Agent agent, Door door)
     {
@@ -1216,11 +1213,8 @@ public partial class MovementSystem
             }
             player.ExecuteInteraction(door, gstruct.Value);
             Orbit.Api.OrbitDoorEvents.Raise(door, Orbit.Api.OrbitDoorEvents.Operation.Open);
-            // Set collision-pass AFTER ExecuteInteraction so the door's animation can drive the bot's traversal
-            // through the swing arc. Order matters: setting it before ExecuteInteraction lets the bot rush the
-            // collider before the animation has actually started.
-            if (door.Collider != null)
-                player.MovementContext.IgnoreInteractionCollision(door.Collider, true);
+            // Do not enlist the door in native temporary collision cleanup. It would
+            // restore the collision after the animation, undoing DoorSystem's policy.
             // Freeze forward path-following for the animation window — movement input cancels the
             // interact state and the door never completes Interacting → Open (see UpdateMovement).
             agent.Movement.DoorInteractHoldUntil = Time.time + DoorInteractHoldSeconds;
@@ -1309,8 +1303,8 @@ public partial class MovementSystem
     /// for wedging the bot's nav, and a recalculated path through a clean cross-section often succeeds.
     /// Cheap: only walks the agent's own opened-doors list, only fires under explicit stuck signals.
     /// </summary>
-    /// <param name="includeNear">When true (hard-stuck path), also close doors inside the normal 4 m floor: a
-    /// pinned bot is usually wedged on the swing arc of a door right next to it, which the floor would skip.</param>
+    /// <param name="includeNear">Hard recovery may close doors inside the normal 4 m range,
+    /// but the 2 m occupied-door guard always applies, including other bots and players.</param>
     public void CloseRecentDoorsBehindAgent(Agent agent, bool includeNear = false)
     {
         var list = agent?.RecentOpenedDoors;
@@ -1329,6 +1323,20 @@ public partial class MovementSystem
             }
             // Mid-animation: let the DoorWatch settle the state first, retry on the next fire.
             if (door.DoorState == EDoorState.Interacting) continue;
+            if (door.DoorState != EDoorState.Open)
+            {
+                list.RemoveAt(i);
+                continue;
+            }
+            if (IsDoorOccupied(agent, door, out var occupant))
+            {
+                if (Time.time >= agent.Movement.NextDoorCloseGuardLog)
+                {
+                    agent.Movement.NextDoorCloseGuardLog = Time.time + 5f;
+                    Log.Debug($"DOOR CLOSE: {agent} door={door.Id} action=deferred reason=occupied occupant={occupant} includeNear={includeNear}");
+                }
+                continue;
+            }
             var dist = XzDistance(agentPos, door.transform.position);
             if (!includeNear && dist < CloseDoorBehindMinDistance) continue;
             if (dist > CloseDoorBehindMaxDistance)
@@ -1340,12 +1348,8 @@ public partial class MovementSystem
             }
             try
             {
-                // Every door in this list was opened by us and sits visually open, but its state reads
-                // Shut (bot interactions never finalize state; the DoorWatch settled it). BSG validates
-                // Close against Open state only — re-align the state with the visual truth first, then
-                // settle it to Shut right after firing the close, matching the swing we just played.
-                if (door.DoorState != EDoorState.Open)
-                    door.DoorState = EDoorState.Open;
+                // The watch now finalizes opens. Never force a shut/locked door back
+                // open just because it remains in this agent's recent-door list.
                 player.MovementContext.ResetCanUsePropState();
                 var gstruct = Door.Interact(player, EInteractionType.Close);
                 if (gstruct.Succeeded)

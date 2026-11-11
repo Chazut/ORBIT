@@ -142,6 +142,7 @@ public class OrbitManager
         Orbit.Patches.AirdropReleasedPatch.OnAirdropReleased -= OnAirdropReleased;
         try { _botsController.BotSpawner.OnBotRemoved -= OnBotRemoved; } catch { }
         try { DormancySystem?.Dispose(); } catch { }
+        DoorSystem.Dispose();
         foreach (var task in ActionManager.Tasks)
             if (task is System.IDisposable disposable)
                 try { disposable.Dispose(); }

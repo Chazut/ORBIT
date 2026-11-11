@@ -25,6 +25,7 @@ public class DoorSystem
         => _spatial.Query(position, radius, result);
 
     private readonly List<(Collider bot, Collider pom)> _bots = new();
+    private readonly Dictionary<Collider, Door> _doorsByCollider = new();
     // Doors Locked at raid start. Used purely to log when one of them physically opens: a locked door is
     // visually identical to a normal one in-game and a bot open never reaches the real "Open" state, so this is
     // the reliable "a bot actually opened a locked door" signal (grep LOCKED-DOOR OPENED).
@@ -38,6 +39,7 @@ public class DoorSystem
 
         for (var i = 0; i < Doors.Length; i++)
         {
+            _doorsByCollider[Doors[i].Collider] = Doors[i];
             _spatial.Update(Doors[i]);
             Doors[i].OnDoorStateChanged += HandleDoorStateChanged;
             if (Doors[i].DoorState == EDoorState.Locked) _startedLocked.Add(Doors[i].GetInstanceID());
@@ -51,8 +53,41 @@ public class DoorSystem
     /// <summary>Registers a bot and syncs its door collision to every door's current state.</summary>
     public void RegisterBot(Collider botCollider, Collider pomCollider)
     {
+        UnregisterBot(botCollider);
         ResyncBot(botCollider, pomCollider);
         _bots.Add((botCollider, pomCollider));
+    }
+
+    // Native interaction cleanup may restore a pair after our door-state callback.
+    // Reconcile only the affected colliders of a registered bot, never scan the map.
+    internal void ReconcileInteraction(Collider botCollider, Collider[] colliders, string source)
+    {
+        if (botCollider == null || colliders == null || colliders.Length == 0) return;
+        for (var i = 0; i < _bots.Count; i++)
+        {
+            var pair = _bots[i];
+            if (pair.bot != botCollider) continue;
+            foreach (var collider in colliders)
+            {
+                if (collider == null || !_doorsByCollider.TryGetValue(collider, out var door) || door == null) continue;
+                var passable = IsPassable(door.DoorState);
+                var changed = Physics.GetIgnoreCollision(pair.bot, collider) != passable
+                    || PhysicsExtensions.GetIgnoreCollision(pair.bot, collider) != passable
+                    || (pair.pom != null && Physics.GetIgnoreCollision(pair.pom, collider) != passable);
+                SetIgnored(pair.bot, pair.pom, collider, passable);
+                if (changed)
+                    Log.Debug($"DOOR COLLISION: door={door.Id} action=reconciled source={source} state={door.DoorState} ignored={passable}");
+            }
+            return;
+        }
+    }
+
+    internal void Dispose()
+    {
+        foreach (var door in Doors)
+            if (door != null) door.OnDoorStateChanged -= HandleDoorStateChanged;
+        _bots.Clear();
+        _doorsByCollider.Clear();
     }
 
     /// <summary>

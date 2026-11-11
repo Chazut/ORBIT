@@ -103,6 +103,8 @@ public class Movement
     /// interaction is in flight and the open animation is cancelled if the bot keeps
     /// pushing forward through the doorway.</summary>
     public float DoorInteractHoldUntil = -1f;
+    internal readonly Orbit.Systems.DoorRecoveryWindow DoorRecovery = new();
+    internal float NextDoorCloseGuardLog;
     internal readonly Orbit.Systems.NearbyDoorCache GhostDoors = new();
 
     /// <summary>Next local route check. Door candidates are cached for two seconds separately.</summary>
