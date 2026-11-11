@@ -7,7 +7,7 @@ using UnityEngine;
 namespace Orbit.Core;
 
 /// <summary>Raid-owned, identity-keyed exclusions, with deferred teardown outside brain callbacks.</summary>
-internal sealed class BotExclusions
+internal sealed partial class BotExclusions
 {
     private sealed class Entry
     {
@@ -111,6 +111,7 @@ internal sealed class BotExclusions
     internal void Tick()
     {
         if (_disposed) return;
+        TickSleepRestrictions();
         _scratch.Clear();
         foreach (var pair in _entries) _scratch.Add(pair.Key);
         foreach (var bot in _scratch)
@@ -189,8 +190,13 @@ internal sealed class BotExclusions
         if (ReferenceEquals(bot, null)) return;
         _entries.Remove(bot);
         _restorers.Remove(bot);
+        _sleepRestrictions.Remove(bot);
     }
 
     internal void Dispose()
-    { _disposed = true; _entries.Clear(); _restorers.Clear(); _scratch.Clear(); }
+    {
+        _disposed = true;
+        _entries.Clear(); _restorers.Clear(); _scratch.Clear();
+        _sleepRestrictions.Clear(); _sleepScratch.Clear();
+    }
 }

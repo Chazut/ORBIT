@@ -607,7 +607,7 @@ public partial class DormancySystem
     private static bool IsSquadDormant(Squad squad)
     {
         foreach (var member in squad.Members)
-            if (Orbit.Api.OrbitBotControl.IsBotExcluded(member.Bot)) return false;
+            if (Orbit.Api.OrbitBotControl.IsBotSleepBlocked(member.Bot)) return false;
         // Registration is staggered: a late member can temporarily join an already sleeping squad.
         return squad.Members.Count > 0 && SquadDormantCount(squad) == squad.Members.Count;
     }
@@ -652,7 +652,7 @@ public partial class DormancySystem
     {
         if (IsWaking(squad)) return false;
         foreach (var member in squad.Members)
-            if (Orbit.Api.OrbitBotControl.IsBotExcluded(member.Bot)) return false;
+            if (Orbit.Api.OrbitBotControl.IsBotSleepBlocked(member.Bot)) return false;
         // Distance gate first: a squad near a human is simply "in play", not diagnostic. Everything
         // counted below answers the verification question "why does a FAR squad stay awake?".
         // Default-dormant types (per-type toggles) use the tighter ring.
@@ -747,7 +747,7 @@ public partial class DormancySystem
     /// keeps blocking sleep exactly as before, so the old wake/sleep bleed loop stays impossible.</summary>
     private void TryGhostPatchUp(Agent agent)
     {
-        if (Orbit.Api.OrbitBotControl.IsBotExcluded(agent.Bot)) return;
+        if (Orbit.Api.OrbitBotControl.IsBotSleepBlocked(agent.Bot)) return;
         if (Time.time - agent.LastGhostPatchUpAt < GhostPatchUpCooldownSeconds) return;
         agent.LastGhostPatchUpAt = Time.time;
         if (!GhostPatchUp(agent.Player)) return;
@@ -757,7 +757,7 @@ public partial class DormancySystem
 
     private void TryGhostPatchUpVanilla(BotOwner bot)
     {
-        if (Orbit.Api.OrbitBotControl.IsBotExcluded(bot)) return;
+        if (Orbit.Api.OrbitBotControl.IsBotSleepBlocked(bot)) return;
         if (_vanillaPatchUpAt.TryGetValue(bot, out var at) && Time.time - at < GhostPatchUpCooldownSeconds) return;
         _vanillaPatchUpAt[bot] = Time.time;
         if (!GhostPatchUp(bot.GetPlayer)) return;
@@ -785,6 +785,10 @@ public partial class DormancySystem
     /// wake log line so a single raid read tells premature wakes from legit ones.</summary>
     private GhostWakeReason? WakeReason(Squad squad, bool proximity = true)
     {
+        // Managed squads transition together; do not leave sleeping peers behind a kept-awake member.
+        foreach (var member in squad.Members)
+            if (Orbit.Api.OrbitBotControl.IsBotSleepBlocked(member.Bot))
+                return new(GhostWakeCause.GroupChanged, "external sleep restriction in squad");
         GhostWakeReason? reason = null;
         // Extract-bound squads ghost their way to the exfil and only wake shortly before its
         // radius, so the real AI handles just the trigger interaction (not the whole walk).
@@ -956,7 +960,7 @@ public partial class DormancySystem
     {
         if (IsWaking(squad)) return;
         foreach (var member in squad.Members)
-            if (Orbit.Api.OrbitBotControl.IsBotExcluded(member.Bot)) return;
+            if (Orbit.Api.OrbitBotControl.IsBotSleepBlocked(member.Bot)) return;
         using var timing = TransitionPerformance.Measure(TransitionPhase.SleepGroup);
         var joining = SquadDormantCount(squad) > 0;
         // Admission and mutation are separate passes. Recheck every awake body before
@@ -988,7 +992,7 @@ public partial class DormancySystem
     private void SleepAgent(Agent agent)
     {
         var bot = agent.Bot;
-        if (Orbit.Api.OrbitBotControl.IsBotExcluded(bot)) return;
+        if (Orbit.Api.OrbitBotControl.IsBotSleepBlocked(bot)) return;
 
         try
         {
@@ -1913,7 +1917,7 @@ public partial class DormancySystem
             var fight = _activeFights[i];
             try
             {
-                if (HasExcludedMember(fight.Winner) || HasExcludedMember(fight.Loser))
+                if (HasSleepBlockedMember(fight.Winner) || HasSleepBlockedMember(fight.Loser))
                 {
                     ReleaseFightPins(fight);
                     _activeFights.RemoveAt(i);
@@ -1982,12 +1986,12 @@ public partial class DormancySystem
         return false;
     }
 
-    private static bool HasExcludedMember(GhostUnit unit)
+    private static bool HasSleepBlockedMember(GhostUnit unit)
     {
         foreach (var agent in unit.Agents)
-            if (Orbit.Api.OrbitBotControl.IsBotExcluded(agent.Bot)) return true;
+            if (Orbit.Api.OrbitBotControl.IsBotSleepBlocked(agent.Bot)) return true;
         foreach (var bot in unit.VanillaBots)
-            if (Orbit.Api.OrbitBotControl.IsBotExcluded(bot)) return true;
+            if (Orbit.Api.OrbitBotControl.IsBotSleepBlocked(bot)) return true;
         return false;
     }
 
@@ -2615,7 +2619,7 @@ public partial class DormancySystem
                 if (!player.AIData.IsAI) continue;
                 var owner = player.AIData.BotOwner;
                 if (owner == null) continue;
-                if (Orbit.Api.OrbitBotControl.IsBotExcluded(owner)) continue;
+                if (Orbit.Api.OrbitBotControl.IsBotSleepBlocked(owner)) continue;
                 AwakeVisionDiagnostics.Observe(owner);
                 var agent = _botRoster.GetAgent(owner);
                 if (agent != null)
@@ -2712,7 +2716,7 @@ public partial class DormancySystem
         for (var i = 0; i < group.Count; i++)
         {
             var bot = group[i];
-            if (Orbit.Api.OrbitBotControl.IsBotExcluded(bot)) return false;
+            if (Orbit.Api.OrbitBotControl.IsBotSleepBlocked(bot)) return false;
             if (joining && (_vanillaDormant.Contains(bot)
                 || bot.BotState is EBotState.PreActive or EBotState.NonActive)) continue;
             var player = bot.GetPlayer;
@@ -2780,7 +2784,7 @@ public partial class DormancySystem
         for (var i = 0; i < group.Count; i++)
         {
             var bot = group[i];
-            if (Orbit.Api.OrbitBotControl.IsBotExcluded(bot)) return;
+            if (Orbit.Api.OrbitBotControl.IsBotSleepBlocked(bot)) return;
             if (_vanillaDormant.Contains(bot)) continue;
             if (joining && bot.BotState is EBotState.PreActive or EBotState.NonActive) continue;
             if (!GhostSleepReadiness.Ready(bot)) return;

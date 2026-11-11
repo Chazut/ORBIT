@@ -1,4 +1,49 @@
-# Per-bot control exclusion
+# Per-bot control and sleep API
+
+## Drive without Ghost sleep
+
+For mods that want ORBIT to keep driving a bot, but keep its body awake:
+
+```csharp
+Orbit.Api.OrbitBotControl.SetBotSleepAllowed(botOwner, false, "YourMod");
+
+// Later, restore the normal Ghost policy:
+Orbit.Api.OrbitBotControl.SetBotSleepAllowed(botOwner, true, "YourMod");
+```
+
+The sleep-only API keeps the existing ORBIT agent, squad, objectives, loot tasks and normal combat
+handoffs. It does not force ORBIT onto bots excluded by role or take control away from combat AI.
+If already in Ghost, the bot wakes safely on the next update (landing or initialization can delay this).
+Managed squads sleep together, so keeping one member awake also prevents its ORBIT squad from sleeping;
+sleeping peers wake through the normal squad transition. Other squads are unaffected.
+
+`true` as the `allowed` argument removes this sleep restriction; it does not put the bot to sleep
+immediately. `EnableBot` and `SetBotSleepAllowed` change independent policies: neither undoes the
+other. Full `ExcludeBot` always blocks sleep, even if `SetBotSleepAllowed(bot, true)` was called.
+To return from full exclusion to drive-without-sleep, set sleep allowed to `false`, then call `EnableBot`.
+
+```csharp
+bool sleepBlocked = Orbit.Api.OrbitBotControl.IsBotSleepBlocked(botOwner);
+```
+
+This query includes both sleep-only restrictions and full exclusions, including pending wakes.
+It describes API policy, not physical readiness. Repeat calls are safe; the last sleep-policy call wins.
+Like the control API below, use it on the Unity thread on the AI authority, per spawned BotOwner.
+Calls return false outside the runtime, on another thread or for invalid/dead/human bots. Removal and
+raid end clear the policy. The `source` is a log label, not a per-mod lock. Other mods' limiters are unaffected.
+Logs use `BOT SLEEP: blocked`, `awake`, `allowed`, `wake pending` and `wake retry`.
+
+Optional integration can cache the public method without a hard ORBIT dependency:
+
+```csharp
+var setSleepAllowed = api?.GetMethod("SetBotSleepAllowed",
+    new[] { typeof(EFT.BotOwner), typeof(bool), typeof(string) });
+bool accepted = setSleepAllowed?.Invoke(null, new object[] { botOwner, false, "YourMod" }) is true;
+```
+
+Here `api` is the type resolved in the optional-reference example below. An older build may not have this method.
+
+## Full control exclusion
 
 For mods that need to keep specific AI awake and handle their behavior themselves.
 ORBIT does not automatically identify or exclude PBT cheaters. The owning mod decides which bots to exclude.
@@ -32,7 +77,8 @@ The exclusion stays in effect even while the calling mod's layer is idle. `Enabl
 the next ORBIT update, after any pending safe wake/cleanup. `IsBotExcluded` stays true until that is
 complete. Repeating either request is safe; if they alternate before the update, the last request wins.
 
-Enabling restores the bot's normal eligibility for ORBIT and Ghost Mode. It does not force ORBIT to
+Enabling restores the bot's normal eligibility for ORBIT and Ghost Mode (unless a separate sleep-only
+restriction remains). It does not force ORBIT to
 take over during combat or bypass role exclusions or your Ghost settings. An eligible brain layer
 gets a fresh ORBIT agent and rejoins its native squad's ORBIT group (or a new group if none remains).
 Old detached objectives/loot tasks are not resumed. Bots with no eligible ORBIT layer retain native behavior.

@@ -4,7 +4,7 @@ using Orbit.Core;
 
 namespace Orbit.Api;
 
-/// <summary>Temporarily opt a living AI out of ORBIT control and Ghost Mode.</summary>
+/// <summary>Per-bot control and Ghost sleep policies for external mods.</summary>
 public static class OrbitBotControl
 {
     /// <summary>
@@ -29,4 +29,19 @@ public static class OrbitBotControl
     /// <summary>Unity-thread query. True also while a safe wake is pending.</summary>
     public static bool IsBotExcluded(BotOwner bot)
         => Singleton<OrbitManager>.Instance?.BotExclusions.Contains(bot) == true;
+
+    /// <summary>
+    /// Allow or prevent Ghost sleep without changing ORBIT control, objectives or role eligibility.
+    /// False requests a safe wake on the next update if already asleep; true removes only this
+    /// sleep restriction and does not force sleep or undo ExcludeBot. Unity thread / AI authority
+    /// only, once per spawned BotOwner instance. Source is diagnostic, not a separate owner lock.
+    /// True means accepted, not that physical activation has already completed.
+    /// </summary>
+    public static bool SetBotSleepAllowed(BotOwner bot, bool allowed, string source = "external-mod")
+        => Singleton<OrbitManager>.Instance?.BotExclusions.SetSleepAllowed(bot, allowed, source) == true;
+
+    /// <summary>Unity-thread query: sleep is blocked by the API (sleep restriction or full exclusion).
+    /// False means normal Ghost eligibility applies, not that the bot is necessarily sleeping.</summary>
+    public static bool IsBotSleepBlocked(BotOwner bot)
+        => Singleton<OrbitManager>.Instance?.BotExclusions.BlocksSleep(bot) == true;
 }

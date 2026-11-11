@@ -16,7 +16,7 @@ public partial class DormancySystem
     }
 
     private bool IsNativeGhostEligible(BotOwner bot)
-        => !Orbit.Api.OrbitBotControl.IsBotExcluded(bot)
+        => !Orbit.Api.OrbitBotControl.IsBotSleepBlocked(bot)
             && (IsStandardDormantType(bot) || IsDefaultDormant(bot));
 
     private int NativeStandardCount(List<BotOwner> group)
