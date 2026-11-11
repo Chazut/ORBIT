@@ -211,7 +211,10 @@ public class OrbitBrainLayer : CustomLayer
 
         _agent = _orbit.AddAgent(BotOwner);
         if (_agent == null) throw new InvalidOperationException("ORBIT agent attachment was refused");
-        var layerName = BotOwner.Brain.ActiveLayerName();
+        // BigBrain constructs this layer inside AICoreAgent's constructor, before Brain.Agent is
+        // assigned. Read the strategy directly: no selected layer yet is normal during spawn.
+        // It also avoids the native agent's cached display name during a runtime re-enable.
+        var layerName = _brain.CurLayerInfo?.Name();
         _sainCombatActive = layerName == SainCombatLayerName;
         _nativeDangerLayer = layerName?.IndexOf("AvoidDanger", StringComparison.OrdinalIgnoreCase) >= 0;
         if (_nativeDangerLayer) _nativeDangerGrace.Observe(Time.time);
@@ -224,6 +227,7 @@ public class OrbitBrainLayer : CustomLayer
         // one so the swing never shoves it.
         _botCollider = _agent.Bot.GetPlayer.CharacterController.GetCollider();
         _orbit.DoorSystem.RegisterBot(_botCollider, _agent.Bot.GetPlayer.POM.Collider);
+        Log.Debug($"BRAIN ATTACHMENT: bot={BotOwner.ProfileId} layer={layerName ?? "none"} nativeAgentReady={BotOwner.Brain.Agent != null} control={_agent.IsActive}");
     }
 
     private void OnDead(Player player, IPlayer lastAggressor, DamageInfo damageInfo, EBodyPart part)
