@@ -514,7 +514,8 @@ internal sealed partial class SniperPlan : IObjectiveWork
                 return RejectPost("roof missing", sample, null);
             sample = roof.point;
         }
-        if (!NavMesh.SamplePosition(sample, out var nav, 1.5f, NavMesh.AllAreas))
+        if (!NavMesh.SamplePosition(sample, out var nav, 1.5f, NavMesh.AllAreas)
+            && !TryTerrainPost(ref sample, out nav))
             return RejectPost("post mesh missing", sample, null);
         if (Mathf.Abs(nav.position.y - sample.y) > 1.25f)
             return RejectPost("post height mismatch", sample, nav.position);

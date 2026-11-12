@@ -88,6 +88,9 @@
       <Reference Include="UnityEngine.PhysicsModule">
         <HintPath>$(SptRoot)\EscapeFromTarkov_Data\Managed\UnityEngine.PhysicsModule.dll</HintPath>
       </Reference>
+      <Reference Include="UnityEngine.TerrainPhysicsModule">
+        <HintPath>$(SptRoot)\EscapeFromTarkov_Data\Managed\UnityEngine.TerrainPhysicsModule.dll</HintPath>
+      </Reference>
       <Reference Include="UnityEngine.TerrainModule">
         <HintPath>$(SptRoot)\EscapeFromTarkov_Data\Managed\UnityEngine.TerrainModule.dll</HintPath>
       </Reference>
