@@ -353,6 +353,9 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                             {
                                 if (objective.Location.IsAirdrop && !agent.IsDormant)
                                     LogAirdropArrival(agent, objective.Location, arrivalHit, true);
+                                else if (!agent.IsDormant && arrivalHit.collider != null
+                                    && LootVisibility.IsContainerShell(objective.Location.Target as InteractableObject, arrivalHit.collider.transform))
+                                    Log.Debug($"LOOT CONTAINER SHELL: {agent} point={objective.Location.Id} collider={arrivalHit.collider.name} distance={arrivalHit.distance:F2} access=clear");
                                 objective.Status = ObjectiveStatus.Looting;
                                 // Looting keeps the bot stationary for several seconds. If we leave the path
                                 // pointing at the previous destination, BSG's BotMover eventually decides the
