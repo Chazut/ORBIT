@@ -9,6 +9,7 @@ namespace Orbit.Looting;
 public partial class OrbitLootHandler
 {
     private Player _player;
+    private readonly Orbit.Navigation.LootAccessGuard _access = new();
     private bool _retired;
 
     internal bool HasLiveOwner => !_retired && LootActorGuard.IsCurrent(_bot, _player);
@@ -54,6 +55,12 @@ public partial class OrbitLootHandler
     {
         ct.ThrowIfCancellationRequested();
         if (!OwnsSession(ct) || !HasLiveOwner) throw new OperationCanceledException(ct);
+        if (!DormantMode)
+        {
+            var head = _bot.LookSensor != null ? _bot.LookSensor.HeadPoint : _player.Transform.position + Vector3.up;
+            if (!_access.Check(Time.frameCount, DormantMode, head, CurrentTarget, out var hit))
+                throw new LootAccessBlockedException(hit.collider?.name ?? "missing-target", hit.distance);
+        }
     }
 
     private bool FinishSession(CancellationToken ct)

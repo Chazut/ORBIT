@@ -49,6 +49,7 @@ public partial class WaypointSystem
         var squad = agent?.Squad;
         // Managed destinations own their floor, even where unrelated global zones overlap.
         if (target != null && (target.Category == WaypointCategory.Corpse || target.IsAirdrop
+            || squad?.CorpseEscort.IsEscortWaypoint(target) == true
             || squad?.Camp?.Owns(agent) == true
             || squad?.Camp?.Approach?.Owns(agent) == true
             || squad?.Rush?.Owns(agent) == true || squad?.Operation?.Owns(agent) == true

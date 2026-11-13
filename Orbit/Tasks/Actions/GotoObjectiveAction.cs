@@ -285,7 +285,7 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                             if (inRadius) ClearLoSBlockedTracking(agent);
                             else if (TrackLoSBlocked(agent, objective.Location, arrivalRefusal)) continue;
                         }
-                        else if (RequiresArrivalLoSCheck(objective.Location.Category) && !agent.IsDormant)
+                        else if ((RequiresArrivalLoSCheck(objective.Location.Category) || agent.Squad.CorpseEscort.IsEscortWaypoint(objective.Location)) && !agent.IsDormant)
                         {
                             if (HasArrivalLineOfSight(agent, objective.Location, out arrivalHit))
                             {
@@ -299,7 +299,8 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                                     if (agent.LoSBlockedPoiId != objective.Location.Id)
                                         LogAirdropArrival(agent, objective.Location, arrivalHit, false);
                                 }
-                                else Log.Debug($"{agent} within {Mathf.Sqrt(distanceSqr):F1}m of {objective.Location} but Physics raycast BLOCKED, holding off arrival");
+                                else if (agent.LoSBlockedPoiId != objective.Location.Id)
+                                    Log.Debug($"LOOT APPROACH BLOCKED: {agent} point={objective.Location.Id} collider={arrivalHit.collider?.name ?? "none"} distance={arrivalHit.distance:F2} nav={objective.Location.Position} target={objective.Location.Target?.transform.position}");
                                 arrivalRefusal = "line-of-sight";
                                 if (TrackLoSBlocked(agent, objective.Location)) continue;
                             }
@@ -311,10 +312,10 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                         }
                     }
                     else if (agent.Movement.Status == MovementStatus.Stopped
-                             && distanceSqr <= (objective.Location.Category == WaypointCategory.Corpse
+                             && distanceSqr <= (agent.Squad.CorpseEscort.IsEscortWaypoint(objective.Location) ? 4f : objective.Location.Category == WaypointCategory.Corpse
                                  ? CorpseNavSnapArrivalRadiusSqr
                                  : NavSnapArrivalRadiusSqr)
-                             && RequiresArrivalLoSCheck(objective.Location.Category))
+                             && (RequiresArrivalLoSCheck(objective.Location.Category) || agent.Squad.CorpseEscort.IsEscortWaypoint(objective.Location)))
                     {
                         var arrivalClear = objective.Location.Category == WaypointCategory.Quest
                             ? QuestArrivalAllowed(agent, objective.Location, out arrivalRefusal)
@@ -693,11 +694,11 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
         }
     }
 
-    // Corpse excluded: bodies spawn behind cover the killer used; the selection-time gate already prevents
-    // picking unseen bodies.
+    // Recheck physical access on arrival: a visible body can end up behind cover during approach.
     private static bool RequiresArrivalLoSCheck(WaypointCategory category)
         => category == WaypointCategory.ContainerLoot
             || category == WaypointCategory.LooseLoot
+            || category == WaypointCategory.Corpse
             || category == WaypointCategory.Quest;
 
     // 3D world-space line-of-sight check between the bot's head and the POI, using the same
@@ -712,10 +713,12 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
         head = lookSensor != null ? lookSensor.HeadPoint : agent.Position + new Vector3(0f, 1f, 0f);
         if (point.IsAirdrop && point.Category == WaypointCategory.ContainerLoot)
             return AirdropVisibility.Check(head, point.Target as LootableContainer, out hit);
-        var direction = point.Position - head;
+        if (point.Target is InteractableObject loot)
+            return LootVisibility.Check(head, loot, out hit);
+        var direction = point.Position + Vector3.up * .1f - head;
         var dist = direction.magnitude;
         if (dist < 0.01f) return true; // basically on top of the POI
-        var blocked = Physics.Raycast(head, direction / dist, dist, LayersMaskController.HighPolyWithTerrainMask);
+        var blocked = Physics.Raycast(head, direction / dist, out hit, dist, LayersMaskController.HighPolyWithTerrainMask, QueryTriggerInteraction.Ignore);
         return !blocked;
     }
 

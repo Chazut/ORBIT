@@ -189,6 +189,7 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
         _cts?.Cancel();
         _cts = new CancellationTokenSource();
         LootTaskRunning = true;
+        _access.Reset();
         LastSessionCancelled = false;
         LastSessionFailed = false;
         LastSessionRetryable = false;
@@ -258,6 +259,11 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
                     break;
             }
             CheckSession(ct);
+        }
+        catch (LootAccessBlockedException e)
+        {
+            ReportInventoryFailure(ct, false);
+            Log.Info($"LOOT ACCESS BLOCKED: {Nick} target={targetName} collider={e.Collider} hitDistance={e.Distance:F2} itemsTaken={Stats.LastItemsTaken}");
         }
         catch (LootInventoryBusyException)
         {
@@ -1597,6 +1603,10 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
             CheckSession(ct);
             var transaction = LootActorGuard.TrackTransaction(_bot, inventoryController.TryRunNetworkTransaction(place, null));
             var result = await LootActorGuard.AwaitTransaction(transaction, ct);
+            // The successful pickup can already have destroyed the loose world object.
+            // Never mark a replaced/cancelled session or a container transfer as consumed.
+            if (OwnsSession(ct) && !ct.IsCancellationRequested && CurrentTargetKind == LootKind.Item)
+                _access.CompleteLoosePickup(result.Succeed);
             CheckSession(ct);
             if (!result.Succeed) Log.Warning($"OrbitLootHandler.Pickup({Nick}): TX FAILED on {name} (Error={result.Error})");
             if (!result.Succeed)
