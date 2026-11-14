@@ -165,6 +165,21 @@ internal sealed class DebugArchive
         File.WriteAllText(temporary, JsonConvert.SerializeObject(record, Formatting.Indented));
         if (File.Exists(_recordPath)) File.Replace(temporary, _recordPath, null);
         else File.Move(temporary, _recordPath);
+        // Preserve the exact capture/journal membership for future storage cleanup.
+        // last-raid.json remains the export entry point and is never archived here.
+        if (SafeId(record.Id))
+        {
+            var indexFolder = Path.Combine(_root, "ORBIT", "diagnostics", "raids");
+            Directory.CreateDirectory(indexFolder);
+            var indexPath = Path.Combine(indexFolder, record.Id + ".json");
+            var index = new RaidDiagnostics.RaidLogRetention.Manifest { Mod = "ORBIT", Id = record.Id, StartedUtc = record.StartedUtc };
+            foreach (var name in record.Diagnostics)
+                if (name == Path.GetFileName(name) && !name.Contains("\\") && !name.Contains("/"))
+                    index.Files.Add(new RaidDiagnostics.RaidLogRetention.Entry { Path = "diagnostics/" + name });
+            File.WriteAllText(indexPath + ".tmp", JsonConvert.SerializeObject(index));
+            if (File.Exists(indexPath)) File.Replace(indexPath + ".tmp", indexPath, null);
+            else File.Move(indexPath + ".tmp", indexPath);
+        }
     }
 
     private void SaveLog(RaidRecord record)

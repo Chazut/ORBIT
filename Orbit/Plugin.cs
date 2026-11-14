@@ -69,9 +69,11 @@ public class Plugin : BaseUnityPlugin
     private const string CombineSoldiersPluginGuid = "com.manimal.combinesoldiers";
 
     private readonly EmbeddedFika _embeddedFika = new();
+    private RaidDiagnostics.DiagnosticStorage _diagnosticStorage;
 
     private void Update()
     {
+        _diagnosticStorage?.Tick(Singleton<EFT.GameWorld>.Instantiated || DebugExport.Busy, Time.realtimeSinceStartup);
         _embeddedFika.Update();
         Log.Refresh();
         PerformanceJournal.RefreshWriter();
@@ -81,8 +83,8 @@ public class Plugin : BaseUnityPlugin
 
     private void OnGUI() => DoorCaptureTool.DrawStatus();
 
-    private void OnApplicationQuit() { _embeddedFika.Dispose(); DebugExport.Shutdown(); Log.Shutdown(); }
-    private void OnDestroy() { _embeddedFika.Dispose(); DebugExport.Shutdown(); Log.Shutdown(); }
+    private void OnApplicationQuit() { _diagnosticStorage?.Dispose(); _embeddedFika.Dispose(); DebugExport.Shutdown(); Log.Shutdown(); }
+    private void OnDestroy() { _diagnosticStorage?.Dispose(); _embeddedFika.Dispose(); DebugExport.Shutdown(); Log.Shutdown(); }
 
     private void Awake()
     {
@@ -111,6 +113,9 @@ public class Plugin : BaseUnityPlugin
         try
         {
             SetupConfig();
+            _diagnosticStorage = new RaidDiagnostics.DiagnosticStorage(Config,
+                System.IO.Path.Combine(BepInEx.Paths.BepInExRootPath, "ORBIT"), "ORBIT",
+                message => Logger.LogInfo(message), message => Logger.LogWarning(message));
             Log.ReportSettings("startup");
             QuietLogging.SettingChanged += (_, _) => Log.ReportSettings("quiet-changed");
             LogLevels.SettingChanged += (_, _) => Log.ReportSettings("levels-changed");

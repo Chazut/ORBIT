@@ -190,6 +190,8 @@ Check versions and overlapping mods, then try the Default preset. For a report:
 
 Reports include available diagnostics and supported Raid Review data. Difficult navigation and unsupported native actions remain limitations; see the wiki below.
 
+**F12 > ORBIT > Diagnostics storage** keeps 20 recent raids and archives older logs within a 5 GB budget, with no age limit. [Storage settings and protected comparisons](DIAGNOSTIC_STORAGE.md).
+
 [Troubleshooting](https://github.com/Chazut/ORBIT/wiki/Troubleshooting) · [Performance guide](https://github.com/Chazut/ORBIT/wiki/Performance) · [Debug reports](https://github.com/Chazut/ORBIT/wiki/Debug-reports-and-Raid-Review)
 
 Future plans: [Roadmap](ROADMAP.md).
