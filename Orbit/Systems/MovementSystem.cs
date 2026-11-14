@@ -63,6 +63,7 @@ public partial class MovementSystem
         for (var i = 0; i < liveAgents.Count; i++)
         {
             var agent = liveAgents[i];
+            agent.Movement.SquadTravel.PreparedFrame = -1;
             using var timing = MeasureMovement(TransitionPhase.MovementAgent,
                 !agent.IsActive ? "inactive" : agent.IsDormant ? "ghost" : "awake", agent);
 
@@ -812,12 +813,14 @@ public partial class MovementSystem
 
         // Decide after advancing corners and computing steering, so the old corner does not
         // request sprint while the body needs to turn toward the next segment.
+        var wantsSprint = WantsTravelSprint(agent, movement.Sprint);
+        var canSprint = wantsSprint && CanSprint(agent);
+        moveVector = SquadTravel.Steer(agent, moveVector, doorsNearby, canSprint);
         var moveDir = CalcMoveDirection(moveVector, player.Rotation);
         var headingDot = moveDir.normalized.y;
         var distanceSqr = (movement.Target - agent.Position).sqrMagnitude;
-        var wantsSprint = WantsTravelSprint(agent, movement.Sprint);
         var shouldSprint = movement.SprintControl.Evaluate(wantsSprint,
-            wantsSprint && CanSprint(agent) && (player.Physical.Sprinting || player.Physical.CanSprint) && !doorsNearby,
+            canSprint && (player.Physical.Sprinting || player.Physical.CanSprint) && !doorsNearby,
             player.Physical.Sprinting, distanceSqr, headingDot, Time.time,
             detectStutter: player.Physical.CanSprint && player.MovementContext.CanWalk
                 && player.PoseLevel >= .99f && movement.Pose >= .99f && !movement.Prone
@@ -1476,6 +1479,7 @@ public partial class MovementSystem
     {
         StopAwakeInput(agent);
         EndTravelObservation(agent);
+        agent.Movement.SquadTravel.Suspend();
         agent.Movement.Travel = null;
         // A queued result belongs to the old route even if the executor finishes after this reset.
         if (invalidatePending) agent.Movement.PathRevision++;

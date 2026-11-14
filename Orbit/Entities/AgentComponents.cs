@@ -77,6 +77,7 @@ public enum MovementUrgency
 
 public class Movement
 {
+    internal readonly Orbit.Systems.SquadTravelMotion SquadTravel = new();
     internal readonly Orbit.Systems.MovementFailureHistory Failures = new();
     internal readonly Orbit.Systems.SprintControl SprintControl = new();
     internal readonly Orbit.Systems.AwakeMotion AwakeMotion = new();

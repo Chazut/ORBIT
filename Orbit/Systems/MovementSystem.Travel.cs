@@ -103,6 +103,13 @@ public partial class MovementSystem
         var squad = agent.Squad;
         var hold = squad?.TravelHold;
         var leader = squad?.Leader;
+        // Squads now watch their sectors while walking. Keep the old personality pause for solos.
+        if (squad is { Size: > 1 })
+        {
+            hold.Until = 0f;
+            EndTravelObservation(agent);
+            return false;
+        }
         if (hold == null || leader == null || !CanObserve(leader)
             || (leader.Look.Target != null && leader.Look.Target != leader.Movement.Travel.OwnedLook))
         {

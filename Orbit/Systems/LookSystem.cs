@@ -25,6 +25,7 @@ public class LookSystem
 
             if (!agent.IsActive)
             {
+                agent.Movement.SquadTravel.Suspend();
                 agent.Look.Target = null;
                 continue;
             }
@@ -45,7 +46,9 @@ public class LookSystem
             var fwdPoint = PathHelper.CalcForwardPoint(movement.Path, agent.Position, movement.CurrentCorner, MoveLookAheadDistSqr);
             var lookDirection = fwdPoint - agent.Position;
             lookDirection.Normalize();
-            bot.Steering.LookToDirection(lookDirection, 540f);
+            if (SquadTravel.TryLook(agent, out var watchDirection))
+                bot.Steering.LookToDirection(watchDirection, 145f);
+            else bot.Steering.LookToDirection(lookDirection, 540f);
         }
     }
 
