@@ -11,7 +11,8 @@
         <SptRoot Condition=" '$(SptRoot)' == '' ">$(MSBuildProjectDirectory)\..\refs\4.1</SptRoot>
         <!-- Fika.Core built from source (github.com/project-fika/Fika-Plugin, cloned next to ORBIT) -->
         <FikaRef Condition=" '$(FikaRef)' == '' ">C:\Dev\Fika-Plugin\Fika.Core\bin\Release\netstandard2.1\Fika.Core.dll</FikaRef>
-        <AssemblyName>Orbit.Fika</AssemblyName>
+        <AssemblyName>ORBIT.Fika.Integration</AssemblyName>
+        <MainAssemblyPath Condition="'$(MainAssemblyPath)' == ''">$(MSBuildProjectDirectory)/../Orbit/bin/$(Configuration)/netstandard2.1/ORBIT.dll</MainAssemblyPath>
     </PropertyGroup>
 
     <ItemGroup>
@@ -19,9 +20,7 @@
         <HintPath>$(SptRoot)\BepInEx\core\0Harmony.dll</HintPath>
         <Private>false</Private>
       </Reference>
-      <ProjectReference Include="..\Orbit\Orbit.csproj">
-        <Private>false</Private>
-      </ProjectReference>
+      <Reference Include="ORBIT" HintPath="$(MainAssemblyPath)" Private="false" />
       <Reference Include="Fika.Core">
         <HintPath>$(FikaRef)</HintPath>
         <Private>false</Private>

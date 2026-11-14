@@ -34,6 +34,7 @@ namespace Orbit;
 [BepInDependency("xyz.drakia.bigbrain")]
 [BepInDependency("xyz.drakia.waypoints")]
 [BepInDependency("me.sol.sain")]
+[BepInDependency("com.fika.core", BepInDependency.DependencyFlags.SoftDependency)]
 [SuppressMessage("ReSharper", "MemberCanBePrivate.Global")]
 public class Plugin : BaseUnityPlugin
 {
@@ -67,8 +68,11 @@ public class Plugin : BaseUnityPlugin
     private const string IsbPluginGuid = "samc137.ISBinfo";
     private const string CombineSoldiersPluginGuid = "com.manimal.combinesoldiers";
 
+    private readonly EmbeddedFika _embeddedFika = new();
+
     private void Update()
     {
+        _embeddedFika.Update();
         Log.Refresh();
         PerformanceJournal.RefreshWriter();
         DebugExport.Refresh();
@@ -77,15 +81,25 @@ public class Plugin : BaseUnityPlugin
 
     private void OnGUI() => DoorCaptureTool.DrawStatus();
 
-    private void OnApplicationQuit() { DebugExport.Shutdown(); Log.Shutdown(); }
-    private void OnDestroy() { DebugExport.Shutdown(); Log.Shutdown(); }
+    private void OnApplicationQuit() { _embeddedFika.Dispose(); DebugExport.Shutdown(); Log.Shutdown(); }
+    private void OnDestroy() { _embeddedFika.Dispose(); DebugExport.Shutdown(); Log.Shutdown(); }
 
     private void Awake()
     {
         LogSource = Logger;
         Log.Initialize();
-
         StartCoroutine(DelayedLoad());
+    }
+
+    private void Start()
+    {
+        // Wait until the chainloader has also registered legacy addons depending
+        // on ORBIT, so an upgrade cannot initialize two transports.
+        _embeddedFika.Start(Chainloader.PluginInfos.ContainsKey("com.fika.core"),
+            Chainloader.PluginInfos.ContainsKey("com.chazut.orbit.fika"),
+            () => EmbeddedFika.Load(typeof(Plugin).Assembly, "ORBIT.Fika.Integration.dll", "Orbit.Fika.OrbitFikaPlugin"),
+            Logger, message => Logger.LogInfo(message), message => Logger.LogError(message));
+
     }
 
     private IEnumerator DelayedLoad()

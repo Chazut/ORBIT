@@ -103,9 +103,26 @@
       <Compile Include="..\Shared\*.cs" Link="Zones\%(Filename)%(Extension)" />
     </ItemGroup>
 
-    <Target Name="PostBuild" AfterTargets="PostBuildEvent">
+    <Target Name="PostBuild" AfterTargets="PostBuildEvent" Condition="'$(DeployOnBuild)' != 'false' and '$(BuildingFikaReference)' != 'true'">
       <MakeDir Directories="$(DeployRoot)\BepInEx\plugins\$(TargetName)" />
       <Exec Command="copy /Y &quot;$(TargetPath)&quot; &quot;$(DeployRoot)\BepInEx\plugins\$(TargetName)\$(TargetFileName)&quot;&#xA;copy /Y &quot;$(TargetDir)$(TargetName).pdb&quot; &quot;$(DeployRoot)\BepInEx\plugins\$(TargetName)\$(TargetName).pdb&quot;" />
     </Target>
 
+
+  <!-- Build a private transport against a reference pass of this plugin. The main
+       assembly has no Fika type references; only these bytes ship inside it. -->
+  <PropertyGroup>
+    <FikaBridgeOutput>$(MSBuildProjectDirectory)/../Orbit.Fika/bin/$(Configuration)/netstandard2.1/ORBIT.Fika.Integration.dll</FikaBridgeOutput>
+    <FikaReferenceOutput>$(MSBuildProjectDirectory)/obj/fika-reference-bin/$(Configuration)/ORBIT.dll</FikaReferenceOutput>
+  </PropertyGroup>
+  <Target Name="BuildEmbeddedFika" BeforeTargets="PrepareForBuild" Condition="'$(BuildingFikaReference)' != 'true'">
+    <MSBuild Projects="$(MSBuildProjectFullPath)" Targets="Build"
+      Properties="BuildingFikaReference=true;DeployOnBuild=false;OutputPath=$(MSBuildProjectDirectory)/obj/fika-reference-bin/$(Configuration)/;IntermediateOutputPath=obj/fika-reference/$(Configuration)/" />
+    <MSBuild Projects="$(MSBuildProjectDirectory)/../Orbit.Fika/Orbit.Fika.csproj" Targets="Restore;Build"
+      Properties="MainAssemblyPath=$(FikaReferenceOutput);Configuration=$(Configuration)"
+      RemoveProperties="BuildingFikaReference;OutputPath;IntermediateOutputPath" />
+  </Target>
+  <ItemGroup Condition="'$(BuildingFikaReference)' != 'true'">
+    <EmbeddedResource Include="$(FikaBridgeOutput)" LogicalName="ORBIT.Fika.Integration.dll" />
+  </ItemGroup>
 </Project>

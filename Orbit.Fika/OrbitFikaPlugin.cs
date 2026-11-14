@@ -1,5 +1,6 @@
 using System.Collections.Generic;
-using BepInEx;
+using System;
+using Random = UnityEngine.Random;
 using BepInEx.Logging;
 using Comfort.Common;
 using EFT;
@@ -18,14 +19,10 @@ namespace Orbit.Fika;
 /// gunfire to every player. The machine that owns the bots (host or headless) resolves the fights
 /// and broadcasts one packet per fight; each client replays the burst through its own BetterAudio
 /// with its own listener distance, so the whole party hears the off-screen action correctly
-/// positioned and attenuated. Without this DLL the limiter works identically, the sounds are just
-/// host-only. DoorSyncBridge also reconciles ORBIT door states independently of bot animations.
-/// Ships separately from the main RC as the Fika addon.
+/// positioned and attenuated. DoorSyncBridge also reconciles ORBIT door states independently of
+/// bot animations. Embedded in ORBIT.dll and loaded only when Fika is installed.
 /// </summary>
-[BepInPlugin(PluginGuid, PluginName, PluginVersion)]
-[BepInDependency("com.fika.core")]
-[BepInDependency(Plugin.PluginGuid, Plugin.OrbitVersion)]
-public class OrbitFikaPlugin : BaseUnityPlugin
+public class OrbitFikaPlugin : IDisposable
 {
     public const string PluginGuid = "com.chazut.orbit.fika";
     public const string PluginName = "ORBIT Fika Bridge";
@@ -53,12 +50,15 @@ public class OrbitFikaPlugin : BaseUnityPlugin
     private static bool _isHost;
     private static readonly List<PendingShot> _pending = new();
 
-    private void Awake()
+    private bool _initialized;
+
+    public void Initialize(ManualLogSource logger)
     {
-        _log = Logger;
-        _scopes = new ScopeSyncBridge(Logger);
-        try { _doors = new DoorSyncBridge(Logger, _scopes); }
-        catch (System.Exception e) { Logger.LogError($"Door sync unavailable: {e}"); }
+        if (_initialized) return;
+        _initialized = true;
+        _log = logger;
+        _scopes = new ScopeSyncBridge(logger);
+        _doors = new DoorSyncBridge(logger, _scopes);
         FikaEventDispatcher.SubscribeEvent<FikaNetworkManagerCreatedEvent>(OnNetworkManagerCreated);
         FikaEventDispatcher.SubscribeEvent<FikaNetworkManagerDestroyedEvent>(OnNetworkManagerDestroyed);
         OrbitEvents.GhostFightSoundsResolved += OnGhostFightResolved;
@@ -68,6 +68,7 @@ public class OrbitFikaPlugin : BaseUnityPlugin
 
     private static void OnNetworkManagerCreated(FikaNetworkManagerCreatedEvent e)
     {
+        ResetNetwork();
         _network = e.Manager;
         _isHost = e.Manager is FikaServer;
         ClearShots();
@@ -79,8 +80,7 @@ public class OrbitFikaPlugin : BaseUnityPlugin
 
     private static void OnNetworkManagerDestroyed(FikaNetworkManagerDestroyedEvent e)
     {
-        _network = null;
-        ClearShots();
+        if (ReferenceEquals(_network, e.Manager)) ResetNetwork();
     }
 
     // ORBIT resolves ghost fights on the machine that owns the bots, so this only ever fires
@@ -239,7 +239,7 @@ public class OrbitFikaPlugin : BaseUnityPlugin
         }
     }
 
-    private void Update()
+    public void Update()
     {
         _doors?.Tick();
         _scopes?.Tick();
@@ -287,13 +287,31 @@ public class OrbitFikaPlugin : BaseUnityPlugin
         }
     }
 
-    private void OnDestroy()
+    public void Dispose()
     {
-        _doors?.Dispose();
-        _scopes?.Dispose();
+        if (!_initialized) return;
+        _initialized = false;
+        FikaEventDispatcher.UnsubscribeEvent<FikaNetworkManagerCreatedEvent>(OnNetworkManagerCreated);
+        FikaEventDispatcher.UnsubscribeEvent<FikaNetworkManagerDestroyedEvent>(OnNetworkManagerDestroyed);
         OrbitEvents.GhostFightSoundsResolved -= OnGhostFightResolved;
         OrbitEvents.GhostFightSoundsStopped -= OnGhostFightStopped;
+        try { _doors?.Dispose(); }
+        finally
+        {
+            _doors = null;
+            try { _scopes?.Dispose(); }
+            finally { _scopes = null; ResetNetwork(); }
+        }
+    }
+
+    private static void ResetNetwork()
+    {
+        var previous = _network;
+        _network = null;
+        _isHost = false;
         ClearShots();
+        try { previous?.UnregisterPacket<OrbitGhostFightPacket>(); }
+        catch { /* The network manager may already be disposed during shutdown. */ }
     }
 
     private static void OnGhostFightStopped(OrbitEvents.GhostFightSoundStop stop)

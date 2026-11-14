@@ -27,7 +27,7 @@ Bots pursue objectives, loot, upgrade their gear and extract. Ghost Mode keeps d
 
 ---
 
-**ORBIT 3.1.1**: [Downloads](https://github.com/Chazut/ORBIT/releases) · [Full changelog](CHANGELOG.md) · [Fika addon 1.2.0](CHANGELOG.md#orbit-fika-addon-120)
+**ORBIT 3.1.1**: [Downloads](https://github.com/Chazut/ORBIT/releases) · [Full changelog](CHANGELOG.md)
 
 ## Features
 
@@ -63,7 +63,7 @@ Distant bots use a lighter simulation to reduce CPU load while continuing suppor
 - **Web UI & presets:** tune behaviour, Ghost settings and faction control; save and share setups, with supported per-map overrides.
 - **Zone editor:** attraction/avoidance zones, floors, bot filters and optional player convergence.
 - **Door capture:** create custom room-rush points directly from an in-game door.
-- **Fika & diagnostics:** co-op addon, optional Raid Review integration and built-in debug ZIP export.
+- **Fika & diagnostics:** built-in co-op support, optional Raid Review integration and built-in debug ZIP export.
 
 > **ORBIT handles activity between fights and Ghost simulation.** Awake combat stays with SAIN/native AI. Spawns and starting gear stay with your spawn system.
 
@@ -152,16 +152,16 @@ Only **ORBIT-controlled bots** follow zones. For regular Scavs, increase **Scavs
 | **[Raid Review](https://sp-mod.com/mod/1479/raid-review)** | (Recommended) Replay of routes, objectives, looting and Ghost activity. |
 | **Faction mods** | (Compatible) Per-faction takeover and supported native Ghost behaviour. Some actions require waking. |
 | **Bot Healing Fixes** | (Compatible) Supported medicine routine paused in native Ghost; unchanged while awake. |
-| **PiP Disabler** | (Compatible) Scoped-wake integration, including remote views with the matching Fika addon. |
+| **PiP Disabler** | (Compatible) Scoped-wake integration, including remote views with Fika. |
 | **Questing Bots, Looting Bots & Phobos** | Incompatible |
 | **Other AI limiters / culling mods** | Incompatible |
 | **Smoothie** | (Not recommended) Reported weird movements and animations. |
 
 ### Playing with Fika
 
-Install the **complete ORBIT ZIP**, dependencies and matching **[Fika addon](https://sp-mod.com/addon/123/orbit-fika-addon)** on the host, joining players and headless client if used. Keep versions identical.
+Install the **complete ORBIT ZIP** and dependencies on the host, joining players and headless client if used. Keep versions identical. Fika support is built into `ORBIT.dll` and activates automatically when Fika is installed. Remove the old `Orbit.Fika.dll` when upgrading; no separate addon is needed.
 
-The addon synchronizes **Ghost gunfire, supported doors/switches and remote scope views**. Configuration is shared through the SPT server.
+The built-in integration synchronizes **Ghost gunfire, supported doors/switches and remote scope views**. Configuration is shared through the SPT server. In solo, the Fika component is not loaded.
 
 [Full compatibility notes](https://github.com/Chazut/ORBIT/wiki/Compatibility) · [Fika setup](https://github.com/Chazut/ORBIT/wiki/Fika) · [Raid Review](https://sp-mod.com/mod/1479/raid-review)
 
