@@ -230,7 +230,10 @@ internal sealed partial class RushPlan : IObjectiveWork
             _partial = !final;
             if (Kind == "Custom") ReportCustomApproach(squad, site, final ? "final" : "leg", "route selected");
             if (_partial) Log.Info($"RUSH APPROACH: {squad} kind={Kind} site={site.Name} leg={_anchor} target={target} remaining={Vector3.Distance(_anchor, target):F1}m");
-            SetOrder(_actor, Point(waypoints, _anchor, site.Name), waypoints);
+            // A one-metre arrival disk can straddle a wall beside a door. Reach the
+            // checked access position before attempting the interaction.
+            var arrivalRadius = door != null && !_inside && _doorApproach && !_partial ? .25f : 1f;
+            SetOrder(_actor, Point(waypoints, _anchor, site.Name, arrivalRadius), waypoints);
             squad.Objective.Location = _orders[_actor]; squad.Objective.Status = SquadObjectiveState.Active;
         }
         foreach (var member in squad.Members)
@@ -250,7 +253,7 @@ internal sealed partial class RushPlan : IObjectiveWork
         // Arrival at the handle takes precedence over a stopped mover's failure. Let the
         // normal door interaction settle without consuming navigation retries at the handle.
         if (door != null && !_inside && _doorApproach && !_partial
-            && (_actor.Position - _anchor).sqrMagnitude <= 1f)
+            && (_actor.Position - _anchor).sqrMagnitude <= .0625f)
             return InteractDoor(squad, waypoints, site, door);
         if (_actor.Objective.Status == ObjectiveStatus.Failed)
         {
@@ -260,7 +263,19 @@ internal sealed partial class RushPlan : IObjectiveWork
             return true;
         }
         if (Status == "searching" && _held >= site.SearchSeconds * _searchScale) return Visit(squad, waypoints);
-        if (Status != "searching" && (_actor.Position - _anchor).sqrMagnitude > (door != null ? 1f : 9f)) return true;
+        var arrivalDistanceSqr = door != null && !_inside && _doorApproach ? .0625f : door != null ? 1f : 9f;
+        if (Status != "searching" && (_actor.Position - _anchor).sqrMagnitude > arrivalDistanceSqr)
+        {
+            if (door != null && !_inside && _doorApproach && !_partial
+                && _actor.Objective.Status == ObjectiveStatus.Finished)
+            {
+                Log.Info($"RUSH REACH: {squad} door={door.Id} reason=stopped-before-access feet={_actor.Position} anchor={_anchor} gap={Vector3.Distance(_actor.Position, _anchor):F2}m");
+                RememberApproach(_anchor);
+                Release(squad, waypoints); _route.Reset();
+                if (++_retries >= 3) return Skip(squad, waypoints, "door access position not reached");
+            }
+            return true;
+        }
         if (_partial) return true;
         // Proximity to a destination upstairs is not arrival. A mover may stop on a
         // landing within the ordinary three-metre arrival radius.
@@ -323,8 +338,8 @@ internal sealed partial class RushPlan : IObjectiveWork
             var reach = OperationSwitchReach.Evaluate(_actor.Position, door);
             if (!reach.Reachable)
             {
-                Log.Info($"RUSH REACH: {squad} door={door.Id} {reach.Diagnostics}");
-                RememberApproach(_actor.Position);
+                Log.Info($"RUSH REACH: {squad} door={door.Id} feet={_actor.Position} anchor={_anchor} gap={Vector3.Distance(_actor.Position, _anchor):F2}m {reach.Diagnostics}");
+                RememberApproach(_anchor);
                 Release(squad, waypoints); _route.Reset(); _nextWork = Time.time + 2f;
                 if (++_retries >= 3) return Skip(squad, waypoints, "door interaction blocked");
                 return true;
@@ -557,8 +572,8 @@ internal sealed partial class RushPlan : IObjectiveWork
                 SetOrder(member, Point(waypoints, _room.Center, "Hold marked room"), waypoints);
         }
     }
-    private static Waypoint Point(WaypointSystem w, Vector3 position, string name)
-        => new(w.NewRuntimeWaypointId(), WaypointCategory.Synthetic, name, position, 1, new(), new(), null);
+    private static Waypoint Point(WaypointSystem w, Vector3 position, string name, float radius = 1f)
+        => new(w.NewRuntimeWaypointId(), WaypointCategory.Synthetic, name, position, radius * radius, new(), new(), null);
     private void SetOrder(Agent member, Waypoint point, WaypointSystem w)
     {
         if (member.Objective.Location != null && member.Objective.Location != point) w.ReleaseClaim(member.Objective.Location.Id, member.Id);

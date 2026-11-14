@@ -176,6 +176,8 @@ internal sealed class OperationRouteSearch
             if (local) LocalDestinations++;
             if (allowedPoint != null && !allowedPoint(hit.position)) { _outsideScope++; continue; }
             if (local && finalPoint != null && !finalPoint(hit.position)) { _blockedInteraction++; continue; }
+            // Avoid a failed final door position without excluding the whole doorway.
+            if (local && nearbyAccess && Visited(hit.position, avoided, .35f)) { _visited++; continue; }
             Samples++;
             if (!NavMesh.CalculatePath(origin, hit.position, NavMesh.AllAreas, _path)
                 || _path.status == NavMeshPathStatus.PathInvalid) { InvalidPaths++; _invalidQueries++; continue; }
@@ -187,6 +189,10 @@ internal sealed class OperationRouteSearch
             {
                 if (corners == null || corners.Length == 0
                     || Vector3.Distance(corners[corners.Length - 1], hit.position) > 1f) { _noCorners++; continue; }
+                // A complete path can still end short of the requested sample. Check
+                // the place the mover will actually reach, not the point behind it.
+                if (nearbyAccess && finalPoint != null && !finalPoint(corners[corners.Length - 1]))
+                { _blockedInteraction++; continue; }
                 RouteCorners = corners;
                 point = hit.position; final = true; return true;
             }
