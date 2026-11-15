@@ -26,10 +26,11 @@ public class OrbitFikaPlugin : IDisposable
 {
     public const string PluginGuid = "com.chazut.orbit.fika";
     public const string PluginName = "ORBIT Fika Bridge";
-    public const string PluginVersion = "1.2.0";
-    public const string ReleaseVersion = "1.2.0";
+    public const string PluginVersion = "1.3.0";
+    public const string ReleaseVersion = "1.3.0";
     private DoorSyncBridge _doors;
     private ScopeSyncBridge _scopes;
+    private WorldSyncBridge _world;
 
     // Mirrors the limiter's own earshot gate, judged here against the LOCAL listener.
     private const float EarshotMeters = 1500f;
@@ -58,7 +59,8 @@ public class OrbitFikaPlugin : IDisposable
         _initialized = true;
         _log = logger;
         _scopes = new ScopeSyncBridge(logger);
-        _doors = new DoorSyncBridge(logger, _scopes);
+        _world = new WorldSyncBridge(logger);
+        _doors = new DoorSyncBridge(logger, _scopes, _world);
         FikaEventDispatcher.SubscribeEvent<FikaNetworkManagerCreatedEvent>(OnNetworkManagerCreated);
         FikaEventDispatcher.SubscribeEvent<FikaNetworkManagerDestroyedEvent>(OnNetworkManagerDestroyed);
         OrbitEvents.GhostFightSoundsResolved += OnGhostFightResolved;
@@ -243,6 +245,7 @@ public class OrbitFikaPlugin : IDisposable
     {
         _doors?.Tick();
         _scopes?.Tick();
+        _world?.Tick();
         if (_pending.Count == 0) return;
 
         var gameWorld = Singleton<GameWorld>.Instance;
@@ -300,7 +303,12 @@ public class OrbitFikaPlugin : IDisposable
         {
             _doors = null;
             try { _scopes?.Dispose(); }
-            finally { _scopes = null; ResetNetwork(); }
+            finally
+            {
+                _scopes = null;
+                try { _world?.Dispose(); }
+                finally { _world = null; ResetNetwork(); }
+            }
         }
     }
 

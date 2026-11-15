@@ -1,6 +1,25 @@
-# ORBIT Fika addon
+# ORBIT Fika integration
 
-**Version 1.2.0 for ORBIT 3.0 and 3.1**: [Full changelog](CHANGELOG.md)
+**Built into ORBIT.dll**, loaded automatically when Fika is present. Install the same updated
+ORBIT on the host, every playing client and the headless client if used. Remove the legacy
+`Orbit.Fika.dll`; a separate addon is no longer needed. Solo does not load this component.
+
+The embedded bridge 1.3.0 adds car extraction state and final bot pose synchronization:
+
+- Cars used by ORBIT share starts, cancellations and departures, including after reconnection.
+  Player payment and eligibility stay native. Ordinary exits keep their existing behavior.
+- A bot's final position is sent before Fika's native death message and applied just before
+  the client creates its corpse. This includes Ghost deaths that occur before a movement update.
+  Fika still owns health, inventory, kill credit and corpse creation.
+
+These messages are negotiated through the existing handshake. Older integrations receive no
+unknown packets, but every participant needs the update for these fixes. `WORLD SYNC:` logs
+distinguish sending, receiving and applying state; warnings are throttled. A send log alone
+does not prove that a corpse appeared. Native reconnect countdown timestamps are also repaired.
+
+Protocol and adapter tests cover Fika 2.4.2 and 2.4.6 APIs. Real multiplayer validation is still required.
+
+## Retained features
 
 PiP Disabler scoped wake support requires the updated ORBIT client and addon on the host or
 headless and playing clients. PiP itself is only needed on players using it. While PiP handles
@@ -9,11 +28,11 @@ times per second. Reports expire after 1.5 seconds and are cleared when PiP stop
 optic or the player disconnects. Normal scope behavior remains unchanged for other players.
 This capability is negotiated through the existing handshake; older addons receive no new packets.
 
-Version 1.2.0 synchronizes the host's Ghost firefight shot timing and stops queued audio when a shooter dies, wakes or leaves the fight. Use the same ORBIT version and addon 1.2.0 on every participant.
+The integration synchronizes the host's Ghost firefight shot timing and stops queued audio when a shooter dies, wakes or leaves the fight.
 
 It retains PiP Disabler scoped wake synchronization and synchronization of switches activated by ORBIT's multi-step objectives,
 alongside door synchronization and Ghost fight audio. It requires ORBIT 3.0.0 or newer. Use the
-same ORBIT client version (3.0 or 3.1) and addon 1.2.0 on the host or headless and every playing client.
+same ORBIT client build on the host or headless and every playing client.
 Older addons do not synchronize these switch interactions. Door compatibility is requested once
 per network session, with a warning if the host does not respond; use matching addon versions.
 

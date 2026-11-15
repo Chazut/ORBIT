@@ -686,6 +686,7 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
         try
         {
             // The string overload resolves the player without an IDissonancePlayer reference.
+            Orbit.Api.OrbitExtractionEvents.Raise(exfil);
             exfil.OnItemTransferred(agent.Bot.GetPlayer.ProfileId);
 
             if (exfil.Status == EExfiltrationStatus.UncompleteRequirements)

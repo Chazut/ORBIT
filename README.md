@@ -161,7 +161,7 @@ Only **ORBIT-controlled bots** follow zones. For regular Scavs, increase **Scavs
 
 Install the **complete ORBIT ZIP** and dependencies on the host, joining players and headless client if used. Keep versions identical. Fika support is built into `ORBIT.dll` and activates automatically when Fika is installed. Remove the old `Orbit.Fika.dll` when upgrading; no separate addon is needed.
 
-The built-in integration synchronizes **Ghost gunfire, supported doors/switches and remote scope views**. Configuration is shared through the SPT server. In solo, the Fika component is not loaded.
+The built-in integration synchronizes **Ghost gunfire, supported doors/switches, remote scope views, car extraction state and final bot positions before death**. Configuration is shared through the SPT server. In solo, the Fika component is not loaded.
 
 [Full compatibility notes](https://github.com/Chazut/ORBIT/wiki/Compatibility) · [Fika setup](https://github.com/Chazut/ORBIT/wiki/Fika) · [Raid Review](https://sp-mod.com/mod/1479/raid-review)
 

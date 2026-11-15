@@ -338,11 +338,11 @@ public class ExtractAction(AgentData dataset, float hysteresis) : Task<Agent>(hy
 
     private static void DepartCar(ExfiltrationPoint exfil)
     {
-        // Mark the car as departed so the human player can't pile in after the squad has left. NotPresent is
-        // BSG's natural V-Ex post-departure state — broadcasts to clients so the UI hides the exfil from the
-        // player.
+        // Native status updates are local. The optional transport watches this exit before mutation
+        // so departure and cancellation reach co-op clients as well as the local extraction UI.
         try
         {
+            Orbit.Api.OrbitExtractionEvents.Raise(exfil);
             exfil.SetStatusLogged(EExfiltrationStatus.NotPresent, "Orbit-VEx-Departed");
         }
         catch (System.Exception e)
