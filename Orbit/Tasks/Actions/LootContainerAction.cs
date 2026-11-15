@@ -85,8 +85,19 @@ public class LootContainerAction(AgentData dataset, WaypointSystem waypointSyste
         // something invalidated it, fail clean.
         if (location == null)
         {
-            Log.Debug($"{agent} LootContainerAction: location/target null, failing");
-            objective.Status = ObjectiveStatus.Failed;
+            // A completed action can remain scheduled until the next score tick.
+            // Do not turn the strategy's new empty assignment back into Failed.
+            if (_states.Remove(agent.Id, out var abandoned))
+            {
+                abandoned.Cancel();
+                waypointSystem.ReleaseClaim(abandoned.Location.Id, agent.Id);
+            }
+            _lootingStartTime.Remove(agent.Id);
+            if (objective.Status == ObjectiveStatus.Looting)
+            {
+                Log.Debug($"LOOT TARGET LOST: {agent} active loot target cleared; session released");
+                objective.Status = ObjectiveStatus.Failed;
+            }
             return;
         }
 
@@ -756,6 +767,7 @@ public class LootContainerAction(AgentData dataset, WaypointSystem waypointSyste
 
 internal class BotLootState
 {
+    internal Waypoint Location => _location;
     // Hard cap on how long we'll wait for loot handler.LootTaskRunning to clear. The brain has its own
     // internal timeout (LootConfig.LootTimeout default 180s) backed by a CancellationTokenSource — but if
     // something inside doesn't honour the cancel (a hung NavMesh callback, a coroutine waiting on a

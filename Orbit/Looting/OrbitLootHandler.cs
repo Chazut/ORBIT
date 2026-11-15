@@ -1473,16 +1473,16 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
         }
 
         using var body = _bodyGate.Enter(true);
-        var pickupReady = new TaskCompletionSource<bool>();
+        var pickup = new NativeLootPickup(player);
         try
         {
-            player.CurrentManagedState.Pickup(true, () => pickupReady.TrySetResult(true));
-            using (ct.Register(() => pickupReady.TrySetResult(false)))
+            while (!pickup.Ready)
             {
-                var ready = await pickupReady.Task;
                 CheckSession(ct);
-                if (!ready) return false;
+                pickup.Tick();
+                if (!pickup.Ready) await Task.Delay(25, ct);
             }
+            CheckSession(ct);
 
             Log.Debug($"OrbitLootHandler.Loose({Nick}): TRY {name} (price={price:N0}₽, perSlot={pricePerSlot:N0}₽, kneel done)");
             var success = await RunTransactionAsync(place, name, ct);
@@ -1499,11 +1499,9 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
         }
         finally
         {
-            if (OwnsSession(ct) && HasLiveOwner && !DormantMode)
-            {
-                try { player.CurrentManagedState.Pickup(false, null); } catch { }
-                try { player.UpdateInteractionCast(); } catch { }
-            }
+            // Dispose only touches the callback/state owned by this pickup, even
+            // when cancellation handed the bot to another task in the meantime.
+            try { pickup.Dispose(); } catch { }
         }
     }
 
