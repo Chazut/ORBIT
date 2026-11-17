@@ -783,6 +783,7 @@ internal class BotLootState
     private bool _started;
     private int _inventoryRetries;
     private float _inventoryRetryAt;
+    private float? _poseBeforeCorpseLoot;
 
     public bool IsDone { get; private set; }
     public bool Success { get; private set; }
@@ -863,6 +864,7 @@ internal class BotLootState
         // Phase-2 dormant looting: the session runs data-only (no animations, delays or equips) when the
         // agent sleeps. Re-set every session — the same handler serves awake sessions later.
         _brain.DormantMode = _agent.IsDormant;
+        MaintainCorpsePosture();
 
         // Snapshot cumulative looted value so we can tell at the end whether the bot actually pocketed
         // anything (vs. opening the container and skipping everything because items were below the value
@@ -962,6 +964,21 @@ internal class BotLootState
             return;
         }
 
+        MaintainCorpsePosture();
+    }
+
+    private void MaintainCorpsePosture()
+    {
+        if (_brain.CurrentTargetKind != LootKind.Corpse || _agent.IsDormant || !_agent.IsActive
+            || !LootActorGuard.IsCurrent(_agent.Bot, _agent.Player)) return;
+        // MovementSystem reapplies its desired pose even when the bot has no path.
+        // Setting BotOwner.SetPose alone is overwritten by the next movement tick.
+        if (!_poseBeforeCorpseLoot.HasValue)
+        {
+            _poseBeforeCorpseLoot = _agent.Movement.Pose;
+            Log.Debug($"{_agent} BotLootState: corpse posture=crouched until session ends");
+        }
+        _agent.Movement.Pose = 0f;
     }
 
     public void Cancel()
@@ -989,6 +1006,13 @@ internal class BotLootState
 
     private void CleanupBrainTarget()
     {
+        if (_poseBeforeCorpseLoot.HasValue)
+        {
+            // Restore only our desired pose; combat and the current body owner control
+            // actual animation. Do not overwrite a pose assigned by a different task.
+            if (_agent.Movement.Pose == 0f) _agent.Movement.Pose = _poseBeforeCorpseLoot.Value;
+            _poseBeforeCorpseLoot = null;
+        }
         _brain.CurrentTarget = null;
         _brain.CurrentTargetKind = LootKind.None;
         _brain.ForceEnabled = false;
