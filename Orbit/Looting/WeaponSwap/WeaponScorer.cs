@@ -134,7 +134,8 @@ public static class WeaponScorer
         var loadedPen = 0;
         var loadedDmg = 0;
         var loadedAmmo = weapon.GetCurrentMagazine()?.FirstRealAmmo() as Ammo;
-        if (loadedAmmo != null) ConsiderAmmoQuality(loadedAmmo, ref loadedPen, ref loadedDmg);
+        if (loadedAmmo != null && string.Equals(loadedAmmo.Caliber, caliber, System.StringComparison.OrdinalIgnoreCase))
+            ConsiderAmmoQuality(loadedAmmo, ref loadedPen, ref loadedDmg);
         var bestPen = loadedPen > 0 ? loadedPen : fallbackPen;
         var bestDmg = loadedDmg > 0 ? loadedDmg : fallbackDmg;
 

@@ -1728,7 +1728,7 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
                     if (slot == null) continue;
                     try
                     {
-                        if (slot.CheckCompatibility(mag))
+                        if (MagazineCompatibility.Fits(w, mag))
                         {
                             reason = $"mag fits {w.LocalizedName()}";
                             return true;

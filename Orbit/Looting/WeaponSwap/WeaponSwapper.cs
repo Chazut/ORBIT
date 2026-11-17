@@ -796,13 +796,13 @@ public static partial class WeaponSwapper
 
         // Build the set of weapon mag-slots the post-swap loadout will have. A mag whose template fits any
         // of these is worth keeping (we can extract its rounds for the matching weapon later).
-        var postSwapMagSlots = new List<Slot>(postSwapWeapons?.Count ?? 0);
+        var postSwapMagSlots = new List<Weapon>(postSwapWeapons?.Count ?? 0);
         if (postSwapWeapons != null)
             foreach (var w in postSwapWeapons)
             {
                 if (w == null) continue;
                 var ms = w.GetMagazineSlot();
-                if (ms != null) postSwapMagSlots.Add(ms);
+                if (ms != null) postSwapMagSlots.Add(w);
             }
 
         // Sort by price/slot desc so the most valuable mods get stripped first; if the bot's bag runs out
@@ -823,7 +823,7 @@ public static partial class WeaponSwapper
             {
                 foreach (var pms in postSwapMagSlots)
                 {
-                    try { if (pms.CheckCompatibility(mag)) { reason = $"mag fits post-swap weapon ({pms.ParentItem?.LocalizedName()})"; break; } }
+                    try { if (MagazineCompatibility.Fits(pms, mag)) { reason = $"mag fits post-swap weapon ({pms.LocalizedName()})"; break; } }
                     catch { /* slot probe can throw — treat as no-fit */ }
                 }
             }
