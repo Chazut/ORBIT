@@ -79,8 +79,7 @@ internal sealed class NativeGhostDoors(BotOwner bot, DoorSystem doors)
     }
 
     private static bool IsOpen(Door door)
-        => door.DoorState == EDoorState.Open
-            && Mathf.Abs(Mathf.DeltaAngle(door.CurrentAngle, door.GetAngle(EDoorState.Open))) <= 1f;
+        => Orbit.Api.OrbitDoorPose.OpenPoseError(door) <= 1f;
 
     private Door FindOnRoute()
     {

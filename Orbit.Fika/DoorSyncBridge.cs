@@ -266,7 +266,8 @@ internal sealed class DoorSyncBridge : IDisposable
     }
 
     private static bool Settled(Door door)
-        => DoorStateReceiver.Terminal(door.DoorState)
+        => door.DoorState == EDoorState.Open ? OrbitDoorPose.OpenPoseError(door) <= 1f
+            : DoorStateReceiver.Terminal(door.DoorState)
             && Mathf.Abs(Mathf.DeltaAngle(door.CurrentAngle, door.GetAngle(door.DoorState))) <= 1f;
 
     private OrbitDoorPacket Snapshot(Door door)

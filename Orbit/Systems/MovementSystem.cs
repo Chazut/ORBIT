@@ -613,8 +613,9 @@ public partial class MovementSystem
     {
         try
         {
+            var targetAngle = Orbit.Api.OrbitDoorPose.TargetAngle(door);
             door.DoorState = EDoorState.Open;
-            door.CurrentAngle = door.GetAngle(EDoorState.Open);
+            door.CurrentAngle = targetAngle;
             EFT.GlobalEvents.GlobalEventsController.CreateEvent<EFT.GlobalEvents.InteractiveObjectInteractionResultEvent>()
                 .Invoke(door, EDoorState.Open);
             Orbit.Api.OrbitDoorEvents.Raise(door, Orbit.Api.OrbitDoorEvents.Operation.Finalize);
@@ -1010,12 +1011,13 @@ public partial class MovementSystem
             {
                 try
                 {
+                    var targetAngle = Orbit.Api.OrbitDoorPose.TargetAngle(watch.Door);
                     watch.Door.DoorState = EDoorState.Open;
                     // Physically snap the leaf to its open pose: on headless the BSG open animation never
                     // runs for bot interactions, leaving state Open with a visually shut leaf (and the
                     // occlusion portal open). Mirrors BSG's breach completion — DoorState + CurrentAngle +
                     // interaction-result event.
-                    watch.Door.CurrentAngle = watch.Door.GetAngle(EDoorState.Open);
+                    watch.Door.CurrentAngle = targetAngle;
                     EFT.GlobalEvents.GlobalEventsController.CreateEvent<EFT.GlobalEvents.InteractiveObjectInteractionResultEvent>()
                         .Invoke(watch.Door, EDoorState.Open);
                     Orbit.Api.OrbitDoorEvents.Raise(watch.Door, Orbit.Api.OrbitDoorEvents.Operation.Finalize);

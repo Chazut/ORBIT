@@ -1,5 +1,4 @@
 using System;
-using System.Reflection;
 using System.Collections;
 using EFT;
 using EFT.Interactive;
@@ -12,10 +11,6 @@ namespace Orbit.Systems;
 // and recover only the transition still owned by this operation.
 internal sealed class OperationInteraction
 {
-    private static readonly FieldInfo StateField = typeof(WorldInteractiveObject).GetField("_interaction",
-        BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
-    private static readonly PropertyInfo BreakProperty = StateField?.FieldType.GetProperty("Break");
-    private static readonly PropertyInfo ResultProperty = StateField?.FieldType.GetProperty("ResultState");
     internal enum Result { Ready, Waiting, Failed }
     private WorldInteractiveObject _target;
     private Player _actor;
@@ -46,7 +41,11 @@ internal sealed class OperationInteraction
         }
         var settled = !_unlockRunning && _target.DoorState != EDoorState.Interacting;
         if (_target is Door door && door.DoorState == EDoorState.Open)
+        {
             settled &= OpenPoseSettled(door);
+            if (settled)
+                Log.Info($"MULTISTEP INTERACTION: target={door.Id} result=opened attempts={Attempts} state=Open angle={door.CurrentAngle:F1} configured={door.GetAngle(EDoorState.Open):F1}");
+        }
         if (settled)
         {
             Release(false);
@@ -55,7 +54,7 @@ internal sealed class OperationInteraction
         else if (now - _started >= 12f)
         {
             Detail = "owned interaction timed out";
-            var expected = _target is Door opening ? opening.GetAngle(EDoorState.Open) : float.NaN;
+            var expected = _target is Door opening ? OrbitDoorPose.TargetAngle(opening) : float.NaN;
             Log.Warning($"MULTISTEP INTERACTION: target={_target.Id} result=timeout attempts={Attempts} state={_target.DoorState} angle={_target.CurrentAngle:F1} expected={expected:F1}");
             Release(true);
             _retryAt = now + 2f;
@@ -134,9 +133,7 @@ internal sealed class OperationInteraction
         Attempts = 0; _busySince = -1; _retryAt = 0; Detail = null; _cleanupFailed = false;
     }
 
-    internal static bool OpenPoseSettled(Door door) => door.DoorState == EDoorState.Open
-        && (Mathf.Abs(Mathf.DeltaAngle(door.CurrentAngle, door.GetAngle(EDoorState.Open))) < 5f
-            || door.IsBroken && Mathf.Abs(Mathf.DeltaAngle(door.CurrentAngle, door.GetAngle(EDoorState.Breaching))) < 5f);
+    internal static bool OpenPoseSettled(Door door) => OrbitDoorPose.OpenPoseError(door) < 5f;
 
     private void Release(bool cancel)
     {
@@ -153,11 +150,10 @@ internal sealed class OperationInteraction
                 {
                     // Stop our animation before restoring its pre-interaction state. Never
                     // force Open, reset another actor's transition or consume a credential.
-                    var state = StateField?.GetValue(target);
-                    if (state == null || BreakProperty?.CanWrite != true || ResultProperty?.CanWrite != true)
-                        throw new InvalidOperationException("Native interaction recovery fields unavailable");
-                    BreakProperty.SetValue(state, true);
-                    ResultProperty.SetValue(state, _before);
+                    var state = OrbitDoorPose.Interaction(ownedDoor)
+                        ?? throw new InvalidOperationException("Native interaction recovery fields unavailable");
+                    state.Break = true;
+                    state.ResultState = _before;
                     target.CurrentAngle = _angle;
                     target.DoorState = _before;
                     Log.Info($"MULTISTEP INTERACTION: target={target.Id} result=restored attempts={Attempts} state={target.DoorState} reason={Detail ?? "cancelled"}");
