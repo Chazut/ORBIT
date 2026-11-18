@@ -46,6 +46,8 @@ internal sealed partial class RushPlan : IObjectiveWork
     private Waypoint _loot;
     private MarkedRoomScope _room;
     private OperationStep _doorStep;
+    private EDoorState? _lastDoorRequest;
+    private const float DoorArrivalRadius = .25f;
     private readonly HashSet<Agent> _roomLooters = new();
     private float _roomIdle;
     private float _roomEntryIdle, _roomEntryBestDistance = float.MaxValue;
@@ -155,6 +157,10 @@ internal sealed partial class RushPlan : IObjectiveWork
         var site = _sites[_current];
         var door = Kind == "Marked" ? waypoints.RushDoor(site.DoorId) : null;
         if (Kind == "Marked" && door == null) return Skip(squad, waypoints, "door removed");
+        // A native door transition can outlive the movement order (especially on Ghost wake).
+        if (door != null && _doorApproach && !_inside &&
+            (door.DoorState == EDoorState.Open || Status is "unlocking door" or "opening door"))
+            return InteractDoor(squad, waypoints, site, door);
         if (_loot != null)
         {
             if (_actor.Objective.Location == _loot && _actor.Objective.Status is not (ObjectiveStatus.Finished or ObjectiveStatus.Failed)) return true;
@@ -230,9 +236,8 @@ internal sealed partial class RushPlan : IObjectiveWork
             _partial = !final;
             if (Kind == "Custom") ReportCustomApproach(squad, site, final ? "final" : "leg", "route selected");
             if (_partial) Log.Info($"RUSH APPROACH: {squad} kind={Kind} site={site.Name} leg={_anchor} target={target} remaining={Vector3.Distance(_anchor, target):F1}m");
-            // A one-metre arrival disk can straddle a wall beside a door. Reach the
-            // checked access position before attempting the interaction.
-            var arrivalRadius = door != null && !_inside && _doorApproach && !_partial ? .25f : 1f;
+            // Guide the mover to a precise spot. Door use is checked from its actual feet.
+            var arrivalRadius = door != null && !_inside && _doorApproach && !_partial ? DoorArrivalRadius : 1f;
             SetOrder(_actor, Point(waypoints, _anchor, site.Name, arrivalRadius), waypoints);
             squad.Objective.Location = _orders[_actor]; squad.Objective.Status = SquadObjectiveState.Active;
         }
@@ -250,11 +255,14 @@ internal sealed partial class RushPlan : IObjectiveWork
             RememberApproach(_actor.Position);
             Release(squad, waypoints); _route.Reset(); _retries = 0; return true;
         }
-        // Arrival at the handle takes precedence over a stopped mover's failure. Let the
-        // normal door interaction settle without consuming navigation retries at the handle.
-        if (door != null && !_inside && _doorApproach && !_partial
-            && (_actor.Position - _anchor).sqrMagnitude <= .0625f)
-            return InteractDoor(squad, waypoints, site, door);
+        // A stopped mover may still be on the correct side and within reach.
+        if (door != null && !_inside && _doorApproach && !_partial)
+        {
+            if ((_actor.Position - _anchor).sqrMagnitude <= DoorArrivalRadius * DoorArrivalRadius
+                || _actor.Objective.Status is ObjectiveStatus.Finished or ObjectiveStatus.Failed)
+                return InteractDoor(squad, waypoints, site, door);
+            return true;
+        }
         if (_actor.Objective.Status == ObjectiveStatus.Failed)
         {
             RememberApproach(_anchor);
@@ -263,19 +271,9 @@ internal sealed partial class RushPlan : IObjectiveWork
             return true;
         }
         if (Status == "searching" && _held >= site.SearchSeconds * _searchScale) return Visit(squad, waypoints);
-        var arrivalDistanceSqr = door != null && !_inside && _doorApproach ? .0625f : door != null ? 1f : 9f;
+        var arrivalDistanceSqr = door != null ? 1f : 9f;
         if (Status != "searching" && (_actor.Position - _anchor).sqrMagnitude > arrivalDistanceSqr)
-        {
-            if (door != null && !_inside && _doorApproach && !_partial
-                && _actor.Objective.Status == ObjectiveStatus.Finished)
-            {
-                Log.Info($"RUSH REACH: {squad} door={door.Id} reason=stopped-before-access feet={_actor.Position} anchor={_anchor} gap={Vector3.Distance(_actor.Position, _anchor):F2}m");
-                RememberApproach(_anchor);
-                Release(squad, waypoints); _route.Reset();
-                if (++_retries >= 3) return Skip(squad, waypoints, "door access position not reached");
-            }
             return true;
-        }
         if (_partial) return true;
         // Proximity to a destination upstairs is not arrival. A mover may stop on a
         // landing within the ordinary three-metre arrival radius.
@@ -291,7 +289,6 @@ internal sealed partial class RushPlan : IObjectiveWork
         {
             _doorApproach = true; Release(squad, waypoints); _route.Reset(); _approachHistory.Clear(); _retries = 0; return true;
         }
-        if (door != null && !_inside) return InteractDoor(squad, waypoints, site, door);
         if (Kind == "Marked") { _held = 0; SetStatus(squad, "looting"); return true; }
         if (Kind == "Custom" && site.CustomMode != "Search")
         { _customArrived = true; return TickCustom(squad, waypoints, site, 0); }
@@ -328,29 +325,33 @@ internal sealed partial class RushPlan : IObjectiveWork
         }
         try
         {
-            var interaction = door.GetInteractionParameters(_actor.Position).InteractionPosition;
-            if ((_actor.Position - interaction).sqrMagnitude > 4f)
-            {
-                Release(squad, waypoints); _route.Reset();
-                if (++_retries >= 3) return Skip(squad, waypoints, "door interaction point unreachable");
-                return true;
-            }
-            var reach = OperationSwitchReach.Evaluate(_actor.Position, door);
+            if (!door.Operatable || door.DoorState == EDoorState.Interacting || door.InteractingPlayer != null) return true;
+            var feet = _actor.Position;
+            var gap = Vector3.Distance(feet, _anchor);
+            // A displaced actor may have only a short window at the handle after waking.
+            // Once a native unlock has settled, opening is a distinct request.
+            bool displacedAfterUnlock = gap > DoorArrivalRadius && _lastDoorRequest == EDoorState.Locked && door.DoorState == EDoorState.Shut;
+            var now = Time.time;
+            if (now < _interactAt && !displacedAfterUnlock) return true;
+            var interaction = door.GetInteractionParameters(feet).InteractionPosition;
+            var tooFar = (feet - interaction).sqrMagnitude > 4f;
+            var reach = tooFar ? default : OperationSwitchReach.Evaluate(feet, door);
             if (!reach.Reachable)
             {
-                Log.Info($"RUSH REACH: {squad} door={door.Id} feet={_actor.Position} anchor={_anchor} gap={Vector3.Distance(_actor.Position, _anchor):F2}m {reach.Diagnostics}");
-                RememberApproach(_anchor);
+                var detail = tooFar ? $"reason=interaction-position target={interaction}" : reach.Diagnostics;
+                Log.Info($"RUSH REACH: {squad} door={door.Id} feet={feet} anchor={_anchor} gap={gap:F2}m {detail}");
+                RememberApproach(feet);
                 Release(squad, waypoints); _route.Reset(); _nextWork = Time.time + 2f;
-                if (++_retries >= 3) return Skip(squad, waypoints, "door interaction blocked");
+                if (++_retries >= 3) return Skip(squad, waypoints, tooFar ? "door interaction point unreachable" : "door interaction blocked");
+                if (Status != "approach") SetStatus(squad, "approach");
                 return true;
             }
             _actor.Look.Target = reach.Point;
             _actor.Look.Type = LookType.Position;
             if (!_actor.IsDormant) LookSystem.LookToPoint(_actor, reach.Point, 360f);
-            var now = Time.time;
-            if (now < _interactAt || !door.Operatable || door.DoorState == EDoorState.Interacting || door.InteractingPlayer != null) return true;
             _interactAt = now + 5;
             if (++_attempts > 3) return Skip(squad, waypoints, "door interaction failed");
+            _lastDoorRequest = door.DoorState;
             if (door.DoorState == EDoorState.Locked)
             {
                 if (!MultiStepAccess.CanForceUnlock(door)) return Skip(squad, waypoints, "door requires power");
@@ -358,7 +359,11 @@ internal sealed partial class RushPlan : IObjectiveWork
                 SetStatus(squad, "unlocking door");
             }
             else if (waypoints.OpenRushDoor?.Invoke(_actor, door) == true)
+            {
+                if (gap > DoorArrivalRadius)
+                    Log.Info($"RUSH DOOR: {squad} door={door.Id} open-requested actor={_actor} ghost={_actor.IsDormant} feet={feet} anchor={_anchor} gap={gap:F2}m {reach.Diagnostics}");
                 SetStatus(squad, "opening door");
+            }
         }
         catch (Exception error) { Log.Warning($"RUSH: {squad} door={site.DoorId} error={error}"); }
         return true;
@@ -512,7 +517,7 @@ internal sealed partial class RushPlan : IObjectiveWork
     private bool Advance(Squad squad, WaypointSystem waypoints)
     {
         SetStatus(squad, _states[_current]); Release(squad, waypoints); _processed++;
-        _current = -1; _retries = _attempts = 0; ResetRanking();
+        _current = -1; _retries = _attempts = 0; _lastDoorRequest = null; ResetRanking();
         _customArrived = _customCampDone = false; _customCampHeld = _customLootHeld = 0;
         _recorded.Reset(); _searchingRecorded = false;
         _elapsed = _held = _interactAt = _roomIdle = 0; _inside = _doorApproach = false; _loot = null; _room = null; _roomLooters.Clear(); _attempted.Clear(); _route.Reset();
@@ -524,7 +529,7 @@ internal sealed partial class RushPlan : IObjectiveWork
     private bool RetryRecorded(Squad squad, WaypointSystem waypoints)
     {
         Release(squad, waypoints); _route.Reset(); _recorded.ResetSearch(); _approachHistory.Clear();
-        _retries = _attempts = 0; _elapsed = _roomEntryIdle = 0; _searchingRecorded = false;
+        _retries = _attempts = 0; _lastDoorRequest = null; _elapsed = _roomEntryIdle = 0; _searchingRecorded = false;
         _nextWork = Time.time + 3f; return true;
     }
 
