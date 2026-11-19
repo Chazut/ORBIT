@@ -4,6 +4,7 @@ using System.Runtime.CompilerServices;
 using Orbit.Entities;
 using Orbit.Helpers;
 using Orbit.Navigation;
+using Orbit.Settings;
 using Orbit.Systems;
 using UnityEngine;
 using Random = UnityEngine.Random;
@@ -157,6 +158,12 @@ public class GuardAction(AgentData dataset, MovementSystem movementSystem, float
                 case GuardStatus.Moving:
                     if (agent.Movement.Status == MovementStatus.Moving) continue;
 
+                    // Record the crouch on arrival so a sleeping camper wakes in the same stance.
+                    if (agent.Squad?.Camp is { Site.Kind: CampSiteKind.Hotspot } camp && camp.Owns(agent))
+                        MovementSystem.ResetGait(agent, pose: 0f);
+                    else if (!agent.IsDormant && agent.Movement.Pose > 0.3f && (coverPoint.Level != CoverLevel.Stay || Random.value > 0.5f))
+                        MovementSystem.ResetGait(agent, pose: 0.25f);
+
                     // Dormant: hold the spot without the sweep (raycasts for a sleeping body are pure
                     // waste) — Watch with no directions idles until the strategy timer moves the squad on.
                     if (agent.IsDormant)
@@ -164,10 +171,6 @@ public class GuardAction(AgentData dataset, MovementSystem movementSystem, float
                         guard.Status = GuardStatus.Watch;
                         continue;
                     }
-
-                    // Arrived: crouch and submit the area sweep job.
-                    if (agent.Movement.Pose > 0.3f && (coverPoint.Level != CoverLevel.Stay || Random.value > 0.5f))
-                        MovementSystem.ResetGait(agent, pose: 0.25f);
 
                     if (!SubmitAreaSweepJob(agent, coverPoint)) continue;
                     guard.Status = GuardStatus.Sweep;
