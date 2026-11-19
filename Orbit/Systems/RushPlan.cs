@@ -36,6 +36,8 @@ internal sealed partial class RushPlan : IObjectiveWork
     private readonly HashSet<int> _attempted = new();
     private readonly List<Vector3> _approachHistory = new();
     private readonly OperationRouteSearch _route = new();
+    private AuthoredPointSearch _pointRepair;
+    private bool _repairedApproach, _repairedInterior;
     private readonly RecordedRouteSearch _recorded = new();
     private bool _searchingRecorded;
     private readonly RushRouteEstimate _ranker = new();
@@ -62,7 +64,7 @@ internal sealed partial class RushPlan : IObjectiveWork
     private Vector3 _anchor, _sortOrigin;
 
     internal RushPlan(string kind, List<RushPoint> sites, float searchScale, RushStyle style = null)
-    { Kind = kind; _sites = sites; _states = new string[sites.Count]; _sequence = new int[sites.Count]; _searchScale = searchScale;
+    { Kind = kind; _sites = new List<RushPoint>(sites); _states = new string[sites.Count]; _sequence = new int[sites.Count]; _searchScale = searchScale;
         if (kind == "Sniper") Sniper = new SniperPlan(sites[0], style ?? new()); }
 
     internal bool Owns(Agent agent) => Sniper != null ? Sniper.Owns(agent) : !Main.Completed && !_paused && !agent.SoloExtractRequested
@@ -113,7 +115,7 @@ internal sealed partial class RushPlan : IObjectiveWork
         if (_actor == null || !_actor.IsActive || _actor.Bot.IsDead || !squad.Members.Contains(_actor)
             || _actor.SoloExtractRequested || (CorpseEscort.InFlight(_actor) && (_loot == null || _actor.Objective.Location != _loot)))
         {
-            Release(squad, waypoints); _actor = null; _loot = null; _route.Reset(); _customArrived = false;
+            Release(squad, waypoints); _actor = null; _loot = null; _route.Reset(); _pointRepair = null; _customArrived = false;
             _recorded.ResetSearch(); _searchingRecorded = false;
             if (CollectingMarkedRoom) _attempted.Clear();
             if (_current < 0) ResetRanking();
@@ -204,17 +206,28 @@ internal sealed partial class RushPlan : IObjectiveWork
             if (door != null && !_inside && _doorApproach) target = door.GetInteractionParameters(_actor.Position).InteractionPosition;
             // Marked rooms, boss areas and Other points on another floor may need distant stairs.
             var final = false;
+            if (_route.InvalidDestination)
+            {
+                if (!(_inside ? _repairedInterior : _repairedApproach) && !_recorded.Active)
+                    return RepairDestination(squad, waypoints, site, door);
+                ReportInvalidDestination(squad, site, target);
+                return Skip(squad, waypoints, "no NavMesh near configured point");
+            }
             var found = !_searchingRecorded && _route.Find(_actor.Position, target, out _anchor, out final, _retries, _approachHistory,
                 floorAware: Kind == "Custom" || (Kind is "Marked" or "Boss") && Mathf.Abs(_actor.Position.y - target.y) > 2.5f,
                 finalPoint: door != null && !_inside && _doorApproach ? DoorStep(door).InteractionCheck : null,
                 localAccess: door != null && !_inside && _doorApproach,
-                requireLocalDestination: Kind == "Custom",
-                destinationScope: Kind == "Custom" ? point => waypoints.CustomRushInZone(site, point) : null,
+                requireLocalDestination: !_recorded.Active && (!_doorApproach || _inside),
+                destinationScope: Kind == "Custom" ? point => waypoints.CustomRushInZone(site, point)
+                    : _inside && _room != null ? _room.Contains
+                    : !string.IsNullOrEmpty(site.FloorId) && !_doorApproach ? point => waypoints.RepairFloor(site, point) : null,
                 destinationRadius: Kind == "Custom" && (site.CustomMode is "Camp" or "CampThenLoot") ? site.Radius : 0);
             if (_route.InvalidDestination)
             {
-                ReportInvalidDestination(squad, site, target);
-                return Skip(squad, waypoints, "no NavMesh near configured point");
+                // The last ordinary probes consumed this frame's route slot.
+                _nextWork = now;
+                waypoints.ContinueOperationWork(this);
+                return true;
             }
             if (_searchingRecorded)
             {
@@ -402,7 +415,7 @@ internal sealed partial class RushPlan : IObjectiveWork
     private bool Pause(Squad squad, WaypointSystem waypoints, string reason)
     {
         waypoints.CancelOperationWork(this);
-        if (!_paused) { Release(squad, waypoints); _loot = null; _actor = null; _paused = true; _customArrived = false; }
+        if (!_paused) { Release(squad, waypoints); _loot = null; _actor = null; _pointRepair = null; _paused = true; _customArrived = false; }
         if (Status != reason) SetStatus(squad, reason);
         if (_current < 0) ResetRanking();
         _nextWork = Time.time + .25f;
@@ -482,6 +495,71 @@ internal sealed partial class RushPlan : IObjectiveWork
         PerformanceJournal.Event(selected ? "rush-select" : "rush-route", squad.Leader?.Bot?.Profile?.Id, detail, squad.Id);
     }
 
+    private bool RepairDestination(Squad squad, WaypointSystem waypoints, RushPoint site, Door door)
+    {
+        var authored = _inside ? LootPosition(site) : Position(site);
+        var seed = authored;
+        var threshold = Vector3.zero;
+        if (door != null)
+        {
+            threshold = door.GetInteractionParameters(_actor.Position).InteractionPosition;
+            seed = _inside ? RoomCenter(site) : threshold;
+            seed.y = threshold.y;
+        }
+        bool Allowed(Vector3 point)
+        {
+            if (!waypoints.RepairFloor(site, point)) return false;
+            if (door == null) return true;
+            if (Mathf.Abs(point.y - threshold.y) > 2f) return false;
+            if (!_inside) return (point - threshold).sqrMagnitude <= 4f;
+            if (_room.HasNativeVolume) return _room.InNativeVolume(point);
+            // Without a native room volume, keep the authored side of the doorway.
+            var pivot = door.transform.position;
+            var dx = authored.x - pivot.x;
+            var dz = authored.z - pivot.z;
+            return dx * dx + dz * dz > .01f && (point.x - pivot.x) * dx + (point.z - pivot.z) * dz > 0f
+                && (point.x - authored.x) * (point.x - authored.x) + (point.z - authored.z) * (point.z - authored.z) <= 2.25f;
+        }
+        var part = _inside ? "interior" : "approach";
+        if (!waypoints.RepairPoint(site, part, authored, seed, _actor, Allowed, ref _pointRepair, out var corrected))
+        {
+            _nextWork = Time.time;
+            waypoints.ContinueOperationWork(this);
+            return true;
+        }
+        var outcome = _pointRepair.Outcome;
+        _pointRepair = null;
+        if (!corrected.HasValue)
+        {
+            ReportInvalidDestination(squad, site, authored);
+            return Skip(squad, waypoints, outcome switch
+            {
+                "ambiguous-floors" => "ambiguous floors near configured point",
+                "no-reachable-surface" => "no reachable correction for configured point",
+                _ => "no NavMesh near configured point"
+            });
+        }
+        var copy = site.Copy();
+        var position = corrected.Value;
+        if (_inside)
+        {
+            _repairedInterior = true;
+            copy.LootX = position.x; copy.LootY = position.y; copy.LootZ = position.z;
+            _room = waypoints.MarkedRoom(copy);
+        }
+        else
+        {
+            _repairedApproach = true;
+            copy.X = position.x; copy.Y = position.y; copy.Z = position.z;
+        }
+        _sites[_current] = copy;
+        Main.Position = position; Main.CellCoords = waypoints.WorldToCell(position);
+        _route.Reset(); _approachHistory.Clear();
+        _nextWork = Time.time;
+        waypoints.ContinueOperationWork(this);
+        return true;
+    }
+
     private void ReportInvalidDestination(Squad squad, RushPoint site, Vector3 target)
     {
         if (!Log.InfoEnabled && !PerformanceJournal.Enabled) return;
@@ -498,7 +576,8 @@ internal sealed partial class RushPlan : IObjectiveWork
     { _states[_current] = "visited"; _visited++; return Advance(squad, waypoints); }
     private bool Skip(Squad squad, WaypointSystem waypoints, string reason)
     {
-        var navigationFailure = reason is "room entrance stalled" or "travel timeout" or "unreachable"
+        var navigationFailure = reason is "no NavMesh near configured point" or "ambiguous floors near configured point"
+            or "no reachable correction for configured point" or "room entrance stalled" or "travel timeout" or "unreachable"
             or "movement failed" or "door interaction point unreachable" or "door interaction failed";
         if (navigationFailure && _current >= 0 && Kind == "Marked"
             && _sites[_current].DoorId == "door_Reserve_Base_Casarms_00042")
@@ -517,6 +596,7 @@ internal sealed partial class RushPlan : IObjectiveWork
     private bool Advance(Squad squad, WaypointSystem waypoints)
     {
         SetStatus(squad, _states[_current]); Release(squad, waypoints); _processed++;
+        _pointRepair = null; _repairedApproach = _repairedInterior = false;
         _current = -1; _retries = _attempts = 0; _lastDoorRequest = null; ResetRanking();
         _customArrived = _customCampDone = false; _customCampHeld = _customLootHeld = 0;
         _recorded.Reset(); _searchingRecorded = false;

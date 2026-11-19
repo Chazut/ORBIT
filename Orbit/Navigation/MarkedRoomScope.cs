@@ -33,6 +33,13 @@ internal sealed class MarkedRoomScope
     {
         if (Mathf.Abs(point.y - _floor) > 2.5f) return false;
         if (_volumes.Count == 0) return (point - Center).sqrMagnitude <= Radius * Radius;
+        return InNativeVolume(point);
+    }
+
+    internal bool HasNativeVolume => _volumes.Count != 0;
+
+    internal bool InNativeVolume(Vector3 point)
+    {
         // Waypoints and path corners lie on the floor, while room triggers start just above it.
         point += Vector3.up * .4f;
         foreach (var volume in _volumes)

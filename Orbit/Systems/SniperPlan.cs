@@ -17,7 +17,10 @@ internal sealed partial class SniperPlan : IObjectiveWork
     private Squad _squad;
     private WaypointSystem _waypoints;
     void IObjectiveWork.ResumeObjectiveWork() => Tick(_squad, _waypoints, _main, WaypointSystem.ObjectiveCombat(_squad));
-    private readonly RushPoint _site;
+    private RushPoint _site;
+    private AuthoredPointSearch _pointRepair;
+    private bool _repairAttempted;
+    private string _repairFailure;
     private readonly float _duration;
     private readonly Dictionary<Agent, Waypoint> _orders = new();
     private readonly Dictionary<Agent, int> _coverAttempts = new();
@@ -72,7 +75,7 @@ internal sealed partial class SniperPlan : IObjectiveWork
         if (!ServerConfig.Rush.Allows(squad.Leader?.BotCategory) || squad.ExtractRequested && !_recorded.Active && !_departing)
             return End(squad, w, "cancelled for extraction or settings");
         if (_actor != null && (!squad.Members.Contains(_actor) || _actor.Bot.IsDead || _actor.SoloExtractRequested))
-        { ResetPostShift(); Release(squad, w); _actor = null; _arrived = false; _returningToPost = false; _route.Reset(); _recorded.Reset(); _progress.Reset(); _approachHistory.Clear(); _retries = 0; }
+        { ResetPostShift(); Release(squad, w); _pointRepair = null; _actor = null; _arrived = false; _returningToPost = false; _route.Reset(); _recorded.Reset(); _progress.Reset(); _approachHistory.Clear(); _retries = 0; }
         if (_actor != null && now >= _nextEquipment)
         {
             _nextEquipment = now + 5;
@@ -102,6 +105,7 @@ internal sealed partial class SniperPlan : IObjectiveWork
             w.CancelOperationWork(this);
             if (!_paused)
             {
+                _pointRepair = null;
                 InterruptPostShift("combat");
                 Release(squad, w, keepCombatLease: _arrived);
                 _paused = true;
@@ -115,6 +119,7 @@ internal sealed partial class SniperPlan : IObjectiveWork
             w.CancelOperationWork(this);
             if (!_paused)
             {
+                _pointRepair = null;
                 var anchor = squad.Objective.Location;
                 Release(squad, w);
                 squad.Objective.Location ??= anchor;
@@ -182,6 +187,7 @@ internal sealed partial class SniperPlan : IObjectiveWork
             if (_actor == null) return End(squad, w, "no scoped member");
             _nextEquipment = now + 5;
         }
+        if (_repairFailure != null) return RepairSeed(squad, w);
         if (TryRecordedTransit(w, now)) return true;
         if (!_formation && !_orders.ContainsKey(_actor))
         { _formation = true; _formationAnchor = _actor.Position; _nextSpacing = 0; }
@@ -212,7 +218,12 @@ internal sealed partial class SniperPlan : IObjectiveWork
                 {
                     var reasons = string.Join(",", _surveyRejections);
                     Log.Info($"SNIPER SURVEY: {squad} candidates={_candidate} rejected={reasons}");
-                    if (_recording == null) return End(squad, w, "no usable post: " + reasons);
+                    if (_recording == null)
+                    {
+                        if (!_surveyRejections.ContainsKey("sightline blocked") && _rejectedPosts.Count == 0)
+                            return StartSeedRepair(squad, w, "no usable post: " + reasons);
+                        return End(squad, w, "no usable post: " + reasons);
+                    }
                     EnableRescue(squad, w, "post survey retry"); _candidate = 0; _nextWork = now + 5f;
                 }
                 return true;
@@ -286,6 +297,44 @@ internal sealed partial class SniperPlan : IObjectiveWork
             SetStatus(squad, "holding");
             SniperCombat.Refresh(_actor, _post, now + 2);
         }
+        return true;
+    }
+
+    private bool StartSeedRepair(Squad squad, WaypointSystem w, string failure)
+    {
+        if (_repairAttempted) return End(squad, w, failure);
+        _repairAttempted = true;
+        Release(squad, w);
+        _repairFailure = failure;
+        ContinueRoute(w);
+        return true;
+    }
+
+    private bool RepairSeed(Squad squad, WaypointSystem w)
+    {
+        if (!w.TryOperationWork(this)) return true;
+        var seed = new Vector3(_site.X, _site.Y, _site.Z);
+        if (_pointRepair == null && NavMesh.SamplePosition(seed, out var local, 1.25f, NavMesh.AllAreas)
+            && (local.position - seed).sqrMagnitude <= 1.25f * 1.25f && w.RepairFloor(_site, local.position))
+            return End(squad, w, _repairFailure);
+        bool Compatible(Vector3 point)
+        {
+            if (!w.RepairFloor(_site, point)) return false;
+            // Elevated points are ground seeds. A correction must still have a roof above it.
+            return !_site.Elevated || Physics.Raycast(point + Vector3.up * 16, Vector3.down, out _, 13,
+                LayersMaskController.HighPolyWithTerrainMask, QueryTriggerInteraction.Ignore);
+        }
+        if (!w.RepairPoint(_site, "sniper-seed", seed, seed, _actor, Compatible, ref _pointRepair, out var corrected))
+        { ContinueRoute(w); return true; }
+        if (!corrected.HasValue) return End(squad, w, _repairFailure);
+        var point = corrected.Value;
+        _site = _site.Copy();
+        _site.X = point.x; _site.Y = point.y; _site.Z = point.z;
+        _main.Position = point; _main.CellCoords = w.WorldToCell(point);
+        _repairFailure = null; _pointRepair = null; _candidate = _retries = 0;
+        _surveyRejections.Clear(); _approachHistory.Clear(); _progress.Reset(); _route.Reset();
+        SetStatus(squad, "surveying corrected site");
+        ContinueRoute(w);
         return true;
     }
 
@@ -427,6 +476,8 @@ internal sealed partial class SniperPlan : IObjectiveWork
             if (RoutePending) { ContinueRoute(w); return true; }
             if (_recorded.Active) { RetryRecorded(squad, w); return true; }
             ReportRoute(squad, site, "site route failed");
+            if (_recording == null && !_repairAttempted && _route.LocalDestinations == 0)
+                return StartSeedRepair(squad, w, "no advancing site approach");
             _route.Reset(); _nextWork = now + 2;
             if (++_retries >= 3) return _recording == null ? End(squad, w, "no advancing site approach") : RetryPost(squad, w);
             return true;
@@ -466,6 +517,8 @@ internal sealed partial class SniperPlan : IObjectiveWork
     {
         if (EnableRescue(squad, w, "autonomous approach exhausted"))
         { RetryRecorded(squad, w); return true; }
+        if (_recording == null && !_resolved && !_repairAttempted && _route.LocalDestinations == 0)
+            return StartSeedRepair(squad, w, "site approach stalled");
         ReportRoute(squad, _post, "post rejected; survey continues");
         _rejectedPosts.Add(_post);
         _progress.Reset();
@@ -519,6 +572,8 @@ internal sealed partial class SniperPlan : IObjectiveWork
             return RejectPost("post mesh missing", sample, null);
         if (Mathf.Abs(nav.position.y - sample.y) > 1.25f)
             return RejectPost("post height mismatch", sample, nav.position);
+        if (_recording == null && !_site.Elevated && !_waypoints.RepairFloor(_site, nav.position))
+            return RejectPost("post outside configured floor", sample, nav.position);
         if (_recording == null && _site.Elevated && nav.position.y < _site.Y + 3)
             return RejectPost("post below roof band", sample, nav.position);
         foreach (var rejected in _rejectedPosts)

@@ -25,6 +25,7 @@ tests/
 !/tests/FikaExfilRegression/
 !/tests/GrenadeDetourRegression/
 !/tests/AirdropClaimRegression/
+!/tests/AuthoredPointRegression/
 
 # Local working files
 /PR_DESCRIPTION_v1.1.0.md
