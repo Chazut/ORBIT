@@ -317,6 +317,9 @@ public class OrbitBrainLayer : CustomLayer
             }
         }
 
+        if (wasActive)
+            Sain.GrenadeThreatReader.OnHandoff(_agent, layerName);
+
         Log.Debug($"{_agent} layer changed to: {layerName} priority: {layer.Priority}");
     }
 

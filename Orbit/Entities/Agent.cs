@@ -70,6 +70,7 @@ public class Agent(int id, BotOwner bot, float[] taskScores) : Entity(id, taskSc
     public readonly BotOwner Bot = bot;
     public readonly Player Player = bot.Mover._player;
 
+    internal GrenadeInterruptions GrenadeInterruptions;
     public readonly Movement Movement = new();
     public readonly Stuck Stuck = new();
     public readonly Look Look = new();

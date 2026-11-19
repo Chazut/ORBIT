@@ -23,6 +23,7 @@ tests/
 !/tests/
 /tests/*
 !/tests/FikaExfilRegression/
+!/tests/GrenadeDetourRegression/
 
 # Local working files
 /PR_DESCRIPTION_v1.1.0.md

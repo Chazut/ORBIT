@@ -63,6 +63,7 @@ public partial class MovementSystem
         for (var i = 0; i < liveAgents.Count; i++)
         {
             var agent = liveAgents[i];
+            if (agent.IsDormant) agent.GrenadeInterruptions = null;
             agent.Movement.SquadTravel.PreparedFrame = -1;
             using var timing = MeasureMovement(TransitionPhase.MovementAgent,
                 !agent.IsActive ? "inactive" : agent.IsDormant ? "ghost" : "awake", agent);
@@ -85,6 +86,17 @@ public partial class MovementSystem
             {
                 ObserveRescueProgress(agent, paused: true);
                 ObserveAwakeRecovery(agent, CanRecoverAirborneFall(agent.Player));
+                continue;
+            }
+            if (agent.GrenadeInterruptions?.Waiting(agent.Movement.PathRevision, Time.time) == true)
+            {
+                // A deliberate wait for a route must not arm an island rescue.
+                ObserveRescueProgress(agent, paused: true);
+                agent.Stuck.IdleRescueSince = -1f;
+                agent.Stuck.IdleRescueIntent = false;
+                agent.Stuck.Recovery.Suspend();
+                agent.Stuck.TravelProgress.Reset();
+                StopAwakeInput(agent, "grenade-detour");
                 continue;
             }
             if (HoldForDoorRecovery(agent)) continue;
@@ -185,6 +197,11 @@ public partial class MovementSystem
                 {
                     ResetPath(agent, MovementStatus.Failed);
                     agent.Objective.Status = ObjectiveStatus.Failed;
+                    continue;
+                }
+                if (!ResolveGrenadeRoute(agent, job, revision))
+                {
+                    _moveJobs.Enqueue((agent, job, revision));
                     continue;
                 }
                 StartMovement(agent, job);

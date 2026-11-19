@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <!-- The test double is discovered through the same optional lookup as in game. -->
+    <AssemblyName>SAIN</AssemblyName>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../Orbit/Navigation/GrenadeDetour.cs" />
+    <Compile Include="../../Orbit/Systems/MovementSystem.GrenadeDetour.cs" />
+    <Compile Include="../../Orbit/Sain/GrenadeThreatReader.cs" />
+  </ItemGroup>
+</Project>
