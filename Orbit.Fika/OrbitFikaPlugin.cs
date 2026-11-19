@@ -61,11 +61,17 @@ public class OrbitFikaPlugin : IDisposable
         _scopes = new ScopeSyncBridge(logger);
         _world = new WorldSyncBridge(logger);
         _doors = new DoorSyncBridge(logger, _scopes, _world);
-        FikaEventDispatcher.SubscribeEvent<FikaNetworkManagerCreatedEvent>(OnNetworkManagerCreated);
-        FikaEventDispatcher.SubscribeEvent<FikaNetworkManagerDestroyedEvent>(OnNetworkManagerDestroyed);
+        FikaEventDispatcher.OnFikaEvent += OnFikaEvent;
         OrbitEvents.GhostFightSoundsResolved += OnGhostFightResolved;
         OrbitEvents.GhostFightSoundsStopped += OnGhostFightStopped;
         _log.LogInfo($"{PluginName} {ReleaseVersion} loaded");
+    }
+
+    // The typed unsubscribe helper in Fika 2.4.2 creates a new delegate during teardown.
+    private static void OnFikaEvent(FikaEvent e)
+    {
+        if (e is FikaNetworkManagerCreatedEvent created) OnNetworkManagerCreated(created);
+        else if (e is FikaNetworkManagerDestroyedEvent destroyed) OnNetworkManagerDestroyed(destroyed);
     }
 
     private static void OnNetworkManagerCreated(FikaNetworkManagerCreatedEvent e)
@@ -294,8 +300,7 @@ public class OrbitFikaPlugin : IDisposable
     {
         if (!_initialized) return;
         _initialized = false;
-        FikaEventDispatcher.UnsubscribeEvent<FikaNetworkManagerCreatedEvent>(OnNetworkManagerCreated);
-        FikaEventDispatcher.UnsubscribeEvent<FikaNetworkManagerDestroyedEvent>(OnNetworkManagerDestroyed);
+        FikaEventDispatcher.OnFikaEvent -= OnFikaEvent;
         OrbitEvents.GhostFightSoundsResolved -= OnGhostFightResolved;
         OrbitEvents.GhostFightSoundsStopped -= OnGhostFightStopped;
         try { _doors?.Dispose(); }

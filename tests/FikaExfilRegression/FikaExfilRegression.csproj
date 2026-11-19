@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <SptRoot Condition="'$(SptRoot)' == ''">$(MSBuildProjectDirectory)/../../refs/4.1</SptRoot>
+    <BepCore>$(SptRoot)/BepInEx/core</BepCore>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="BepInEx" HintPath="$(BepCore)/BepInEx.dll" />
+    <Reference Include="0Harmony" HintPath="$(BepCore)/0Harmony.dll" />
+    <Reference Include="MonoMod.Utils" HintPath="$(BepCore)/MonoMod.Utils.dll" />
+    <Reference Include="Mono.Cecil" HintPath="$(BepCore)/Mono.Cecil.dll" />
+    <None Include="$(SptRoot)/EscapeFromTarkov_Data/Managed/netstandard.dll" Link="netstandard.dll" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

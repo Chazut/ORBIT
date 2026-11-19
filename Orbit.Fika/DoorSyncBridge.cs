@@ -77,7 +77,7 @@ internal sealed class DoorSyncBridge : IDisposable
         }
         catch
         {
-            Dispose();
+            FikaPatchCleanup.Rollback(this, log);
             throw;
         }
     }
@@ -392,11 +392,11 @@ internal sealed class DoorSyncBridge : IDisposable
 
     public void Dispose()
     {
+        if (_active == this) _active = null;
         OrbitDoorEvents.Changed -= OnDoorChanged;
         OrbitInteractionEvents.Changed -= OnSwitchChanged;
         FikaEventDispatcher.OnFikaEvent -= OnFikaEvent;
-        _harmony.UnpatchSelf();
-        Reset();
-        if (_active == this) _active = null;
+        try { FikaPatchCleanup.Unpatch(_harmony, _log); }
+        finally { Reset(); }
     }
 }

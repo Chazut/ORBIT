@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Reflection;
 using BepInEx.Logging;
 using CommonAssets.Scripts.Game;
 using Comfort.Common;
@@ -66,7 +65,11 @@ internal sealed class WorldSyncBridge : IDisposable
             OrbitExtractionEvents.Used += WatchExit;
             FikaEventDispatcher.OnFikaEvent += OnEvent;
         }
-        catch { Dispose(); throw; }
+        catch
+        {
+            FikaPatchCleanup.Rollback(this, log);
+            throw;
+        }
     }
 
     private void Patch(Type type, string method, string prefix)
@@ -286,17 +289,17 @@ internal sealed class WorldSyncBridge : IDisposable
         catch (Exception e) { bridge.Warn("death pose apply failed: " + e.Message); }
     }
 
-    private static bool BeforeNativeCountdown(object __instance)
+    // Fika 2.4.2 uses a class and 2.4.6 a readonly struct. Both expose the same string field.
+    private static bool BeforeNativeCountdown(string ___ExfilName)
     {
         var bridge = _active;
         if (bridge == null || bridge._host || bridge._applying || bridge._session == null) return true;
-        var id = AccessTools.Field(__instance.GetType(), "ExfilName")?.GetValue(__instance) as string;
         // A delayed native start cannot resurrect a car the host has already consumed.
-        return id == null || !bridge._received.Exits.TryGetValue(id, out var state)
+        return ___ExfilName == null || !bridge._received.Exits.TryGetValue(___ExfilName, out var state)
             || state.Status != (byte)EExfiltrationStatus.NotPresent;
     }
 
-    private static void AfterExitSnapshot(object __instance)
+    private static void AfterExitSnapshot(byte[] ___Data)
     {
         var bridge = _active;
         if (bridge == null || bridge._host) return;
@@ -304,9 +307,8 @@ internal sealed class WorldSyncBridge : IDisposable
         {
             // Fika 2.4.2-2.4.6 writes this field as Single but reads it as Int32. Repair only
             // countdown timestamps after its own snapshot handler; retain native availability/eligibility.
-            var bytes = AccessTools.Field(__instance.GetType(), "Data")?.GetValue(__instance) as byte[];
-            if (bytes == null) return;
-            var reader = new NetDataReader(bytes);
+            if (___Data == null) return;
+            var reader = new NetDataReader(___Data);
             var count = reader.GetInt();
             if (count < 0 || count > 256) return;
             for (var i = 0; i < count; i++)
@@ -393,10 +395,10 @@ internal sealed class WorldSyncBridge : IDisposable
 
     public void Dispose()
     {
+        if (_active == this) _active = null;
         OrbitExtractionEvents.Used -= WatchExit;
         FikaEventDispatcher.OnFikaEvent -= OnEvent;
-        _harmony.UnpatchSelf();
-        Reset();
-        if (_active == this) _active = null;
+        try { FikaPatchCleanup.Unpatch(_harmony, _log); }
+        finally { Reset(); }
     }
 }

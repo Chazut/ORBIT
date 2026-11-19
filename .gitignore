@@ -20,6 +20,9 @@ notes/
 refs/
 perf/
 tests/
+!/tests/
+/tests/*
+!/tests/FikaExfilRegression/
 
 # Local working files
 /PR_DESCRIPTION_v1.1.0.md

@@ -58,8 +58,9 @@ internal sealed class EmbeddedFika : IDisposable
         }
         catch (Exception ex)
         {
-            Dispose();
-            reportError("Embedded Fika integration failed to initialize: " + (ex.InnerException ?? ex));
+            var cause = ex is TargetInvocationException && ex.InnerException != null ? ex.InnerException : ex;
+            try { reportError("Embedded Fika integration failed to initialize: " + cause); }
+            finally { Dispose(); }
         }
     }
 
@@ -68,8 +69,8 @@ internal sealed class EmbeddedFika : IDisposable
         try { tick?.Invoke(); }
         catch (Exception ex)
         {
-            Dispose();
-            error?.Invoke("Embedded Fika integration stopped after an update error: " + ex);
+            try { error?.Invoke("Embedded Fika integration stopped after an update error: " + ex); }
+            finally { Dispose(); }
         }
     }
 
