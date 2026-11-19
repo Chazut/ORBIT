@@ -1,11 +1,11 @@
 # ORBIT 3.2.0
 
-- Traveling squads spread out and watch different directions as they move.
-- Bots crouch to loot bodies, make better ammo choices, and move on when loot is out of reach.
-- Marked-room and other locked-door rushes are more reliable, including doors that swing the other way.
-- Fika support is built in. Car extracts and bot death positions now sync more reliably between players.
+- **Watch the last bot in a traveling squad.** One squadmate can glance back while the others keep walking. They spread out in open ground and draw closer at doors and tight corners.
+- **Bots crouch while they search a body.** A PMC carrying a 5.56 M4 checks the rounds in a spare mag before counting it as usable ammo. Bots also move on when they can't reach the loot.
+- **Locked-room runs are more reliable.** A bot waking from Ghost Mode at Dorms 314 can open the door from where it's standing if the handle is within reach. At ULTRA Medical, bots can carry on looting when the door swings open in the opposite direction.
+- **Car extracts and fallen bots stay in sync in Fika.** When the car leaves or a bot dies, teammates now get more consistent updates on whether the extract is available and where the body landed. Fika support is built into ORBIT.
 
-**Upgrading from 3.1.1 with Fika?** Remove the old `Orbit.Fika.dll` when installing this version.
+**Updating from 3.1.1 with Fika?** Remove the old `Orbit.Fika.dll` when you install 3.2.0.
 
 # ORBIT 3.1.1
 
