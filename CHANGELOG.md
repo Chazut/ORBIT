@@ -1,3 +1,10 @@
+# ORBIT 3.2.1
+
+## Fixes
+
+- **Fika headless startup.** Fixed an extraction countdown error that could stop ORBIT's co-op sync from loading on Fika 2.4.6, even with Ghost Mode off. Thanks to RetroLogic for the report and log!
+- **Clearer error reports.** If Fika sync fails to start, ORBIT keeps the original error in the log and reports any cleanup issues separately.
+
 # ORBIT 3.2.0
 
 ## Features
