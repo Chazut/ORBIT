@@ -63,6 +63,8 @@ public class LootContainerAction(AgentData dataset, WaypointSystem waypointSyste
             if (now - startedAt >= LootingWatchdogSeconds)
             {
                 Log.Warning($"{agent} stuck at Status=Looting on {agent.Objective.Location} for {now - startedAt:F1}s without LootContainerAction taking over — failing objective");
+                if (agent.Objective.Location != null)
+                    waypointSystem.ReleaseClaim(agent.Objective.Location.Id, agent.Id);
                 agent.Objective.Status = ObjectiveStatus.Failed;
                 _lootingStartTime.Remove(agent.Id);
                 agent.TaskScores[ordinal] = 0f;
@@ -90,7 +92,7 @@ public class LootContainerAction(AgentData dataset, WaypointSystem waypointSyste
             if (_states.Remove(agent.Id, out var abandoned))
             {
                 abandoned.Cancel();
-                waypointSystem.ReleaseClaim(abandoned.Location.Id, agent.Id);
+                waypointSystem.EndLootSession(abandoned.Location, agent.Id);
             }
             _lootingStartTime.Remove(agent.Id);
             if (objective.Status == ObjectiveStatus.Looting)
@@ -104,7 +106,14 @@ public class LootContainerAction(AgentData dataset, WaypointSystem waypointSyste
         // Dormant bots loot for real since phase 2: BotLootState flips the handler into DormantMode
         // (pure data transfers, no animations/delays/equips), so ghost squads bank loot value and the
         // world state matches what an awake bot would have produced.
-        if (!_states.TryGetValue(agent.Id, out var state))
+        if (_states.TryGetValue(agent.Id, out var state) && state.Location != location)
+        {
+            state.Cancel();
+            waypointSystem.EndLootSession(state.Location, agent.Id);
+            _states.Remove(agent.Id);
+            state = null;
+        }
+        if (state == null)
         {
             // The scheduler may retain this action between strategy ticks even after completion.
             // Only a new loot order may start another session; existing sessions still finish below.
@@ -119,7 +128,14 @@ public class LootContainerAction(AgentData dataset, WaypointSystem waypointSyste
             }
             if (location.Target == null)
             {
+                waypointSystem.ReleaseClaim(location.Id, agent.Id);
                 objective.Status = ObjectiveStatus.Failed;
+                return;
+            }
+            if (location.IsAirdrop && !waypointSystem.BeginAirdropLoot(location.Id, agent.Id))
+            {
+                objective.Status = waypointSystem.IsClaimedByOther(location.Id, agent.Id)
+                    ? ObjectiveStatus.Finished : ObjectiveStatus.Failed;
                 return;
             }
             Log.Debug($"{agent} LootContainerAction: starting loot on {location} (target={location.Target?.GetType().Name ?? "null"})");
@@ -131,6 +147,7 @@ public class LootContainerAction(AgentData dataset, WaypointSystem waypointSyste
         state.Tick();
 
         if (!state.IsDone) return;
+        if (location.IsAirdrop) waypointSystem.EndLootSession(location, agent.Id);
 
         if (!state.Success && agent.Squad?.Camp.PreserveInterruptedAirdropLoot(agent.Squad, location, waypointSystem) == true)
         {
@@ -743,12 +760,14 @@ public class LootContainerAction(AgentData dataset, WaypointSystem waypointSyste
         {
             Log.Debug($"{entity} LootContainerAction.Deactivate: cancelling in-flight loot");
             state.Cancel();
+            waypointSystem.EndLootSession(state.Location, entity.Id);
             _states.Remove(entity.Id);
+            if (state.Location != entity.Objective.Location) return;
         }
-
-        var location = entity.Objective.Location;
-        if (location != null)
-            waypointSystem.ReleaseClaim(location.Id, entity.Id);
+        else if (entity.Objective.Location != null)
+        {
+            waypointSystem.ReleaseClaim(entity.Objective.Location.Id, entity.Id);
+        }
 
         // Reset to None so the bot can re-attempt later (or pick a new objective) if this task gets
         // re-activated. Terminal statuses are left alone.

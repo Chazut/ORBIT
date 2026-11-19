@@ -1,5 +1,3 @@
-using System.Collections.Generic;
-using EFT.Interactive;
 using Orbit.Entities;
 using Orbit.Helpers;
 using Orbit.Navigation;
@@ -11,40 +9,8 @@ namespace Orbit.Systems;
 
 public partial class WaypointSystem
 {
-    private sealed class LandedAirdrop
-    {
-        internal LootableContainer Container;
-        internal Waypoint Point;
-    }
-
-    private readonly List<LandedAirdrop> _landedAirdrops = new();
     private readonly NavMeshPath _airdropPath = new();
     private float _nextAirdropPath;
-
-    internal void RegisterLandedAirdrop(LootableContainer container)
-    {
-        if (container == null) return;
-        foreach (var drop in _landedAirdrops) if (drop.Container == container) return;
-        _landedAirdrops.RemoveAll(drop => drop.Container == null);
-        _landedAirdrops.Add(new LandedAirdrop { Container = container });
-        RegisterAmbushAirdrop(container);
-        Log.Info($"AIRDROP LOOT: landed crate registered at {container.transform.position}");
-    }
-
-    private Waypoint AirdropPoint(LootableContainer container)
-    {
-        foreach (var drop in _landedAirdrops)
-        {
-            if (drop.Container != container) continue;
-            if (drop.Point != null) return drop.Point;
-            if (!NavMesh.SamplePosition(container.transform.position, out var hit, 2f, NavMesh.AllAreas)) return null;
-            // Keep the crate out of the general grid: each bot must discover it or choose its ambush.
-            drop.Point = new Waypoint(NewRuntimeWaypointId(), WaypointCategory.ContainerLoot,
-                "Airdrop", hit.position, 1f, new(), new(), container) { IsAirdrop = true };
-            return drop.Point;
-        }
-        return null;
-    }
 
     internal Waypoint TryFindOpportunisticAirdrop(Agent agent)
     {
@@ -60,6 +26,7 @@ public partial class WaypointSystem
             || agent.LootExtractSweep != null || Time.time < agent.NextAirdropScanAt) return null;
         agent.NextAirdropScanAt = Time.time + 2f;
         if (!(ServerConfig.Loot.LootingEnabled).IsBotEnabled(agent.Bot.Profile.Info.Settings.Role)) return null;
+        PruneDestroyedAirdrops();
         var radius = ServerConfig.Loot.DetectDistance;
         var radiusSqr = radius * radius;
         foreach (var drop in _landedAirdrops)

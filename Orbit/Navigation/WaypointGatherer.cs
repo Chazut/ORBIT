@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Linq;
 using EFT;
 using EFT.Interactive;
+using EFT.Airdrop;
+using EFT.SynchronizableObjects;
 using Orbit.Helpers;
 using UnityEngine;
 using UnityEngine.AI;
@@ -21,7 +23,9 @@ public class WaypointGatherer(float cellSize, BotsController botsController)
 {
     private static int _idCounter;
 
-    public List<Waypoint> CollectBuiltinWaypoints()
+    public List<Waypoint> CollectBuiltinWaypoints() => CollectBuiltinWaypoints(null);
+
+    internal List<Waypoint> CollectBuiltinWaypoints(Action<LootableContainer> registerLandedAirdrop)
     {
         var collection = new List<Waypoint>();
 
@@ -58,6 +62,13 @@ public class WaypointGatherer(float cellSize, BotsController botsController)
             if (container.transform == null || !container.enabled || container.Template == null)
                 continue;
 
+            if (registerLandedAirdrop != null && container.GetComponentInParent<AirdropSynchronizableObject>() is { } drop)
+            {
+                // A restored crate may already be on the ground before the landing callback is wired.
+                if (drop.IsStatic || drop.Logic is ClientAirDrop { _fallingStage: EAirdropFallingStage.Landed })
+                    registerLandedAirdrop(container);
+                continue;
+            }
             ValidateAndAddWaypoint(collection, WaypointCategory.ContainerLoot, container.name, container.transform.position, target: container);
         }
         Log.Debug($"ContainerLoot POIs collected: {collection.Count - beforeContainer}");

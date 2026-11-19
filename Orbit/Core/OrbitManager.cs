@@ -245,6 +245,7 @@ public class OrbitManager
         if (!HasAgent(agent)) return;
 
         agent.LootHandler?.Retire();
+        WaypointSystem.ReleaseAirdropClaims(agent.Id);
 
         // First, so a dormant body is re-activated before teardown (corpses must never stay hidden
         // inside an inactive GameObject).

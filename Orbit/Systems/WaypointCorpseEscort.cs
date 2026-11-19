@@ -13,9 +13,6 @@ public partial class WaypointSystem
 {
     private readonly NavMeshPath _escortPath = new();
 
-    internal bool IsClaimedByOther(int waypointId, int agentId)
-        => _claims.TryGetValue(waypointId, out var holder) && holder != agentId;
-
     internal Waypoint CreateCorpseEscortWaypoint(Vector3 position)
         => new(NewRuntimeWaypointId(), WaypointCategory.Synthetic, "CorpseEscort", position,
             1f, new List<Door>(), new List<CoverPoint>(), null);

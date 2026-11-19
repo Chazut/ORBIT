@@ -368,7 +368,7 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                             else
                             {
                                 objective.Status = ObjectiveStatus.Finished;
-                                Log.Debug($"{agent} arrived at {objective.Location}, claim DENIED (already held), staying as backup");
+                                Log.Debug($"{agent} arrived at {objective.Location}, claim DENIED, staying as backup");
                             }
                         }
                         else if (objective.Location.Category == WaypointCategory.Exfil

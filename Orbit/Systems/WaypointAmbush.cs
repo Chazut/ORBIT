@@ -91,12 +91,8 @@ public partial class WaypointSystem
     {
         point = null;
         if (site?.Kind != CampSiteKind.Airdrop || !site.Landed || !IsAmbushSiteAvailable(site, agent.BotCategory)) return false;
-        if (site.LootWaypoint == null)
-        {
-            site.LootWaypoint = AirdropPoint(site.Drop);
-            if (site.LootWaypoint == null) return false;
-        }
-        var target = site.LootWaypoint;
+        var target = site.LootWaypoint = AirdropPoint(site.Drop);
+        if (target == null) return false;
         if (agent.Squad.CompletedPoiIds.Contains(target.Id) || agent.ValueSkippedPoiIds.Contains(target.Id)
             || IsClaimedByOther(target.Id, agent.Id)
             || !Orbit.Tasks.Actions.GotoObjectiveAction.IsLootableForAgent(agent, target)

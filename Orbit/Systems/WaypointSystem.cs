@@ -72,11 +72,6 @@ public partial class WaypointSystem
     // waypoint came from CollectBuiltinWaypoints, synthetic cell fill, or AddRuntimeWaypoint.
     private readonly Dictionary<int, Vector2Int> _waypointCells = new();
 
-    // Per-waypoint reservation: while a bot is actively looting a waypoint, other bots (same squad or
-    // different) cannot start a second loot on it. Cleared by ReleaseClaim or automatically on
-    // RemoveWaypoint.
-    private readonly Dictionary<int, int> _claims = new();
-
     // Reverse index: Item.Id (string MongoID) → Waypoint.Id (int), populated only for LooseLoot waypoints
     // whose Target is a LootItem. Lets the inventory-change hook find and prune the matching waypoint when a
     // player or vanilla-AI bot picks up an item outside of our routine.
@@ -134,7 +129,7 @@ public partial class WaypointSystem
 
         Log.Info("Gathering built in waypoints");
         _waypointGatherer = new WaypointGatherer(_cellSize, botsController);
-        var builtinWaypoints = _waypointGatherer.CollectBuiltinWaypoints();
+        var builtinWaypoints = _waypointGatherer.CollectBuiltinWaypoints(RegisterLandedAirdrop);
 
         // Calculate bounds from positions
         _worldMin = geometryConfig.Min;
@@ -1310,6 +1305,7 @@ public partial class WaypointSystem
     {
         if (!_waypointCells.Remove(waypointId, out var coords))
         {
+            if (RetireLandedAirdrop(waypointId)) return true;
             Log.Debug($"RemoveWaypoint: id={waypointId} not tracked, no-op");
             return false;
         }
@@ -1355,38 +1351,6 @@ public partial class WaypointSystem
         => location != null && location.Category == WaypointCategory.LooseLoot
            && (!_waypointCells.ContainsKey(location.Id) || location.Target == null
                || (location.Target is LootItem item && item.Item == null));
-
-    /// <summary>
-    /// Reserve an existing waypoint for an agent. Reclaiming one's own reservation is idempotent.
-    /// </summary>
-    public bool TryClaim(int waypointId, int agentId)
-    {
-        if (!_waypointCells.ContainsKey(waypointId))
-        {
-            Log.Debug($"LOOT RECOVERY: denied claim on removed waypoint {waypointId} for agent {agentId}");
-            return false;
-        }
-        if (_claims.TryGetValue(waypointId, out var holder))
-        {
-            var ok = holder == agentId;
-            Log.Debug($"TryClaim: loc={waypointId} agent={agentId} already held by {holder} → {(ok ? "self-reclaim" : "DENIED")}");
-            return ok;
-        }
-        _claims[waypointId] = agentId;
-        Log.Debug($"TryClaim: loc={waypointId} agent={agentId} GRANTED");
-        return true;
-    }
-
-    public void ReleaseClaim(int waypointId, int agentId)
-    {
-        if (_claims.TryGetValue(waypointId, out var holder) && holder == agentId)
-        {
-            _claims.Remove(waypointId);
-            Log.Debug($"ReleaseClaim: loc={waypointId} agent={agentId} released");
-        }
-    }
-
-    public bool IsClaimed(int waypointId) => _claims.ContainsKey(waypointId);
 
     private void RegisterWaypointInCell(Vector2Int coords, Waypoint loc)
     {
