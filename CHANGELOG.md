@@ -1,3 +1,12 @@
+# ORBIT 3.2.0
+
+- Traveling squads spread out and watch different directions as they move.
+- Bots crouch to loot bodies, make better ammo choices, and move on when loot is out of reach.
+- Marked-room and other locked-door rushes are more reliable, including doors that swing the other way.
+- Fika support is built in. Car extracts and bot death positions now sync more reliably between players.
+
+**Upgrading from 3.1.1 with Fika?** Remove the old `Orbit.Fika.dll` when installing this version.
+
 # ORBIT 3.1.1
 
 For SPT 4.1.x. Changes since ORBIT 3.1.0. This patch focuses on looting, movement, Ghost transitions and objective recovery, and adds a public API for other mods.
