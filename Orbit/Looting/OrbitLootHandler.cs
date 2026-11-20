@@ -768,7 +768,8 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
         // is randomised per track for natural variation.
         var visibleOrder = lootableSlots.Where(s => !SearchableCorpseSlots.Contains(s)).OrderBy(_ => Random.value).ToList();
         var searchSlots = lootableSlots.Where(s => SearchableCorpseSlots.Contains(s));
-        if (corpseBelt != null) searchSlots = searchSlots.Concat(new[] { EquipmentSlot.ArmBand });
+        if (corpseBelt != null && PackNStrapCompat.IsBotCorpse(inventoryEquipment.Owner as CorpseItemController))
+            searchSlots = searchSlots.Concat(new[] { EquipmentSlot.ArmBand });
         var searchOrder = searchSlots.OrderBy(_ => Random.value).ToList();
         Log.Debug($"OrbitLootHandler.Corpse({Nick}, {corpse.name}): side={corpse.Side} pmc={isPmc} visibleOrder=[{string.Join(",", visibleOrder)}] searchOrder=[{string.Join(",", searchOrder)}]");
 
@@ -844,11 +845,11 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
             if (IsWeaponSlot(slotKind) || IsGearSlot(slotKind)) continue;
             var slot = inventoryEquipment.GetSlot(slotKind);
             var root = slot?.ContainedItem;
-            if (root == null) continue;
+            if (root == null || (slotKind == EquipmentSlot.ArmBand && !ReferenceEquals(root, corpseBelt))) continue;
             var slotItems = new List<DrainEntry>();
             await EnumerateItemsForDrainAsync(root, slotKind == EquipmentSlot.ArmBand ? "Belt" : slotKind.ToString(), slotItems, ct);
             CheckSession(ct);
-            // Search nested pouches normally, but leave the equipped belt on its corpse.
+            // Only confirmed bot corpses reach this slot. The equipped belt stays on the body.
             if (slotKind == EquipmentSlot.ArmBand)
             {
                 slotItems.RemoveAll(entry => ReferenceEquals(entry.Item, corpseBelt));
@@ -1595,7 +1596,7 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
         CheckSession(ct);
         EnsureInventoryAvailable(ct);
         var inventoryController = _bot.GetPlayer?.InventoryController;
-        if (inventoryController == null) return false;
+        if (inventoryController == null || PackNStrapCompat.TakesProtectedItem(place.Value)) return false;
         try
         {
             CheckSession(ct);

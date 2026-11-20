@@ -200,6 +200,7 @@ public static class WeaponScorer
     public static IEnumerable<Item> Walk(Item root)
     {
         if (root == null) yield break;
+        var protectedBelt = PackNStrapCompat.ProtectedBelt(root);
         var stack = new Stack<Item>();
         stack.Push(root);
         while (stack.Count > 0)
@@ -211,7 +212,7 @@ public static class WeaponScorer
                 if (compound.Slots != null)
                     foreach (var slot in compound.Slots)
                     {
-                        if (slot?.ContainedItem == null) continue;
+                        if (slot?.ContainedItem == null || ReferenceEquals(slot.ContainedItem, protectedBelt)) continue;
                         if (IsSecuredContainerSlot(slot)) continue;
                         stack.Push(slot.ContainedItem);
                     }

@@ -495,6 +495,7 @@ public static partial class WeaponSwapper
         var handler = Singleton<BotRoster>.Instance?.GetAgent(bot)?.LootHandler;
         // Non-loot callers also use this helper; only the owning session records its outcome.
         handler?.CheckInventoryForSession(ct);
+        if (PackNStrapCompat.TakesProtectedItem(op.Value)) return false;
         var ic = bot.GetPlayer.InventoryController;
         Log.Debug($"WeaponSwap.{label}({nick}): tx STARTED (awaiting TryRunNetworkTransaction)");
         using var timeoutCts = new CancellationTokenSource(NetworkTransactionTimeoutMs);

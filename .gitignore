@@ -26,6 +26,7 @@ tests/
 !/tests/GrenadeDetourRegression/
 !/tests/AirdropClaimRegression/
 !/tests/AuthoredPointRegression/
+!/tests/CorpseBeltRegression/
 
 # Local working files
 /PR_DESCRIPTION_v1.1.0.md
