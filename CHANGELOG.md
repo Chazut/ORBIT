@@ -1,3 +1,20 @@
+# ORBIT 3.3.0
+
+## Features
+
+- **Fums' 1.3 Customs backport.** Each preset copies its Customs zones and objective points to the backport on first load. You can then edit the two maps independently.
+- **Automatic point recovery.** If an addon places a rush, sniper or other objective off the walkable ground, ORBIT looks for a reachable spot nearby on the intended floor. Your addon files stay as they are.
+
+## Changes
+
+- **Hotspot ambushes.** Bots crouch once they reach their camping spot, including when they arrive in Ghost Mode.
+
+## Fixes
+
+- **Airdrops.** One bot loots the crate at a time. Others can take their turn once the first bot finishes or gives it up.
+- **Grenade avoidance.** Bots repeatedly interrupted by the same danger can take a detour and continue toward their objective.
+- **Player belts.** Bots looting your body leave your equipped Pack 'n' Strap belt and everything inside it alone.
+
 # ORBIT 3.2.1
 
 ## Fixes
