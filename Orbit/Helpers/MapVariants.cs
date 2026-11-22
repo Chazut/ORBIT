@@ -1,5 +1,6 @@
 using System;
 using System.Reflection;
+using Orbit.Settings;
 using UnityEngine.SceneManagement;
 
 namespace Orbit.Helpers;
@@ -42,13 +43,19 @@ public static class MapVariants
     {
         if (IsMap(mapId, InterchangeId))
         {
-            if (InterchangeReworkApiSaysRework()) return Rework;
+            if (ReadFlag(InterchangeReworkApiType, "IsRework")) return Rework;
             if (AnySceneEndsWith(InterchangeReworkSceneSuffix)) return Rework;
             if (ManimalLoaderActive(ManimalInterchangeLoader)) return Rework;
         }
         else if (IsMap(mapId, LighthouseId))
         {
             if (ManimalLoaderActive(ManimalLighthouseLoader)) return Rework;
+        }
+        else if (IsMap(mapId, CustomsBackport.BaseId)
+            && ReadFlag("Fums.Customs.Client.BundleSceneLoader", "Active"))
+        {
+            // Fums owns the replacement scenes for this raid. Vanilla and failed loads keep bigmap.
+            return CustomsBackport.Variant;
         }
 
         return "";
@@ -97,15 +104,11 @@ public static class MapVariants
         return false;
     }
 
-    /// <summary>True when LennoxP90's extension API is present and reports the rework variant for this raid.</summary>
-    private static bool InterchangeReworkApiSaysRework()
+    private static bool ReadFlag(string typeName, string property)
     {
         try
         {
-            var api = FindType(InterchangeReworkApiType);
-            if (api == null) return false;
-            var flag = api.GetProperty("IsRework", Members);
-            return flag != null && flag.GetValue(null) is true;
+            return FindType(typeName)?.GetProperty(property, Members)?.GetValue(null) is true;
         }
         catch
         {
@@ -141,5 +144,8 @@ public static class MapVariants
 
     /// <summary>The key zones, geometry and renders are looked up under: the id itself for vanilla, "{id}@{variant}" otherwise.</summary>
     public static string ZoneKey(string mapId, string variant)
-        => string.IsNullOrEmpty(variant) ? mapId : $"{mapId}@{variant}";
+    {
+        if (variant == CustomsBackport.Variant && IsMap(mapId, CustomsBackport.BaseId)) return CustomsBackport.Key;
+        return string.IsNullOrEmpty(variant) ? mapId : $"{mapId}@{variant}";
+    }
 }

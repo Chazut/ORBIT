@@ -111,6 +111,7 @@ public class ConfigService(ISptLogger<ConfigService> logger)
         if (upgradeSniper) Orbit.Settings.SniperDefaults.AddTo(parsed.Rush.Maps);
         parsed.Rush.SniperCatalogueVersion = 1;
         BehaviorValidation.Validate(parsed);
+        Orbit.Settings.RushDefaults.SeedCustomsBackport(parsed.Rush.Maps);
         parsed.ConfigVersion = new OrbitServerConfig().ConfigVersion;
         return JsonSerializer.Serialize(parsed, _jsonOptions);
 

@@ -121,6 +121,8 @@ Use **Presets > Save as new preset**. Apply or export behaviour settings, zones,
 
 Draw attraction/avoidance zones, set their radius, filter by floor or bot type, and edit rush destinations. Zones affect ORBIT-controlled bots.
 
+With Fums' Customs 1.3 backport, choose **Customs 1.3 (Fums)** in the editor. On first startup, each existing preset gets a separate copy of its Customs zones and rush points, including custom and sniper points. After that you can tune either layout independently. The editor uses the classic Customs map as a reference. [Fums' Customs backport](https://sp-mod.com/mod/3434/fums-13-customs-backport).
+
 [See the visual zone editor](https://imgur.com/8zGYnfK.png)
 
 ### How do I attract bots to my quest area?

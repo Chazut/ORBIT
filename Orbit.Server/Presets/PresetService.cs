@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Orbit.Settings;
 using Orbit.Server.Config;
 using Orbit.Server.Zones;
 using SPTarkov.Common.Models.Logging;
@@ -64,7 +65,7 @@ public sealed partial class PresetService(ConfigService configs, ZoneStoreServic
                 {
                     _library = JsonSerializer.Deserialize<PresetLibrary>(File.ReadAllText(LibraryPath), Json)
                         ?? throw new InvalidDataException("Empty preset library.");
-                    ValidateLibrary(_library);
+                    if (ValidateLibrary(_library)) Persist(_library);
                 }
                 else
                 {
@@ -150,7 +151,7 @@ public sealed partial class PresetService(ConfigService configs, ZoneStoreServic
                 if (_library.ActiveAddon != null)
                 {
                     var next = Clone(_library);
-                    var snapshot = ApplyAddon(_active, update);
+                    var snapshot = ApplyAddon(_active, update, seedVariant: false);
                     next.ActiveAddon = new UserPreset
                         { Id = update.Id, Name = update.Name, AddonRevision = update.Revision, Snapshot = snapshot };
                     next.ActiveId = update.Id;
@@ -334,13 +335,25 @@ public sealed partial class PresetService(ConfigService configs, ZoneStoreServic
     private PresetSnapshot Defaults() => new()
         { Config = JsonSerializer.Deserialize<JsonElement>(ConfigService.DefaultJson), Maps = zones.DefaultSnapshot() };
 
-    private PresetSnapshot ApplyAddon(PresetSnapshot baseline, PresetAddon addon, bool includeRushPoints = true)
+    private PresetSnapshot ApplyAddon(PresetSnapshot baseline, PresetAddon addon, bool includeRushPoints = true, bool seedVariant = true)
     {
         var combined = Normalize(baseline);
         if (addon.Config is { } patch)
             combined.Config = JsonSerializer.Deserialize<JsonElement>(AddonDiscovery.OverlayConfig(combined.Config.GetRawText(), patch));
         if (includeRushPoints) combined.Config = AddonDiscovery.OverlayRushPoints(combined.Config, addon.RushPoints);
         foreach (var (map, content) in addon.Maps) combined.Maps[map] = content;
+        // When selecting an older addon, seed from its own Customs data. Later changes
+        // to the active addon only replace maps it actually supplies.
+        seedVariant = seedVariant && addon.Id != _library.ActiveId;
+        if (seedVariant && addon.Maps.ContainsKey(CustomsBackport.BaseId) && !addon.Maps.ContainsKey(CustomsBackport.Key))
+            combined.Maps.Remove(CustomsBackport.Key);
+        if (seedVariant && includeRushPoints)
+        {
+            var points = addon.Config is { } config ? AddonDiscovery.ReadRushPoints(config) : new();
+            foreach (var (map, catalogue) in addon.RushPoints) points[map] = catalogue;
+            if (points.TryGetValue(CustomsBackport.BaseId, out var customs) && !points.ContainsKey(CustomsBackport.Key))
+                combined.Config = AddonDiscovery.OverlayRushPoints(combined.Config, new() { [CustomsBackport.Key] = customs });
+        }
         return Normalize(combined);
     }
 
@@ -350,6 +363,8 @@ public sealed partial class PresetService(ConfigService configs, ZoneStoreServic
         if (snapshot.Maps == null) throw new InvalidDataException("Preset maps cannot be null.");
         foreach (var (id, model) in snapshot.Maps)
             result.Maps[id] = zones.NormalizeSnapshot(id, JsonSerializer.Serialize(model, Json));
+        if (!result.Maps.ContainsKey(CustomsBackport.Key) && result.Maps.TryGetValue(CustomsBackport.BaseId, out var customs))
+            result.Maps[CustomsBackport.Key] = zones.NormalizeSnapshot(CustomsBackport.Key, JsonSerializer.Serialize(customs, Json));
         // Future releases can add maps without invalidating existing presets.
         foreach (var (id, model) in zones.DefaultSnapshot()) result.Maps.TryAdd(id, model);
         return result;
@@ -369,15 +384,15 @@ public sealed partial class PresetService(ConfigService configs, ZoneStoreServic
 
     private PresetSnapshot ReadLegacy()
     {
-        var snapshot = Defaults();
+        var snapshot = new PresetSnapshot { Config = JsonSerializer.Deserialize<JsonElement>(ConfigService.DefaultJson) };
         var configFile = Path.Combine(configs.ModDirectory, "config.json");
-        if (File.Exists(configFile)) snapshot.Config = JsonSerializer.Deserialize<JsonElement>(ConfigService.NormalizeJson(File.ReadAllText(configFile)));
+        if (File.Exists(configFile)) snapshot.Config = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(configFile));
         foreach (var id in ZoneStoreService.MapIds)
         {
             var file = Path.Combine(configs.ModDirectory, "zones", id + ".json");
             if (File.Exists(file)) snapshot.Maps[id] = zones.NormalizeSnapshot(id, File.ReadAllText(file));
         }
-        return snapshot;
+        return Normalize(snapshot);
     }
 
     private void BackupLegacy()
@@ -394,23 +409,35 @@ public sealed partial class PresetService(ConfigService configs, ZoneStoreServic
         }
     }
 
-    private void ValidateLibrary(PresetLibrary library)
+    private bool ValidateLibrary(PresetLibrary library)
     {
         if (library.Format != "orbit-presets/1" || library.Presets == null) throw new InvalidDataException("Unsupported preset library.");
         var ids = new HashSet<string>();
+        var seeded = false;
+        static bool HasVariantPoints(JsonElement config) =>
+            config.TryGetProperty("rush", out var rush) && rush.TryGetProperty("maps", out var maps)
+            && maps.TryGetProperty(CustomsBackport.Key, out _);
+        PresetSnapshot Upgrade(PresetSnapshot saved)
+        {
+            var normalized = Normalize(saved);
+            if (!saved.Maps.ContainsKey(CustomsBackport.Key) || (HasVariantPoints(normalized.Config) && !HasVariantPoints(saved.Config)))
+                seeded = true;
+            return normalized;
+        }
         foreach (var preset in library.Presets)
         {
             if (preset == null || !preset.Id.StartsWith("local:") || !ids.Add(preset.Id) || string.IsNullOrWhiteSpace(preset.Name))
                 throw new InvalidDataException("Invalid or duplicate personal preset.");
-            preset.Snapshot = Normalize(preset.Snapshot);
+            preset.Snapshot = Upgrade(preset.Snapshot);
         }
         if (library.ActiveAddon is { } addon)
         {
             if (!addon.Id.StartsWith("addon:") || addon.Id != library.ActiveId) throw new InvalidDataException("Invalid active addon.");
-            addon.Snapshot = Normalize(addon.Snapshot);
+            addon.Snapshot = Upgrade(addon.Snapshot);
         }
         if (library.ActiveId != "default" && !ids.Contains(library.ActiveId) && library.ActiveAddon == null)
             throw new InvalidDataException("The active preset is missing.");
+        return seeded;
     }
 
     private void Persist(PresetLibrary library) => AtomicWrite(LibraryPath, JsonSerializer.Serialize(library, Json));

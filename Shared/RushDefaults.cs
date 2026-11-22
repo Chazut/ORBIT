@@ -44,7 +44,19 @@ public static class RushDefaults
     {
         var maps = CreateBase();
         SniperDefaults.AddTo(maps);
+        SeedCustomsBackport(maps);
         return maps;
+    }
+
+    public static void SeedCustomsBackport(Dictionary<string, List<RushPoint>> maps)
+    {
+        List<RushPoint> customs = null;
+        foreach (var pair in maps)
+        {
+            if (string.Equals(pair.Key, CustomsBackport.Key, StringComparison.OrdinalIgnoreCase)) return;
+            if (string.Equals(pair.Key, CustomsBackport.BaseId, StringComparison.OrdinalIgnoreCase)) customs = pair.Value;
+        }
+        if (customs != null) maps.Add(CustomsBackport.Key, customs.ConvertAll(point => point.Copy()));
     }
     private static Dictionary<string, List<RushPoint>> CreateBase() => new()
     {

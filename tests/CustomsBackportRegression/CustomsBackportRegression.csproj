@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>annotations</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../Shared/*.cs" />
+    <Compile Include="../../Orbit/Helpers/MapVariants.cs" />
+    <Compile Include="../../Orbit.Server/Config/*.cs;../../Orbit.Server/Presets/*.cs;../../Orbit.Server/Zones/*.cs;../../Orbit.Server/Web/MapViews.cs" />
+    <EmbeddedResource Include="../../Orbit.Server/Resources/Zones/*.json" LogicalName="Orbit.Server.Resources.Zones.%(Filename)%(Extension)" />
+  </ItemGroup>
+</Project>

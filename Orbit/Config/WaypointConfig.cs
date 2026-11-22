@@ -25,6 +25,8 @@ public class WaypointConfig
         {
             MapZones[item.Key] = new ConfigBundle<MapZone>($"Maps/Zones/{item.Key}.json", item.Value);
         }
+        MapZones[Orbit.Settings.CustomsBackport.Key] = new ConfigBundle<MapZone>(
+            $"Maps/Zones/{Orbit.Settings.CustomsBackport.Key}.json", MapZones[Orbit.Settings.CustomsBackport.BaseId].Value);
     }
 
     public class MapGeometry(Vector2 min, Vector2 max, float cellSize)

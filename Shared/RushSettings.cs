@@ -45,7 +45,9 @@ public sealed class RushSettings
         MapBehaviorOverride.Range(SniperDisengageDistance, 50, 200, "Sniper close threat distance");
         foreach (var s in new[] { Timmy, Cautious, Average, Aggressive, VeryAggressive })
             (s ?? throw new ArgumentException("Rush styles must be objects.")).Validate();
-        if (Maps == null || Maps.Count > 40) throw new ArgumentException("Invalid rush map catalogue.");
+        // The automatic copy must also fit an older catalogue already at the 40-map limit.
+        if (Maps == null || Maps.Count > (Maps.ContainsKey(CustomsBackport.Key) ? 41 : 40))
+            throw new ArgumentException("Invalid rush map catalogue.");
         foreach (var map in Maps)
         {
             if (map.Value == null || map.Value.Count > 256) throw new ArgumentException("At most 256 rush points per map.");

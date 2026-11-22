@@ -27,6 +27,7 @@ tests/
 !/tests/AirdropClaimRegression/
 !/tests/AuthoredPointRegression/
 !/tests/CorpseBeltRegression/
+!/tests/CustomsBackportRegression/
 
 # Local working files
 /PR_DESCRIPTION_v1.1.0.md

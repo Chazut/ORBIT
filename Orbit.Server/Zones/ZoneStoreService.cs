@@ -19,13 +19,14 @@ public partial class ZoneStoreService(ISptLogger<ZoneStoreService> logger)
     // ORBIT map ids (BSG location ids as the client sees them).
     public static readonly string[] MapIds =
     [
-        "bigmap", "factory4_day", "factory4_night", "Interchange", "Interchange@rework", "laboratory", "Labyrinth",
+        "bigmap", CustomsBackport.Key, "factory4_day", "factory4_night", "Interchange", "Interchange@rework", "laboratory", "Labyrinth",
         "Lighthouse", "Lighthouse@rework", "RezervBase", "Sandbox", "Sandbox_high", "Shoreline", "TarkovStreets", "Woods",
     ];
 
     public static readonly Dictionary<string, string> MapLabels = new()
     {
         ["bigmap"] = "Customs",
+        [CustomsBackport.Key] = "Customs 1.3 (Fums)",
         ["factory4_day"] = "Factory (day)",
         ["factory4_night"] = "Factory (night)",
         ["Interchange"] = "Interchange",
@@ -82,7 +83,7 @@ public partial class ZoneStoreService(ISptLogger<ZoneStoreService> logger)
             var path = PathFor(mapId);
             if (!File.Exists(path))
             {
-                var seed = ReadEmbeddedDefault(mapId);
+                var seed = mapId == CustomsBackport.Key ? GetZonesLocked(CustomsBackport.BaseId) : ReadEmbeddedDefault(mapId);
                 NormalizeNativeFloors(mapId, seed);
                 Directory.CreateDirectory(ZonesDir);
                 File.WriteAllText(path, JsonSerializer.Serialize(seed, _json));
@@ -232,6 +233,8 @@ public partial class ZoneStoreService(ISptLogger<ZoneStoreService> logger)
     /// its 21+ twin, a vanilla map and its 1.0 rework. Both directions.</summary>
     private static readonly Dictionary<string, string> _siblings = new()
     {
+        [CustomsBackport.BaseId] = CustomsBackport.Key,
+        [CustomsBackport.Key] = CustomsBackport.BaseId,
         ["Sandbox"] = "Sandbox_high",
         ["Sandbox_high"] = "Sandbox",
         ["Interchange"] = "Interchange@rework",
@@ -395,7 +398,7 @@ public partial class ZoneStoreService(ISptLogger<ZoneStoreService> logger)
         try
         {
             var asm = Assembly.GetExecutingAssembly();
-            using var stream = asm.GetManifestResourceStream($"Orbit.Server.Resources.Zones.{mapId}.json");
+            using var stream = asm.GetManifestResourceStream($"Orbit.Server.Resources.Zones.{CustomsBackport.ReferenceMap(mapId)}.json");
             if (stream != null)
             {
                 using var reader = new StreamReader(stream);

@@ -56,7 +56,7 @@ public partial class ZoneStoreService
         {
             if (NativeCache.TryGetValue(mapId, out var actual) && actual.TryGetValue(zoneName, out var floors)
                 && FloorSelection.IsKnown(mapId, floors)) return floors;
-            return NativeFloorDefaults.ByMap.TryGetValue(mapId, out var map) && map.TryGetValue(zoneName, out var initial)
+            return NativeFloorDefaults.ByMap.TryGetValue(Orbit.Settings.CustomsBackport.ReferenceMap(mapId), out var map) && map.TryGetValue(zoneName, out var initial)
                 ? initial : null;
         }
     }

@@ -9,7 +9,7 @@ namespace Orbit.Zones;
 public static class FloorCatalog
 {
     // Increment only maps whose floor membership changes, so old scene reports cannot mask an update.
-    public static int RevisionFor(string mapId) => mapId == "bigmap" || mapId == "RezervBase" ? 1 : 0;
+    public static int RevisionFor(string mapId) => Orbit.Settings.CustomsBackport.ReferenceMap(mapId) is "bigmap" or "RezervBase" ? 1 : 0;
 
     public static readonly Dictionary<string, FloorMap> Maps = new Dictionary<string, FloorMap>
     {
@@ -696,7 +696,7 @@ public static class FloorCatalog
     };
 
     public static FloorMap For(string mapId)
-        => Maps.TryGetValue(mapId, out var map) ? map : null;
+        => Maps.TryGetValue(Orbit.Settings.CustomsBackport.ReferenceMap(mapId), out var map) ? map : null;
 
     public static bool Matches(string mapId, string floorId, float x, float y, float z)
         => string.IsNullOrEmpty(floorId) || (For(mapId)?.Matches(floorId, x, y, z) ?? false);

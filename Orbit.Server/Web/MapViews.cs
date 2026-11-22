@@ -9,9 +9,11 @@ public sealed record MapView(string? Svg, float Rot, float X1, float Z1, float X
 /// convergence preview on the Zones page.</summary>
 public static class MapViews
 {
+    private static readonly MapView Customs = new("https://assets.tarkov.dev/maps/svg/Customs-Ground_Level.svg", 180, 698, -307, -372, 237);
     public static readonly Dictionary<string, MapView> Views = new()
     {
-        ["bigmap"] = new("https://assets.tarkov.dev/maps/svg/Customs-Ground_Level.svg", 180, 698, -307, -372, 237),
+        ["bigmap"] = Customs,
+        [Orbit.Settings.CustomsBackport.Key] = Customs,
         ["factory4_day"] = new("https://assets.tarkov.dev/maps/svg/Factory-Ground_Floor.svg", 90, 77, -64.5f, -65.5f, 67.4f),
         ["factory4_night"] = new("https://assets.tarkov.dev/maps/svg/Factory-Ground_Floor.svg", 90, 77, -64.5f, -65.5f, 67.4f),
         ["Sandbox"] = new("https://assets.tarkov.dev/maps/svg/GroundZero-Ground_Level.svg", 180, 249, -124, -99, 364),
