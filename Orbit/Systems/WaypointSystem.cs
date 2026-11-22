@@ -185,6 +185,14 @@ public partial class WaypointSystem
 
         InitializeOperations();
         InitializeRush();
+        // Settings.Name can be populated after waypoint gathering. Bind the native key door
+        // from the existing scene inventory; only ZB-014 consults it at extraction time.
+        foreach (var door in _rushDoors.Values)
+            if (door.KeyId == ExfilArrival.WoodsBunkerKey)
+                foreach (var exit in _exfilPoints)
+                    if (exit.ExfilGate == null || (door.transform.position - exit.Position).sqrMagnitude
+                        < (exit.ExfilGate.transform.position - exit.Position).sqrMagnitude)
+                        exit.ExfilGate = door;
         Log.Debug("Populating cells with synthetic waypoints");
         _validCellQueue = new Queue<Vector2Int>();
         for (var x = 0; x < _gridSize.x; x++)

@@ -127,8 +127,9 @@ public class ExtractAction(AgentData dataset, float hysteresis) : Task<Agent>(hy
             return;
         }
 
-        if (Orbit.Systems.MultiStepAccess.IsConditional(exfil)
-            && (!Orbit.Systems.MultiStepAccess.ExitActive(exfil, agent) || !ExfilArrival.IsInside(agent, loc)))
+        if ((ExfilArrival.RequiresOpenGate(exfil) && !ExfilArrival.IsInside(agent, loc))
+            || (Orbit.Systems.MultiStepAccess.IsConditional(exfil)
+                && (!Orbit.Systems.MultiStepAccess.ExitActive(exfil, agent) || !ExfilArrival.IsInside(agent, loc))))
         {
             _footExtractStartTime.Remove(agent.Id);
             agent.Objective.Status = ObjectiveStatus.None;
@@ -151,7 +152,7 @@ public class ExtractAction(AgentData dataset, float hysteresis) : Task<Agent>(hy
         }
 
         var seconds = agent.Objective.Location?.Target is ExfiltrationPoint point
-                      && Orbit.Systems.MultiStepAccess.IsConditional(point)
+                      && (Orbit.Systems.MultiStepAccess.IsConditional(point) || ExfilArrival.RequiresOpenGate(point))
             ? Mathf.Max(FootExtractStandTime, point.Settings.ExfiltrationTime) : FootExtractStandTime;
         if (now - startedAt < seconds) return;
 
@@ -365,6 +366,8 @@ public class ExtractAction(AgentData dataset, float hysteresis) : Task<Agent>(hy
     {
         // Also protect stale targets and every arrival/watchdog fallback.
         if (RejectFlareExit(agent)) return false;
+        if (agent.Objective.Location?.Target is ExfiltrationPoint exit && ExfilArrival.RequiresOpenGate(exit)
+            && !ExfilArrival.IsInside(agent, agent.Objective.Location)) return false;
         // Also protects emergency watchdog and arrival-fallback callers from bypassing backpack requirements.
         if (!(recoverNoBackpack ? NoBackpackExfil.CanRecover(agent, agent.Objective.Location)
                 : NoBackpackExfil.CanFinish(agent, agent.Objective.Location)))
@@ -421,7 +424,7 @@ public class ExtractAction(AgentData dataset, float hysteresis) : Task<Agent>(hy
     internal static bool ForceDespawn(Agent agent)
     {
         if (agent.Objective.Location?.Target is not ExfiltrationPoint exit
-            || ExfilArrival.IsSharedTimer(exit) || ExfilArrival.IsUnavailable(exit)) return false;
+            || ExfilArrival.RequiresOpenGate(exit) || ExfilArrival.IsSharedTimer(exit) || ExfilArrival.IsUnavailable(exit)) return false;
         if (Orbit.Systems.MultiStepAccess.IsConditional(exit)
             && (!Orbit.Systems.MultiStepAccess.ExitActive(exit, agent)
                 || !ExfilArrival.IsInside(agent, agent.Objective.Location))) return false;

@@ -23,6 +23,7 @@ public class AirdropLandedPatch : ModulePatch
     public static void Postfix(ClientAirDrop __instance)
     {
         var lootableContainer = __instance._syncObject.GetComponentInChildren<LootableContainer>();
+        Orbit.Navigation.AirdropVisibility.Register(lootableContainer, __instance._syncObject.transform);
         OnAirdropLanded?.Invoke(lootableContainer);
     }
 }

@@ -28,6 +28,7 @@ tests/
 !/tests/AuthoredPointRegression/
 !/tests/CorpseBeltRegression/
 !/tests/CustomsBackportRegression/
+!/tests/WoodsInteractionRegression/
 
 # Local working files
 /PR_DESCRIPTION_v1.1.0.md

@@ -66,7 +66,10 @@ public class WaypointGatherer(float cellSize, BotsController botsController)
             {
                 // A restored crate may already be on the ground before the landing callback is wired.
                 if (drop.IsStatic || drop.Logic is ClientAirDrop { _fallingStage: EAirdropFallingStage.Landed })
+                {
+                    AirdropVisibility.Register(container, drop.transform);
                     registerLandedAirdrop(container);
+                }
                 continue;
             }
             ValidateAndAddWaypoint(collection, WaypointCategory.ContainerLoot, container.name, container.transform.position, target: container);

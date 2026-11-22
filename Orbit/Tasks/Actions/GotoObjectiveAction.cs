@@ -402,13 +402,22 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                                 var outsideWait = ExfilArrival.OutsideTriggerWait(agent);
                                 if (firstWait)
                                 {
-                                    Log.Debug($"{agent} within {Mathf.Sqrt(distanceSqr):F1}m of {objective.Location} but outside the trigger collider — counting as arrival miss (force-extract timer armed)");
+                                    if (ExfilArrival.RequiresOpenGate(exfil))
+                                        Log.Debug($"{agent} waiting for ZB-014 entry: gate={objective.Location.ExfilGate?.DoorState.ToString() ?? "missing"}, exit={exfil.Status}, position={agent.Position}");
+                                    else
+                                        Log.Debug($"{agent} within {Mathf.Sqrt(distanceSqr):F1}m of {objective.Location} but outside the trigger collider — counting as arrival miss (force-extract timer armed)");
                                 }
                                 else if (outsideWait >= ExfilOutsideTriggerForceExtractSeconds)
                                 {
                                     if (NoBackpackExfil.RetainAfterDrop(agent, objective.Location)) break;
                                     if (Orbit.Systems.MultiStepAccess.IsConditional(exfil) || NoBackpackExfil.RequiresDrop(exfil))
                                     { objective.Status = ObjectiveStatus.Failed; break; }
+                                    if (ExfilArrival.RequiresOpenGate(exfil))
+                                    {
+                                        Log.Info($"{agent} ZB-014 entry unavailable: gate={objective.Location.ExfilGate?.DoorState.ToString() ?? "missing"}, exit={exfil.Status}, position={agent.Position}; selecting another exfil");
+                                        ExfilArrival.Abandon(agent, objective.Location);
+                                        break;
+                                    }
                                     if (ExfilArrival.IsSharedTimer(exfil))
                                     {
                                         Log.Info($"{agent} V-Ex {exfil.name} trigger unreachable, selecting another exfil");
@@ -613,7 +622,7 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
             {
                 // Force the despawn only near the exit. A distant local blockage says nothing about
                 // whether the exit is reachable from a nearby NavMesh point.
-                if (!ExfilArrival.IsSharedTimer(exfil)
+                if (!ExfilArrival.RequiresOpenGate(exfil) && !ExfilArrival.IsSharedTimer(exfil)
                     && !Orbit.Systems.MultiStepAccess.IsConditional(exfil)
                     && !NoBackpackExfil.RequiresDrop(exfil)
                     && (agent.Position - location.Position).sqrMagnitude <= ExfilForceDespawnProximitySqr)
@@ -624,7 +633,7 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                     agent.ArrivalFailures.Forget(locId);
                     return;
                 }
-                if (exfil.Settings?.ExfiltrationType == EExfiltrationType.Individual
+                if (!ExfilArrival.RequiresOpenGate(exfil) && exfil.Settings?.ExfiltrationType == EExfiltrationType.Individual
                     && !Orbit.Systems.MultiStepAccess.IsConditional(exfil)
                     && !NoBackpackExfil.RequiresDrop(exfil)
                     && exfil.Status != EExfiltrationStatus.NotPresent && exfil.Status != EExfiltrationStatus.Hidden)

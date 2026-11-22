@@ -17,6 +17,10 @@ internal static class ExfilArrival
 
     private static readonly ConditionalWeakTable<ExfiltrationPoint, Trigger> Triggers = new();
 
+    internal const string WoodsBunkerKey = "591afe0186f77431bd616a11";
+    internal static bool RequiresOpenGate(ExfiltrationPoint exit) =>
+        string.Equals(exit?.Settings?.Name, "ZB-014", System.StringComparison.OrdinalIgnoreCase);
+
     internal static bool IsSharedTimer(ExfiltrationPoint exfil) =>
         exfil?.Settings?.ExfiltrationType == EExfiltrationType.SharedTimer;
 
@@ -30,6 +34,14 @@ internal static class ExfilArrival
         if (location?.Target is not ExfiltrationPoint exfil) return false;
         var trigger = Triggers.GetValue(exfil, static point => new Trigger(point));
         var collider = trigger.Collider;
+        if (RequiresOpenGate(exfil))
+        {
+            var gate = location.ExfilGate;
+            return exfil.Status == EExfiltrationStatus.RegularMode && gate != null
+                && gate.DoorState == EDoorState.Open && collider != null
+                && collider.bounds.size.sqrMagnitude > .001f && collider.bounds.Contains(agent.Position)
+                && (collider.ClosestPoint(agent.Position) - agent.Position).sqrMagnitude <= .0001f;
+        }
         if (collider != null)
         {
             var bounds = collider.bounds;

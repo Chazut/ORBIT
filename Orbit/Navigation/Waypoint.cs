@@ -38,6 +38,7 @@ public class Waypoint(
     public readonly Vector3 Position = position;
     // Keep the original approach for selection and local fallback; navigation can aim inside a bunker.
     public Vector3? ExfilInteriorPosition;
+    internal Door ExfilGate;
     public readonly float RadiusSqr = radiusSqr;
     public readonly WaypointCategory Category = category;
     public readonly List<Door> Doors = doors;

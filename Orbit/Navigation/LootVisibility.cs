@@ -22,6 +22,8 @@ internal static class LootVisibility
     {
         hit = default;
         if (target == null) return false;
+        if (target is LootableContainer crate && AirdropVisibility.IsRegistered(crate))
+            return AirdropVisibility.Check(head, crate, out hit);
         var direction = Target(target) - head;
         var distance = direction.magnitude;
         if (distance < .01f) return true;
