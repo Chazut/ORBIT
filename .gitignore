@@ -29,6 +29,13 @@ tests/
 !/tests/CorpseBeltRegression/
 !/tests/CustomsBackportRegression/
 !/tests/WoodsInteractionRegression/
+!/tests/ExtractionHarness/
+/tests/ExtractionHarness/*.Generated.cs
+/tests/ExtractionHarness/check_dashboard.py
+!/tests/NavigationHarness/
+/tests/NavigationHarness/*
+!/tests/NavigationHarness/Doubles.cs
+!/tests/NavigationHarness/ArrivalPorts.cs
 
 # Local working files
 /PR_DESCRIPTION_v1.1.0.md

@@ -1,0 +1,102 @@
+using System;
+using System.Collections.Generic;
+using EFT.Interactive;
+using Orbit.Entities;
+using Orbit.Navigation;
+using UnityEngine;
+
+public enum EBotLinkResult { complete, extraConnect }
+
+namespace UnityEngine
+{
+    public partial struct Vector3
+    {
+        public static Vector3 down => -up;
+        public static float Dot(Vector3 a, Vector3 b) => a.x * b.x + a.y * b.y + a.z * b.z;
+        public static Vector3 MoveTowards(Vector3 from, Vector3 to, float distance) =>
+            (to - from).magnitude <= distance ? to : from + (to - from).normalized * distance;
+    }
+    public static partial class Mathf
+    {
+        public static int CeilToInt(float value) => (int)MathF.Ceiling(value);
+        public static int Max(int a, int b) => Math.Max(a, b);
+        public static int Min(int a, int b) => Math.Min(a, b);
+        public static int Clamp(int value, int min, int max) => Math.Clamp(value, min, max);
+        public static float Clamp(float value, float min, float max) => Math.Clamp(value, min, max);
+    }
+}
+namespace EFT.Interactive
+{
+    public partial class Door
+    {
+        public string Id = "test-gate";
+        public bool Operatable = true;
+        public object InteractingPlayer;
+        public int Unlocks, Opens;
+        public void Unlock() { Unlocks++; DoorState = EDoorState.Shut; }
+        public int GetInstanceID() => GetHashCode();
+        public Vector3 GetInteractionPosition(Vector3 feet) =>
+            new(transform.position.x + (feet.x < transform.position.x ? -1 : 1), feet.y, transform.position.z);
+    }
+}
+namespace Orbit.Entities
+{
+    public partial class Agent { public bool? SoloWoodsBunkerChoice; }
+    public partial class Squad { public bool? WoodsBunkerChoice; }
+    public partial class Personality { public float LockedDoorUnlockProba = .3f; }
+    public partial class Profile { public string Id = "pmc", Nickname = "Test PMC"; }
+    public partial class Movement
+    {
+        public int CurrentCorner;
+        internal readonly Systems.MovementFailureHistory Failures = new();
+    }
+    public partial class Bot { public CombatMemory Memory = new(); }
+    public class CombatMemory { public bool IsUnderFire; public object GoalEnemy; }
+}
+namespace Orbit.Sain { internal static class PersonalityFallback { internal const float LockedDoorUnlockProba = .3f; } }
+namespace Orbit.Helpers
+{
+    public static class RoleExtensions { public static bool IsPMC(this int role) => role == 0; }
+    public static partial class PerformanceJournal
+    {
+        public static void Event(string name, string profile, string detail, int squad) { }
+    }
+}
+namespace Orbit.Systems
+{
+    internal class OperationPlan { }
+    internal class RushPlan { }
+    internal class AmbushSite { }
+    internal class ExtractCampApproach { }
+    internal interface IObjectiveWork { void ResumeObjectiveWork(); }
+    internal enum OperationStepKind { Access }
+    internal class OperationStep
+    {
+        public OperationStepKind Kind;
+        public Door Object;
+        public Func<Vector3, bool> InteractionCheck => CanInteract;
+        public bool CanInteract(Vector3 feet) => (feet - Object.transform.position).sqrMagnitude <= 4f;
+    }
+    public partial class WaypointSystem
+    {
+        internal bool CanUseExfil(Agent agent, Waypoint exit) =>
+            !ExfilArrival.IsUnavailable((ExfiltrationPoint)exit.Target)
+                && (!WoodsBunkerAccess.Applies(exit) || WoodsBunkerAccess.Available(exit)
+                    && WoodsBunkerAccess.Accepted(agent.Squad, agent.SoloExtractRequested ? agent : null));
+        internal bool TryOperationWork(IObjectiveWork work) => true;
+        internal void ContinueOperationWork(IObjectiveWork work) { }
+        internal void CancelOperationWork(IObjectiveWork work) { }
+    }
+    public partial class MovementSystem
+    {
+        private readonly Dictionary<int, float> _doorInteractCooldown = new();
+        private const float DoorInteractCooldownSeconds = 1.5f;
+        private void CancelSpawnWaypointSearch(Agent agent) { }
+        public bool OpenObjectiveDoor(Agent agent, Door door)
+        {
+            door.Opens++;
+            door.DoorState = EDoorState.Open;
+            return true;
+        }
+    }
+}
