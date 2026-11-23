@@ -55,6 +55,7 @@ public static class ServerConfig
         [JsonProperty("detect_distance")] public float DetectDistance = 80f;
         [JsonProperty("corpse_requires_sight_or_squad_kill")] public bool CorpseRequiresSightOrSquadKill = true;
         [JsonProperty("keep_spawn_weapons")] public bool KeepSpawnWeapons;
+        [JsonProperty("loot_player_belt_contents")] public bool LootPlayerBeltContents;
 
         [JsonProperty("extract_pmc")] public bool ExtractPmc = true;
         [JsonProperty("extract_player_scav")] public bool ExtractPlayerScav = true;

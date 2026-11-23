@@ -165,6 +165,7 @@ public class LootConfig
     public float DetectDistance { get; set; } = 80f;
     public bool CorpseRequiresSightOrSquadKill { get; set; } = true;
     public bool KeepSpawnWeapons { get; set; }
+    public bool LootPlayerBeltContents { get; set; }
 
     public bool ExtractPmc { get; set; } = true;
     public bool ExtractPlayerScav { get; set; } = true;

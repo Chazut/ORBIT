@@ -768,7 +768,7 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
         // is randomised per track for natural variation.
         var visibleOrder = lootableSlots.Where(s => !SearchableCorpseSlots.Contains(s)).OrderBy(_ => Random.value).ToList();
         var searchSlots = lootableSlots.Where(s => SearchableCorpseSlots.Contains(s));
-        if (corpseBelt != null && PackNStrapCompat.IsBotCorpse(inventoryEquipment.Owner as CorpseItemController))
+        if (corpseBelt != null && PackNStrapCompat.CanSearchBelt(inventoryEquipment.Owner as CorpseItemController))
             searchSlots = searchSlots.Concat(new[] { EquipmentSlot.ArmBand });
         var searchOrder = searchSlots.OrderBy(_ => Random.value).ToList();
         Log.Debug($"OrbitLootHandler.Corpse({Nick}, {corpse.name}): side={corpse.Side} pmc={isPmc} visibleOrder=[{string.Join(",", visibleOrder)}] searchOrder=[{string.Join(",", searchOrder)}]");
@@ -849,7 +849,7 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
             var slotItems = new List<DrainEntry>();
             await EnumerateItemsForDrainAsync(root, slotKind == EquipmentSlot.ArmBand ? "Belt" : slotKind.ToString(), slotItems, ct);
             CheckSession(ct);
-            // Only confirmed bot corpses reach this slot. The equipped belt stays on the body.
+            // Search the contents and leave the equipped belt on the body.
             if (slotKind == EquipmentSlot.ArmBand)
             {
                 slotItems.RemoveAll(entry => ReferenceEquals(entry.Item, corpseBelt));

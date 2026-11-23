@@ -24,6 +24,8 @@
                      Tooltip="Bot scavs (not PlayerScavs) skip the value gate and just roll this chance per item, like vanilla opportunistic scavs. PMCs and PlayerScavs are unaffected." />
         <OrbitSwitch @bind-Value="Cfg.Loot.CorpseRequiresSightOrSquadKill" Label="Corpse requires line of sight or squad kill"
                      Tooltip="ON (default): a corpse is only looted if the squad saw it or made the kill, so bots do not magically know about bodies across the map." />
+        <OrbitSwitch @bind-Value="Cfg.Loot.LootPlayerBeltContents" Label="Loot player belt contents"
+                     Tooltip="Allow bots to take items from a dead player's equipped Pack 'n' Strap belt. The belt stays on the body. Bots can always search other bots' belts." />
         <OrbitSwitch @bind-Value="Cfg.Loot.KeepSpawnWeapons" Label="Bots keep their spawn weapons"
                      Tooltip="ON: bots never equip a weapon they find (no corpse weapon swap, no filling an empty slot). They still bag and strip weapons as loot and still grab mags and ammo for the weapons they spawned with. Use this if you see bots stuck with a looted gun they have no ammo for." />
     </SettingsCard>
@@ -48,6 +50,7 @@
         Cfg.Loot.DetectDistance = d.DetectDistance;
         Cfg.Loot.ScavLootChancePct = d.ScavLootChancePct;
         Cfg.Loot.CorpseRequiresSightOrSquadKill = d.CorpseRequiresSightOrSquadKill;
+        Cfg.Loot.LootPlayerBeltContents = d.LootPlayerBeltContents;
         Cfg.Loot.KeepSpawnWeapons = d.KeepSpawnWeapons;
     }
 }

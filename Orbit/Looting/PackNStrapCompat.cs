@@ -2,6 +2,7 @@ using BepInEx.Bootstrap;
 using Comfort.Common;
 using EFT;
 using EFT.InventoryLogic;
+using Orbit.Helpers;
 
 namespace Orbit.Looting;
 
@@ -21,8 +22,9 @@ internal static class PackNStrapCompat
         return null;
     }
 
-    internal static bool IsBotCorpse(CorpseItemController owner)
+    internal static bool CanSearchBelt(CorpseItemController owner)
     {
+        if (ServerConfig.Loot.LootPlayerBeltContents) return true;
         // The raid keeps this lookup after death, including players on a Fika host.
         var id = owner?.KilledProfileID;
         return !string.IsNullOrEmpty(id) && Singleton<GameWorld>.Instance?.GetEverExistedPlayerByID(id)?.IsAI == true;
@@ -32,7 +34,7 @@ internal static class PackNStrapCompat
     {
         if (root is not InventoryEquipment equipment) return null;
         var belt = CorpseBelt(equipment);
-        return belt != null && !IsBotCorpse(equipment.Owner as CorpseItemController) ? belt : null;
+        return belt != null && !CanSearchBelt(equipment.Owner as CorpseItemController) ? belt : null;
     }
 
     // A co-op player can move a queued item into the belt during the bot's search delay.
@@ -49,6 +51,6 @@ internal static class PackNStrapCompat
             return false;
         var belt = equipment.GetSlot(EquipmentSlot.ArmBand)?.ContainedItem;
         if (belt == null || !(ReferenceEquals(item, belt) || item.IsChildOf(belt))) return false;
-        return ProtectedBelt(equipment) != null;
+        return CorpseBelt(equipment) != null && (ReferenceEquals(item, belt) || !CanSearchBelt(owner));
     }
 }

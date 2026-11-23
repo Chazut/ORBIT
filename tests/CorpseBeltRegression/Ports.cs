@@ -1,3 +1,14 @@
+namespace Orbit.Helpers
+{
+    internal static class ServerConfig
+    {
+        internal static class Loot
+        {
+            internal static bool LootPlayerBeltContents;
+        }
+    }
+}
+
 namespace BepInEx.Bootstrap
 {
     public static class Chainloader
