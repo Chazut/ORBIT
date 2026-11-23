@@ -1173,7 +1173,7 @@ public partial class MovementSystem
         if (agent.IsDormant)
         {
             if (IsGhostDoorPending(door)) return false;
-            GhostOpenDoor(agent, door, "for marked rush", respectCooldown: true);
+            GhostOpenDoor(agent, door, "for objective", respectCooldown: true);
             return IsGhostDoorPending(door);
         }
         if (!OpenDoor(agent, door)) return false;
@@ -1646,7 +1646,7 @@ public partial class MovementSystem
         if (Time.time - stuck.IdleRescueSince < threshold || !stuck.Recovery.ProbeDue(pos)) return;
 
         var goal = objective?.Location;
-        Vector3? target = goal == null ? null : goal.ExfilInteriorPosition ?? goal.Position;
+        Vector3? target = goal == null ? null : WoodsBunkerAccess.Destination(goal);
         var nearby = TryNearbyEscape(agent, target, out var landing);
         if (nearby == EscapeResult.Pending) return;
         if (nearby == EscapeResult.Found)
@@ -1744,7 +1744,7 @@ public partial class MovementSystem
         objective.ArrivalPath = null;
         var movement = agent.Movement;
         var destination = objective.Location.Category == WaypointCategory.Exfil
-            ? objective.Location.ExfilInteriorPosition ?? objective.Location.Position
+            ? WoodsBunkerAccess.Destination(objective.Location)
             : objective.Location.Position;
         MoveToByPath(agent, destination, movement.Pose, movement.Speed,
             movement.Prone, movement.Sprint, movement.Urgency);
@@ -1958,7 +1958,7 @@ public partial class MovementSystem
     private bool ContinueSpawnEscape(Agent agent)
     {
         var goal = agent.Objective?.Location;
-        Vector3? target = goal == null ? null : goal.ExfilInteriorPosition ?? goal.Position;
+        Vector3? target = goal == null ? null : WoodsBunkerAccess.Destination(goal);
         var nearby = TryNearbyEscape(agent, target, out var localDest);
         if (nearby == EscapeResult.Exhausted) return false;
         var stuck = agent.Stuck;
@@ -2283,7 +2283,7 @@ public partial class MovementSystem
             if (!TeleportSafe(agent, humanPlayers) || !agent.Stuck.Recovery.ProbeDue(agent.Position)) return;
 
             var objLoc = agent.Objective?.Location;
-            Vector3? target = objLoc == null ? null : objLoc.ExfilInteriorPosition ?? objLoc.Position;
+            Vector3? target = objLoc == null ? null : WoodsBunkerAccess.Destination(objLoc);
             var nearby = movementSystem.TryNearbyEscape(agent, target, out var localDest);
             if (nearby == EscapeResult.Pending) return;
             if (nearby == EscapeResult.Found) { movementSystem.CompleteNearbyEscape(agent, localDest); return; }

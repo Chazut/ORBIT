@@ -11,7 +11,14 @@ namespace Orbit.Systems;
 public partial class WaypointSystem
 {
     private readonly List<Waypoint> _exfilPoints = new();
-    private readonly Dictionary<Entity, ExfilSearch> _exfilSearches = new();
+    // Squads and agents have independent ID sequences. A solo PMC must never reuse a
+    // squad's completed search (or its bunker choice) just because the numeric IDs match.
+    private sealed class SearchOwnerComparer : IEqualityComparer<Entity>
+    {
+        public bool Equals(Entity first, Entity second) => ReferenceEquals(first, second);
+        public int GetHashCode(Entity owner) => System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(owner);
+    }
+    private readonly Dictionary<Entity, ExfilSearch> _exfilSearches = new(new SearchOwnerComparer());
     private readonly List<Entity> _expiredExfils = new();
 
     private sealed class ExfilSearch : IFrameSearch
@@ -83,8 +90,16 @@ public partial class WaypointSystem
         {
             if (Squad.CompletedPoiIds.Contains(point.Id) || !_owner.SquadCanUseWaypoint(Squad, _pmc, point, Solo))
                 return new(false, float.MaxValue, available: false);
+            var destination = point.Position;
+            var bunker = WoodsBunkerAccess.Applies(point);
+            if (bunker)
+            {
+                if (!WoodsBunkerAccess.Choose(Squad, Solo, point, _pmc))
+                    return new(false, float.MaxValue, available: false);
+                destination = WoodsBunkerAccess.Destination(point);
+            }
             _queries++;
-            var found = CalculateTimedPath(Origin, point.Position, _path, TransitionPhase.ExfilPath, point.Name, Squad.Id);
+            var found = CalculateTimedPath(Origin, destination, _path, TransitionPhase.ExfilPath, point.Name, Squad.Id);
             if (found && _path.status == NavMeshPathStatus.PathComplete)
             {
                 if (string.Equals(_owner._mapId, "bigmap", StringComparison.OrdinalIgnoreCase))
@@ -94,18 +109,27 @@ public partial class WaypointSystem
                     var previous = Origin;
                     foreach (var corner in completeCorners)
                     { CompleteRouteLength += Vector3.Distance(previous, corner); previous = corner; }
-                    CompleteRouteLength += Vector3.Distance(previous, point.Position);
+                    CompleteRouteLength += Vector3.Distance(previous, destination);
                 }
                 return new(true, 0);
             }
             var corners = _path.corners;
+            if (bunker && found && _path.status == NavMeshPathStatus.PathPartial && corners is { Length: > 0 }
+                && point.ExfilGate.DoorState != EFT.Interactive.EDoorState.Open)
+            {
+                // The locked gate may cut the mesh just short of the requested standing point.
+                // A reachable handle at the real path endpoint is a complete first leg.
+                var access = new OperationStep { Kind = OperationStepKind.Access, Object = point.ExfilGate };
+                if (access.CanInteract(corners[corners.Length - 1])) return new(true, 0f);
+            }
             var gap = !found || _path.status == NavMeshPathStatus.PathInvalid || corners == null || corners.Length == 0
-                ? float.MaxValue : (corners[corners.Length - 1] - point.Position).sqrMagnitude;
+                ? float.MaxValue : (corners[corners.Length - 1] - destination).sqrMagnitude;
             Log.Debug($"EXFIL ROUTE QUERY: {Squad} exit={point.Name} status={_path.status} found={found} gap={Mathf.Sqrt(gap):F1}m");
             return new(false, gap);
         }
 
         internal bool ResultValid => Result == null || !Squad.CompletedPoiIds.Contains(Result.Id)
+            && (!WoodsBunkerAccess.Applies(Result) || WoodsBunkerAccess.Available(Result) && WoodsBunkerAccess.Accepted(Squad, Solo))
             && _owner.SquadCanUseWaypoint(Squad, _pmc, Result, Solo);
     }
 

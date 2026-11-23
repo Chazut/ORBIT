@@ -482,6 +482,11 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                 }
             }
 
+            // The gate approach handles progress and genuine failures. A normal POI travel timeout
+            // must not replace the selected bunker while members are unlocking or entering it.
+            if (squad.ExtractRequested && WoodsBunkerAccess.Applies(squadObjective.Location)
+                && WoodsBunkerAccess.Available(squadObjective.Location) && WoodsBunkerAccess.Accepted(squad, null))
+                continue;
             if (Time.time < squadObjective.StartTime + squadObjective.Duration)
                 continue;
 

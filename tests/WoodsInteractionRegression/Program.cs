@@ -7,6 +7,7 @@ int checks = 0;
 void Check(bool result, string message) { if (!result) throw new Exception(message); checks++; }
 
 var bot = new Agent();
+BunkerScenarios.Run(Check);
 var exit = new ExfiltrationPoint { Settings = new() { Name = "ZB-014" } };
 var point = new Waypoint { Target = exit, ExfilGate = new Door() };
 Check(!ExfilArrival.IsInside(bot, point), "no trigger cannot fall back to anchor");

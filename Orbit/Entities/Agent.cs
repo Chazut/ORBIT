@@ -148,6 +148,7 @@ public class Agent(int id, BotOwner bot, float[] taskScores) : Entity(id, taskSc
     /// emergency (wounded with no usable meds left) and the per-member loot threshold (gated by a one-time roll).
     /// </summary>
     public bool SoloExtractRequested;
+    internal bool? SoloWoodsBunkerChoice;
     public string SoloExtractReason;
     public Orbit.Navigation.Waypoint SoloExtractTarget;
     public bool SoloLootThresholdRolled;

@@ -1,3 +1,7 @@
+# Unreleased
+
+- **Woods bunker extraction.** PMCs roll once when considering ZB-014. Those who choose it go to the locked gate, unlock and open it, then walk into the extraction room. Squadmates share the decision.
+
 # ORBIT 3.3.0
 
 ## Features

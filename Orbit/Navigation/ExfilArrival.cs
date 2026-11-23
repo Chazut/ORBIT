@@ -21,6 +21,13 @@ internal static class ExfilArrival
     internal static bool RequiresOpenGate(ExfiltrationPoint exit) =>
         string.Equals(exit?.Settings?.Name, "ZB-014", System.StringComparison.OrdinalIgnoreCase);
 
+    internal static Collider BunkerVolume(ExfiltrationPoint exit) =>
+        Triggers.GetValue(exit, static point => new Trigger(point)).Collider;
+
+    internal static bool BunkerContains(Collider volume, Vector3 feet) =>
+        volume != null && volume.bounds.size.sqrMagnitude > .001f && volume.bounds.Contains(feet)
+        && (volume.ClosestPoint(feet) - feet).sqrMagnitude <= .0001f;
+
     internal static bool IsSharedTimer(ExfiltrationPoint exfil) =>
         exfil?.Settings?.ExfiltrationType == EExfiltrationType.SharedTimer;
 
@@ -38,9 +45,7 @@ internal static class ExfilArrival
         {
             var gate = location.ExfilGate;
             return exfil.Status == EExfiltrationStatus.RegularMode && gate != null
-                && gate.DoorState == EDoorState.Open && collider != null
-                && collider.bounds.size.sqrMagnitude > .001f && collider.bounds.Contains(agent.Position)
-                && (collider.ClosestPoint(agent.Position) - agent.Position).sqrMagnitude <= .0001f;
+                && gate.DoorState == EDoorState.Open && BunkerContains(collider, agent.Position);
         }
         if (collider != null)
         {
@@ -79,10 +84,10 @@ internal static class ExfilArrival
             : (agent.Position - location.Position).sqrMagnitude <= 225f;
     }
 
-    internal static void Abandon(Agent agent, Waypoint location)
+    internal static void Abandon(Agent agent, Waypoint location, bool squadWide = true)
     {
         var squad = agent.Squad;
-        if (squad != null)
+        if (squadWide && squad != null)
         {
             squad.CompletedPoiIds.Add(location.Id);
             squad.NearestExfilCached = null;

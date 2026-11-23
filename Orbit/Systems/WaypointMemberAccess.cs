@@ -73,6 +73,14 @@ public partial class WaypointSystem
     {
         pending = false;
         var squad = member.Squad;
+        if (squad?.ExtractRequested == true && ReferenceEquals(pick, squad.Objective.Location)
+            && WoodsBunkerAccess.Applies(pick) && WoodsBunkerAccess.Accepted(squad, null))
+        {
+            CancelMemberAccess(member);
+            if (!squad.CompletedPoiIds.Contains(pick.Id) && WoodsBunkerAccess.Available(pick)) return true;
+            RejectMemberAnchor(squad, pick);
+            return false;
+        }
         var unavailable = IsUnavailableLooseLoot(pick);
         var eligibility = squad == null ? "no-squad" : squad.CompletedPoiIds.Contains(pick.Id) ? "already-completed"
             : member.ValueSkippedPoiIds.Contains(pick.Id) ? "personal-value-skip" : unavailable ? "loot-unavailable"

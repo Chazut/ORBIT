@@ -238,6 +238,7 @@ public class Squad(int id, float[] taskScores, int targetMembersCount) : Entity(
     // Short-TTL cache for FindNearestEligibleExfil: that scan now path-checks every candidate and the
     // extract-interrupt gate polls it each tick, so the verdict is cached. Null = no reachable exfil last eval.
     public Waypoint NearestExfilCached;
+    internal bool? WoodsBunkerChoice;
     public float NearestExfilCachedAt = float.NegativeInfinity;
 
     /// <summary>

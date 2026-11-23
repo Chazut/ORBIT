@@ -1,0 +1,28 @@
+using System;
+using EFT.Interactive;
+using Orbit.Entities;
+using Orbit.Helpers;
+using UnityEngine;
+
+namespace Orbit.Systems;
+
+public partial class MovementSystem
+{
+    // Called from the selected bunker's access step, after the bot's actual feet pass the reach check.
+    internal void UseBunkerGate(Agent agent, Door door)
+    {
+        if (door == null || !door.Operatable || door.InteractingPlayer != null) return;
+        if (door.DoorState == EDoorState.Shut) { OpenObjectiveDoor(agent, door); return; }
+        if (door.DoorState != EDoorState.Locked || agent.Bot.Profile?.Info?.Settings?.Role.IsPMC() != true) return;
+        var doorId = door.GetInstanceID();
+        if (_doorInteractCooldown.TryGetValue(doorId, out var last) && Time.time - last < DoorInteractCooldownSeconds) return;
+        _doorInteractCooldown[doorId] = Time.time;
+        try
+        {
+            door.Unlock();
+            Orbit.Api.OrbitDoorEvents.Raise(door, Orbit.Api.OrbitDoorEvents.Operation.Unlock);
+            Log.Info($"WOODS BUNKER: {agent} unlocking door={door.Id} ghost={agent.IsDormant} feet={agent.Position}");
+        }
+        catch (Exception error) { Log.Warning($"WOODS BUNKER: {agent} unlock failed door={door.Id}: {error.Message}"); }
+    }
+}

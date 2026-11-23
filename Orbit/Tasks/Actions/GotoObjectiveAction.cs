@@ -395,6 +395,8 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                             // Keep walking to the interior target until arrival or a local fallback.
                             if (!ExfilArrival.IsInside(agent, objective.Location))
                             {
+                                // The bunker approach owns both the gate and room legs and validates physical entry.
+                                if (ExfilArrival.RequiresOpenGate(exfil)) break;
                                 // Renew the local fallback while making progress, including downstairs.
                                 // If the foot-exit approach stalls, still extract here without choosing
                                 // another exit. Shared-timer cars keep their stricter arrival rules.
@@ -402,22 +404,13 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                                 var outsideWait = ExfilArrival.OutsideTriggerWait(agent);
                                 if (firstWait)
                                 {
-                                    if (ExfilArrival.RequiresOpenGate(exfil))
-                                        Log.Debug($"{agent} waiting for ZB-014 entry: gate={objective.Location.ExfilGate?.DoorState.ToString() ?? "missing"}, exit={exfil.Status}, position={agent.Position}");
-                                    else
-                                        Log.Debug($"{agent} within {Mathf.Sqrt(distanceSqr):F1}m of {objective.Location} but outside the trigger collider — counting as arrival miss (force-extract timer armed)");
+                                    Log.Debug($"{agent} within {Mathf.Sqrt(distanceSqr):F1}m of {objective.Location} but outside the trigger collider (force-extract timer armed)");
                                 }
                                 else if (outsideWait >= ExfilOutsideTriggerForceExtractSeconds)
                                 {
                                     if (NoBackpackExfil.RetainAfterDrop(agent, objective.Location)) break;
                                     if (Orbit.Systems.MultiStepAccess.IsConditional(exfil) || NoBackpackExfil.RequiresDrop(exfil))
                                     { objective.Status = ObjectiveStatus.Failed; break; }
-                                    if (ExfilArrival.RequiresOpenGate(exfil))
-                                    {
-                                        Log.Info($"{agent} ZB-014 entry unavailable: gate={objective.Location.ExfilGate?.DoorState.ToString() ?? "missing"}, exit={exfil.Status}, position={agent.Position}; selecting another exfil");
-                                        ExfilArrival.Abandon(agent, objective.Location);
-                                        break;
-                                    }
                                     if (ExfilArrival.IsSharedTimer(exfil))
                                     {
                                         Log.Info($"{agent} V-Ex {exfil.name} trigger unreachable, selecting another exfil");

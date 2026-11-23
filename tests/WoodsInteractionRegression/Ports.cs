@@ -4,11 +4,12 @@ using UnityEngine;
 
 namespace UnityEngine
 {
-    public readonly record struct Vector3(float x, float y, float z)
+    public record struct Vector3(float x, float y, float z)
     {
         public static Vector3 up => new(0, 1, 0);
         public float sqrMagnitude => x * x + y * y + z * z;
         public float magnitude => MathF.Sqrt(sqrMagnitude);
+        public static float Distance(Vector3 a, Vector3 b) => (a - b).magnitude;
         public static Vector3 operator +(Vector3 a, Vector3 b) => new(a.x + b.x, a.y + b.y, a.z + b.z);
         public static Vector3 operator -(Vector3 a, Vector3 b) => new(a.x - b.x, a.y - b.y, a.z - b.z);
         public static Vector3 operator *(Vector3 a, float k) => new(a.x * k, a.y * k, a.z * k);
@@ -49,7 +50,7 @@ namespace UnityEngine
             return FirstHit != null;
         }
     }
-    public static class Time { public static float time; }
+    public static class Time { public static float time; public static int frameCount; }
 }
 public static class LayersMaskController { public const int HighPolyWithTerrainMask = 1; }
 namespace EFT.Interactive
@@ -57,7 +58,7 @@ namespace EFT.Interactive
     public class InteractableObject { public Transform transform = new(); public Transform TrackableTransform => transform; }
     public class LootableContainer : InteractableObject { public Collider Collider; }
     public enum EDoorState { Locked, Shut, Interacting, Open }
-    public class Door { public EDoorState DoorState; }
+    public partial class Door { public EDoorState DoorState; }
     public enum EExfiltrationType { Individual, SharedTimer }
     public enum EExfiltrationStatus { RegularMode, NotPresent, Hidden, AwaitsManualActivation }
     public class Settings { public string Name; public EExfiltrationType ExfiltrationType; }
@@ -69,15 +70,15 @@ namespace EFT.Interactive
         public T GetComponent<T>() where T : class => Volume as T;
     }
 }
-namespace Orbit.Navigation { public class Waypoint { public object Target; public Door ExfilGate; public int Id; public Vector3 Position; } }
+namespace Orbit.Navigation { public partial class Waypoint { public object Target; public Door ExfilGate; public int Id; public Vector3 Position; } }
 namespace Orbit.Entities
 {
-    public enum ObjectiveStatus { None }
+    public enum ObjectiveStatus { None, Moving, Extracting }
     public class Objective
     {
         public Waypoint Location, SplinterParent; public object ArrivalPath;
         public float ExfilOutsideTriggerSince, DispatchTime; public Vector3 ExfilOutsideTriggerLastPosition; public ObjectiveStatus Status;
     }
-    public class Squad { public HashSet<int> CompletedPoiIds = new(); public Waypoint NearestExfilCached; public float NearestExfilCachedAt; public Objective Objective = new(); }
-    public class Agent { public Squad Squad; public Objective Objective = new(); public Waypoint SoloExtractTarget; public Vector3 Position; }
+    public partial class Squad : Entity { public HashSet<int> CompletedPoiIds = new(); public Waypoint NearestExfilCached; public float NearestExfilCachedAt; public Objective Objective = new(); }
+    public partial class Agent : Entity { public Squad Squad; public Objective Objective = new(); public Waypoint SoloExtractTarget; public Vector3 Position; }
 }

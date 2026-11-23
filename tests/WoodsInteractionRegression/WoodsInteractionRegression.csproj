@@ -6,6 +6,14 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../../Orbit/Navigation/ExfilArrival.cs" />
+    <Compile Include="../../Orbit/Entities/Entity.cs" />
+    <Compile Include="../../Orbit/Navigation/WoodsBunkerAccess.cs" />
+    <Compile Include="../../Orbit/Navigation/NearestExfilSearch.cs" />
+    <Compile Include="../../Orbit/Navigation/OperationProgress.cs" />
+    <Compile Include="../../Orbit/Systems/FrameSearchQueue.cs" />
+    <Compile Include="../../Orbit/Systems/WaypointExfilSearch.cs" />
+    <Compile Include="../../Orbit/Systems/MovementSystem.BunkerGate.cs" />
+    <Compile Include="../../Orbit/Systems/ExfilApproach.cs" />
     <Compile Include="../../Orbit/Navigation/AirdropVisibility.cs" />
     <Compile Include="../../Orbit/Navigation/LootVisibility.cs" />
   </ItemGroup>
