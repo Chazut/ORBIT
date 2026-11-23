@@ -39,6 +39,7 @@ public class Guard
     public CoverPoint? CoverPoint;
     public AreaSweepJob AreaSweepJob;
     public float WatchTimeout;
+    internal int ExtractWatchProbe, ExtractWatchMisses;
     public readonly List<Vector3> WatchDirections = [];
 
     public override string ToString()

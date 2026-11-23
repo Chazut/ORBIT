@@ -159,14 +159,16 @@ public class GuardAction(AgentData dataset, MovementSystem movementSystem, float
                     if (agent.Movement.Status == MovementStatus.Moving) continue;
 
                     // Record the crouch on arrival so a sleeping camper wakes in the same stance.
-                    if (agent.Squad?.Camp is { Site.Kind: CampSiteKind.Hotspot } camp && camp.Owns(agent))
+                    var camp = agent.Squad?.Camp;
+                    var camping = camp != null && camp.Owns(agent) && camp.Looter != agent;
+                    if (camping)
                         MovementSystem.ResetGait(agent, pose: 0f);
                     else if (!agent.IsDormant && agent.Movement.Pose > 0.3f && (coverPoint.Level != CoverLevel.Stay || Random.value > 0.5f))
                         MovementSystem.ResetGait(agent, pose: 0.25f);
 
-                    // Dormant: hold the spot without the sweep (raycasts for a sleeping body are pure
-                    // waste) — Watch with no directions idles until the strategy timer moves the squad on.
-                    if (agent.IsDormant)
+                    // Sleeping guards need no sweep. Extract campers check a walkable approach
+                    // from their actual eye position when awake.
+                    if (agent.IsDormant || (camping && camp.Site.Kind == CampSiteKind.Extract))
                     {
                         guard.Status = GuardStatus.Watch;
                         continue;
@@ -191,6 +193,11 @@ public class GuardAction(AgentData dataset, MovementSystem movementSystem, float
                     {
                         if (guard.WatchTimeout <= Time.time)
                         {
+                            if (agent.Squad.Camp.Site.Kind == CampSiteKind.Extract)
+                            {
+                                WatchExtractApproach(agent, agent.Squad.Camp.Site.Position);
+                                continue;
+                            }
                             var toward = agent.Squad.Camp.Site.Position + Vector3.up - agent.Player.PlayerBones.Head.position;
                             LookSystem.LookToDirection(agent, LookSystem.RandomDirectionInEllipse(toward.normalized, 20f, 5f), 90f);
                             guard.WatchTimeout = Time.time + Random.Range(3f, 8f);
@@ -213,11 +220,52 @@ public class GuardAction(AgentData dataset, MovementSystem movementSystem, float
         _sweepPool.FlushScheduled();
     }
 
+    internal static void RestoreCampOnWake(Agent agent)
+    {
+        var camp = agent.Squad?.Camp;
+        if (!agent.IsActive || camp == null || !camp.Owns(agent) || camp.Looter == agent
+            || agent.Objective.Status != ObjectiveStatus.Finished
+            || agent.Guard.Status is not (GuardStatus.Watch or GuardStatus.Sweep)
+            || agent.Movement.Status == MovementStatus.Moving) return;
+
+        MovementSystem.ResetGait(agent, pose: 0f);
+        agent.Guard.ExtractWatchProbe = 0;
+        agent.Guard.ExtractWatchMisses = 0;
+        agent.Guard.WatchTimeout = 0f;
+        if (camp.Site.Kind == CampSiteKind.Extract) agent.Look.Target = null;
+        Log.Debug($"{agent} resumed crouched ambush kind={camp.Site.Kind} at {agent.Position}");
+    }
+
+    private static void WatchExtractApproach(Agent agent, Vector3 exit)
+    {
+        var guard = agent.Guard;
+        var eye = agent.Player.PlayerBones.Head.position;
+        if (ExtractAmbushWatch.TryWatchApproach(agent.Position, eye, exit, guard.ExtractWatchProbe, out var target))
+        {
+            if (agent.Look.Target == null)
+                Log.Debug($"{agent} extract camp watching approach from {eye} to {target}");
+            LookSystem.LookToPoint(agent, target, 90f);
+            guard.WatchTimeout = Time.time + Random.Range(3f, 8f);
+            guard.ExtractWatchMisses = 0;
+            return;
+        }
+        // Doors and the actual crouched eye position can differ from the formation search.
+        // Check one other heading per tick. Exhaustion hands the slot back to the camp planner.
+        agent.Look.Target = null;
+        guard.ExtractWatchProbe = (guard.ExtractWatchProbe + 1) % ExtractAmbushWatch.WatchProbeCount;
+        if (++guard.ExtractWatchMisses < ExtractAmbushWatch.WatchProbeCount) return;
+        guard.ExtractWatchMisses = 0;
+        agent.Objective.Status = ObjectiveStatus.Failed;
+        Log.Debug($"{agent} extract camp lost all visible approaches at {agent.Position}");
+    }
+
     protected override void Deactivate(Agent entity)
     {
         var guard = entity.Guard;
 
         guard.Status = GuardStatus.None;
+        guard.ExtractWatchProbe = 0;
+        guard.ExtractWatchMisses = 0;
         // The pool retains unfinished jobs until completion, including after death or combat takeover.
         DrainAreaSweepJob(guard);
         guard.WatchDirections.Clear();

@@ -1152,6 +1152,7 @@ public partial class DormancySystem
 
             // Re-path from the real wake position if a move was in flight: the ghost walk followed the old
             // corners, but doors it phased through are still closed and the mesh may differ locally.
+            Tasks.Actions.GuardAction.RestoreCampOnWake(agent);
             var movement = agent.Movement;
             if (movement.Status == MovementStatus.Moving && movement.Target != Movement.Infinity)
                 _movementSystem.MoveToByPath(agent, movement.Target,

@@ -232,6 +232,37 @@ public partial class WaypointSystem
         List<Vector3> occupied, AmbushSearchBudget budget, float distanceMax = 0)
     {
         if (distanceMax <= 0) distanceMax = rule.DistanceMax;
+        foreach (var candidate in EnumerateAmbushCover(agent, site, rule, occupied, budget, distanceMax))
+        {
+            if (!candidate.HasValue) { yield return null; continue; }
+            var feet = candidate.Value.Position;
+            if (site.Kind == CampSiteKind.Extract)
+            {
+                var visible = false;
+                for (var probe = 0; probe < ExtractAmbushWatch.WatchProbeCount; probe++)
+                {
+                    yield return null;
+                    if (!ExtractAmbushWatch.TryWatchApproach(feet, feet + Vector3.up, site.Position, probe, out _)) continue;
+                    visible = true;
+                    break;
+                }
+                if (!visible)
+                {
+                    budget.Reject("no visible extract approach");
+                    budget.Source = "none";
+                    continue;
+                }
+            }
+            if (budget.Source == "geometry" && Log.InfoEnabled)
+                Log.Info($"AMBUSH COVER: {agent.Squad} source=geometry category={candidate.Value.Category} position={feet} kind={site.Kind} radius={distanceMax:F1}m");
+            yield return candidate;
+            yield break;
+        }
+    }
+
+    private IEnumerable<CoverPoint?> EnumerateAmbushCover(Agent agent, AmbushSite site, CampSiteSettings rule,
+        List<Vector3> occupied, AmbushSearchBudget budget, float distanceMax)
+    {
         budget.CachedCandidates += site.Covers.Count;
         if (distanceMax > site.CoversRadius + .1f)
         { site.CoversRadius = distanceMax; site.CoversReady = false; site.CoverProbe = 0; }
@@ -271,7 +302,7 @@ public partial class WaypointSystem
                 if (site.Kind is CampSiteKind.Extract or CampSiteKind.Hotspot && budget.Remaining <= 4) break;
                 yield return null;
                 if (ValidateAmbushPosition(agent, site, rule, cover.Position, occupied, budget, out var position, distanceMax))
-                { budget.Source = "native-or-cached"; yield return new CoverPoint(position, cover.Direction, cover.Category, cover.Level); yield break; }
+                { budget.Source = "native-or-cached"; yield return new CoverPoint(position, cover.Direction, cover.Category, cover.Level); }
             }
         // Some scenes have sparse or missing baked cover hints. Discover nearby physical shelter
         // only after native candidates fail, and validate it with the same floor/path/spacing rules.
@@ -288,9 +319,7 @@ public partial class WaypointSystem
                     if (!ValidateAmbushPosition(agent, site, rule, cover.Position, occupied, budget, out var position, distanceMax)) continue;
                     if (site.Covers.Count < 512 && !site.Covers.Contains(cover)) site.Covers.Add(cover);
                     budget.Source = "geometry";
-                    if (Log.InfoEnabled) Log.Info($"AMBUSH COVER: {agent.Squad} source=geometry category={cover.Category} position={position} kind={site.Kind} radius={distanceMax:F1}m");
                     yield return new CoverPoint(position, cover.Direction, cover.Category, cover.Level);
-                    yield break;
                 }
         if (!ServerConfig.Ambush.RequireCover)
             for (var i = 0; i < 12 && budget.Remaining > 0; i++)
@@ -300,7 +329,7 @@ public partial class WaypointSystem
                 var radius = (rule.DistanceMin + distanceMax) * .5f;
                 var sample = site.Position + new Vector3(Mathf.Cos(angle), 0, Mathf.Sin(angle)) * radius;
                 if (ValidateAmbushPosition(agent, site, rule, sample, occupied, budget, out var position, distanceMax))
-                { budget.Source = "open"; yield return new CoverPoint(position, (site.Position - position).normalized, CoverCategory.None, CoverLevel.Stay); yield break; }
+                { budget.Source = "open"; yield return new CoverPoint(position, (site.Position - position).normalized, CoverCategory.None, CoverLevel.Stay); }
             }
         if (budget.Remaining <= 0) budget.Reject("query budget");
     }
