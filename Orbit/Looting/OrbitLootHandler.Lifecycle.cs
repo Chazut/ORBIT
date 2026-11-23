@@ -10,6 +10,7 @@ public partial class OrbitLootHandler
 {
     private Player _player;
     private readonly Orbit.Navigation.LootAccessGuard _access = new();
+    internal float CorpseLootReachSqr;
     private bool _retired;
 
     internal bool HasLiveOwner => !_retired && LootActorGuard.IsCurrent(_bot, _player);
@@ -55,6 +56,17 @@ public partial class OrbitLootHandler
     {
         ct.ThrowIfCancellationRequested();
         if (!OwnsSession(ct) || !HasLiveOwner) throw new OperationCanceledException(ct);
+        if (CurrentTargetKind == LootKind.Corpse)
+        {
+            if (CurrentTarget == null) throw new LootAccessBlockedException("missing-target", 0f);
+            var feet = _player.PlayerBones.BodyTransform.position;
+            float distanceSqr = (Orbit.Navigation.LootVisibility.BodyPosition(CurrentTarget) - feet).sqrMagnitude;
+            if (!Orbit.Navigation.CorpseApproach.WithinLootReach(distanceSqr, CorpseLootReachSqr))
+                throw new LootAccessBlockedException("corpse-out-of-reach", Mathf.Sqrt(distanceSqr));
+            if (DormantMode && CorpseLootReachSqr > Orbit.Navigation.CorpseApproach.PreferredSqr
+                && !_access.Check(Time.frameCount, false, feet + Vector3.up, CurrentTarget, out var blocked))
+                throw new LootAccessBlockedException(blocked.collider?.name ?? "missing-target", blocked.distance);
+        }
         if (!DormantMode)
         {
             var head = _bot.LookSensor != null ? _bot.LookSensor.HeadPoint : _player.Transform.position + Vector3.up;

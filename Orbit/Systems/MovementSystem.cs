@@ -787,7 +787,9 @@ public partial class MovementSystem
         {
             // Last corner reached: maybe the path doesn't go all the way to the target (navmesh truncation,
             // dynamic geometry). Retry if we're still too far from the actual destination.
-            if ((movement.Path[movement.CurrentCorner] - agent.Player.Position).sqrMagnitude <= TargetEpsSqr)
+            var stopRadiusSqr = agent.Objective?.Location?.Category == WaypointCategory.Corpse
+                && agent.Objective.Status == ObjectiveStatus.Moving ? CornerWalkEpsSqr : TargetEpsSqr;
+            if ((movement.Path[movement.CurrentCorner] - agent.Player.Position).sqrMagnitude <= stopRadiusSqr)
             {
                 if ((movement.Target - movement.Path[movement.CurrentCorner]).sqrMagnitude > TargetEpsSqr)
                 {

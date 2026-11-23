@@ -209,6 +209,7 @@ BunkerTests.Run(Check);
 FailedExitTests.Run(Check);
 RetainedExitRecoveryTests.Run(Check);
 QuestArrivalTests.Run(Check);
+CorpseApproachTests.Run(Check);
 Console.WriteLine($"Extraction: {checks} checks passed; 10000 steady ticks = {allocated} allocated bytes. Real actions/task manager with engine doubles.");
 
 sealed class Scenario
@@ -218,6 +219,7 @@ sealed class Scenario
     public readonly ExfiltrationPoint Car;
     public readonly Waypoint Exit;
     public readonly MovementSystem Movement=new();
+    public readonly WaypointSystem Waypoints=new();
     public readonly GotoObjectiveAction Goto;
     public readonly ExtractAction Extract;
     public readonly ActionManager Manager;
@@ -229,7 +231,7 @@ sealed class Scenario
         UnityEngine.AI.NavMesh.Connected = true;
         Physics.LineBlock = null;
         Car=NewCar(collider);Exit=NewExit(Car,100);
-        Goto=new(Data,Movement,new(),0.15f);Extract=new(Data,0.1f);
+        Goto=new(Data,Movement,Waypoints,0.15f);Extract=new(Data,0.1f);
         Manager=new(Data,new Task<Agent>[]{Goto,Extract});
         Singleton<OrbitManager>.Instance=new() { Removed=Remove };
     }

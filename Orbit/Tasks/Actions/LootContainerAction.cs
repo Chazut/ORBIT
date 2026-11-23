@@ -803,6 +803,8 @@ internal class BotLootState
     private int _inventoryRetries;
     private float _inventoryRetryAt;
     private float? _poseBeforeCorpseLoot;
+    private bool _proneBeforeCorpseLoot;
+    private bool _lootingProne;
 
     public bool IsDone { get; private set; }
     public bool Success { get; private set; }
@@ -820,6 +822,7 @@ internal class BotLootState
         _location = location;
 
         var handler = OrbitLootHandler.ForBot(agent.Bot);
+        handler.CorpseLootReachSqr = agent.Objective.CorpseLootReachSqr;
         _brain = handler;
         agent.LootHandler = handler;
     }
@@ -883,7 +886,6 @@ internal class BotLootState
         // Phase-2 dormant looting: the session runs data-only (no animations, delays or equips) when the
         // agent sleeps. Re-set every session — the same handler serves awake sessions later.
         _brain.DormantMode = _agent.IsDormant;
-        MaintainCorpsePosture();
 
         // Snapshot cumulative looted value so we can tell at the end whether the bot actually pocketed
         // anything (vs. opening the container and skipping everything because items were below the value
@@ -897,9 +899,11 @@ internal class BotLootState
         {
             try
             {
-                _agent.Bot.SetPose(0.25f);
-                _agent.Bot.Steering.LookToPoint(loot.transform.position);
                 if (_agent.Bot.Mover != null) _agent.Bot.Mover.Sprint(false);
+                if (lootKind != LootKind.Corpse) _agent.Bot.SetPose(0.25f);
+                var lookTarget = lootKind == LootKind.Corpse ? loot.TrackableTransform : null;
+                _agent.Bot.Steering.LookToPoint(lookTarget != null ? lookTarget.position : loot.transform.position);
+                MaintainCorpsePosture();
             }
             catch (System.Exception e)
             {
@@ -989,14 +993,25 @@ internal class BotLootState
     private void MaintainCorpsePosture()
     {
         if (_brain.CurrentTargetKind != LootKind.Corpse || _agent.IsDormant || !_agent.IsActive
+            || _agent.Bot?.Memory?.HaveEnemy == true || _agent.Bot?.Memory?.IsUnderFire == true
             || !LootActorGuard.IsCurrent(_agent.Bot, _agent.Player)) return;
         // MovementSystem reapplies its desired pose even when the bot has no path.
         // Setting BotOwner.SetPose alone is overwritten by the next movement tick.
         if (!_poseBeforeCorpseLoot.HasValue)
         {
             _poseBeforeCorpseLoot = _agent.Movement.Pose;
-            Log.Debug($"{_agent} BotLootState: corpse posture=crouched until session ends");
+            _proneBeforeCorpseLoot = _agent.Movement.Prone;
+            var context = _agent.Player.MovementContext;
+            // BotLay.TryLay is a combat decision that can reject a safe spot solely because
+            // there is no enemy. Use the player's clearance test and the native pose transition.
+            if (!context.IsInPronePose && _agent.Bot.Mover != null && context.CanProne)
+                _agent.Bot.Mover.DoProne(true);
+            _lootingProne = context.IsInPronePose;
+            Log.Debug($"{_agent} BotLootState: corpse posture={(_lootingProne ? "prone" : "crouched")} until session ends");
         }
+        else if (_lootingProne && !_agent.Player.MovementContext.IsInPronePose)
+            _lootingProne = false;
+        _agent.Movement.Prone = _lootingProne;
         _agent.Movement.Pose = 0f;
     }
 
@@ -1030,6 +1045,7 @@ internal class BotLootState
             // Restore only our desired pose; combat and the current body owner control
             // actual animation. Do not overwrite a pose assigned by a different task.
             if (_agent.Movement.Pose == 0f) _agent.Movement.Pose = _poseBeforeCorpseLoot.Value;
+            if (_agent.Movement.Prone == _lootingProne) _agent.Movement.Prone = _proneBeforeCorpseLoot;
             _poseBeforeCorpseLoot = null;
         }
         _brain.CurrentTarget = null;

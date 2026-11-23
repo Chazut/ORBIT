@@ -303,9 +303,8 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
         if (!HasLiveOwner || loot == null) return;
         try
         {
-            var target = loot.transform?.position;
-            if (!target.HasValue) return;
-            _bot.Steering?.LookToPoint(target.Value);
+            var target = loot is Corpse ? Orbit.Navigation.LootVisibility.BodyPosition(loot) : loot.transform.position;
+            _bot.Steering?.LookToPoint(target);
         }
         catch (System.Exception e)
         {
@@ -324,7 +323,7 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
             try { _bot.Mover?.Stop(); } catch (System.Exception e) { Log.Warning($"OrbitLootHandler.FreezeBotForLootSession({Nick}): Mover.Stop THREW {e.Message}"); }
             try { if (_bot.Mover != null) _bot.Mover.Pause = true; } catch (System.Exception e) { Log.Warning($"OrbitLootHandler.FreezeBotForLootSession({Nick}): Mover.Pause THREW {e.Message}"); }
             try { _bot.SetPose(0f); } catch (System.Exception e) { Log.Warning($"OrbitLootHandler.FreezeBotForLootSession({Nick}): SetPose THREW {e.Message}"); }
-            Log.Debug($"OrbitLootHandler.FreezeBotForLootSession({Nick}): bot pinned crouched + movement paused + patrol data paused for loot session");
+            Log.Debug($"OrbitLootHandler.FreezeBotForLootSession({Nick}): movement and patrol paused for loot session");
         }
         catch (System.Exception e)
         {
@@ -344,8 +343,9 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
             if (_bot.Memory != null && (_bot.Memory.HaveEnemy || _bot.Memory.IsUnderFire)) return;
             try { Orbit.Patches.LootPatrolResumePatch.Resume(_bot); } catch (System.Exception e) { Log.Warning($"OrbitLootHandler.UnfreezeBotAfterLootSession({Nick}): PatrollingData.Unpause THREW {e.Message}"); }
             try { if (_bot.Mover != null) _bot.Mover.Pause = false; } catch (System.Exception e) { Log.Warning($"OrbitLootHandler.UnfreezeBotAfterLootSession({Nick}): Mover.Pause THREW {e.Message}"); }
-            try { _bot.SetPose(1f); } catch (System.Exception e) { Log.Warning($"OrbitLootHandler.UnfreezeBotAfterLootSession({Nick}): SetPose THREW {e.Message}"); }
-            Log.Debug($"OrbitLootHandler.UnfreezeBotAfterLootSession({Nick}): bot movement resumed + standing + patrol data resumed");
+            // The corpse action restores the pose it owned when this search started.
+            try { if (CurrentTargetKind != LootKind.Corpse) _bot.SetPose(1f); } catch (System.Exception e) { Log.Warning($"OrbitLootHandler.UnfreezeBotAfterLootSession({Nick}): SetPose THREW {e.Message}"); }
+            Log.Debug($"OrbitLootHandler.UnfreezeBotAfterLootSession({Nick}): movement and patrol resumed");
         }
         catch (System.Exception e)
         {

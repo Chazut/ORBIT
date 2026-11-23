@@ -41,6 +41,12 @@ public class Objective
     /// </summary>
     public float DispatchTime;
 
+    internal Vector3? CorpseApproachPosition;
+    internal Vector3? CorpseLastStand;
+    internal int CorpseProbeIndex;
+    internal bool CorpseProbing;
+    internal float CorpseLootReachSqr;
+
     /// <summary>
     /// Time.time when the agent last made meaningful progress inside the loose exfil radius
     /// but outside its trigger. The local fallback can despawn a stuck bot from its current

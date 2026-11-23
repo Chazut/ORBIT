@@ -49,13 +49,6 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
     private const float NavSnapArrivalRadius = 4f;
     private const float NavSnapArrivalRadiusSqr = NavSnapArrivalRadius * NavSnapArrivalRadius;
 
-    // Corpses get a tighter nav-snap cap: the loot session kneels the bot wherever it stands, and
-    // looting a body from 4m away reads as telekinesis. 2.5m = the upper bound of BSG's nav-snap
-    // drift AND roughly "at the body's feet" for a sprawled corpse — close enough that the kneel
-    // looks like a search.
-    private const float CorpseNavSnapArrivalRadius = 2.5f;
-    private const float CorpseNavSnapArrivalRadiusSqr = CorpseNavSnapArrivalRadius * CorpseNavSnapArrivalRadius;
-
     /// <summary>
     /// Grace window after dispatch before any "stopped outside arrival radius" failure can fire. BSG's
     /// BotMover takes a frame or two to begin the new move; if the agent was Stopped (Guard / loot
@@ -168,6 +161,8 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
             }
             else PauseExfilApproach(agent);
 
+            var body = objective.Location.Category == WaypointCategory.Corpse ? objective.Location.Target as Corpse : null;
+            var goalPosition = body != null ? LootVisibility.BodyPosition(body) : objective.Location.Position;
             switch (objective.Status)
             {
                 case ObjectiveStatus.None:
@@ -178,11 +173,16 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                     // never applied to those dispatches — a re-dispatched anchor could otherwise rack up
                     // 3 "stopped outside" fails within a second, blacklisted before BSG even started moving.
                     objective.DispatchTime = Time.time;
-                    var startDistSqr = (objective.Location.Position - agent.Position).sqrMagnitude;
+                    objective.CorpseProbeIndex = 0;
+                    objective.CorpseProbing = false;
+                    objective.CorpseLootReachSqr = 0f;
+                    objective.CorpseLastStand = null;
+                    objective.CorpseApproachPosition = body != null ? goalPosition : null;
+                    var startDistSqr = (goalPosition - agent.Position).sqrMagnitude;
                     var shouldSprint = ShouldSprintToObjective(agent, startDistSqr);
                     var destination = objective.Location.Category == WaypointCategory.Exfil
                         ? objective.Location.ExfilInteriorPosition ?? objective.Location.Position
-                        : objective.Location.Position;
+                        : goalPosition;
                     movementSystem.MoveToByPath(agent, destination, sprint: shouldSprint, styledTravel: true);
                     objective.Status = ObjectiveStatus.Moving;
                     break;
@@ -195,7 +195,13 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                     if (agent.Movement.HasPath && objective.ArrivalPath != agent.Movement.Path)
                         objective.ArrivalPath = agent.Movement.Path;
 
-                    var distanceSqr = (objective.Location.Position - agent.Position).sqrMagnitude;
+                    var distanceSqr = (goalPosition - agent.Position).sqrMagnitude;
+                    if (body != null && objective.CorpseApproachPosition is Vector3 previousBody
+                        && (previousBody - goalPosition).sqrMagnitude > .4f * .4f && distanceSqr > CorpseApproach.PreferredSqr)
+                    {
+                        objective.Status = ObjectiveStatus.None;
+                        break;
+                    }
                     if (objective.Location.Category == WaypointCategory.Exfil && objective.Location.ExfilInteriorPosition is Vector3 insideTarget)
                         distanceSqr = Mathf.Min(distanceSqr, (insideTarget - agent.Position).sqrMagnitude);
 
@@ -232,8 +238,12 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                             TrackArrivalFailure(agent, objective.Location);
                             break;
                         }
-                        AbandonStalledObjective(agent);
-                        break;
+                        if (body == null || distanceSqr > CorpseApproach.SearchRadiusSqr)
+                        {
+                            AbandonStalledObjective(agent);
+                            break;
+                        }
+                        objective.CorpseProbing = true;
                     }
 
                     // Stop sprinting once inside the 50m "scan" radius so the bot has time to spot enemies on
@@ -275,7 +285,28 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                     var inRadius = false;
                     var arrivalRefusal = "distance";
                     RaycastHit arrivalHit = default;
-                    if (distanceSqr <= objective.Location.RadiusSqr)
+                    bool corpseFallback = false;
+                    if (body != null && distanceSqr > CorpseApproach.PreferredSqr && distanceSqr <= CorpseApproach.SearchRadiusSqr
+                        && (objective.CorpseProbing || agent.Movement.Status == MovementStatus.Failed
+                            || agent.Movement.Status == MovementStatus.Stopped && Time.time - objective.DispatchTime > DispatchGraceSeconds))
+                    {
+                        if (!agent.IsActive || MovementSystem.IsTravelPaused(agent)) break;
+                        objective.CorpseProbing = true;
+                        if (objective.CorpseProbeIndex < CorpseApproach.Samples)
+                        {
+                            if (CorpseApproach.TryStand(objective.CorpseProbeIndex++, agent.Position, goalPosition,
+                                    body, objective.CorpseLastStand, out var stand))
+                            {
+                                objective.CorpseLastStand = stand;
+                                movementSystem.MoveToByPath(agent, stand, sprint: false);
+                                objective.CorpseProbing = false;
+                                objective.DispatchTime = Time.time;
+                            }
+                            break;
+                        }
+                        corpseFallback = distanceSqr <= CorpseApproach.LimitSqr;
+                    }
+                    if (corpseFallback || distanceSqr <= (body != null ? CorpseApproach.PreferredSqr : objective.Location.RadiusSqr))
                     {
                         // Quest arrival uses simulated feet for both awake and sleeping agents. Loot keeps
                         // its existing head-based gate, skipped while the physical body is inactive.
@@ -285,7 +316,7 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                             if (inRadius) ClearLoSBlockedTracking(agent);
                             else if (TrackLoSBlocked(agent, objective.Location, arrivalRefusal)) continue;
                         }
-                        else if ((RequiresArrivalLoSCheck(objective.Location.Category) || agent.Squad.CorpseEscort.IsEscortWaypoint(objective.Location)) && !agent.IsDormant)
+                        else if (corpseFallback || (RequiresArrivalLoSCheck(objective.Location.Category) || agent.Squad.CorpseEscort.IsEscortWaypoint(objective.Location)) && !agent.IsDormant)
                         {
                             if (HasArrivalLineOfSight(agent, objective.Location, out arrivalHit))
                             {
@@ -311,10 +342,8 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                             ClearLoSBlockedTracking(agent);
                         }
                     }
-                    else if (agent.Movement.Status == MovementStatus.Stopped
-                             && distanceSqr <= (agent.Squad.CorpseEscort.IsEscortWaypoint(objective.Location) ? 4f : objective.Location.Category == WaypointCategory.Corpse
-                                 ? CorpseNavSnapArrivalRadiusSqr
-                                 : NavSnapArrivalRadiusSqr)
+                    else if (objective.Location.Category != WaypointCategory.Corpse && agent.Movement.Status == MovementStatus.Stopped
+                             && distanceSqr <= (agent.Squad.CorpseEscort.IsEscortWaypoint(objective.Location) ? 4f : NavSnapArrivalRadiusSqr)
                              && (RequiresArrivalLoSCheck(objective.Location.Category) || agent.Squad.CorpseEscort.IsEscortWaypoint(objective.Location)))
                     {
                         var arrivalClear = objective.Location.Category == WaypointCategory.Quest
@@ -351,6 +380,13 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                         {
                             if (waypointSystem.TryClaim(objective.Location.Id, agent.Id))
                             {
+                                if (body != null)
+                                {
+                                    var distance = Mathf.Sqrt(distanceSqr);
+                                    var reach = Mathf.Min(CorpseApproach.Limit, distance + .05f);
+                                    objective.CorpseLootReachSqr = corpseFallback ? reach * reach : CorpseApproach.PreferredSqr;
+                                    Log.Debug($"CORPSE LOOT REACH: {agent} point={objective.Location.Id} fallback={corpseFallback} distance={distance:F2}m");
+                                }
                                 if (objective.Location.IsAirdrop && !agent.IsDormant)
                                     LogAirdropArrival(agent, objective.Location, arrivalHit, true);
                                 else if (!agent.IsDormant && arrivalHit.collider != null
@@ -451,7 +487,8 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                         break;
                     }
 
-                    if (agent.Movement.Status == MovementStatus.Failed)
+                    if (agent.Movement.Status == MovementStatus.Failed
+                        || objective.CorpseProbing && objective.CorpseProbeIndex >= CorpseApproach.Samples)
                     {
                         // MovementSystem's HardStuck escalation ran out (recalc → teleport → giving up) and
                         // reset path to Failed. The bot is jammed against geometry.
@@ -716,7 +753,7 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
         hit = default;
         Vector3 head;
         var lookSensor = agent.Bot?.LookSensor;
-        head = lookSensor != null ? lookSensor.HeadPoint : agent.Position + new Vector3(0f, 1f, 0f);
+        head = lookSensor != null && !agent.IsDormant ? lookSensor.HeadPoint : agent.Position + new Vector3(0f, 1f, 0f);
         if (point.IsAirdrop && point.Category == WaypointCategory.ContainerLoot)
             return AirdropVisibility.Check(head, point.Target as LootableContainer, out hit);
         if (point.Target is InteractableObject loot)

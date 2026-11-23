@@ -14,8 +14,13 @@ internal static class LootVisibility
         if (target is LootableContainer container && container.Collider != null)
             return container.Collider.bounds.center;
         // A corpse's root remains at the death position while its pelvis can move with the ragdoll.
+        return BodyPosition(target) + Vector3.up * .1f;
+    }
+
+    internal static Vector3 BodyPosition(InteractableObject target)
+    {
         var track = target.TrackableTransform;
-        return (track != null ? track.position : target.transform.position) + Vector3.up * .1f;
+        return track != null ? track.position : target.transform.position;
     }
 
     internal static bool Check(Vector3 head, InteractableObject target, out RaycastHit hit)

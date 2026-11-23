@@ -91,6 +91,15 @@ namespace UnityEngine
     }
 }
 namespace UnityEngine.AI {
+#if !EXTRACTION_HARNESS
+    public enum NavMeshPathStatus { PathComplete, PathPartial }
+    public class NavMeshPath { public NavMeshPathStatus status; }
+    public static partial class NavMesh {
+        public static bool Connected = true;
+        public static bool CalculatePath(Vector3 a, Vector3 b, int areas, NavMeshPath path)
+        { path.status = Connected ? NavMeshPathStatus.PathComplete : NavMeshPathStatus.PathPartial; return true; }
+    }
+#endif
     public class NavMeshObstacle { public bool carving,enabled; public Vector3 center,size; }
     public struct NavMeshHit { public Vector3 position; }
     public static partial class NavMesh {
@@ -121,7 +130,7 @@ public static class LocationScene { public static T[] GetAllObjects<T>() => Arra
 namespace EFT.Ballistics { public static class BallisticsCalculatorConstants { public const int HitMask=1; } }
 namespace EFT.Interactive
 {
-    public class InteractableObject : MonoBehaviour { public Transform TrackableTransform => transform; }
+    public class InteractableObject : MonoBehaviour { public Transform Pelvis; public Transform TrackableTransform => Pelvis ?? transform; }
     public class LootableContainer : InteractableObject { public Collider Collider; }
     public class Corpse : InteractableObject { }
     public class LootItem : InteractableObject { }

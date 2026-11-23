@@ -55,8 +55,10 @@ public partial class WaypointSystem
             || squad?.Rush?.Owns(agent) == true || squad?.Operation?.Owns(agent) == true
             || squad?.MainApproach.Owns(agent) == true))
         {
-            var floor = FloorCatalog.For(_zoneKey)?.Resolve(target.Position.x, target.Position.y, target.Position.z);
-            return floor == null || MatchesZoneFloorAtTarget(floor, target.Position, position);
+            var anchor = target.Category == WaypointCategory.Corpse && target.Target is EFT.Interactive.Corpse body && body != null
+                ? LootVisibility.BodyPosition(body) : target.Position;
+            var floor = FloorCatalog.For(_zoneKey)?.Resolve(anchor.x, anchor.y, anchor.z);
+            return floor == null || MatchesZoneFloorAtTarget(floor, anchor, position);
         }
         return HasReachedZoneFloor(squad, target, position);
     }

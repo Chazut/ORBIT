@@ -63,7 +63,7 @@ public class CorpseRegistrationPatch : ModulePatch
                 WaypointCategory.Corpse,
                 __result.name,
                 pos,
-                radiusSqr: 3f * 3f, // tight enough to require same-room, loose enough to absorb BSG's 2-3m stopping inertia
+                radiusSqr: CorpseApproach.PreferredSqr,
                 doors: new List<Door>(),
                 coverPoints: new List<CoverPoint>(),
                 target: __result
