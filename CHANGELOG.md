@@ -11,7 +11,8 @@
 
 ## Fixes
 
-- **Airdrops.** One bot loots the crate at a time. Others can take their turn once the first bot finishes or gives it up.
+- **Airdrops.** Bots can now loot a crate even when its outer shell gets in the way. One bot loots at a time, and the next can take over when it leaves.
+- **Woods bunker extraction.** Bots using ZB-014 need the exit to be active and the key door open. They must enter the extraction zone before they can leave the raid.
 - **Grenade avoidance.** Bots repeatedly interrupted by the same danger can take a detour and continue toward their objective.
 - **Player belts.** Bots looting your body leave your equipped Pack 'n' Strap belt and everything inside it alone.
 

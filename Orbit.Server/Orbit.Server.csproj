@@ -42,7 +42,7 @@
     <ModDeployDir>$(SPT_DIR)\user\mods\ORBIT</ModDeployDir>
   </PropertyGroup>
 
-  <Target Name="DeployMod" AfterTargets="Build" Condition="Exists('$(ModDeployDir)')">
+  <Target Name="DeployMod" AfterTargets="Build" Condition="'$(DeployOnBuild)' != 'false' and Exists('$(ModDeployDir)')">
     <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(ModDeployDir)" SkipUnchangedFiles="true" />
     <Message Importance="high" Text="[Orbit.Server] Deployed DLL to $(ModDeployDir)" />
   </Target>
