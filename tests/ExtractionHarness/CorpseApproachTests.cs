@@ -23,6 +23,16 @@ internal static class CorpseApproachTests
 
     internal static void Run(Action<bool,string> check)
     {
+        foreach (bool alreadyProne in new[] { false, true })
+        foreach (bool clearance in new[] { false, true })
+        {
+            check(!CorpseApproach.PreferProne(false, false, alreadyProne, clearance),
+                "ordinary scavs, bosses and guards crouch even when arriving prone");
+            check(CorpseApproach.PreferProne(true, false, alreadyProne, clearance) == (alreadyProne || clearance),
+                "PMC keeps prone or lies down when there is clearance");
+            check(CorpseApproach.PreferProne(false, true, alreadyProne, clearance) == (alreadyProne || clearance),
+                "simulated player scav follows the same posture rule as a PMC");
+        }
         foreach (bool ghost in new[] { false, true })
         {
             foreach (float distance in new[] { .8f, 1f, 2.75f, 3f, 3.01f })

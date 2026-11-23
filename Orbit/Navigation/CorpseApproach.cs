@@ -19,6 +19,9 @@ internal static class CorpseApproach
         new(.707f,0,.707f), new(-.707f,0,.707f), new(.707f,0,-.707f), new(-.707f,0,-.707f)
     };
 
+    internal static bool PreferProne(bool pmc, bool playerScav, bool alreadyProne, bool clearance)
+        => (pmc || playerScav) && (alreadyProne || clearance);
+
     internal static int Samples => 1 + 2 * directions.Length;
     private static NavMeshPath reachPath;
 

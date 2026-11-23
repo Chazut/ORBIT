@@ -1004,9 +1004,16 @@ internal class BotLootState
             var context = _agent.Player.MovementContext;
             // BotLay.TryLay is a combat decision that can reject a safe spot solely because
             // there is no enemy. Use the player's clearance test and the native pose transition.
-            if (!context.IsInPronePose && _agent.Bot.Mover != null && context.CanProne)
-                _agent.Bot.Mover.DoProne(true);
-            _lootingProne = context.IsInPronePose;
+            var profile = _agent.Bot.Profile;
+            var role = profile?.Info?.Settings?.Role;
+            bool pmc = role?.IsPMC() == true;
+            bool playerScav = role == EFT.WildSpawnType.assault && profile.WillBeAPlayerScav();
+            bool alreadyProne = context.IsInPronePose;
+            bool preferProne = CorpseApproach.PreferProne(pmc, playerScav, alreadyProne,
+                !alreadyProne && (pmc || playerScav) && context.CanProne);
+            if (alreadyProne != preferProne)
+                _agent.Bot.Mover?.DoProne(preferProne);
+            _lootingProne = preferProne && context.IsInPronePose;
             Log.Debug($"{_agent} BotLootState: corpse posture={(_lootingProne ? "prone" : "crouched")} until session ends");
         }
         else if (_lootingProne && !_agent.Player.MovementContext.IsInPronePose)
