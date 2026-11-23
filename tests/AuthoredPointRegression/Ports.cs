@@ -1,10 +1,15 @@
 namespace UnityEngine
 {
-    internal readonly record struct Vector3(float x, float y, float z)
+    internal record struct Vector3(float x, float y, float z)
     {
         internal static Vector3 down => new(0, -1, 0);
         internal static Vector3 up => new(0, 1, 0);
         internal float sqrMagnitude => x * x + y * y + z * z;
+        internal static Vector3 zero => default;
+        internal float magnitude => MathF.Sqrt(sqrMagnitude);
+        internal Vector3 normalized => magnitude > 0 ? this * (1f / magnitude) : zero;
+        internal static Vector3 MoveTowards(Vector3 from, Vector3 to, float length)
+            => Distance(from,to) <= length ? to : from + (to-from).normalized * length;
         public static Vector3 operator +(Vector3 a, Vector3 b) => new(a.x+b.x, a.y+b.y, a.z+b.z);
         public static Vector3 operator -(Vector3 a, Vector3 b) => new(a.x-b.x, a.y-b.y, a.z-b.z);
         public static Vector3 operator *(Vector3 a, float f) => new(a.x*f, a.y*f, a.z*f);
@@ -15,6 +20,11 @@ namespace UnityEngine
         internal const float PI = MathF.PI;
         internal static float Abs(float a) => MathF.Abs(a);
         internal static float Min(float a,float b) => MathF.Min(a,b);
+        internal static int Max(int a,int b) => Math.Max(a,b);
+        internal static float Max(float a,float b) => MathF.Max(a,b);
+        internal static int Clamp(int value,int min,int max) => Math.Clamp(value,min,max);
+        internal static int CeilToInt(float value) => (int)MathF.Ceiling(value);
+        internal static float Sqrt(float value) => MathF.Sqrt(value);
         internal static float Cos(float a) => MathF.Cos(a);
         internal static float Sin(float a) => MathF.Sin(a);
     }
@@ -33,7 +43,7 @@ namespace UnityEngine
 }
 namespace UnityEngine.AI
 {
-    internal enum NavMeshPathStatus { PathComplete, PathPartial }
+    internal enum NavMeshPathStatus { PathComplete, PathPartial, PathInvalid }
     internal class NavMeshPath { internal Vector3[] corners; internal NavMeshPathStatus status; }
     internal record struct NavMeshHit(Vector3 position);
     internal static class NavMesh

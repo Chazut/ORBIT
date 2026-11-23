@@ -29,6 +29,9 @@ internal sealed class AuthoredPointSearch
     internal int BlockedSpace { get; private set; }
     internal int IncompletePath { get; private set; }
     internal int ShortPath { get; private set; }
+    // A walkable spot on the requested floor can be disconnected from a distant origin.
+    // It is evidence for trying an approach, never a corrected destination by itself.
+    internal bool HasDisconnectedSurface => Outcome == "no-reachable-surface" && IncompletePath > 0;
 
     internal AuthoredPointSearch(Vector3 seed, float radius, Func<Vector3, bool> scope)
     { _seed = seed; _radius = Mathf.Min(radius, 6f); _scope = scope; }

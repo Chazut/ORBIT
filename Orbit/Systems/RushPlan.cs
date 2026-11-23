@@ -38,6 +38,7 @@ internal sealed partial class RushPlan : IObjectiveWork
     private readonly OperationRouteSearch _route = new();
     private AuthoredPointSearch _pointRepair;
     private bool _repairedApproach, _repairedInterior;
+    private bool _stageCustomApproach;
     private readonly RecordedRouteSearch _recorded = new();
     private bool _searchingRecorded;
     private readonly RushRouteEstimate _ranker = new();
@@ -206,6 +207,7 @@ internal sealed partial class RushPlan : IObjectiveWork
             if (door != null && !_inside && _doorApproach) target = door.GetInteractionParameters(_actor.Position).InteractionPosition;
             // Marked rooms, boss areas and Other points on another floor may need distant stairs.
             var final = false;
+            var staging = _stageCustomApproach && OperationRouteSearch.CanStageFrom(_actor.Position, target);
             if (_route.InvalidDestination)
             {
                 if (!(_inside ? _repairedInterior : _repairedApproach) && !_recorded.Active)
@@ -221,7 +223,8 @@ internal sealed partial class RushPlan : IObjectiveWork
                 destinationScope: Kind == "Custom" ? point => waypoints.CustomRushInZone(site, point)
                     : _inside && _room != null ? _room.Contains
                     : !string.IsNullOrEmpty(site.FloorId) && !_doorApproach ? point => waypoints.RepairFloor(site, point) : null,
-                destinationRadius: Kind == "Custom" && (site.CustomMode is "Camp" or "CampThenLoot") ? site.Radius : 0);
+                destinationRadius: Kind == "Custom" && (site.CustomMode is "Camp" or "CampThenLoot") ? site.Radius : 0,
+                stageDisconnectedTarget: staging);
             if (_route.InvalidDestination)
             {
                 // The last ordinary probes consumed this frame's route slot.
@@ -247,7 +250,8 @@ internal sealed partial class RushPlan : IObjectiveWork
                 return true;
             }
             _partial = !final;
-            if (Kind == "Custom") ReportCustomApproach(squad, site, final ? "final" : "leg", "route selected");
+            if (Kind == "Custom") ReportCustomApproach(squad, site, final ? "final" : "leg",
+                staging && !final ? "approaching disconnected destination" : "route selected");
             if (_partial) Log.Info($"RUSH APPROACH: {squad} kind={Kind} site={site.Name} leg={_anchor} target={target} remaining={Vector3.Distance(_anchor, target):F1}m");
             // Guide the mover to a precise spot. Door use is checked from its actual feet.
             var arrivalRadius = door != null && !_inside && _doorApproach && !_partial ? DoorArrivalRadius : 1f;
@@ -527,12 +531,22 @@ internal sealed partial class RushPlan : IObjectiveWork
             waypoints.ContinueOperationWork(this);
             return true;
         }
-        var outcome = _pointRepair.Outcome;
+        var repair = _pointRepair;
         _pointRepair = null;
         if (!corrected.HasValue)
         {
+            if (Kind == "Custom" && repair.HasDisconnectedSurface && OperationRouteSearch.CanStageFrom(_actor.Position, seed))
+            {
+                // Let the route search verify intermediate legs. Near the site it must
+                // validate the authored floor again before a camp or loot order can start.
+                _stageCustomApproach = true;
+                _route.Reset();
+                _nextWork = Time.time;
+                waypoints.ContinueOperationWork(this);
+                return true;
+            }
             ReportInvalidDestination(squad, site, authored);
-            return Skip(squad, waypoints, outcome switch
+            return Skip(squad, waypoints, repair.Outcome switch
             {
                 "ambiguous-floors" => "ambiguous floors near configured point",
                 "no-reachable-surface" => "no reachable correction for configured point",
@@ -540,6 +554,7 @@ internal sealed partial class RushPlan : IObjectiveWork
             });
         }
         var copy = site.Copy();
+        _stageCustomApproach = false;
         var position = corrected.Value;
         if (_inside)
         {
@@ -596,7 +611,7 @@ internal sealed partial class RushPlan : IObjectiveWork
     private bool Advance(Squad squad, WaypointSystem waypoints)
     {
         SetStatus(squad, _states[_current]); Release(squad, waypoints); _processed++;
-        _pointRepair = null; _repairedApproach = _repairedInterior = false;
+        _pointRepair = null; _repairedApproach = _repairedInterior = _stageCustomApproach = false;
         _current = -1; _retries = _attempts = 0; _lastDoorRequest = null; ResetRanking();
         _customArrived = _customCampDone = false; _customCampHeld = _customLootHeld = 0;
         _recorded.Reset(); _searchingRecorded = false;

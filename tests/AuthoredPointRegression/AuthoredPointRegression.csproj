@@ -7,6 +7,12 @@
   <ItemGroup>
     <None Update="*.csv" CopyToOutputDirectory="PreserveNewest" />
     <Compile Include="../../Orbit/Navigation/AuthoredPointSearch.cs" />
+    <Compile Include="../../Orbit/Navigation/OperationRouteSearch.cs" />
+    <Compile Include="../../Orbit/Navigation/OperationRoutePolicy.cs" />
+    <Compile Include="../../Shared/CustomsBackport.cs" />
+    <Compile Include="../../Shared/FloorCatalog.cs" />
+    <Compile Include="../../Shared/NativeFloorResolver.cs" />
+    <Compile Include="../../Shared/ZoneScope.cs" />
     <Compile Include="../../Orbit/Systems/WaypointPointRepair.cs" />
   </ItemGroup>
 </Project>

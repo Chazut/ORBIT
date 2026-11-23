@@ -36,6 +36,10 @@ internal sealed class OperationRouteSearch
     private const int LocalCandidates = 20;
     private const int DirectCandidates = LocalCandidates + 3;
     private const int ExpandedCandidates = 42;
+    private const float MinStagingDistance = 20f;
+
+    internal static bool CanStageFrom(Vector3 origin, Vector3 target)
+        => HorizontalDistance(origin, target) >= MinStagingDistance;
 
     internal string Diagnostics => $"complete={_completePaths} invalidQueries={_invalidQueries} approachChecks={_checks} approachRejected={_rejected}"
         + $" searchTarget={_target} lastRejected={_lastRejected} lastRejection={_lastRejection}"
@@ -59,7 +63,7 @@ internal sealed class OperationRouteSearch
         int expansion = 0, IReadOnlyList<Vector3> avoided = null, bool floorAware = false, float finalHeightTolerance = 2.5f,
         Func<Vector3, bool> allowedPoint = null, Func<Vector3, bool> finalPoint = null, bool localAccess = false,
         bool groundedTarget = false, bool requireLocalDestination = false,
-        Func<Vector3, bool> destinationScope = null, float destinationRadius = 0)
+        Func<Vector3, bool> destinationScope = null, float destinationRadius = 0, bool stageDisconnectedTarget = false)
     {
         point = default;
         _target = target;
@@ -82,7 +86,7 @@ internal sealed class OperationRouteSearch
         var work = 0;
         while (_candidate < totalCandidates && work < 3)
         {
-            if (MissingDestination(requireLocalDestination)) return false;
+            if (MissingDestination(requireLocalDestination && !stageDisconnectedTarget)) return false;
             work++;
             var index = _candidate++;
             var local = index < LocalCandidates;
@@ -116,7 +120,7 @@ internal sealed class OperationRouteSearch
             {
                 // Walk connected ground toward a distant room when its interior cannot yet be resolved.
                 var distance = Vector3.Distance(origin, target);
-                if (distance < 20f) continue;
+                if (distance < MinStagingDistance) continue;
                 var length = index == LocalCandidates ? 80f : index == LocalCandidates + 1 ? 40f : 20f;
                 sample = Vector3.MoveTowards(origin, target, Mathf.Min(length, distance * .65f));
                 sample.y = origin.y;
@@ -212,7 +216,7 @@ internal sealed class OperationRouteSearch
             if (Visited(end, avoided, separation)) { _visited++; continue; }
             RememberApproach(end, score, _path.status == NavMeshPathStatus.PathComplete);
         }
-        if (MissingDestination(requireLocalDestination)) return false;
+        if (MissingDestination(requireLocalDestination && !stageDisconnectedTarget)) return false;
         if (_candidate < totalCandidates) { Pending = true; return false; }
         // Verify in score order, continuing with another candidate after an invalid endpoint.
         // These calls consume the same slice as enumeration, including after a deferred resume.
@@ -227,13 +231,21 @@ internal sealed class OperationRouteSearch
             // The actor or its approach history may have advanced while this search was queued.
             if (Vector3.Distance(origin, approach) < separation) { RejectApproach(approach, "too-close"); continue; }
             if (Visited(approach, avoided, separation)) { RejectApproach(approach, "visited"); continue; }
+            if (stageDisconnectedTarget && LocalDestinations == 0
+                && HorizontalDistance(approach, target) > HorizontalDistance(origin, target) - 3f)
+            { RejectApproach(approach, "no-progress"); continue; }
             _checks++;
             var calculated = NavMesh.CalculatePath(origin, approach, NavMesh.AllAreas, _path);
             if (calculated && _path.status == NavMeshPathStatus.PathComplete)
             {
-                if (!OperationRoutePolicy.AllowsPath(_path.corners, allowedPoint))
+                var corners = _path.corners;
+                if (stageDisconnectedTarget && (corners == null || corners.Length < 2
+                    || (corners[0] - origin).sqrMagnitude > 2.25f
+                    || (corners[corners.Length - 1] - approach).sqrMagnitude > 1f))
+                { RejectApproach(approach, "short-path"); continue; }
+                if (!OperationRoutePolicy.AllowsPath(corners, allowedPoint))
                 { _outsideScope++; RejectApproach(approach, "outside-scope"); continue; }
-                RouteCorners = _path.corners;
+                RouteCorners = corners;
                 point = approach; return true;
             }
             InvalidPaths++;

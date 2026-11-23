@@ -48,15 +48,20 @@ AuthoredPointSearch Resolve(Vector3 position, Func<Vector3,bool> scope=null)
 Floors(-4,4);
 Check(Resolve(seed).Outcome=="ambiguous-floors","two equally plausible walkable storeys");
 Check(Resolve(seed,p=>p.y>0).Result.y==4,"explicit upstairs selection");
+Check(!Resolve(seed).HasDisconnectedSurface,"ambiguous floors must not authorize staging");
 NavMesh.Path=(a,b,path)=>b.y>0 && Complete(a,b,path);
 Check(Resolve(seed).Result.y==4,"disconnected floor cannot win");
 NavMesh.Path=(a,b,path)=>{ Complete(a,b,path); path.status=NavMeshPathStatus.PathPartial; return true; };
-Check(Resolve(seed).Outcome=="no-reachable-surface","partial route is not a correction");
+var partial = Resolve(seed);
+Check(partial.Outcome=="no-reachable-surface" && partial.HasDisconnectedSurface,
+    "partial route allows an approach but is not a correction");
 NavMesh.Path=(a,b,path)=>{ Complete(a,b,path); path.corners=[a,new(100,0,100)]; return true; };
 Check(Resolve(seed).Outcome=="no-reachable-surface","path ends too far from the sample");
 NavMesh.Path=Complete;
 Physics.Blocked=_=>true;
-Check(Resolve(seed).Outcome=="no-reachable-surface","reject obstructed standing positions");
+var blocked = Resolve(seed);
+Check(blocked.Outcome=="no-reachable-surface" && !blocked.HasDisconnectedSurface,
+    "obstructed standing positions cannot authorize a staged approach");
 Physics.Blocked=_=>false;
 Floors(50);
 Check(Resolve(seed).Outcome=="no-compatible-surface","unbounded height cannot select another building");
@@ -114,3 +119,4 @@ foreach (var (name,position,low,high) in new[] {
     Console.WriteLine($"{name} {position} -> {found.Result}, {found.Samples} samples, {found.Paths} path checks");
 }
 Console.WriteLine($"PASS {checks} authored point repair checks");
+LibraryCampTests.Run();
