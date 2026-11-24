@@ -53,6 +53,7 @@ internal sealed partial class RushPlan : IObjectiveWork
     private const float DoorArrivalRadius = .25f;
     private readonly HashSet<Agent> _roomLooters = new();
     private float _roomIdle;
+    private float _bestDoorGap = float.MaxValue;
     private float _roomEntryIdle, _roomEntryBestDistance = float.MaxValue;
     private const float RoomEntryStallSeconds = 45f;
     private int _current = -1, _candidate, _best = -1, _visited, _processed, _skipped, _retries, _attempts;
@@ -160,6 +161,22 @@ internal sealed partial class RushPlan : IObjectiveWork
         var site = _sites[_current];
         var door = Kind == "Marked" ? waypoints.RushDoor(site.DoorId) : null;
         if (Kind == "Marked" && door == null) return Skip(squad, waypoints, "door removed");
+        if (door != null && !_inside && !_doorApproach &&
+            OperationRouteSearch.NearInteraction(_actor.Position, door.transform.position))
+        {
+            // The authored point may sit across a wall. The native standing position
+            // and the existing reach check decide which side can actually use the door.
+            Release(squad, waypoints);
+            _route.Reset();
+            _pointRepair = null;
+            _recorded.ResetSearch();
+            _searchingRecorded = false;
+            _approachHistory.Clear();
+            _doorApproach = true;
+            _retries = 0;
+            _bestDoorGap = Vector3.Distance(_actor.Position, door.transform.position);
+            Log.Info($"RUSH DOOR APPROACH: {squad} site={site.Name} door={door.Id} feet={_actor.Position} authored={Position(site)} gap={_bestDoorGap:F1}m");
+        }
         // A native door transition can outlive the movement order (especially on Ghost wake).
         if (door != null && _doorApproach && !_inside &&
             (door.DoorState == EDoorState.Open || Status is "unlocking door" or "opening door"))
@@ -267,10 +284,28 @@ internal sealed partial class RushPlan : IObjectiveWork
         }
         // A partial leg can end beside its anchor even when the mover reports failure.
         // Count actual arrival before the status, then recalculate from the closer position.
-        if (_partial && (_actor.Position - _anchor).sqrMagnitude <= 9f)
+        // A local door leg may itself be only two metres long. Let its mover
+        // approach the assigned one-metre radius before evaluating progress.
+        bool localDoorLeg = door != null && _doorApproach && !_inside && !_recorded.Active;
+        bool moverEnded = _actor.Objective.Status is ObjectiveStatus.Finished or ObjectiveStatus.Failed;
+        if (_partial && (_actor.Position - _anchor).sqrMagnitude <= (localDoorLeg && !moverEnded ? 1f : 9f))
         {
             RememberApproach(_actor.Position);
-            Release(squad, waypoints); _route.Reset(); _retries = 0; return true;
+            Release(squad, waypoints);
+            _route.Reset();
+            if (localDoorLeg)
+            {
+                float gap = Vector3.Distance(_actor.Position, door.transform.position);
+                if (OperationRouteSearch.AdvancedTowardDoor(gap, ref _bestDoorGap))
+                    _retries = 0;
+                else if (++_retries >= 3)
+                {
+                    Log.Info($"RUSH DOOR STALL: {squad} site={site.Name} door={door.Id} best={_bestDoorGap:F1}m current={gap:F1}m");
+                    return Skip(squad, waypoints, "unreachable");
+                }
+            }
+            else _retries = 0;
+            return true;
         }
         // A stopped mover may still be on the correct side and within reach.
         if (door != null && !_inside && _doorApproach && !_partial)
@@ -280,7 +315,7 @@ internal sealed partial class RushPlan : IObjectiveWork
                 return InteractDoor(squad, waypoints, site, door);
             return true;
         }
-        if (_actor.Objective.Status == ObjectiveStatus.Failed)
+        if (_actor.Objective.Status == ObjectiveStatus.Failed || _partial && localDoorLeg && moverEnded)
         {
             RememberApproach(_anchor);
             Release(squad, waypoints); _route.Reset();
@@ -304,6 +339,7 @@ internal sealed partial class RushPlan : IObjectiveWork
         }
         if (door != null && !_inside && !_doorApproach)
         {
+            _bestDoorGap = Vector3.Distance(_actor.Position, door.transform.position);
             _doorApproach = true; Release(squad, waypoints); _route.Reset(); _approachHistory.Clear(); _retries = 0; return true;
         }
         if (Kind == "Marked") { _held = 0; SetStatus(squad, "looting"); return true; }
@@ -612,6 +648,7 @@ internal sealed partial class RushPlan : IObjectiveWork
     {
         SetStatus(squad, _states[_current]); Release(squad, waypoints); _processed++;
         _pointRepair = null; _repairedApproach = _repairedInterior = _stageCustomApproach = false;
+        _bestDoorGap = float.MaxValue;
         _current = -1; _retries = _attempts = 0; _lastDoorRequest = null; ResetRanking();
         _customArrived = _customCampDone = false; _customCampHeld = _customLootHeld = 0;
         _recorded.Reset(); _searchingRecorded = false;
@@ -624,6 +661,7 @@ internal sealed partial class RushPlan : IObjectiveWork
     private bool RetryRecorded(Squad squad, WaypointSystem waypoints)
     {
         Release(squad, waypoints); _route.Reset(); _recorded.ResetSearch(); _approachHistory.Clear();
+        _bestDoorGap = float.MaxValue;
         _retries = _attempts = 0; _lastDoorRequest = null; _elapsed = _roomEntryIdle = 0; _searchingRecorded = false;
         _nextWork = Time.time + 3f; return true;
     }

@@ -120,3 +120,30 @@ foreach (var (name,position,low,high) in new[] {
 }
 Console.WriteLine($"PASS {checks} authored point repair checks");
 LibraryCampTests.Run();
+
+// Model a nearby marked door whose authored approach is obstructed.
+var markedOrigin = new Vector3(4.47f,0,0);
+Check(OperationRouteSearch.NearInteraction(markedOrigin,seed), "use the physical door locally");
+Check(!OperationRouteSearch.NearInteraction(new(0,3,0),seed), "preserve approach on another floor");
+Check(!OperationRouteSearch.NearInteraction(new(20,0,0),seed), "preserve long range approach");
+float bestGap = 4.47f;
+foreach (var lateralGap in new[]{4.5f,4.4f,5f})
+    Check(!OperationRouteSearch.AdvancedTowardDoor(lateralGap,ref bestGap), "lateral arrival cannot reset retries");
+Check(OperationRouteSearch.AdvancedTowardDoor(3.6f, ref bestGap) && bestGap == 3.6f, "real progress earns new retries");
+Floors(0);
+NavMesh.Path = Complete;
+foreach (bool accessible in new[]{true,false})
+{
+    var route = new OperationRouteSearch();
+    bool found, final;
+    Vector3 end;
+    int slices = 0;
+    do
+    {
+        Check(++slices < 100, "bounded handle search");
+        found = route.Find(markedOrigin, seed, out end, out final, localAccess:true,
+            finalPoint: p => accessible && Vector3.Distance(p, seed) < 1f);
+    } while (route.Pending);
+    Check((found && final) == accessible, "door interaction requires a reachable usable endpoint");
+}
+Console.WriteLine("PASS marked door approach, progress and interaction checks");

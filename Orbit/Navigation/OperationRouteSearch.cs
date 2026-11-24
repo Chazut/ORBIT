@@ -38,6 +38,17 @@ internal sealed class OperationRouteSearch
     private const int ExpandedCandidates = 42;
     private const float MinStagingDistance = 20f;
 
+    internal static bool NearInteraction(Vector3 origin, Vector3 target)
+        => HorizontalDistance(origin, target) <= 15f
+            && Mathf.Abs(origin.y - target.y) <= 2.5f;
+
+    internal static bool AdvancedTowardDoor(float gap, ref float best)
+    {
+        if (gap + .5f >= best) return false;
+        best = gap;
+        return true;
+    }
+
     internal static bool CanStageFrom(Vector3 origin, Vector3 target)
         => HorizontalDistance(origin, target) >= MinStagingDistance;
 
@@ -78,8 +89,7 @@ internal sealed class OperationRouteSearch
         var expandedCandidates = floorAware ? 128 : ExpandedCandidates;
         // Once beside a switch, search the entrance and corners of its small enclosure.
         // Complete final paths may still take any necessary detour around the building.
-        var nearbyAccess = localAccess && HorizontalDistance(origin, target) <= 15f
-            && Mathf.Abs(origin.y - target.y) <= 2.5f;
+        var nearbyAccess = localAccess && NearInteraction(origin, target);
         _localAccess = nearbyAccess;
         var totalCandidates = DirectCandidates + (nearbyAccess ? 16 : expansion * expandedCandidates);
         var separation = nearbyAccess ? 2f : 5f;
