@@ -54,6 +54,12 @@ public static class SainPersonality
 
     public static bool IsSainAvailable => _typesResolved;
 
+    internal static void ClearRaid()
+    {
+        _cachedBotManager = null;
+        _cachedBotManagerWorld = null;
+    }
+
     public static void InitIfNeeded()
     {
         if (_initAttempted) return;

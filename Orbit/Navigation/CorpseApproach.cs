@@ -25,6 +25,8 @@ internal static class CorpseApproach
     internal static int Samples => 1 + 2 * directions.Length;
     private static NavMeshPath reachPath;
 
+    internal static void ClearRaid() => reachPath = null;
+
     internal static bool WithinLootReach(float distanceSqr, float approvedReachSqr)
         => distanceSqr <= Mathf.Min(LimitSqr, Mathf.Max(PreferredSqr, approvedReachSqr));
 

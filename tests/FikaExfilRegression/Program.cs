@@ -14,7 +14,7 @@ using MonoMod.Cil;
 using MonoMod.Utils;
 
 // Run in a fresh process for each version so the two Fika assemblies cannot be unified.
-internal static class Program
+internal static partial class Program
 {
     private const BindingFlags PrivateStatic = BindingFlags.NonPublic | BindingFlags.Static;
 
@@ -52,6 +52,7 @@ internal static class Program
             integration = Assembly.Load(bytes.ToArray());
         }
 
+#if NETFRAMEWORK
         var bridge = integration.GetType("Orbit.Fika.WorldSyncBridge", true);
         var modern = version == "2.4.6";
         Check(modern || version == "2.4.2", "Unsupported test fixture version");
@@ -66,6 +67,12 @@ internal static class Program
         CheckPatchLifecycle(integration, countdown.GetMethod("Execute"), bridge.GetMethod("BeforeNativeCountdown", PrivateStatic));
         CheckNetworkUnsubscribe(integration, fika);
         Console.WriteLine($"PASS: Fika {version}, HarmonyX {typeof(Harmony).Assembly.GetName().Version}, countdown, snapshot and startup rollback.");
+#else
+        // The real network managers implement default interface methods unsupported on net48.
+        CheckPacketLifecycle(integration, fika);
+        CheckSceneTeardown(main);
+        Console.WriteLine($"PASS: Fika {version}, packet lifecycle and raid-scoped scene caches.");
+#endif
     }
 
     private static void CheckFieldInjection(MethodInfo original, MethodInfo patch, string field, bool prefix)

@@ -27,7 +27,13 @@ public static class DoorRoutingDiag
     }
 
     private static readonly List<Pending> _pending = new();
-    private static readonly NavMeshPath _path = new();
+    private static NavMeshPath _path;
+
+    internal static void Clear()
+    {
+        _pending.Clear();
+        _path = null;
+    }
 
     /// <summary>Snapshots the pre-flip state and queues the matching post-flip snapshot from the same origin.</summary>
     public static void LogBefore(Squad squad, Waypoint pick, Door door)
@@ -68,6 +74,7 @@ public static class DoorRoutingDiag
 
     private static string Snapshot(Door door, NavMeshDoorLink link, Vector3 origin, Vector3 target)
     {
+        _path ??= new NavMeshPath();
         var ok = NavMesh.CalculatePath(origin, target, NavMesh.AllAreas, _path);
         var pathStatus = ok ? _path.status.ToString() : "NoPath";
 

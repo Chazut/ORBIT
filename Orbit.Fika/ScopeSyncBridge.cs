@@ -24,6 +24,7 @@ internal sealed class ScopeSyncBridge : IDisposable
     private readonly ManualLogSource _log;
     private readonly Dictionary<NetPeer, PeerState> _peers = new();
     private IFikaNetworkManager _network;
+    private IFikaNetworkManager _scopeReceiver;
     private GameWorld _world;
     private string _session, _lastProfile;
     private ulong _sequence;
@@ -61,9 +62,13 @@ internal sealed class ScopeSyncBridge : IDisposable
         {
             case FikaNetworkManagerCreatedEvent created:
                 Reset();
+                if (created.Manager is FikaServer)
+                {
+                    created.Manager.RegisterPacket<OrbitScopePacket, NetPeer>(Receive);
+                    _scopeReceiver = created.Manager;
+                }
                 _network = created.Manager;
                 _host = _network is FikaServer;
-                if (_host) _network.RegisterPacket<OrbitScopePacket, NetPeer>(Receive);
                 break;
             case FikaNetworkManagerDestroyedEvent destroyed when destroyed.Manager == _network:
                 Reset();
@@ -145,8 +150,8 @@ internal sealed class ScopeSyncBridge : IDisposable
 
     private void Reset()
     {
-        if (_host) _network?.UnregisterPacket<OrbitScopePacket>();
         _network = null;
+        FikaPatchCleanup.Unregister<OrbitScopePacket>(ref _scopeReceiver, _log);
         _world = null;
         _session = _lastProfile = null;
         _sequence = 0;

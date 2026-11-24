@@ -44,7 +44,8 @@ internal static class BotLandingGuard
     private static readonly Dictionary<BotOwner, WakeSearch> WakeSearches = new();
     private const float WakeHeightLimit = 0.65f;
     private const float WakeRadius = 3f;
-    private static readonly NavMeshPath LocalPath = new();
+    private static NavMeshPath _localPath;
+    private static NavMeshPath LocalPath => _localPath ??= new NavMeshPath();
     private static readonly Vector3[] WakeCorners = new Vector3[64];
     private static float _nextTick;
     private static float _probeWindow;
@@ -58,6 +59,7 @@ internal static class BotLandingGuard
         Rejections.Clear();
         CorrectedUntil.Clear();
         WakeSearches.Clear();
+        _localPath = null;
         _nextTick = 0f;
         _probeWindow = 0f;
         _nearbyProbes = 0;

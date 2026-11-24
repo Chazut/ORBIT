@@ -88,12 +88,12 @@ internal sealed class DoorSyncBridge : IDisposable
         {
             case FikaNetworkManagerCreatedEvent created:
                 Reset();
+                created.Manager.RegisterPacket<OrbitDoorPacket, NetPeer>(Receive);
                 _network = created.Manager;
                 _host = _network is FikaServer;
                 _connected = true;
                 _hello = Guid.NewGuid().ToString("N");
                 _session = _host ? Guid.NewGuid().ToString("N") : null;
-                _network.RegisterPacket<OrbitDoorPacket, NetPeer>(Receive);
                 break;
             case FikaNetworkManagerDestroyedEvent destroyed when destroyed.Manager == _network:
                 Reset();
@@ -127,9 +127,8 @@ internal sealed class DoorSyncBridge : IDisposable
 
     private void Reset()
     {
-        _network?.UnregisterPacket<OrbitDoorPacket>();
-        _network = null;
-        _connected = false;
+        FikaPatchCleanup.Unregister<OrbitDoorPacket>(ref _network, _log);
+        _host = _connected = false;
         _world = null;
         _session = _hello = null;
         _revision = 0;

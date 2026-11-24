@@ -142,8 +142,12 @@ public class OrbitDisposePatch : ModulePatch
         }
         finally
         {
-            // Door links exist independently of the manager. Release them even if runtime
-            // initialization was skipped or an earlier subsystem failed during teardown.
+            // These scene caches can outlive the manager, including after partial initialization.
+            Sain.SainPersonality.ClearRaid();
+            Systems.MultiStepAccess.Reset();
+            OperationSwitchReach.Reset();
+            CorpseApproach.ClearRaid();
+            DoorRoutingDiag.Clear();
             DoorNavMesh.Clear();
             RotationDiagnostics.Clear();
             try { DebugExport.WorldEnded(); }

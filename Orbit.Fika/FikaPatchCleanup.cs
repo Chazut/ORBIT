@@ -1,12 +1,24 @@
 using System;
 using System.Linq;
 using BepInEx.Logging;
+using Fika.Core.Networking;
+using Fika.Core.Networking.LiteNetLib.Utils;
 using HarmonyLib;
 
 namespace Orbit.Fika;
 
 internal static class FikaPatchCleanup
 {
+    // The caller assigns receiver only after Fika has accepted the subscription.
+    internal static void Unregister<T>(ref IFikaNetworkManager receiver, ManualLogSource log) where T : INetSerializable
+    {
+        var manager = receiver;
+        receiver = null;
+        if (manager == null) return;
+        try { manager.UnregisterPacket<T>(); }
+        catch (Exception error) { log.LogWarning($"Fika cleanup failed ({typeof(T).Name}): {error}"); }
+    }
+
     // Constructor rollback must never replace the exception that triggered it.
     internal static void Rollback(IDisposable bridge, ManualLogSource log)
     {

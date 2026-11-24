@@ -48,6 +48,7 @@ public class OrbitFikaPlugin : IDisposable
 
     private static ManualLogSource _log;
     private static IFikaNetworkManager _network;
+    private static IFikaNetworkManager _ghostFightReceiver;
     private static bool _isHost;
     private static readonly List<PendingShot> _pending = new();
 
@@ -77,12 +78,15 @@ public class OrbitFikaPlugin : IDisposable
     private static void OnNetworkManagerCreated(FikaNetworkManagerCreatedEvent e)
     {
         ResetNetwork();
-        _network = e.Manager;
-        _isHost = e.Manager is FikaServer;
-        ClearShots();
+        bool host = e.Manager is FikaServer;
         // Only clients replay received fights; the host already plays its own burst via the limiter.
-        if (!_isHost)
+        if (!host)
+        {
             e.Manager.RegisterPacket<OrbitGhostFightPacket>(OnGhostFightPacket);
+            _ghostFightReceiver = e.Manager;
+        }
+        _network = e.Manager;
+        _isHost = host;
         _log.LogInfo($"{PluginName}: network manager ready (host={_isHost})");
     }
 
@@ -319,12 +323,10 @@ public class OrbitFikaPlugin : IDisposable
 
     private static void ResetNetwork()
     {
-        var previous = _network;
         _network = null;
         _isHost = false;
         ClearShots();
-        try { previous?.UnregisterPacket<OrbitGhostFightPacket>(); }
-        catch { /* The network manager may already be disposed during shutdown. */ }
+        FikaPatchCleanup.Unregister<OrbitGhostFightPacket>(ref _ghostFightReceiver, _log);
     }
 
     private static void OnGhostFightStopped(OrbitEvents.GhostFightSoundStop stop)

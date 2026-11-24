@@ -110,9 +110,9 @@ internal sealed class WorldSyncBridge : IDisposable
         {
             case FikaNetworkManagerCreatedEvent created:
                 Reset();
+                created.Manager.RegisterPacket<OrbitWorldPacket, NetPeer>(Receive);
                 _network = created.Manager;
                 _host = _network is FikaServer;
-                _network.RegisterPacket<OrbitWorldPacket, NetPeer>(Receive);
                 break;
             case FikaNetworkManagerDestroyedEvent destroyed when destroyed.Manager == _network:
                 Reset();
@@ -376,8 +376,7 @@ internal sealed class WorldSyncBridge : IDisposable
 
     private void Reset()
     {
-        try { _network?.UnregisterPacket<OrbitWorldPacket>(); }
-        catch (Exception e) { Warn("receiver cleanup failed: " + e.Message); }
+        FikaPatchCleanup.Unregister<OrbitWorldPacket>(ref _network, _log);
         foreach (var watch in _exits.Values)
             if (watch.Point != null) watch.Point.OnStatusChanged -= ExitChanged;
         _exits.Clear();
@@ -386,7 +385,6 @@ internal sealed class WorldSyncBridge : IDisposable
         _received.Clear();
         _pending.Clear();
         _receivedAt.Clear();
-        _network = null;
         _session = null;
         _revision = 0;
         _host = _applying = _requestSent = false;
