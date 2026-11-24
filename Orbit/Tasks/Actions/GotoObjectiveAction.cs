@@ -393,13 +393,11 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                                     && LootVisibility.IsContainerShell(objective.Location.Target as InteractableObject, arrivalHit.collider.transform))
                                     Log.Debug($"LOOT CONTAINER SHELL: {agent} point={objective.Location.Id} collider={arrivalHit.collider.name} distance={arrivalHit.distance:F2} access=clear");
                                 objective.Status = ObjectiveStatus.Looting;
-                                // Looting keeps the bot stationary for several seconds. If we leave the path
-                                // pointing at the previous destination, BSG's BotMover eventually decides the
-                                // bot is "stuck" relative to its last good cast point and teleports it away —
-                                // sometimes 200m+. Re-aim at current pos so BSG re-links here and resets its
-                                // rescue timer.
-                                movementSystem.MoveToByPath(agent, agent.Position, sprint: false, urgency: MovementUrgency.Low);
-                                Log.Debug($"{agent} arrived at lootable {objective.Location}, claim OK → Looting (path refreshed to {agent.Position})");
+                                // A route to our own feet can still produce lateral input after the
+                                // NavMesh projects them to a nearby point. End corpse travel here.
+                                if (body != null) MovementSystem.StopAtCorpse(agent);
+                                else movementSystem.MoveToByPath(agent, agent.Position, sprint: false, urgency: MovementUrgency.Low);
+                                Log.Debug($"{agent} arrived at lootable {objective.Location}, claim OK → Looting");
                             }
                             else
                             {

@@ -1495,6 +1495,13 @@ public partial class MovementSystem
     internal static void StopSniperPostShift(Agent agent) => ResetPath(agent);
     internal static void StopExfilApproach(Agent agent) => ResetPath(agent);
 
+    internal static void StopAtCorpse(Agent agent)
+    {
+        agent.Movement.Target = agent.Position;
+        agent.Movement.Sprint = false;
+        ResetPath(agent);
+    }
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void ResetPath(Agent agent, MovementStatus status = MovementStatus.Stopped, bool invalidatePending = true)
     {

@@ -28,6 +28,16 @@ namespace Orbit.Systems
     public partial class MovementSystem { public static bool IsTravelPaused(Agent a) => false; }
     public partial class WaypointSystem { public bool HasReachedObjectiveFloor(Agent a, Waypoint p, Vector3 feet) => FloorReached; }
 #if !EXTRACTION_HARNESS
+    public partial class MovementSystem
+    {
+        internal static void StopAtCorpse(Agent a)
+        {
+            a.Movement.Target = a.Position;
+            a.Movement.Path = null;
+            a.Movement.HasPath = a.Movement.Sprint = false;
+            a.Movement.Status = MovementStatus.Stopped;
+        }
+    }
     // Extraction has its own route harness. Keep the existing arrival tests at the final gate.
     public class ExfilApproach
     {

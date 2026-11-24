@@ -10,6 +10,7 @@
     <Compile Include="../../Shared/ZoneScope.cs;../../Shared/CustomsBackport.cs;../../Shared/FloorCatalog.cs;../../Shared/NativeFloorResolver.cs" />
     <Compile Include="../../Orbit/Navigation/LootVisibility.cs" />
     <Compile Include="../../Orbit/Navigation/CorpseApproach.cs" />
+    <Compile Include="../../Orbit/Looting/CorpseLootFacing.cs" />
     <Compile Remove="Recovery.Generated.cs" />
     <Compile Include="$(RecoverySlice)" />
     <Compile Include="../NavigationHarness/ArrivalPorts.cs" Link="ArrivalPorts.cs" />

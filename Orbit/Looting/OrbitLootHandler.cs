@@ -225,7 +225,7 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
             if (!DormantMode)
             {
                 FreezeBotForLootSession();
-                LookAtLootTarget(loot);
+                if (kind != LootKind.Corpse) LookAtLootTarget(loot);
             }
             // A better weapon parked in primary2 while the bot slept is promoted here, at the start of any
             // awake session: the bot is pinned and calm. Hooking it on phase 4 missed every session that ends
@@ -303,8 +303,7 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
         if (!HasLiveOwner || loot == null) return;
         try
         {
-            var target = loot is Corpse ? Orbit.Navigation.LootVisibility.BodyPosition(loot) : loot.transform.position;
-            _bot.Steering?.LookToPoint(target);
+            _bot.Steering?.LookToPoint(loot.transform.position);
         }
         catch (System.Exception e)
         {

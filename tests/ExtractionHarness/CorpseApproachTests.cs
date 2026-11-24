@@ -1,7 +1,9 @@
 using System;
 using EFT.Interactive;
 using Orbit.Entities;
+using Orbit.Looting;
 using Orbit.Navigation;
+using Orbit.Systems;
 using UnityEngine;
 using UnityEngine.AI;
 
@@ -23,6 +25,28 @@ internal static class CorpseApproachTests
 
     internal static void Run(Action<bool,string> check)
     {
+        var facing = new CorpseLootFacing();
+        var (_, looter, corpse) = At(.8f, false);
+        facing.Hold(looter, corpse);
+        var direction = LookSystem.LastDirection;
+        check(direction.x < -.8f && direction.y < 0f && Math.Abs(direction.z) < .001f,
+            "looter faces the live pelvis from its feet");
+        // Prone pivot crosses the body, crouched bot shifts, or the ragdoll settles.
+        looter.Position = new(-.2f, 0f, .1f);
+        corpse.Pelvis.position = new(.2f, 0f, -.1f);
+        facing.Hold(looter, corpse);
+        check(LookSystem.LastDirection.Equals(direction), "moving pivots cannot reverse the held heading");
+        facing.Release(looter);
+        check(looter.Look.Target == null, "completion releases the corpse look");
+        looter.Position = corpse.Pelvis.position + new Vector3(.01f, 0f, 0f);
+        looter.Player.Transform.forward = new(0f, 0f, 1f);
+        facing.Hold(looter, corpse);
+        check(LookSystem.LastDirection.z > .8f && Math.Abs(LookSystem.LastDirection.x) < .001f,
+            "new session directly over a body keeps the arrival heading");
+        LookSystem.LookToPoint(looter, LookSystem.LastDirection, 90f);
+        facing.Release(looter);
+        check(looter.Look.Target.HasValue && looter.Look.Type == LookType.Position,
+            "cleanup preserves a new owner's look even at the same coordinates");
         foreach (bool alreadyProne in new[] { false, true })
         foreach (bool clearance in new[] { false, true })
         {
@@ -43,6 +67,9 @@ internal static class CorpseApproachTests
                 if (distance <= CorpseApproach.Preferred)
                 {
                     check(bot.Objective.Status == ObjectiveStatus.Looting, "close body accessible without fallback");
+                    check(scene.Movement.Orders == 1 && !bot.Movement.HasPath
+                        && bot.Movement.Status == MovementStatus.Stopped && bot.Movement.Target.Equals(bot.Position),
+                        "claim ends travel at the looter's feet without queuing a return step");
                     continue;
                 }
                 check(bot.Objective.Status == ObjectiveStatus.Moving, "entering 3m cannot start looting by itself");
@@ -52,7 +79,11 @@ internal static class CorpseApproachTests
                 scene.Tick(10);
                 check((bot.Objective.Status == ObjectiveStatus.Looting) == (distance <= 3f), "3m is an inclusive hard limit");
                 if (distance <= 3f)
+                {
                     check(CorpseApproach.WithinLootReach(distance * distance, bot.Objective.CorpseLootReachSqr), "approved session permits actual transfer range");
+                    check(!bot.Movement.HasPath && bot.Movement.Status == MovementStatus.Stopped,
+                        "fallback looter also stops at its reachable spot");
+                }
             }
 
             var (reachable, walker, _) = At(2.5f, ghost);
@@ -65,6 +96,11 @@ internal static class CorpseApproachTests
             reachable.Tick(6);
             check(walker.Objective.Status == ObjectiveStatus.Looting && walker.Objective.CorpseLootReachSqr == CorpseApproach.PreferredSqr,
                 "reachable closer approach gets only normal session reach");
+            var next = walker.Position + new Vector3(4f, 0f, 0f);
+            reachable.Movement.MoveToByPath(walker, next);
+            reachable.Movement.Step(walker, 1f);
+            check(walker.Movement.HasPath && (next - walker.Position).magnitude < 4f,
+                "a new travel order works immediately after the stop");
 
             var (moving, follower, ragdoll) = At(2.5f, ghost);
             ragdoll.Pelvis.position = new(5, 0, 0);

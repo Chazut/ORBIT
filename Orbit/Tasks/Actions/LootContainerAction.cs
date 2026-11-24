@@ -805,6 +805,7 @@ internal class BotLootState
     private float? _poseBeforeCorpseLoot;
     private bool _proneBeforeCorpseLoot;
     private bool _lootingProne;
+    private CorpseLootFacing _corpseFacing;
 
     public bool IsDone { get; private set; }
     public bool Success { get; private set; }
@@ -900,10 +901,12 @@ internal class BotLootState
             try
             {
                 if (_agent.Bot.Mover != null) _agent.Bot.Mover.Sprint(false);
-                if (lootKind != LootKind.Corpse) _agent.Bot.SetPose(0.25f);
-                var lookTarget = lootKind == LootKind.Corpse ? loot.TrackableTransform : null;
-                _agent.Bot.Steering.LookToPoint(lookTarget != null ? lookTarget.position : loot.transform.position);
-                MaintainCorpsePosture();
+                if (lootKind == LootKind.Corpse) MaintainCorpsePosture();
+                else
+                {
+                    _agent.Bot.SetPose(0.25f);
+                    _agent.Bot.Steering.LookToPoint(loot.transform.position);
+                }
             }
             catch (System.Exception e)
             {
@@ -927,6 +930,11 @@ internal class BotLootState
             if (Time.time < _inventoryRetryAt) return;
             _inventoryRetryAt = 0f;
             Begin();
+            if (IsDone)
+            {
+                CleanupBrainTarget();
+                return;
+            }
         }
         if (!_started) return;
 
@@ -992,9 +1000,12 @@ internal class BotLootState
 
     private void MaintainCorpsePosture()
     {
-        if (_brain.CurrentTargetKind != LootKind.Corpse || _agent.IsDormant || !_agent.IsActive
+        if (_brain.CurrentTargetKind != LootKind.Corpse || _brain.CurrentTarget == null || _agent.IsDormant || !_agent.IsActive
             || _agent.Bot?.Memory?.HaveEnemy == true || _agent.Bot?.Memory?.IsUnderFire == true
             || !LootActorGuard.IsCurrent(_agent.Bot, _agent.Player)) return;
+        if (_agent.Movement.Status == MovementStatus.Moving || _agent.Movement.HasPath)
+            MovementSystem.StopAtCorpse(_agent);
+        _corpseFacing.Hold(_agent, _brain.CurrentTarget);
         // MovementSystem reapplies its desired pose even when the bot has no path.
         // Setting BotOwner.SetPose alone is overwritten by the next movement tick.
         if (!_poseBeforeCorpseLoot.HasValue)
@@ -1047,6 +1058,7 @@ internal class BotLootState
 
     private void CleanupBrainTarget()
     {
+        _corpseFacing.Release(_agent);
         if (_poseBeforeCorpseLoot.HasValue)
         {
             // Restore only our desired pose; combat and the current body owner control

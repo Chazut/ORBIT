@@ -209,7 +209,8 @@ namespace Orbit.Entities
     public enum GuardStatus { None,Moving,Sweep,Watch }
     public class Guard { public CoverPoint? CoverPoint; public GuardStatus Status; public int ExtractWatchProbe, ExtractWatchMisses; public AreaSweepJob AreaSweepJob; public List<Vector3> WatchDirections = new(); public float WatchTimeout; }
     public class AreaSweepJob { public int Count; public bool IsCompleted = true; public Unity.Jobs.JobHandle Handle; public Unity.Collections.NativeArray<RaycastCommand> Commands; public Unity.Collections.NativeArray<RaycastHit> Hits; }
-    public class Look { public object Target; }
+    public enum LookType { Position, Direction }
+    public class Look { public Vector3? Target; public LookType Type; }
     public partial class Agent : Entity
     {
         #if !EXTRACTION_HARNESS
@@ -264,8 +265,8 @@ namespace Orbit.Systems
         public static Vector3 RandomDirectionInEllipse(Vector3 d,float a,float b)=>d;
         public static int Calls;
         public static Vector3 LastDirection;
-        public static void LookToPoint(Agent a,Vector3 p,float speed) { Calls++; a.Look.Target=p; LastDirection=(p-a.Position).normalized; }
-        public static void LookToDirection(Agent a,Vector3 b,float c) { Calls++; LastDirection=b; }
+        public static void LookToPoint(Agent a,Vector3 p,float speed) { Calls++; a.Look.Type=LookType.Position; a.Look.Target=p; LastDirection=(p-a.Position).normalized; }
+        public static void LookToDirection(Agent a,Vector3 b,float speed=180f) { Calls++; a.Look.Type=LookType.Direction; a.Look.Target=b; LastDirection=b; }
     }
 }
 
