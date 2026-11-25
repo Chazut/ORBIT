@@ -9,6 +9,9 @@ namespace UnityEngine
 {
     public static class Mathf
     {
+        public static int Max(int a, int b) => Math.Max(a, b);
+        public static float Max(float a, float b) => Math.Max(a, b);
+        public static int CeilToInt(float n) => (int)Math.Ceiling(n);
         public static float Sqrt(float v) => MathF.Sqrt(v);
         public static float Abs(float v) => MathF.Abs(v);
         public static float Clamp(float v, float min, float max) => Math.Clamp(v, min, max);

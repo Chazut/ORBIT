@@ -79,6 +79,16 @@ surfaces.Clear();
 surfaces.Add((new Collider { name = "Wall_panel", transform = new Transform { parent = loot.transform } }, 1.9f));
 Check(LootVisibility.Check(head, loot, out _), "a wall-mounted target cannot be its own separating wall");
 
+CustomsOfficeTests.Run(Check);
+var warehouse = new Transform { name = "sklad_concrete" };
+var warehouseFace = new MeshCollider { name = "concrete 1", sharedMesh = new Mesh { name = "concrete" },
+    transform = new Transform { parent = new Transform { name = "ballistic", parent = warehouse } } };
+warehouseFace.SurfaceProbe = (ray, length) => new RaycastHit { distance = .1f, normal = -ray.direction };
+surfaces.Clear();
+surfaces.Add((warehouseFace, 1.2f));
+Check(!LootVisibility.Check(head, loot, out _), "Customs warehouse wall blocks the suitcase on the opposite side");
+Check(LootVisibility.Check(new(1.3f, 1, 0), loot, out _), "same suitcase can be opened from its side of the warehouse wall");
+surfaces.Clear();
 var room = new Collider { name = "Hostel_01_Room_02_BALLISTIC_concrete" };
 surfaces.Clear();
 surfaces.Add((room, 1f));

@@ -5,6 +5,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../../Orbit/Navigation/MarkedRoomScope.cs" />
     <Compile Include="../../Orbit/Navigation/ExfilArrival.cs" />
     <Compile Include="../../Orbit/Entities/Entity.cs" />
     <Compile Include="../../Orbit/Navigation/WoodsBunkerAccess.cs" />

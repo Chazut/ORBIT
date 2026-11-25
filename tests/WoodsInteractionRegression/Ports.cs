@@ -22,6 +22,7 @@ namespace UnityEngine
         public string name = "";
         public Vector3 position;
         public Transform parent;
+        public Matrix4x4 worldToLocalMatrix => Matrix4x4.identity;
         public bool IsChildOf(Transform t) => this == t || parent?.IsChildOf(t) == true;
         public T GetComponent<T>() where T : class => null;
         public void GetComponentsInChildren<T>(bool inactive, List<T> components) { }
@@ -30,6 +31,8 @@ namespace UnityEngine
     public struct Bounds
     {
         public Vector3 center, size;
+        public Bounds(Vector3 center, Vector3 size) { this.center = center; this.size = size; }
+        public Vector3 extents => size * .5f;
         public bool Contains(Vector3 p) => Math.Abs(p.x - center.x) <= size.x / 2
             && Math.Abs(p.y - center.y) <= size.y / 2 && Math.Abs(p.z - center.z) <= size.z / 2;
     }

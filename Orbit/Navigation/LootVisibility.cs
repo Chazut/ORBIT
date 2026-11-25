@@ -21,6 +21,9 @@ internal static class LootVisibility
     private static readonly Regex wall = new(Start + @"(?i:walls?|partitions?|stena)(?:[_ .-]*"
         + WallPart + End + @"|(?=$|[_ .()-]*[0-9]|[ ()]*$))");
     private static readonly Regex building = new(Start + @"(?i:room|hallway|corridor|building|factory|hostel)" + End);
+    // The Customs warehouse uses generic concrete meshes under this structural prefab.
+    // Its combined mesh also includes floor and trim, so still require a partition face.
+    private static readonly Regex customsWarehouse = new(@"^sklad_concrete(?: \([0-9]+\))?$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
     private static readonly Regex collisionNode = new(
         @"^(?:ballistic|colliders?|collision|coll|lod[0-9]*|mesh|concrete|stone|metal(?:thin|thick)?|wood(?:thin|thick)?)(?:$|[_ .(0-9-])",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
@@ -117,7 +120,7 @@ internal static class LootVisibility
     private static Surface AssetSurface(string name)
     {
         if (wall.IsMatch(name)) return Surface.Wall;
-        return building.IsMatch(name) ? Surface.Building : Surface.Other;
+        return building.IsMatch(name) || customsWarehouse.IsMatch(name) ? Surface.Building : Surface.Other;
     }
 }
 

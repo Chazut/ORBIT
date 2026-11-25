@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using EFT.Interactive;
 using UnityEngine;
 using UnityEngine.AI;
 
@@ -17,16 +18,33 @@ internal sealed class MarkedRoomScope
     {
         Center = center; _floor = center.y; Radius = radius;
         if (room == null) return;
-        if (room.Colliders != null)
-            foreach (var box in room.Colliders)
-                if (box != null)
-                    _volumes.Add((box.transform.worldToLocalMatrix, new Bounds(box.center, box.size)));
-        if (_volumes.Count == 0)
-            _volumes.Add((Matrix4x4.identity, room.Bounds));
+        AddVolume(room);
         Source = "native room " + room.name;
         if (!Contains(center)) Center = new Vector3(room.Bounds.center.x, center.y, room.Bounds.center.z);
         if (NavMesh.SamplePosition(Center, out var hit, 2f, NavMesh.AllAreas) && Contains(hit.position)) Center = hit.position;
         Radius = Mathf.Max(radius, room.Bounds.extents.magnitude + Vector3.Distance(Center, room.Bounds.center));
+    }
+
+    private void AddVolume(SpatialAudioRoom room)
+    {
+        var before = _volumes.Count;
+        if (room.Colliders != null)
+            foreach (var box in room.Colliders)
+                if (box != null) _volumes.Add((box.transform.worldToLocalMatrix, new Bounds(box.center, box.size)));
+        if (_volumes.Count == before) _volumes.Add((Matrix4x4.identity, room.Bounds));
+    }
+
+    internal void IncludeOffice(SpatialAudioRoom hallway, SpatialAudioRoom front, SpatialAudioRoom back,
+        BoxCollider doorway, EDoorState state)
+    {
+        if (state != EDoorState.Shut && state != EDoorState.Open) return;
+        var office = front == hallway ? back : back == hallway ? front : null;
+        if (office == null || office == hallway || office.IsOutdoor || office.Bounds.size.sqrMagnitude == 0) return;
+        AddVolume(office);
+        // Audio volumes can stop at opposite faces of the door frame.
+        if (doorway != null) _volumes.Add((doorway.transform.worldToLocalMatrix, new Bounds(doorway.center, doorway.size)));
+        Radius = Mathf.Max(Radius, office.Bounds.extents.magnitude + Vector3.Distance(Center, office.Bounds.center));
+        Source += " + " + office.name;
     }
 
     internal bool Contains(Vector3 point)

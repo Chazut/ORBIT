@@ -51,7 +51,22 @@ public partial class WaypointSystem
                 if (room != null && !room.IsOutdoor && room.Bounds.size.sqrMagnitude > 0
                     && (selected == null || room.RoomSize < selected.RoomSize)) selected = room;
         }
-        return new(new Vector3(point.LootX, point.LootY, point.LootZ), point.Radius, selected);
+        var scope = new MarkedRoomScope(new Vector3(point.LootX, point.LootY, point.LootZ), point.Radius, selected);
+        // The Tarcone key opens a hallway. The PCs and safe are in two separate native
+        // rooms adjoining that hallway. Only include offices accessible in this raid.
+        if (point.DoorId == "door_custom_Tamozhnya_00000" && selected != null)
+        {
+            IncludeOffice("door_custom_Tamozhnya_00001");
+            IncludeOffice("door_custom_Tamozhnya_00002");
+        }
+        return scope;
+
+        void IncludeOffice(string id)
+        {
+            if (!_rushPortals.TryGetValue(id, out var link) || link == null ||
+                !_rushDoors.TryGetValue(id, out var door) || door == null) return;
+            scope.IncludeOffice(selected, link.FrontRoom, link.BackRoom, link.portalCollider, door.DoorState);
+        }
     }
     internal void RegisterRushCorpse(Waypoint corpse, string role)
     {
