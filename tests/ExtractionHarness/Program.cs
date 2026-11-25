@@ -230,6 +230,7 @@ foreach (var (category, target, drop) in new (WaypointCategory, InteractableObje
     Check(looter.Objective.Status == ObjectiveStatus.Looting, $"same-side {category} hands off to loot, ghost={ghost}, drop={drop}");
 }
 CorpseApproachTests.Run(Check);
+WallLootApproachTests.Run(Check);
 Console.WriteLine($"Extraction: {checks} checks passed; 10000 steady ticks = {allocated} allocated bytes. Real actions/task manager with engine doubles.");
 
 sealed class Scenario

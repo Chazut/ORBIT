@@ -27,6 +27,13 @@ internal static class CorpseApproach
 
     internal static void ClearRaid() => reachPath = null;
 
+    internal static bool HasCompletePath(Vector3 feet, Vector3 stand)
+    {
+        reachPath ??= new NavMeshPath();
+        return NavMesh.CalculatePath(feet, stand, NavMesh.AllAreas, reachPath)
+            && reachPath.status == NavMeshPathStatus.PathComplete;
+    }
+
     internal static bool WithinLootReach(float distanceSqr, float approvedReachSqr)
         => distanceSqr <= Mathf.Min(LimitSqr, Mathf.Max(PreferredSqr, approvedReachSqr));
 
@@ -41,9 +48,7 @@ internal static class CorpseApproach
         if (improvement < .2f || (hit.position - feet).sqrMagnitude < .2f * .2f
             || lastStand.HasValue && (hit.position - lastStand.Value).sqrMagnitude < .2f * .2f
             || !LootVisibility.Check(hit.position + Vector3.up, corpse, out _)) return false;
-        reachPath ??= new NavMeshPath();
-        if (!NavMesh.CalculatePath(feet, hit.position, NavMesh.AllAreas, reachPath)
-            || reachPath.status != NavMeshPathStatus.PathComplete) return false;
+        if (!HasCompletePath(feet, hit.position)) return false;
         stand = hit.position;
         return true;
     }

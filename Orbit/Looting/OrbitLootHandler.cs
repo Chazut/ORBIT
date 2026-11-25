@@ -111,6 +111,7 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
     /// loot so the squad blacklists the POI — without it a hang-cancelled loose item was re-picked
     /// forever (observed: 'doom' looping 6 times on the same sewing kit).</summary>
     public bool LastSessionCancelled { get; private set; }
+    internal bool LastSessionWallBlocked { get; private set; }
     public bool LastSessionFailed { get; private set; }
     public bool LastSessionRetryable { get; private set; }
 
@@ -192,6 +193,7 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
         _access.Reset();
         LastSessionCancelled = false;
         LastSessionFailed = false;
+        LastSessionWallBlocked = false;
         LastSessionRetryable = false;
         Stats.LastItemsTaken = false;
         Stats.LastMaxPerSlotSeen = 0f;
@@ -262,6 +264,7 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
         }
         catch (LootAccessBlockedException e)
         {
+            if (OwnsSession(ct)) LastSessionWallBlocked = e.Wall;
             ReportInventoryFailure(ct, false);
             Log.Info($"LOOT ACCESS BLOCKED: {Nick} target={targetName} collider={e.Collider} hitDistance={e.Distance:F2} itemsTaken={Stats.LastItemsTaken}");
         }

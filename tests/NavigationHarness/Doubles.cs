@@ -72,11 +72,12 @@ namespace UnityEngine
     public readonly record struct Ray(Vector3 origin, Vector3 direction);
     public class Mesh : Object { }
     public class MeshCollider : Collider { public Mesh sharedMesh; }
-    public class Collider : Object { public bool Raycast(Ray ray, out RaycastHit hit, float length) { hit = default; return false; } public Transform transform = new(); public Bounds bounds; public Func<Vector3,Vector3> Closest; public Vector3 ClosestPoint(Vector3 p) => Closest?.Invoke(p) ?? new(Math.Clamp(p.x,bounds.min.x,bounds.max.x),Math.Clamp(p.y,bounds.min.y,bounds.max.y),Math.Clamp(p.z,bounds.min.z,bounds.max.z)); }
+    public class Collider : Object { public Func<Ray,RaycastHit?> SurfaceProbe; public bool Raycast(Ray ray, out RaycastHit hit, float length) { var contact = SurfaceProbe?.Invoke(ray); hit = contact.GetValueOrDefault(); return contact.HasValue; } public Transform transform = new(); public Bounds bounds; public Func<Vector3,Vector3> Closest; public Vector3 ClosestPoint(Vector3 p) => Closest?.Invoke(p) ?? new(Math.Clamp(p.x,bounds.min.x,bounds.max.x),Math.Clamp(p.y,bounds.min.y,bounds.max.y),Math.Clamp(p.z,bounds.min.z,bounds.max.z)); }
     public class BoxCollider : Collider { public Vector3 size, center; public bool enabled = true; }
     public enum QueryTriggerInteraction { Ignore }
     public static partial class Physics {
         public static bool Blocked;
+        public static Func<Vector3,Vector3,RaycastHit?> SegmentHit;
         public static Collider FirstHit;
         public static Vector3 LastTarget, LastOrigin;
         public static int SightQueries, LastMask;
@@ -92,6 +93,12 @@ namespace UnityEngine
         public static bool Raycast(Vector3 a,Vector3 b,float c,int d) => Blocked;
         public static bool Raycast(Vector3 a,Vector3 b,out RaycastHit hit,float c,int d,QueryTriggerInteraction triggers) {
             SightQueries++; LastOrigin=a; LastTarget=a+b*c; LastMask=d; LastTriggers=triggers;
+            if (SegmentHit != null)
+            {
+                var contact = SegmentHit(a, a+b*c);
+                hit = contact.GetValueOrDefault();
+                return contact.HasValue;
+            }
             hit=new(){collider=FirstHit,distance=c*.5f}; return Blocked;
         }
     }

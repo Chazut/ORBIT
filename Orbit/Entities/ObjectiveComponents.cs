@@ -41,6 +41,7 @@ public class Objective
     /// </summary>
     public float DispatchTime;
 
+    internal WallLootApproachState WallApproach;
     internal Vector3? CorpseApproachPosition;
     internal Vector3? CorpseLastStand;
     internal int CorpseProbeIndex;
@@ -57,6 +58,15 @@ public class Objective
     public Vector3 ExfilOutsideTriggerLastPosition;
 
     public override string ToString() => $"Objective({Location}, status: {Status})";
+}
+
+internal sealed class WallLootApproachState(Waypoint location)
+{
+    internal readonly Waypoint Location = location;
+    internal Vector3? Stand;
+    internal Vector3? RejectedStand;
+    internal int NextSample;
+    internal bool RequireNewStand;
 }
 
 // ── Per-squad objective ──────────────────────────────────────────────

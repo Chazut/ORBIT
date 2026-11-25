@@ -67,7 +67,7 @@ public partial class OrbitLootHandler
         var origin = !DormantMode && _bot.LookSensor != null
             ? _bot.LookSensor.HeadPoint : _player.PlayerBones.BodyTransform.position + Vector3.up;
         if (!_access.Check(Time.frameCount, DormantMode, origin, CurrentTarget, out var hit))
-            throw new LootAccessBlockedException(hit.collider?.name ?? "missing-target", hit.distance);
+            throw new LootAccessBlockedException(hit.collider?.name ?? "missing-target", hit.distance, wall: hit.collider != null);
     }
 
     private bool FinishSession(CancellationToken ct)

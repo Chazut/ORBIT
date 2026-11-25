@@ -156,6 +156,17 @@ public class LootContainerAction(AgentData dataset, WaypointSystem waypointSyste
             return;
         }
 
+        if (state.WallBlocked && location.Target != null)
+        {
+            // The bot or loot can move after the arrival check. Return the claim and continue
+            // with untried stands, including when the first transfer already succeeded.
+            waypointSystem.ReleaseClaim(location.Id, agent.Id);
+            _states.Remove(agent.Id);
+            WallLootApproach.ResumeAfterBlockedSession(agent);
+            Log.Debug($"LOOT WALL DETOUR: {agent} point={location.Id} wall detected during interaction");
+            return;
+        }
+        objective.WallApproach = null;
         var squadWasExtracting = agent.Squad?.ExtractRequested == true;
         var wasSoloExtracting = agent.SoloExtractRequested;
 
@@ -796,7 +807,7 @@ internal class BotLootState
 
     private readonly Agent _agent;
     private readonly Waypoint _location;
-    private readonly ILootHandler _brain;
+    private readonly OrbitLootHandler _brain;
     private float _lootedAtStart;
     private float _beganAt;
     private bool _started;
@@ -809,6 +820,7 @@ internal class BotLootState
 
     public bool IsDone { get; private set; }
     public bool Success { get; private set; }
+    public bool WallBlocked { get; private set; }
 
     /// <summary>
     /// True iff the bot actually took at least one item during this operation. Used by LootContainerAction to
@@ -955,6 +967,7 @@ internal class BotLootState
                 return;
             }
             // A partial transfer does not prove the rest of a failed inspection was completed.
+            WallBlocked = _brain.LastSessionWallBlocked && !_brain.LastSessionCancelled && !targetMissing;
             Success = !_brain.LastSessionFailed && (ItemsTaken || (!_brain.LastSessionCancelled && !targetMissing));
             Log.Info($"LOOT RESULT: {_agent} location={_location} itemsTaken={ItemsTaken} failed={_brain.LastSessionFailed} retryable={_brain.LastSessionRetryable} retries={_inventoryRetries} cancelled={_brain.LastSessionCancelled} success={Success}");
             IsDone = true;

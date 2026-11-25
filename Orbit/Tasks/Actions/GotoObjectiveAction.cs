@@ -173,6 +173,7 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                     // never applied to those dispatches — a re-dispatched anchor could otherwise rack up
                     // 3 "stopped outside" fails within a second, blacklisted before BSG even started moving.
                     objective.DispatchTime = Time.time;
+                    objective.WallApproach = null;
                     objective.CorpseProbeIndex = 0;
                     objective.CorpseProbing = false;
                     objective.CorpseLootReachSqr = 0f;
@@ -272,7 +273,25 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                     var arrivalRefusal = "distance";
                     RaycastHit arrivalHit = default;
                     bool corpseFallback = false;
-                    if (body != null && distanceSqr > CorpseApproach.PreferredSqr && distanceSqr <= CorpseApproach.SearchRadiusSqr
+                    var detour = objective.WallApproach;
+                    if (detour != null && detour.Location != objective.Location)
+                        objective.WallApproach = detour = null;
+                    if (detour != null)
+                    {
+                        var result = detour.Tick(agent, movementSystem, waypointSystem);
+                        if (result == WallLootApproach.Result.Exhausted)
+                        {
+                            Log.Debug($"LOOT WALL DETOUR: {agent} point={objective.Location.Id} exhausted accessible stands");
+                            objective.Status = ObjectiveStatus.Failed;
+                            TrackArrivalFailure(agent, objective.Location);
+                            break;
+                        }
+                        if (result == WallLootApproach.Result.Moving) break;
+                        inRadius = true;
+                        corpseFallback = body != null && distanceSqr > CorpseApproach.PreferredSqr;
+                        ClearLoSBlockedTracking(agent);
+                    }
+                    if (!inRadius && body != null && distanceSqr > CorpseApproach.PreferredSqr && distanceSqr <= CorpseApproach.SearchRadiusSqr
                         && (objective.CorpseProbing || agent.Movement.Status == MovementStatus.Failed
                             || agent.Movement.Status == MovementStatus.Stopped && Time.time - objective.DispatchTime > DispatchGraceSeconds))
                     {
@@ -291,8 +310,14 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                             break;
                         }
                         corpseFallback = distanceSqr <= CorpseApproach.LimitSqr;
+                        if (!corpseFallback && IsLootableForAgent(agent, objective.Location)
+                            && !HasArrivalLineOfSight(agent, objective.Location, out arrivalHit) && arrivalHit.collider != null)
+                        {
+                            BeginWallDetour(agent, arrivalHit);
+                            break;
+                        }
                     }
-                    if (corpseFallback || distanceSqr <= (body != null ? CorpseApproach.PreferredSqr : objective.Location.RadiusSqr))
+                    if (!inRadius && (corpseFallback || distanceSqr <= (body != null ? CorpseApproach.PreferredSqr : objective.Location.RadiusSqr)))
                     {
                         if (objective.Location.Category == WaypointCategory.Quest)
                         {
@@ -317,6 +342,11 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                                 else if (agent.LoSBlockedPoiId != objective.Location.Id)
                                     Log.Debug($"LOOT APPROACH BLOCKED: {agent} point={objective.Location.Id} collider={arrivalHit.collider?.name ?? "none"} distance={arrivalHit.distance:F2} nav={objective.Location.Position} target={objective.Location.Target?.transform.position}");
                                 arrivalRefusal = "line-of-sight";
+                                if (arrivalHit.collider != null && IsLootableForAgent(agent, objective.Location))
+                                {
+                                    BeginWallDetour(agent, arrivalHit);
+                                    break;
+                                }
                                 if (TrackLoSBlocked(agent, objective.Location)) continue;
                             }
                         }
@@ -326,14 +356,16 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                             ClearLoSBlockedTracking(agent);
                         }
                     }
-                    else if (objective.Location.Category != WaypointCategory.Corpse && agent.Movement.Status == MovementStatus.Stopped
+                    else if (!inRadius && objective.Location.Category != WaypointCategory.Corpse
+                             && (agent.Movement.Status == MovementStatus.Stopped || agent.Movement.Status == MovementStatus.Failed
+                                 && IsLootableForAgent(agent, objective.Location))
                              && distanceSqr <= (agent.Squad.CorpseEscort.IsEscortWaypoint(objective.Location) ? 4f : NavSnapArrivalRadiusSqr)
                              && (RequiresArrivalLoSCheck(objective.Location.Category) || agent.Squad.CorpseEscort.IsEscortWaypoint(objective.Location)))
                     {
                         var arrivalClear = objective.Location.Category == WaypointCategory.Quest
                             ? QuestArrivalAllowed(agent, objective.Location, out arrivalRefusal)
                             : HasArrivalLineOfSight(agent, objective.Location, out arrivalHit);
-                        if (arrivalClear)
+                        if (arrivalClear && agent.Movement.Status == MovementStatus.Stopped)
                         {
                             Log.Debug($"{agent} BSG nav-snap arrival rescue: stopped {Mathf.Sqrt(distanceSqr):F1}m off {objective.Location}, approach clear, checking target floor");
                             inRadius = true;
@@ -341,7 +373,12 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                         }
                         else
                         {
-                            if (objective.Location.Category != WaypointCategory.Quest) arrivalRefusal = "line-of-sight";
+                            if (arrivalHit.collider != null && IsLootableForAgent(agent, objective.Location))
+                            {
+                                BeginWallDetour(agent, arrivalHit);
+                                break;
+                            }
+                            if (!arrivalClear && objective.Location.Category != WaypointCategory.Quest) arrivalRefusal = "line-of-sight";
                             ClearLoSBlockedTracking(agent);
                         }
                     }
@@ -735,6 +772,14 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
         if (dist < 0.01f) return true; // basically on top of the POI
         var blocked = Physics.Raycast(head, direction / dist, out hit, dist, LayersMaskController.HighPolyWithTerrainMask, QueryTriggerInteraction.Ignore);
         return !blocked;
+    }
+
+    private static void BeginWallDetour(Agent agent, RaycastHit hit)
+    {
+        var objective = agent.Objective;
+        objective.WallApproach = new WallLootApproachState(objective.Location);
+        ClearLoSBlockedTracking(agent);
+        Log.Debug($"LOOT WALL DETOUR: {agent} point={objective.Location.Id} reason=line-of-sight collider={hit.collider.name}");
     }
 
     private static void LogAirdropArrival(Agent agent, Waypoint point, RaycastHit hit, bool clear)
