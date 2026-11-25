@@ -51,7 +51,7 @@ namespace Orbit.Entities
 {
     public partial class Squad { public float GhostFightUntil; public RushPort Rush; }
     public class RushPort { public SniperPort Sniper; }
-    public class SniperPort { public bool Watch(Agent a) => false; }
+    public class SniperPort { public bool Watch(Agent a) => false; public bool IsPostShift(Agent a) => false; }
     public class AreaSweepPool
     {
         public const int MaxCandidates = 32;

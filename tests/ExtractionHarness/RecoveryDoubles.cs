@@ -18,8 +18,9 @@ namespace UnityEngine.AI
     public static partial class NavMesh
     {
         public static bool Connected=true;public static int PathQueries;
+        public static Func<Vector3, Vector3, NavMeshPath, bool> Route;
         public static bool CalculatePath(Vector3 a,Vector3 b,int areas,NavMeshPath path)
-        {PathQueries++;path.corners=Connected ? new[]{a,b} : Array.Empty<Vector3>();path.status=Connected?NavMeshPathStatus.PathComplete:NavMeshPathStatus.PathInvalid;return Connected;}
+        {PathQueries++;if(Route!=null)return Route(a,b,path);path.corners=Connected ? new[]{a,b} : Array.Empty<Vector3>();path.status=Connected?NavMeshPathStatus.PathComplete:NavMeshPathStatus.PathInvalid;return Connected;}
     }
 }
 public class BotMover

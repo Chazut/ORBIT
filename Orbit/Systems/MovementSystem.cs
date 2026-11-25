@@ -247,6 +247,26 @@ public partial class MovementSystem
     public void MoveToDirect(Agent agent, Vector3 destination)
         => throw new NotImplementedException();
 
+    // The extraction planner already verified a complete path from the previous waypoint.
+    // Join its first corner from the actual arrival position. Special movement orders still
+    // use the normal job pipeline, including grenade detours and sniper path restrictions.
+    internal bool TryContinueExfilPath(Agent agent, Vector3 destination, Vector3[] corners, bool sprint)
+    {
+        if (corners == null || corners.Length < 2 || (corners[0] - agent.Position).sqrMagnitude > 9f
+            || (corners[corners.Length - 1] - destination).sqrMagnitude > 1f
+            || agent.GrenadeInterruptions?.Armed(Time.time) == true || agent.Squad?.Rush?.Sniper?.IsPostShift(agent) == true
+            || NavMesh.Raycast(agent.Position, corners[0], out _, NavMesh.AllAreas))
+            return false;
+
+        var job = new NavJob(corners[0], destination) { Path = corners, Status = NavMeshPathStatus.PathComplete };
+        StartMovement(agent, job, continuing: true);
+        if (job.Status == NavMeshPathStatus.PathInvalid) return false;
+        agent.Movement.PathRevision++;
+        agent.Movement.Retry = 0;
+        ResetGait(agent, sprint: sprint);
+        return true;
+    }
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void MoveRetry(Agent agent, Vector3 destination)
     {
@@ -334,12 +354,13 @@ public partial class MovementSystem
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static void StartMovement(Agent agent, NavJob job)
+    private static void StartMovement(Agent agent, NavJob job, bool continuing = false)
     {
-        if(job.Status!=NavMeshPathStatus.PathInvalid&&DirectionalMineSafety.Blocks(agent.Position,job.Path,out _))
-            job.Status=NavMeshPathStatus.PathInvalid;
+        if (job.Status != NavMeshPathStatus.PathInvalid && DirectionalMineSafety.Blocks(agent.Position, job.Path, out _))
+            job.Status = NavMeshPathStatus.PathInvalid;
         if (job.Status == NavMeshPathStatus.PathInvalid)
         {
+            if (continuing) return;
             agent.Movement.Failures.FailedRoute(agent.Position);
             Log.Debug($"{agent} movement failed due to an invalid path");
             agent.Movement.Target = job.Target;
@@ -351,7 +372,7 @@ public partial class MovementSystem
 
         // A dormant bot's BotMover sleeps with the GameObject — leave it alone, the wake resync restores
         // the Stop+Pause state before the mover runs again.
-        if (!agent.IsDormant)
+        if (!agent.IsDormant && !(continuing && agent.Bot.Mover.Pause))
         {
             agent.Bot.Mover.Stop();
             agent.Bot.Mover.Pause = true;

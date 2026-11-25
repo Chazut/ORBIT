@@ -14,6 +14,11 @@ internal sealed class ExfilApproach(Agent agent, MovementSystem movement, Waypoi
     private readonly OperationRouteSearch _route = new();
     private readonly OperationProgress _progress = new();
     private readonly List<Vector3> _history = new();
+    private readonly List<Vector3> _aheadHistory = new();
+    private const float ArrivalSqr = 2f * 2f;
+    private const float LookaheadSqr = 12f * 12f;
+    private bool _aheadStarted, _aheadFinal;
+    private Vector3 _aheadLeg;
     private Waypoint _exit;
     private Vector3 _leg, _searchOrigin;
     private float _nextSearch, _nextEligibility, _lastTick, _elapsed, _issuedAt;
@@ -41,7 +46,7 @@ internal sealed class ExfilApproach(Agent agent, MovementSystem movement, Waypoi
         waypoints.CancelOperationWork(this);
         _enabled = _walking = _holdingGate = false;
         _lastTick = 0;
-        _route.Reset();
+        ClearSearch();
     }
 
     internal bool Tick(bool sprint)
@@ -78,7 +83,9 @@ internal sealed class ExfilApproach(Agent agent, MovementSystem movement, Waypoi
         if (bunker && UpdateBunkerStage(exit)) return true;
         var target = WoodsBunkerAccess.Destination(exit);
         // ZB-014 owns its final approach all the way into the trigger, including inside the loose 25m radius.
-        if (!bunker && ((target - agent.Position).sqrMagnitude <= 625f || ExfilArrival.IsInside(agent, exit)))
+        var distanceToLegSqr = (agent.Position - _leg).sqrMagnitude;
+        var approachingWaypoint = _walking && !_finalLeg && distanceToLegSqr > ArrivalSqr;
+        if (!bunker && ((!approachingWaypoint && (target - agent.Position).sqrMagnitude <= 625f) || ExfilArrival.IsInside(agent, exit)))
         {
             if (_enabled) { Pause(); objective.Status = ObjectiveStatus.None; Report("final", "local exit approach"); }
             return false;
@@ -98,10 +105,10 @@ internal sealed class ExfilApproach(Agent agent, MovementSystem movement, Waypoi
         if (_walking)
         {
             _progress.ObserveLeg(agent.Position, _elapsed);
-            if (!(bunker && _finalLeg) && (agent.Position - _leg).sqrMagnitude <= 4f)
+            if (!(bunker && _finalLeg) && distanceToLegSqr <= ArrivalSqr)
             {
                 OperationRouteSearch.Remember(_history, _leg);
-                _progress.ReachedLeg(); _walking = false; _route.Reset();
+                _progress.ReachedLeg(); _walking = false;
                 _failures = _progress.Stalled(_elapsed) ? Mathf.Min(2, _failures + 1) : 0;
                 Report("reached", $"point={_leg}");
             }
@@ -113,27 +120,82 @@ internal sealed class ExfilApproach(Agent agent, MovementSystem movement, Waypoi
                 Retry("leg stopped advancing");
                 return true;
             }
-            else return true;
+            else
+            {
+                if (!_finalLeg && distanceToLegSqr <= LookaheadSqr && agent.Movement.HasPath
+                    && agent.Movement.Status == MovementStatus.Moving)
+                    PrepareNextLeg(target);
+                return true;
+            }
+        }
+        if (_aheadStarted)
+        {
+            if (_failures == 0 && distanceToLegSqr <= ArrivalSqr)
+            {
+                if (_route.Pending)
+                {
+                    PrepareNextLeg(target);
+                    if (_route.Pending) return true;
+                }
+                if (_route.RouteCorners != null && movement.TryContinueExfilPath(agent, _aheadLeg, _route.RouteCorners, _sprint))
+                {
+                    BeginLeg(_aheadLeg, _aheadFinal, target, true);
+                    return true;
+                }
+            }
+            // A speculative miss never penalizes the exit. Search from the actual arrival
+            // position with the normal history, expansion and shared work budget.
+            ClearSearch();
+            waypoints.ContinueOperationWork(this);
+            return true;
         }
         if (now < _nextSearch || !waypoints.TryOperationWork(this)) return true;
         if (!_route.Pending || (agent.Position - _searchOrigin).sqrMagnitude > 9f)
         { _route.Reset(); _searchOrigin = agent.Position; }
-        if (!_route.Find(agent.Position, target, out _leg, out var final,
-                _failures, _history, floorAware: true, allowedPoint: AllowedPoint,
-                finalPoint: _stage == BunkerStage.Gate ? _gateStep.InteractionCheck
-                    : _stage == BunkerStage.Room ? InsideRoom : null, localAccess: bunker))
+        if (!FindLeg(agent.Position, target, _history, _failures, out var point, out var final))
         {
             if (_route.Pending) { waypoints.ContinueOperationWork(this); return true; }
             Retry("no connected approach; " + _route.Diagnostics);
             return true;
         }
-        _progress.BeginLeg(_route.RouteCorners, _elapsed);
-        _walking = true; _finalLeg = final; _issuedAt = _elapsed;
-        objective.DispatchTime = now; objective.ArrivalPath = null;
-        // Follow the verified leg directly, without travel-style detours around its endpoint.
-        movement.MoveToByPath(agent, _leg, sprint: _sprint);
-        Report("leg", $"point={_leg} final={final} remaining={Vector3.Distance(agent.Position, target):F1}m");
+        movement.MoveToByPath(agent, point, sprint: _sprint);
+        BeginLeg(point, final, target, false);
         return true;
+    }
+
+    private void PrepareNextLeg(Vector3 target)
+    {
+        if ((_aheadStarted && !_route.Pending) || !waypoints.TryOperationWork(this)) return;
+        if (!_aheadStarted)
+        {
+            _aheadStarted = true;
+            _aheadHistory.Clear();
+            _aheadHistory.AddRange(_history);
+            OperationRouteSearch.Remember(_aheadHistory, _leg);
+        }
+        if (!FindLeg(_leg, target, _aheadHistory, 0, out _aheadLeg, out _aheadFinal) && _route.Pending)
+            waypoints.ContinueOperationWork(this);
+    }
+
+    private bool FindLeg(Vector3 origin, Vector3 target, List<Vector3> history, int failures, out Vector3 point, out bool final)
+        => _route.Find(origin, target, out point, out final, failures, history, floorAware: true, allowedPoint: AllowedPoint,
+            finalPoint: _stage == BunkerStage.Gate ? _gateStep.InteractionCheck
+                : _stage == BunkerStage.Room ? InsideRoom : null, localAccess: _stage != BunkerStage.None);
+
+    private void ClearSearch()
+    {
+        _aheadStarted = false;
+        _route.Reset();
+    }
+
+    private void BeginLeg(Vector3 point, bool final, Vector3 target, bool prepared)
+    {
+        _leg = point;
+        _progress.BeginLeg(_route.RouteCorners, _elapsed);
+        ClearSearch();
+        _walking = true; _finalLeg = final; _issuedAt = _elapsed;
+        agent.Objective.DispatchTime = Time.time; agent.Objective.ArrivalPath = null;
+        Report("leg", $"point={_leg} final={final} remaining={Vector3.Distance(agent.Position, target):F1}m prepared={prepared}");
     }
 
     private bool UpdateBunkerStage(Waypoint exit)
@@ -173,7 +235,7 @@ internal sealed class ExfilApproach(Agent agent, MovementSystem movement, Waypoi
         if (!_holdingGate)
         {
             MovementSystem.StopExfilApproach(agent);
-            _route.Reset(); _walking = false; _lastAdvance = _elapsed;
+            ClearSearch(); _walking = false; _lastAdvance = _elapsed;
             _holdingGate = true;
         }
         if (_elapsed - _lastAdvance > 45f) AbandonBunker("native door interaction did not complete");
@@ -197,7 +259,7 @@ internal sealed class ExfilApproach(Agent agent, MovementSystem movement, Waypoi
     {
         if (_stage != BunkerStage.None && ++_bunkerRetries >= 3 && _elapsed - _lastAdvance >= 45f)
         { AbandonBunker(reason); return; }
-        _walking = false; _route.Reset(); MovementSystem.StopExfilApproach(agent);
+        _walking = false; ClearSearch(); MovementSystem.StopExfilApproach(agent);
         _failures = Mathf.Min(2, _failures + 1);
         _nextSearch = Time.time + (_failures < 2 ? 3f : 10f);
         Report("retry", reason);

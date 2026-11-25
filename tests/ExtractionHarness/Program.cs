@@ -207,6 +207,7 @@ Check(cache.Car.gameObject.ComponentLookups==1,"trigger collider lookup cached a
 Check(allocated==0,$"countdown tick must allocate zero bytes, got {allocated}");
 
 BunkerTests.Run(Check);
+ExfilLookaheadTests.Run(Check);
 FailedExitTests.Run(Check);
 RetainedExitRecoveryTests.Run(Check);
 QuestArrivalTests.Run(Check);
@@ -229,6 +230,8 @@ sealed class Scenario
     {
         Time.time=0;Time.deltaTime=0.02f;Log.Messages.Clear();Physics.Blocked=false;
         UnityEngine.AI.NavMesh.Sampler = null;
+        UnityEngine.AI.NavMesh.Route = null;
+        DirectionalMineSafety.Blocked = false;
         UnityEngine.AI.NavMesh.Connected = true;
         Physics.LineBlock = null;
         Car=NewCar(collider);Exit=NewExit(Car,100);
@@ -246,6 +249,7 @@ sealed class Scenario
     public Agent Add(bool solo, Vector3 position=default,ObjectiveStatus status=ObjectiveStatus.Extracting,bool active=true,Waypoint location=null)
     {
         var a=new Agent { Id=nextId++,Squad=Squad,SoloExtractRequested=solo,Position=position,IsActive=active };
+        a.Movement.OrdersOwner = Movement;
         a.Objective.Location=location??Exit;a.Objective.Status=status;
         if(solo)a.SoloExtractTarget=a.Objective.Location;
         Squad.NearestExfilCached=a.Objective.Location;Squad.NearestExfilCachedAt=Time.time;
