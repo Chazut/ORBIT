@@ -225,7 +225,7 @@ public class PoiGuardConfig
 /// <summary>F12 "07. Advection &amp; convergence" plus the convergence master toggle.</summary>
 public class ZonesConfig
 {
-    public bool QuestScavAttraction { get; set; }
+    public bool QuestScavAttraction { get; set; } = true;
     public float QuestScavRadius { get; set; } = 700f;
     public float ZoneRadiusScale { get; set; } = 1f;
     public float ZoneForceScale { get; set; } = 1f;
