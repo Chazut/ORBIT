@@ -1,4 +1,5 @@
-using System.Collections.Generic;
+using System.Runtime.CompilerServices;
+using System.Text.RegularExpressions;
 using EFT.Interactive;
 using UnityEngine;
 
@@ -7,12 +8,30 @@ namespace Orbit.Navigation;
 /// <summary>Physical loot access uses the object, never its sampled navigation point.</summary>
 internal static class LootVisibility
 {
-    // Unity-thread scratch storage. Clear after use so scene objects never survive a raid here.
-    private static readonly List<LootableContainer> propContainers = new(2);
+    private enum Surface { Other, Wall, Building }
+    private sealed class SurfaceInfo(Surface value) { internal readonly Surface Value = value; }
+    private static readonly ConditionalWeakTable<Collider, SurfaceInfo> surfaces = new();
+    private static readonly ConditionalWeakTable<Collider, SurfaceInfo>.CreateValueCallback classify = Classify;
+    private static readonly RaycastHit[] scratch = new RaycastHit[16];
+
+    // Match structural asset identifiers. In particular a wall-mounted lamp or clock is its own asset.
+    private const string Start = @"(?:^|[^a-zA-Z]|(?<=[a-z])(?=[A-Z]))";
+    private const string End = @"(?=$|[^a-zA-Z]|(?-i:[A-Z]))";
+    private const string WallPart = @"(?i:tile|panel|brick|concrete|wood|metal|plaster|glass|ext|int|block|ballistic|collider|collision|lod)";
+    private static readonly Regex wall = new(Start + @"(?i:walls?|partitions?|stena)(?:[_ .-]*"
+        + WallPart + End + @"|(?=$|[_ .()-]*[0-9]|[ ()]*$))");
+    private static readonly Regex building = new(Start + @"(?i:room|hallway|corridor|building|factory|hostel)" + End);
+    private static readonly Regex collisionNode = new(
+        @"^(?:ballistic|colliders?|collision|coll|lod[0-9]*|mesh|concrete|stone|metal(?:thin|thick)?|wood(?:thin|thick)?)(?:$|[_ .(0-9-])",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
     internal static Vector3 Target(InteractableObject target)
     {
         if (target is LootableContainer container && container.Collider != null)
-            return container.Collider.bounds.center;
+        {
+            var bounds = container.Collider.bounds;
+            if (bounds.size.sqrMagnitude > 0f) return bounds.center;
+        }
         // A corpse's root remains at the death position while its pelvis can move with the ragdoll.
         return BodyPosition(target) + Vector3.up * .1f;
     }
@@ -27,33 +46,78 @@ internal static class LootVisibility
     {
         hit = default;
         if (target == null) return false;
-        if (target is LootableContainer crate && AirdropVisibility.IsRegistered(crate))
-            return AirdropVisibility.Check(head, crate, out hit);
-        var direction = Target(target) - head;
+        var end = Target(target);
+        var direction = end - head;
         var distance = direction.magnitude;
         if (distance < .01f) return true;
-        if (!Physics.Raycast(head, direction / distance, out hit, distance,
-                LayersMaskController.HighPolyWithTerrainMask, QueryTriggerInteraction.Ignore)) return true;
-        var obstacle = hit.collider != null ? hit.collider.transform : null;
-        if (obstacle == null) return false;
-        if (obstacle == target.transform || obstacle.IsChildOf(target.transform)) return true;
-        return IsContainerShell(target, obstacle);
+        direction /= distance;
+        if (FindWall(head, direction, distance, target.transform, out hit)) return false;
+
+        // Some map meshes have one-sided faces. Use the same segment from the other side.
+        if (!FindWall(end, -direction, distance, target.transform, out hit)) return true;
+        hit.distance = distance - hit.distance;
+        return false;
     }
 
-    // Some props put the interaction box and the ballistic mesh on sibling objects.
-    // The sports bag uses this layout. Limit ownership to its immediate LOD prop,
-    // never a map/room ancestor or a collider name shared by every bag in the scene.
-    internal static bool IsContainerShell(InteractableObject target, Transform obstacle)
+    private static bool FindWall(Vector3 origin, Vector3 direction, float distance, Transform target, out RaycastHit wallHit)
     {
-        if (target is not LootableContainer || obstacle == null) return false;
-        var prop = target.transform.parent;
-        if (prop == null || prop.GetComponent<LODGroup>() == null || !obstacle.IsChildOf(prop)) return false;
-        try
+        var hits = scratch;
+        var count = Physics.RaycastNonAlloc(origin, direction, hits, distance,
+            LayersMaskController.HighPolyWithTerrainMask, QueryTriggerInteraction.Ignore);
+        // NonAlloc does not guarantee the nearest hits when the buffer fills.
+        if (count == hits.Length)
         {
-            prop.GetComponentsInChildren(true, propContainers);
-            return propContainers.Count == 1 && propContainers[0] == target;
+            hits = Physics.RaycastAll(origin, direction, distance,
+                LayersMaskController.HighPolyWithTerrainMask, QueryTriggerInteraction.Ignore);
+            count = hits.Length;
         }
-        finally { propContainers.Clear(); }
+        wallHit = default;
+        var nearest = float.PositiveInfinity;
+        for (int i = 0; i < count; i++)
+        {
+            var contact = hits[i];
+            var collider = contact.collider;
+            if (collider == null || contact.distance <= 0f || contact.distance >= distance || contact.distance >= nearest) continue;
+            var surface = surfaces.GetValue(collider, classify).Value;
+            if (surface != Surface.Wall && (surface != Surface.Building || !IsPartitionFace(collider, contact))) continue;
+            if (collider.transform.IsChildOf(target)) continue;
+            nearest = contact.distance;
+            wallHit = contact;
+        }
+        return nearest < float.PositiveInfinity;
+    }
+
+    // Maps also batch a room's walls, floor and trim into one ballistic mesh. Only a vertical
+    // face that continues overhead on the very same plane is evidence of a partition there.
+    private static bool IsPartitionFace(Collider collider, RaycastHit hit)
+    {
+        if (Mathf.Abs(hit.normal.y) > .25f) return false;
+        var probe = new Ray(hit.point + Vector3.up * 1.5f + hit.normal * .1f, -hit.normal);
+        return collider.Raycast(probe, out var upper, .2f)
+            && Mathf.Abs(upper.distance - .1f) <= .04f && Vector3.Dot(upper.normal, hit.normal) > .95f;
+    }
+
+    private static SurfaceInfo Classify(Collider collider)
+    {
+        var name = collider.name;
+        var surface = AssetSurface(name);
+        if (surface == Surface.Other && collider is MeshCollider mesh && mesh.sharedMesh != null)
+            surface = AssetSurface(mesh.sharedMesh.name);
+        // A generic collision node can belong to a named structural prefab. Stop at the
+        // first actual asset so a prop does not inherit the identity of an entire building.
+        for (var parent = collider.transform.parent; surface == Surface.Other && parent != null
+                && collisionNode.IsMatch(name); parent = parent.parent)
+        {
+            name = parent.name;
+            surface = AssetSurface(name);
+        }
+        return new SurfaceInfo(surface);
+    }
+
+    private static Surface AssetSurface(string name)
+    {
+        if (wall.IsMatch(name)) return Surface.Wall;
+        return building.IsMatch(name) ? Surface.Building : Surface.Other;
     }
 }
 
@@ -61,6 +125,7 @@ internal static class LootVisibility
 internal sealed class LootAccessGuard
 {
     private int checkedFrame = -1;
+    private bool checkedDormant;
     private bool consumed;
     internal void Reset() { checkedFrame = -1; consumed = false; }
     // A successful loose-item transaction removes its world object. Only completion may
@@ -69,10 +134,11 @@ internal sealed class LootAccessGuard
     internal bool Check(int frame, bool dormant, Vector3 head, InteractableObject target, out RaycastHit hit)
     {
         hit = default;
-        if (dormant || consumed) return true;
+        if (consumed) return true;
         if (target == null) return false;
-        if (checkedFrame == frame) return true;
+        if (checkedFrame == frame && checkedDormant == dormant) return true;
         if (!LootVisibility.Check(head, target, out hit)) return false;
+        checkedDormant = dormant;
         checkedFrame = frame;
         return true;
     }

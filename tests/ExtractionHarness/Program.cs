@@ -211,6 +211,24 @@ ExfilLookaheadTests.Run(Check);
 FailedExitTests.Run(Check);
 RetainedExitRecoveryTests.Run(Check);
 QuestArrivalTests.Run(Check);
+foreach (bool ghost in new[] { false, true })
+foreach (var (category, target, drop) in new (WaypointCategory, InteractableObject, bool)[] {
+    (WaypointCategory.LooseLoot, new LootItem(), false), (WaypointCategory.Corpse, new Corpse(), false),
+    (WaypointCategory.ContainerLoot, new LootableContainer(), false), (WaypointCategory.ContainerLoot, new LootableContainer(), true) })
+{
+    var scene = new Scenario();
+    scene.Squad.ExtractRequested = false;
+    var poi = new Waypoint(42, category, "loot", default, 1f, new(), new(), target) { IsAirdrop = drop };
+    var looter = scene.Add(false, new(.6f, 0f, 0f), ObjectiveStatus.None, location: poi);
+    looter.IsDormant = ghost;
+    Physics.Blocked = true;
+    Physics.FirstHit = new Collider { name = "Wall_tile_5x10_BALLISTIC_concrete" };
+    scene.Tick(1); scene.Tick(2);
+    Check(looter.Objective.Status == ObjectiveStatus.Moving, $"a wall prevents {category} arrival, ghost={ghost}, drop={drop}");
+    Physics.FirstHit = new Collider { name = "card_file_Box_BALLISTIC_metalthin" };
+    scene.Tick(3);
+    Check(looter.Objective.Status == ObjectiveStatus.Looting, $"same-side {category} hands off to loot, ghost={ghost}, drop={drop}");
+}
 CorpseApproachTests.Run(Check);
 Console.WriteLine($"Extraction: {checks} checks passed; 10000 steady ticks = {allocated} allocated bytes. Real actions/task manager with engine doubles.");
 

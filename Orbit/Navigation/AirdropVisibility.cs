@@ -4,7 +4,7 @@ using UnityEngine;
 
 namespace Orbit.Navigation;
 
-/// <summary>Use the crate, not its ground navigation point, for discovery and arrival sight.</summary>
+/// <summary>Use the crate, not its ground navigation point, for visual discovery.</summary>
 internal static class AirdropVisibility
 {
     private static readonly ConditionalWeakTable<LootableContainer, Transform> Crates = new();
@@ -15,8 +15,6 @@ internal static class AirdropVisibility
         Crates.Remove(container);
         Crates.Add(container, crateRoot);
     }
-
-    internal static bool IsRegistered(LootableContainer container) => Crates.TryGetValue(container, out _);
 
     internal static Vector3 Target(LootableContainer container) => container.transform.position + Vector3.up;
 

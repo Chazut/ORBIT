@@ -8,6 +8,8 @@ namespace UnityEngine
     {
         public static Vector3 up => new(0, 1, 0);
         public float sqrMagnitude => x * x + y * y + z * z;
+        public static Vector3 operator -(Vector3 a) => a * -1;
+        public static float Dot(Vector3 a, Vector3 b) => a.x * b.x + a.y * b.y + a.z * b.z;
         public float magnitude => MathF.Sqrt(sqrMagnitude);
         public static float Distance(Vector3 a, Vector3 b) => (a - b).magnitude;
         public static Vector3 operator +(Vector3 a, Vector3 b) => new(a.x + b.x, a.y + b.y, a.z + b.z);
@@ -17,6 +19,7 @@ namespace UnityEngine
     }
     public class Transform
     {
+        public string name = "";
         public Vector3 position;
         public Transform parent;
         public bool IsChildOf(Transform t) => this == t || parent?.IsChildOf(t) == true;
@@ -32,17 +35,43 @@ namespace UnityEngine
     }
     public class Collider
     {
+        public string name = "";
+        public Func<Ray, float, RaycastHit?> SurfaceProbe;
+        public bool Raycast(Ray ray, out RaycastHit hit, float length)
+        {
+            var result = SurfaceProbe?.Invoke(ray, length);
+            hit = result.GetValueOrDefault();
+            return result.HasValue;
+        }
         public Transform transform = new();
         public Bounds bounds;
         public Func<Vector3, Vector3> Closest = p => p;
         public Vector3 ClosestPoint(Vector3 p) => Closest(p);
     }
+    public readonly record struct Ray(Vector3 origin, Vector3 direction);
+    public class Mesh { public string name; }
+    public class MeshCollider : Collider { public Mesh sharedMesh; }
     public enum QueryTriggerInteraction { Ignore }
-    public struct RaycastHit { public Collider collider; }
+    public struct RaycastHit { public Collider collider; public float distance; public Vector3 normal, point; }
     public static class Physics
     {
         public static Collider FirstHit;
         public static Vector3 End;
+        public static int Queries, Overflows;
+        public static Func<Vector3, Vector3, float, RaycastHit[]> Intersections;
+        public static int RaycastNonAlloc(Vector3 start, Vector3 direction, RaycastHit[] buffer, float length, int mask, QueryTriggerInteraction triggers)
+        {
+            Queries++;
+            var hits = Intersections(start, direction, length);
+            int count = Math.Min(hits.Length, buffer.Length);
+            Array.Copy(hits, buffer, count);
+            return count;
+        }
+        public static RaycastHit[] RaycastAll(Vector3 start, Vector3 direction, float length, int mask, QueryTriggerInteraction triggers)
+        {
+            Overflows++;
+            return Intersections(start, direction, length);
+        }
         public static bool Raycast(Vector3 start, Vector3 direction, out RaycastHit hit, float length, int mask, QueryTriggerInteraction triggers)
         {
             End = start + direction * length;

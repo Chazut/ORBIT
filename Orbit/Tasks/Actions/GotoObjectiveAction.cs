@@ -257,21 +257,7 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                         MovementSystem.ResetGait(agent);
                     }
 
-                    // Arrival gate — two-stage check that both prevents looting through walls AND tolerates
-                    // BSG's nav-snap drift:
-                    //
-                    //   1. Within the strict 1m radius → still require a
-                    // Physics.Raycast LoS clear between the bot's head and the POI. A bot standing 0.9m from
-                    // a loot pile on the OTHER side of a wall would otherwise pass the euclidean check and
-                    // loot through the wall. Uses the same HighPolyWithTerrainMask BSG uses natively — tests
-                    // real 3D world geometry, not navmesh edges.
-                    //
-                    //   2. Between 1m and 4m, AND bot is Stopped (BSG
-                    // reports "destination reached" but stopped on the nearest navmesh node, 1.5-2.5m off the
-                    // exact Waypoint.Position) → same Physics raycast LoS check. BSG nav-snap rescue path.
-                    //
-                    // Lootables only — Synthetic / Exfil still use the wide radius without LoS (those don't
-                    // suffer from through-wall validation).
+                    // Normal loot arrival and stopped nav-snap recovery use the same wall check.
                     // Exfil stuck timer hygiene: if the bot has walked OUT of the exfil radius (combat
                     // pulled them away, etc.) clear the outside-trigger timer so the next re-entry gets
                     // a fresh 15 s window. Only the Exfil category uses the timer; other categories' field
@@ -308,15 +294,13 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                     }
                     if (corpseFallback || distanceSqr <= (body != null ? CorpseApproach.PreferredSqr : objective.Location.RadiusSqr))
                     {
-                        // Quest arrival uses simulated feet for both awake and sleeping agents. Loot keeps
-                        // its existing head-based gate, skipped while the physical body is inactive.
                         if (objective.Location.Category == WaypointCategory.Quest)
                         {
                             inRadius = QuestArrivalAllowed(agent, objective.Location, out arrivalRefusal);
                             if (inRadius) ClearLoSBlockedTracking(agent);
                             else if (TrackLoSBlocked(agent, objective.Location, arrivalRefusal)) continue;
                         }
-                        else if (corpseFallback || (RequiresArrivalLoSCheck(objective.Location.Category) || agent.Squad.CorpseEscort.IsEscortWaypoint(objective.Location)) && !agent.IsDormant)
+                        else if (RequiresArrivalLoSCheck(objective.Location.Category) || (!agent.IsDormant && agent.Squad.CorpseEscort.IsEscortWaypoint(objective.Location)))
                         {
                             if (HasArrivalLineOfSight(agent, objective.Location, out arrivalHit))
                             {
@@ -389,9 +373,6 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                                 }
                                 if (objective.Location.IsAirdrop && !agent.IsDormant)
                                     LogAirdropArrival(agent, objective.Location, arrivalHit, true);
-                                else if (!agent.IsDormant && arrivalHit.collider != null
-                                    && LootVisibility.IsContainerShell(objective.Location.Target as InteractableObject, arrivalHit.collider.transform))
-                                    Log.Debug($"LOOT CONTAINER SHELL: {agent} point={objective.Location.Id} collider={arrivalHit.collider.name} distance={arrivalHit.distance:F2} access=clear");
                                 objective.Status = ObjectiveStatus.Looting;
                                 // A route to our own feet can still produce lateral input after the
                                 // NavMesh projects them to a nearby point. End corpse travel here.
@@ -742,20 +723,13 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
             || category == WaypointCategory.Corpse
             || category == WaypointCategory.Quest;
 
-    // 3D world-space line-of-sight check between the bot's head and the POI, using the same
-    // HighPolyWithTerrainMask BSG uses for cover and vision tests. Real Tarkov walls are HighPoly colliders
-    // so any wall between head and POI registers as a Physics.Raycast hit. Airdrops use the crate's
-    // visibility target and accept its own collider, matching discovery rather than aiming at the ground.
     private static bool HasArrivalLineOfSight(Agent agent, Waypoint point, out RaycastHit hit)
     {
         hit = default;
-        Vector3 head;
         var lookSensor = agent.Bot?.LookSensor;
-        head = lookSensor != null && !agent.IsDormant ? lookSensor.HeadPoint : agent.Position + new Vector3(0f, 1f, 0f);
-        if (point.IsAirdrop && point.Category == WaypointCategory.ContainerLoot)
-            return AirdropVisibility.Check(head, point.Target as LootableContainer, out hit);
-        if (point.Target is InteractableObject loot)
-            return LootVisibility.Check(head, loot, out hit);
+        var head = lookSensor != null && !agent.IsDormant ? lookSensor.HeadPoint : agent.Position + Vector3.up;
+        if (point.Category is WaypointCategory.ContainerLoot or WaypointCategory.LooseLoot or WaypointCategory.Corpse)
+            return LootVisibility.Check(head, point.Target as InteractableObject, out hit);
         var direction = point.Position + Vector3.up * .1f - head;
         var dist = direction.magnitude;
         if (dist < 0.01f) return true; // basically on top of the POI
@@ -766,7 +740,7 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
     private static void LogAirdropArrival(Agent agent, Waypoint point, RaycastHit hit, bool clear)
     {
         var container = point.Target as LootableContainer;
-        var target = container != null ? AirdropVisibility.Target(container) : point.Position;
+        var target = container != null ? LootVisibility.Target(container) : point.Position;
         Log.Debug($"AIRDROP ARRIVAL: {agent} point={point.Id} clear={clear} "
             + $"collider={hit.collider?.name ?? "none"} hitDistance={hit.distance:F2} "
             + $"bot={agent.Position} target={target} targetMissing={container == null}");

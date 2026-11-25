@@ -87,7 +87,7 @@ namespace Orbit.Entities
         public List<Agent> Members = new();
     }
     public enum MovementStatus { Moving, Stopped, Failed }
-    public class Movement { public float DoorInteractHoldUntil; public MovementStatus Status; }
+    public class Movement { public bool HasPath => Status == MovementStatus.Moving; public float DoorInteractHoldUntil; public MovementStatus Status; }
     public partial class Agent
     {
         public Agent(int id = 1) : base(id, []) { }
@@ -165,6 +165,12 @@ namespace Orbit.Systems
         public static bool IsTravelPaused(Agent a) => false;
         public void MoveToByPath(Agent a, Vector3 point, bool sprint)
         { Orders.Add(point); a.Movement.Status = MovementStatus.Moving; }
+        public bool TryContinueExfilPath(Agent agent, Vector3 point, Vector3[] corners, bool sprint)
+        {
+            if (corners == null || corners.Length < 2) return false;
+            MoveToByPath(agent, point, sprint);
+            return true;
+        }
         public bool OpenObjectiveDoor(Agent a, Door door)
         { door.Opens++; door.DoorState = EDoorState.Open; return true; }
     }

@@ -30,7 +30,7 @@ namespace UnityEngine
         public T AddComponent<T>() where T : new() { var t = new T(); Components[typeof(T)] = t; return t; }
     }
     public class LODGroup { }
-    public class Transform {
+    public class Transform : Object {
         public Transform parent;
         public readonly Dictionary<Type,object> Components = new();
         public readonly List<object> ChildComponents = new();
@@ -52,6 +52,9 @@ namespace UnityEngine
         public static Vector3 operator *(float b, Vector3 a) => a*b;
         public static Vector3 operator /(Vector3 a, float b) => a*(1f/b);
         public static float Distance(Vector3 a, Vector3 b) => (a-b).magnitude;
+#if !EXTRACTION_HARNESS
+        public static float Dot(Vector3 a, Vector3 b) => a.x*b.x + a.y*b.y + a.z*b.z;
+#endif
         public static Vector3 Scale(Vector3 a, Vector3 b) => new(a.x*b.x,a.y*b.y,a.z*b.z);
         public override string ToString() => $"({x},{y},{z})";
     }
@@ -66,23 +69,34 @@ namespace UnityEngine
     public static class Random { public static float value => 0; public static float Range(float a,float b) => a; public static int Range(int a,int b) => a; }
     public struct Quaternion { public static Quaternion AngleAxis(float a,Vector3 b) => new(); public static Vector3 operator *(Quaternion q,Vector3 v) => v; }
     public struct Bounds { public Vector3 min,max; public Vector3 size => max-min; public Vector3 center => (min+max)*.5f; public Vector3 extents => size*.5f; public bool Inside,Spatial; public bool Contains(Vector3 p) => Spatial ? p.x>=min.x && p.y>=min.y && p.z>=min.z && p.x<=max.x && p.y<=max.y && p.z<=max.z : Inside; }
-    public class Collider : Object { public Transform transform = new(); public Bounds bounds; public Func<Vector3,Vector3> Closest; public Vector3 ClosestPoint(Vector3 p) => Closest?.Invoke(p) ?? new(Math.Clamp(p.x,bounds.min.x,bounds.max.x),Math.Clamp(p.y,bounds.min.y,bounds.max.y),Math.Clamp(p.z,bounds.min.z,bounds.max.z)); }
+    public readonly record struct Ray(Vector3 origin, Vector3 direction);
+    public class Mesh : Object { }
+    public class MeshCollider : Collider { public Mesh sharedMesh; }
+    public class Collider : Object { public bool Raycast(Ray ray, out RaycastHit hit, float length) { hit = default; return false; } public Transform transform = new(); public Bounds bounds; public Func<Vector3,Vector3> Closest; public Vector3 ClosestPoint(Vector3 p) => Closest?.Invoke(p) ?? new(Math.Clamp(p.x,bounds.min.x,bounds.max.x),Math.Clamp(p.y,bounds.min.y,bounds.max.y),Math.Clamp(p.z,bounds.min.z,bounds.max.z)); }
     public class BoxCollider : Collider { public Vector3 size, center; public bool enabled = true; }
     public enum QueryTriggerInteraction { Ignore }
     public static partial class Physics {
         public static bool Blocked;
         public static Collider FirstHit;
-        public static Vector3 LastTarget;
+        public static Vector3 LastTarget, LastOrigin;
         public static int SightQueries, LastMask;
         public static QueryTriggerInteraction LastTriggers;
+        public static int RaycastNonAlloc(Vector3 origin, Vector3 direction, RaycastHit[] hits, float distance, int mask, QueryTriggerInteraction triggers)
+        {
+            if (!Raycast(origin, direction, out var first, distance, mask, triggers) || first.collider == null) return 0;
+            hits[0] = first;
+            return 1;
+        }
+        public static RaycastHit[] RaycastAll(Vector3 origin, Vector3 direction, float distance, int mask, QueryTriggerInteraction triggers)
+            => Blocked ? new[] { new RaycastHit { collider = FirstHit, distance = distance * .5f } } : Array.Empty<RaycastHit>();
         public static bool Raycast(Vector3 a,Vector3 b,float c,int d) => Blocked;
         public static bool Raycast(Vector3 a,Vector3 b,out RaycastHit hit,float c,int d,QueryTriggerInteraction triggers) {
-            SightQueries++; LastTarget=a+b*c; LastMask=d; LastTriggers=triggers;
+            SightQueries++; LastOrigin=a; LastTarget=a+b*c; LastMask=d; LastTriggers=triggers;
             hit=new(){collider=FirstHit,distance=c*.5f}; return Blocked;
         }
     }
     public struct QueryParameters { public int layerMask; }
-    public struct RaycastHit { public Collider collider; public float distance; }
+    public struct RaycastHit { public Collider collider; public float distance; public Vector3 point, normal; }
     public struct RaycastCommand
     {
         public float distance; public Vector3 direction;

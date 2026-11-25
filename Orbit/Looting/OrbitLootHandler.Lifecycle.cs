@@ -63,16 +63,11 @@ public partial class OrbitLootHandler
             float distanceSqr = (Orbit.Navigation.LootVisibility.BodyPosition(CurrentTarget) - feet).sqrMagnitude;
             if (!Orbit.Navigation.CorpseApproach.WithinLootReach(distanceSqr, CorpseLootReachSqr))
                 throw new LootAccessBlockedException("corpse-out-of-reach", Mathf.Sqrt(distanceSqr));
-            if (DormantMode && CorpseLootReachSqr > Orbit.Navigation.CorpseApproach.PreferredSqr
-                && !_access.Check(Time.frameCount, false, feet + Vector3.up, CurrentTarget, out var blocked))
-                throw new LootAccessBlockedException(blocked.collider?.name ?? "missing-target", blocked.distance);
         }
-        if (!DormantMode)
-        {
-            var head = _bot.LookSensor != null ? _bot.LookSensor.HeadPoint : _player.Transform.position + Vector3.up;
-            if (!_access.Check(Time.frameCount, DormantMode, head, CurrentTarget, out var hit))
-                throw new LootAccessBlockedException(hit.collider?.name ?? "missing-target", hit.distance);
-        }
+        var origin = !DormantMode && _bot.LookSensor != null
+            ? _bot.LookSensor.HeadPoint : _player.PlayerBones.BodyTransform.position + Vector3.up;
+        if (!_access.Check(Time.frameCount, DormantMode, origin, CurrentTarget, out var hit))
+            throw new LootAccessBlockedException(hit.collider?.name ?? "missing-target", hit.distance);
     }
 
     private bool FinishSession(CancellationToken ct)
