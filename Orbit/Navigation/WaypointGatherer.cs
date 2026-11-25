@@ -25,7 +25,8 @@ public class WaypointGatherer(float cellSize, BotsController botsController)
 
     public List<Waypoint> CollectBuiltinWaypoints() => CollectBuiltinWaypoints(null);
 
-    internal List<Waypoint> CollectBuiltinWaypoints(Action<LootableContainer> registerLandedAirdrop)
+    internal List<Waypoint> CollectBuiltinWaypoints(Action<LootableContainer> registerLandedAirdrop,
+        Action<TriggerWithId> registerQuestTrigger = null)
     {
         var collection = new List<Waypoint>();
 
@@ -39,6 +40,7 @@ public class WaypointGatherer(float cellSize, BotsController botsController)
             if (trigger.transform == null)
                 continue;
 
+            registerQuestTrigger?.Invoke(trigger);
             if (QuestWaypointPlacement.IsEliminationZone(trigger.Id)
                 || QuestWaypointPlacement.IsEliminationZone(trigger.name))
             {

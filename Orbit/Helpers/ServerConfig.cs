@@ -190,6 +190,8 @@ public static class ServerConfig
 
     public sealed class ZonesSection
     {
+        [JsonProperty("quest_scav_attraction")] public bool QuestScavAttraction;
+        [JsonProperty("quest_scav_radius")] public float QuestScavRadius = 700f;
         [JsonProperty("zone_radius_scale")] public float ZoneRadiusScale = 1f;
         [JsonProperty("zone_force_scale")] public float ZoneForceScale = 1f;
         [JsonProperty("zone_falloff_scale")] public float ZoneFalloffScale = 1f;

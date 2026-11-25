@@ -127,6 +127,10 @@ With Fums' Customs 1.3 backport, choose **Customs 1.3 (Fums)** in the editor. On
 
 ### How do I attract bots to my quest area?
 
+Enable **Zones and convergence → Active quest zones → Attract scavs to active quest zones**, then save and start a raid. For tasks like **Rite of Passage**, **Long Road** and **Safe Corridor**, nearby regular scav patrols favor the areas where you still need kills. ORBIT checks progress every 30 seconds using the player quest data available to the host. The option is off by default, with an adjustable range of 700 m.
+
+You can also set up a hotspot manually.
+
 1. Open **Zone editor** and select your map/layout.
 2. Double-click the quest location to create a zone, or select an existing one.
 3. Choose the targets you need under **Bot types** and set **Zone floor** if relevant.

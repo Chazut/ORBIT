@@ -293,6 +293,18 @@ public partial class WaypointSystem
             yield break;
         }
 
+        var questPull = Vector2.zero;
+        if (_questScavs?.AppliesTo(entity as Squad) == true)
+        {
+            questPull = _questScavs.Pull(worldPos, out var inZoneColumn);
+            if (inZoneColumn && _cells[requestCoords.x, requestCoords.y].HasWaypoints)
+                foreach (var point in SearchCell(search, entity, requestCoords))
+                {
+                    if (point == null) yield return null;
+                    else if (_questScavs.PatrolWeight(point) > 1f) { yield return point; yield break; }
+                }
+        }
+
         var previousCoords = previous == null ? requestCoords : WorldToCell(previous.Position);
         var neighbors = new List<Vector2Int>(8);
 
@@ -319,7 +331,7 @@ public partial class WaypointSystem
         }
 
         var advectionVector = _advectionField[requestCoords.x, requestCoords.y]
-            + ScopedAttraction(entity as Squad, requestCoords);
+            + ScopedAttraction(entity as Squad, requestCoords) + questPull;
         var convergenceVector = _convergenceField[requestCoords.x, requestCoords.y];
         var randomization = Random.insideUnitCircle;
         randomization *= 0.5f;

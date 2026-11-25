@@ -20,6 +20,16 @@
                      Tooltip="How fast a zone's force fades with distance. Larger = tighter to the zone." />
     </SettingsCard>
 
+    <SettingsCard Title="Active quest zones" OnReset="ResetQuestZones">
+        <OrbitSwitch @bind-Value="Cfg.Zones.QuestScavAttraction" Label="Attract scavs to active quest zones"
+                     Tooltip="Draw nearby ORBIT-controlled scavs toward places where a current player task requires scav kills. Completed objectives stop attracting scavs. Save for the next raid." />
+        @if (Cfg.Zones.QuestScavAttraction)
+        {
+            <OrbitSlider T="float" @bind-Value="Cfg.Zones.QuestScavRadius" Label="Scav attraction range" Unit="m"
+                         Min="100f" Max="1000f" Step="50f" Tooltip="Distance from the quest area within which scav patrols are drawn toward it." />
+        }
+    </SettingsCard>
+
     <SettingsCard Title="Player convergence" OnReset="ResetConvergence">
         <OrbitSwitch @bind-Value="Cfg.Zones.ConvergenceEnabled" Label="Player convergence"
                      Tooltip="ON: the world gently drifts toward the human player(s), bringing more action your way. OFF (default): no pull." />
@@ -47,6 +57,13 @@
         Cfg.Zones.ZoneRadiusScale = d.ZoneRadiusScale;
         Cfg.Zones.ZoneForceScale = d.ZoneForceScale;
         Cfg.Zones.ZoneFalloffScale = d.ZoneFalloffScale;
+    }
+
+    private void ResetQuestZones()
+    {
+        var d = new ZonesConfig();
+        Cfg.Zones.QuestScavAttraction = d.QuestScavAttraction;
+        Cfg.Zones.QuestScavRadius = d.QuestScavRadius;
     }
 
     private void ResetConvergence()

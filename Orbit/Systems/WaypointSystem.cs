@@ -59,6 +59,7 @@ public partial class WaypointSystem
     // Player convergence: a per-cell pull toward the living human player(s), refreshed every 30s as
     // they move. Folded into RequestNear's preferred-direction sum alongside advection / home / main.
     private readonly List<Player> _humanPlayers;
+    private readonly QuestScavAttraction _questScavs;
     private readonly Vector2[,] _convergenceField;
     private readonly List<Vector2Int> _convergencePlayerCoords = [];
     private readonly TimePacing _convergenceUpdatePacing = new(30f);
@@ -129,7 +130,10 @@ public partial class WaypointSystem
 
         Log.Info("Gathering built in waypoints");
         _waypointGatherer = new WaypointGatherer(_cellSize, botsController);
-        var builtinWaypoints = _waypointGatherer.CollectBuiltinWaypoints(RegisterLandedAirdrop);
+        if (ServerConfig.Zones.QuestScavAttraction)
+            _questScavs = new QuestScavAttraction(_mapId, ServerConfig.Zones.QuestScavRadius);
+        var builtinWaypoints = _waypointGatherer.CollectBuiltinWaypoints(RegisterLandedAirdrop,
+            _questScavs == null ? null : _questScavs.Register);
 
         // Calculate bounds from positions
         _worldMin = geometryConfig.Min;
@@ -255,8 +259,7 @@ public partial class WaypointSystem
         Log.Info($"Convergence reloaded: enabled={ConvergenceActive} radius: {_convergenceRadius:F0} force: {_convergenceForce:F2}");
     }
 
-    /// <summary>Per-frame tick. Only refreshes the player-convergence field, on a 30s pacing — players
-    /// move, the pull follows them.</summary>
+    /// <summary>Pump deferred work each frame and refresh player-dependent attractions every 30s.</summary>
     public void Update()
     {
         PumpDispatchSearches();
@@ -270,6 +273,7 @@ public partial class WaypointSystem
 
         if (_convergenceUpdatePacing.Blocked())
             return;
+        _questScavs?.Refresh(Comfort.Common.Singleton<GameWorld>.Instance);
         CalculateConvergence();
     }
 
@@ -1946,6 +1950,8 @@ public partial class WaypointSystem
         if (entity is Squad squad)
         {
             var hasBlacklist = squad.CompletedPoiIds.Count > 0;
+            var questScavs = _questScavs?.AppliesTo(squad) == true && _questScavs.InRange(squad.Leader.Position)
+                ? _questScavs : null;
             // Timmy extra: 5% chance to "forget" the blacklist for one pick — re-considers waypoints the
             // squad already cleared.
             if (hasBlacklist
@@ -2111,9 +2117,12 @@ public partial class WaypointSystem
                     skippedExfil++;
                     continue;
                 }
-                if (floorFilterActive && loc.Category != WaypointCategory.Quest
+                var questWeight = questScavs?.PatrolWeight(loc) ?? 1f;
+                // A reachable waypoint inside the quest volume can lead down to a bunker even
+                // when the random looting floor is upstairs. Explicit zone floors still apply.
+                if (floorFilterActive && loc.Category != WaypointCategory.Quest && questWeight <= 1f
                     && Mathf.Abs(loc.Position.y - floorY.Value) > floorTolerance) continue;
-                var weight = ScopedWaypointWeight(squad, loc);
+                var weight = ScopedWaypointWeight(squad, loc) * questWeight;
                 candidates += weight;
                 if (Random.value * candidates < weight)
                     pick = loc;
@@ -2172,7 +2181,7 @@ public partial class WaypointSystem
                 if (!SquadCanUseWaypoint(squad, squadIsPmc, loc)) continue;
                 if (!CanSelectMemberDoorTarget(squad, loc)) continue;
                 if (HasFailedDoorOnPath(squad, loc)) continue;
-                var weight = ScopedWaypointWeight(squad, loc);
+                var weight = ScopedWaypointWeight(squad, loc) * (questScavs?.PatrolWeight(loc) ?? 1f);
                 fallbackCandidates += weight;
                 if (Random.value * fallbackCandidates < weight)
                     fallbackPick = loc;
