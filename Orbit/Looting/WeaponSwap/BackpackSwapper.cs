@@ -169,7 +169,7 @@ public static class BackpackSwapper
             ct.ThrowIfCancellationRequested();
             var place = ItemManipulator.QuickFindAppropriatePlace(
                 item, ic, newGrids,
-                ItemManipulator.EMoveItemOrder.PickUp, true);
+                ItemManipulator.EMoveItemOrder.Apply, true);
             if (!place.Succeeded)
             {
                 Log.Debug($"BackpackSwap.Transfer({nick}): QFAP failed for {item.LocalizedName()} — aborting transfer");

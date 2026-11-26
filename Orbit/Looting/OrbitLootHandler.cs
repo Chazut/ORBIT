@@ -1367,7 +1367,7 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
         }
 
         if (!ValidatePickup(entry, out var name, out var price, out var pricePerSlot, out var inventoryController)) return false;
-        var place = FindPlace(entry, inventoryController, name, price);
+        var place = await FindCargoPlaceAsync(entry.Item, inventoryController, ct);
         if (!place.Succeeded) return false;
 
         Log.Debug($"OrbitLootHandler.Transfer({Nick}): TRY {name} at {entry.Path} (price={price:N0}₽, perSlot={pricePerSlot:N0}₽)");
@@ -1460,15 +1460,14 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
         var entry = new DrainEntry(item, "");
         if (!ValidatePickup(entry, out var name, out var price, out var pricePerSlot, out var inventoryController)) return false;
         var player = _bot.GetPlayer;
-        var place = FindPlace(entry, inventoryController, name, price);
-        if (!place.Succeeded) return false;
-
         // Dormant fast path: the kneel animation callback would never fire on a disabled body — run the
         // transaction directly (identical data op; the world item is consumed by the transaction).
         if (DormantMode)
         {
             await Task.Delay(500, ct); // kneel-time equivalent — the animation can't play on a disabled body
             CheckSession(ct);
+            var place = await FindCargoPlaceAsync(item, inventoryController, ct);
+            if (!place.Succeeded) return false;
             var taken = await RunTransactionAsync(place, name, ct);
             CheckSession(ct);
             if (taken) RecordPickup(name, price, entry.Path);
@@ -1487,6 +1486,8 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
             }
             CheckSession(ct);
 
+            var place = await FindCargoPlaceAsync(item, inventoryController, ct);
+            if (!place.Succeeded) return false;
             Log.Debug($"OrbitLootHandler.Loose({Nick}): TRY {name} (price={price:N0}₽, perSlot={pricePerSlot:N0}₽, kneel done)");
             var success = await RunTransactionAsync(place, name, ct);
             CheckSession(ct);
@@ -1577,20 +1578,11 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
     {
         if (!HasLiveOwner) return false;
         var inventory = _bot.GetPlayer?.InventoryController;
-        return inventory != null && loot?.Item != null
-            && ItemManipulator.QuickFindAppropriatePlace(loot.Item, inventory,
-                new[] { inventory.Inventory.Equipment }, ItemManipulator.EMoveItemOrder.PickUp, true).Succeeded;
-    }
-
-    private OperationResult<IItemOperationResult> FindPlace(DrainEntry entry, InventoryController inventoryController, string name, float price)
-    {
-        var targets = new[] { inventoryController.Inventory.Equipment };
-        var place = ItemManipulator.QuickFindAppropriatePlace(
-            entry.Item, inventoryController, targets,
-            ItemManipulator.EMoveItemOrder.PickUp, true);
-        if (!place.Succeeded)
-            Log.Debug($"OrbitLootHandler.Pickup({Nick}): SKIP {name} at {entry.Path} ({entry.Item.Width}x{entry.Item.Height}, price={price:N0}₽, no slot found — {DescribeFreeSpace(inventoryController)})");
-        return place;
+        if (inventory == null || loot?.Item == null) return false;
+        if (RaidLootPlacement.Find(loot.Item, inventory).Succeeded) return true;
+        // Check the actual rearrangement at pickup, outside the spatial search.
+        return inventory.Inventory.Equipment.GetSlot(EquipmentSlot.Backpack)?.ContainedItem is CompoundItem bag
+            && bag.Grids.Any(g => CouldFit(g, loot.Item));
     }
 
     private async Task<bool> RunTransactionAsync(OperationResult<IItemOperationResult> place, string name, CancellationToken ct)
@@ -1598,7 +1590,8 @@ public partial class OrbitLootHandler : MonoBehaviour, ILootHandler
         CheckSession(ct);
         EnsureInventoryAvailable(ct);
         var inventoryController = _bot.GetPlayer?.InventoryController;
-        if (inventoryController == null || PackNStrapCompat.TakesProtectedItem(place.Value)) return false;
+        if (inventoryController == null || PackNStrapCompat.TakesProtectedItem(place.Value)
+            || RaidLootPlacement.GoesIntoSecureSlot(place.Value, inventoryController)) return false;
         try
         {
             CheckSession(ct);

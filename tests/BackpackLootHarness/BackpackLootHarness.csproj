@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><TargetFramework>net10.0</TargetFramework><OutputType>Exe</OutputType><ImplicitUsings>enable</ImplicitUsings></PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../Orbit/Looting/BackpackLayout.cs" />
+    <Compile Include="../../Orbit/Looting/RaidLootPlacement.cs" />
+    <Compile Include="../../Orbit/Looting/OrbitLootHandler.Backpack.cs" />
+  </ItemGroup>
+</Project>

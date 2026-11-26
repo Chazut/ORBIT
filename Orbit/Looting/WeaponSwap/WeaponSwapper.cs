@@ -497,6 +497,7 @@ public static partial class WeaponSwapper
         handler?.CheckInventoryForSession(ct);
         if (PackNStrapCompat.TakesProtectedItem(op.Value)) return false;
         var ic = bot.GetPlayer.InventoryController;
+        if (RaidLootPlacement.GoesIntoSecureSlot(op.Value, ic)) return false;
         Log.Debug($"WeaponSwap.{label}({nick}): tx STARTED (awaiting TryRunNetworkTransaction)");
         using var timeoutCts = new CancellationTokenSource(NetworkTransactionTimeoutMs);
         using var waitCts = CancellationTokenSource.CreateLinkedTokenSource(ct, timeoutCts.Token);
@@ -838,15 +839,12 @@ public static partial class WeaponSwapper
         candidates.Sort((a, b) => b.pricePerSlot.CompareTo(a.pricePerSlot));
 
         Log.Info($"WeaponStrip({nick}): {candidates.Count} mod(s) to strip off {weaponToDiscard.LocalizedName()} before discard");
-        var emptyGrids = new List<CompoundItem>(0); // QFAP scans the full inventory by default; null = use bot's grids
         foreach (var (slot, mod, pricePerSlot, reason) in candidates)
         {
             ct.ThrowIfCancellationRequested();
             try
             {
-                var place = ItemManipulator.QuickFindAppropriatePlace(
-                    mod, ic, emptyGrids,
-                    ItemManipulator.EMoveItemOrder.PickUp, true);
+                var place = RaidLootPlacement.Find(mod, ic);
                 if (!place.Succeeded)
                 {
                     Log.Debug($"WeaponStrip({nick}): QFAP failed for {mod.LocalizedName()} — no room, leaving on weapon");

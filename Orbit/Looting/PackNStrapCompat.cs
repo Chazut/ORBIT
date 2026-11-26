@@ -45,7 +45,7 @@ internal static class PackNStrapCompat
         return operation is IItemOperationResult pickup && IsProtected(pickup.Item);
     }
 
-    private static bool IsProtected(Item item)
+    internal static bool IsProtected(Item item)
     {
         if (item?.Owner is not CorpseItemController owner || owner.RootItem is not InventoryEquipment equipment)
             return false;

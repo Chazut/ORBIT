@@ -22,6 +22,7 @@ perf/
 tests/
 !/tests/
 /tests/*
+!/tests/BackpackLootHarness/
 !/tests/FikaExfilRegression/
 !/tests/GrenadeDetourRegression/
 !/tests/AirdropClaimRegression/
