@@ -147,3 +147,4 @@ foreach (bool accessible in new[]{true,false})
     Check((found && final) == accessible, "door interaction requires a reachable usable endpoint");
 }
 Console.WriteLine("PASS marked door approach, progress and interaction checks");
+RushPlan.TestVoronEntrance();

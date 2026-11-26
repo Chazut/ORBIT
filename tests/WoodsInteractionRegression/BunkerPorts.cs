@@ -168,7 +168,7 @@ namespace Orbit.Systems
         public static bool IsTravelPaused(Agent a) => false;
         public void MoveToByPath(Agent a, Vector3 point, bool sprint)
         { Orders.Add(point); a.Movement.Status = MovementStatus.Moving; }
-        public bool TryContinueExfilPath(Agent agent, Vector3 point, Vector3[] corners, bool sprint)
+        public bool TryFollowPreparedPath(Agent agent, Vector3 point, Vector3[] corners, bool sprint)
         {
             if (corners == null || corners.Length < 2) return false;
             MoveToByPath(agent, point, sprint);

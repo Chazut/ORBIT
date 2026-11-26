@@ -118,7 +118,7 @@ internal sealed partial class RushPlan : IObjectiveWork
             || _actor.SoloExtractRequested || (CorpseEscort.InFlight(_actor) && (_loot == null || _actor.Objective.Location != _loot)))
         {
             Release(squad, waypoints); _actor = null; _loot = null; _route.Reset(); _pointRepair = null; _customArrived = false;
-            _recorded.ResetSearch(); _searchingRecorded = false;
+            _recorded.ResetSearch(); _searchingRecorded = false; _voron = null;
             if (CollectingMarkedRoom) _attempted.Clear();
             if (_current < 0) ResetRanking();
             var livingMember = false;
@@ -177,9 +177,13 @@ internal sealed partial class RushPlan : IObjectiveWork
             _bestDoorGap = Vector3.Distance(_actor.Position, door.transform.position);
             Log.Info($"RUSH DOOR APPROACH: {squad} site={site.Name} door={door.Id} feet={_actor.Position} authored={Position(site)} gap={_bestDoorGap:F1}m");
         }
+        if (_voron != null && !_voron.AtHandle && !_inside)
+            return TickVoronEntrance(squad, waypoints, site, door);
         // A native door transition can outlive the movement order (especially on Ghost wake).
         if (door != null && _doorApproach && !_inside &&
-            (door.DoorState == EDoorState.Open || Status is "unlocking door" or "opening door"))
+            ((door.DoorState == EDoorState.Open && (!IsVoronDoor(waypoints, door)
+                || (_actor.Position - VoronHallHandle).sqrMagnitude <= 4f))
+             || Status is "unlocking door" or "opening door"))
             return InteractDoor(squad, waypoints, site, door);
         if (_loot != null)
         {
@@ -262,6 +266,7 @@ internal sealed partial class RushPlan : IObjectiveWork
             {
                 if (_route.Pending) { ContinueSpawnSearch(waypoints); return true; }
                 Log.Info($"RUSH APPROACH: {squad} kind={Kind} site={site.Name} from={_actor.Position} target={target} samples={_route.Samples} partial={_route.PartialPaths} invalid={_route.InvalidPaths} attempt={_retries + 1}/3");
+                if (TryStartVoronEntrance(squad, waypoints, door)) return true;
                 _route.Reset(); _nextWork = now + 2;
                 if (++_retries >= 3) return Skip(squad, waypoints, "unreachable");
                 return true;
@@ -370,6 +375,8 @@ internal sealed partial class RushPlan : IObjectiveWork
     {
         if (door.DoorState == EDoorState.Open)
         {
+            if (!_lastDoorRequest.HasValue && (_actor.Position - VoronHallHandle).sqrMagnitude > 4f
+                && TryStartVoronEntrance(squad, waypoints, door)) return true;
             _room ??= waypoints.MarkedRoom(site);
             _inside = true; Release(squad, waypoints); _route.Reset(); _elapsed = 0; _retries = 0; _approachHistory.Clear();
             Main.Position = RoomCenter(site); Main.CellCoords = waypoints.WorldToCell(Main.Position);
@@ -627,6 +634,9 @@ internal sealed partial class RushPlan : IObjectiveWork
     { _states[_current] = "visited"; _visited++; return Advance(squad, waypoints); }
     private bool Skip(Squad squad, WaypointSystem waypoints, string reason)
     {
+        if (_current >= 0 && Kind == "Marked" && _doorApproach && !_inside
+            && reason is "unreachable" or "movement failed" or "door interaction point unreachable" or "door interaction blocked"
+            && TryStartVoronEntrance(squad, waypoints, waypoints.RushDoor(_sites[_current].DoorId))) return true;
         var navigationFailure = reason is "no NavMesh near configured point" or "ambiguous floors near configured point"
             or "no reachable correction for configured point" or "room entrance stalled" or "travel timeout" or "unreachable"
             or "movement failed" or "door interaction point unreachable" or "door interaction failed";
@@ -651,7 +661,7 @@ internal sealed partial class RushPlan : IObjectiveWork
         _bestDoorGap = float.MaxValue;
         _current = -1; _retries = _attempts = 0; _lastDoorRequest = null; ResetRanking();
         _customArrived = _customCampDone = false; _customCampHeld = _customLootHeld = 0;
-        _recorded.Reset(); _searchingRecorded = false;
+        _recorded.Reset(); _searchingRecorded = false; _voron = null;
         _elapsed = _held = _interactAt = _roomIdle = 0; _inside = _doorApproach = false; _loot = null; _room = null; _roomLooters.Clear(); _attempted.Clear(); _route.Reset();
         _roomEntryIdle = 0; _roomEntryBestDistance = float.MaxValue;
         if (_visited >= Count || _processed >= _sites.Count) return End(squad, waypoints, FinishReason());

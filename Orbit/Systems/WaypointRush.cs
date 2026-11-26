@@ -41,6 +41,7 @@ public partial class WaypointSystem
 
     internal Door RushDoor(string id) => _rushDoors.TryGetValue(id, out var door) ? door : null;
     internal System.Func<Agent, Door, bool> OpenRushDoor;
+    internal System.Func<Agent, Door, Vector3, bool> CrossVoronEntrance;
     internal MarkedRoomScope MarkedRoom(RushPoint point)
     {
         SpatialAudioRoom selected = null;

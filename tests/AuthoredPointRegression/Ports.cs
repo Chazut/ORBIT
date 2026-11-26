@@ -63,7 +63,7 @@ namespace Orbit.Settings
 }
 namespace Orbit.Entities
 {
-    internal class Agent
+    internal partial class Agent
     {
         internal UnityEngine.Vector3 Position { get; set; }
         internal sealed record ProfileData(string Id);

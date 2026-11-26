@@ -42,6 +42,7 @@ public partial class MovementSystem
         _humanPlayers = humanPlayers;
         _waypointSystem = waypointSystem;
         _waypointSystem.OpenRushDoor = OpenObjectiveDoor;
+        _waypointSystem.CrossVoronEntrance = TryCrossVoronEntrance;
         _waypointSystem.TrySniperRelocation = TryEnterSniperPost;
         _waypointSystem.TrySniperTransit = TryRecordedSniperTransit;
         _travelWorld = new TravelRouteWorld(waypointSystem);
@@ -247,10 +248,32 @@ public partial class MovementSystem
     public void MoveToDirect(Agent agent, Vector3 destination)
         => throw new NotImplementedException();
 
-    // The extraction planner already verified a complete path from the previous waypoint.
-    // Join its first corner from the actual arrival position. Special movement orders still
+    // The baked Shoreline mesh can end on each side of an open power station doorway.
+    // Walk this short threshold only when its floor and the entire body passage are clear.
+    private bool TryCrossVoronEntrance(Agent agent, Door door, Vector3 inside)
+    {
+        var from = agent.Position;
+        var delta = inside - from;
+        if (door == null || door.DoorState != EDoorState.Open || delta.sqrMagnitude > 10.24f
+            || Mathf.Abs(delta.y) > .65f || (door.transform.position - from).sqrMagnitude > 6.25f)
+            return false;
+        var mask = LayersMaskController.HighPolyWithTerrainMask | (1 << LayersMaskController.DoorLayer);
+        if (Physics.CapsuleCast(from + Vector3.up * .4f, from + Vector3.up * 1.45f, .24f,
+            delta.normalized, out _, delta.magnitude, mask, QueryTriggerInteraction.Ignore)) return false;
+        for (int i = 0; i <= 4; i++)
+        {
+            var point = from + delta * (i * .25f);
+            if (DangerZones.IsInside(point) || !Physics.Raycast(point + Vector3.up * .55f, Vector3.down,
+                out var hit, 1.05f, LayersMaskController.HighPolyWithTerrainMask, QueryTriggerInteraction.Ignore)
+                || hit.normal.y < .65f) return false;
+        }
+        return TryFollowPreparedPath(agent, inside, new[] { from, inside }, false);
+    }
+
+    // The caller verified the supplied route. Join its first corner from the actual
+    // arrival position. Special movement orders still
     // use the normal job pipeline, including grenade detours and sniper path restrictions.
-    internal bool TryContinueExfilPath(Agent agent, Vector3 destination, Vector3[] corners, bool sprint)
+    internal bool TryFollowPreparedPath(Agent agent, Vector3 destination, Vector3[] corners, bool sprint)
     {
         if (corners == null || corners.Length < 2 || (corners[0] - agent.Position).sqrMagnitude > 9f
             || (corners[corners.Length - 1] - destination).sqrMagnitude > 1f

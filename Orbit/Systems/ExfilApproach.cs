@@ -137,7 +137,7 @@ internal sealed class ExfilApproach(Agent agent, MovementSystem movement, Waypoi
                     PrepareNextLeg(target);
                     if (_route.Pending) return true;
                 }
-                if (_route.RouteCorners != null && movement.TryContinueExfilPath(agent, _aheadLeg, _route.RouteCorners, _sprint))
+                if (_route.RouteCorners != null && movement.TryFollowPreparedPath(agent, _aheadLeg, _route.RouteCorners, _sprint))
                 {
                     BeginLeg(_aheadLeg, _aheadFinal, target, true);
                     return true;

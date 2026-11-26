@@ -11,7 +11,7 @@ for name in (
     "TryIdleIslandRescue", "TryLocalRescuePoint", "IsRescueDestinationHidden",
     "ResetAfterRescue", "ResumeAfterRescue", "CompleteLocalRescue", "ResumeGroundPlacement",
     "RescueTeleportToConnectedPoint", "RescueTeleportNearSquadmate", "StopExfilApproach", "StopAtCorpse",
-    "TryContinueExfilPath", "StartMovement",
+    "TryFollowPreparedPath", "StartMovement",
 ):
     # A field/expression ends on the declaration line. A block ends at class-member indentation.
     declarations = list(re.finditer(r"^    (?:private|internal) [^\n]*?\b" + name +
