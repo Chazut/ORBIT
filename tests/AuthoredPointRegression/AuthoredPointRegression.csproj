@@ -14,6 +14,7 @@
     <Compile Include="../../Shared/NativeFloorResolver.cs" />
     <Compile Include="../../Shared/ZoneScope.cs" />
     <Compile Include="../../Orbit/Systems/WaypointPointRepair.cs" />
+    <Compile Include="../../Orbit/Systems/VoronEntranceRoute.cs" />
     <Compile Include="../../Orbit/Systems/RushPlan.VoronEntrance.cs" />
   </ItemGroup>
 </Project>

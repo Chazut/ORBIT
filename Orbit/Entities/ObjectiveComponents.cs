@@ -67,6 +67,7 @@ internal sealed class WallLootApproachState(Waypoint location)
     internal Vector3? RejectedStand;
     internal int NextSample;
     internal bool RequireNewStand;
+    internal System.Func<Vector3, bool> AllowedStand;
 }
 
 // ── Per-squad objective ──────────────────────────────────────────────

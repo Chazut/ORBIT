@@ -19,6 +19,29 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
 {
     private readonly System.Runtime.CompilerServices.ConditionalWeakTable<Agent, ExfilApproach> _exfilApproaches = new();
 
+    private readonly System.Runtime.CompilerServices.ConditionalWeakTable<Agent, VoronLootApproach> _voronLoot = new();
+
+    private void CancelVoronLoot(Agent agent)
+    {
+        if (!_voronLoot.TryGetValue(agent, out var route)) return;
+        route.Cancel();
+        _voronLoot.Remove(agent);
+    }
+
+    private bool TryStartVoronLoot(Agent agent)
+    {
+        var point = agent.Objective.Location;
+        if (point.VoronLootDoor == null || VoronEntranceRoute.InLootRoom(agent.Position)
+            || !VoronLootApproach.Allowed(agent, point.VoronLootDoor)) return false;
+        CancelVoronLoot(agent);
+        _voronLoot.Add(agent, new VoronLootApproach(agent, movementSystem, waypointSystem));
+        _stuckEnRouteTracker.Remove(agent.Id);
+        ClearLoSBlockedTracking(agent);
+        agent.Objective.WallApproach = null;
+        Log.Info($"VORON LOOT: {agent} point={point.Id} direct approach failed; looking for an entrance feet={agent.Position}");
+        return true;
+    }
+
     private void PauseExfilApproach(Agent agent)
     { if (_exfilApproaches.TryGetValue(agent, out var approach)) approach.Pause(); }
 
@@ -94,6 +117,7 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                                                           or ObjectiveStatus.Looting
                                                           or ObjectiveStatus.Extracting)
             {
+                CancelVoronLoot(agent);
                 PauseExfilApproach(agent);
                 _stuckEnRouteTracker.Remove(agent.Id);
                 agent.TaskScores[ordinal] = 0;
@@ -104,6 +128,7 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
             // an internal action may have displaced Goto before the later handover to SAIN.
             if (!agent.IsActive)
             {
+                CancelVoronLoot(agent);
                 _stuckEnRouteTracker.Remove(agent.Id);
                 NoBackpackExfil.PauseRecovery(agent);
                 PauseExfilApproach(agent);
@@ -134,6 +159,28 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
             {
                 _stuckEnRouteTracker.Remove(agent.Id);
                 continue;
+            }
+
+            if (_voronLoot.TryGetValue(agent, out var voron))
+            {
+                if (!voron.Owns(objective.Location) || objective.Status != ObjectiveStatus.Moving) CancelVoronLoot(agent);
+                else
+                {
+                    var result = voron.Tick();
+                    if (result == VoronLootApproach.Result.Working) continue;
+                    CancelVoronLoot(agent);
+                    if (result is VoronLootApproach.Result.Failed or VoronLootApproach.Result.Unavailable)
+                    {
+                        objective.Status = ObjectiveStatus.Failed;
+                        if (result == VoronLootApproach.Result.Failed) TrackArrivalFailure(agent, objective.Location);
+                        continue;
+                    }
+                    // The original waypoint may have snapped through a wall. Search reachable
+                    // stands around its actual item, keeping the ordinary loot interaction.
+                    objective.WallApproach = new WallLootApproachState(objective.Location)
+                    { Stand = agent.Position, AllowedStand = VoronEntranceRoute.InLootRoom };
+                    objective.DispatchTime = Time.time;
+                }
             }
 
             if (objective.Location.Target is ExfiltrationPoint backpackExit && NoBackpackExfil.RequiresDrop(backpackExit))
@@ -241,6 +288,7 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                         }
                         if (body == null || distanceSqr > CorpseApproach.SearchRadiusSqr)
                         {
+                            if (TryStartVoronLoot(agent)) break;
                             AbandonStalledObjective(agent);
                             break;
                         }
@@ -281,6 +329,7 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                         var result = detour.Tick(agent, movementSystem, waypointSystem);
                         if (result == WallLootApproach.Result.Exhausted)
                         {
+                            if (TryStartVoronLoot(agent)) break;
                             Log.Debug($"LOOT WALL DETOUR: {agent} point={objective.Location.Id} exhausted accessible stands");
                             objective.Status = ObjectiveStatus.Failed;
                             TrackArrivalFailure(agent, objective.Location);
@@ -344,7 +393,7 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                                 arrivalRefusal = "line-of-sight";
                                 if (arrivalHit.collider != null && IsLootableForAgent(agent, objective.Location))
                                 {
-                                    BeginWallDetour(agent, arrivalHit);
+                                    if (!TryStartVoronLoot(agent)) BeginWallDetour(agent, arrivalHit);
                                     break;
                                 }
                                 if (TrackLoSBlocked(agent, objective.Location)) continue;
@@ -375,7 +424,7 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                         {
                             if (arrivalHit.collider != null && IsLootableForAgent(agent, objective.Location))
                             {
-                                BeginWallDetour(agent, arrivalHit);
+                                if (!TryStartVoronLoot(agent)) BeginWallDetour(agent, arrivalHit);
                                 break;
                             }
                             if (!arrivalClear && objective.Location.Category != WaypointCategory.Quest) arrivalRefusal = "line-of-sight";
@@ -393,6 +442,12 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                     }
                     if (inRadius)
                     {
+                        if (objective.Location.VoronLootDoor != null
+                            && !VoronEntranceRoute.InLootRoom(agent.Position))
+                        {
+                            if (!TryStartVoronLoot(agent)) objective.Status = ObjectiveStatus.Failed;
+                            break;
+                        }
                         agent.ArrivalFailures.Forget(objective.Location.Id);
                         // If this is a lootable POI and we can grab the claim, chain straight into Looting
                         // state. Otherwise (claim held, or non-lootable category) fall through to Finished —
@@ -506,6 +561,7 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                     if (agent.Movement.Status == MovementStatus.Failed
                         || objective.CorpseProbing && objective.CorpseProbeIndex >= CorpseApproach.Samples)
                     {
+                        if (TryStartVoronLoot(agent)) break;
                         // MovementSystem's HardStuck escalation ran out (recalc → teleport → giving up) and
                         // reset path to Failed. The bot is jammed against geometry.
                         objective.Status = ObjectiveStatus.Failed;
@@ -524,6 +580,7 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
                     else if (agent.Movement.Status == MovementStatus.Stopped
                              && Time.time - objective.DispatchTime > DispatchGraceSeconds)
                     {
+                        if (TryStartVoronLoot(agent)) break;
                         objective.Status = ObjectiveStatus.Failed;
                         if (objective.Location.IsAirdrop && arrivalRefusal == "line-of-sight"
                             && agent.LoSBlockedPoiId != objective.Location.Id)
@@ -543,6 +600,7 @@ public class GotoObjectiveAction(AgentData dataset, MovementSystem movementSyste
 
     protected override void Deactivate(Agent entity)
     {
+        CancelVoronLoot(entity);
         PauseExfilApproach(entity);
         // Preserve the same target's watchdog across internal action changes. A handover to SAIN
         // still clears it, so legitimate combat/cover time never counts as an ORBIT navigation stall.

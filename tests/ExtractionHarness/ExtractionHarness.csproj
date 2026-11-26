@@ -21,6 +21,8 @@
     <Compile Include="../../Orbit/Navigation/OperationProgress.cs" />
     <Compile Include="../../Orbit/Navigation/OperationRoutePolicy.cs" />
     <Compile Include="../../Orbit/Navigation/OperationRouteSearch.cs" />
+    <Compile Include="../../Orbit/Systems/VoronEntranceRoute.cs" />
+    <Compile Include="../../Orbit/Systems/VoronLootApproach.cs" />
     <Compile Include="../../Orbit/Systems/ExfilApproach.cs" />
     <Compile Include="../../Orbit/Systems/MovementSystem.BunkerGate.cs" />
     <Compile Include="../../Orbit/Systems/MovementFailureHistory.cs" />

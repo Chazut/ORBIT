@@ -16,6 +16,7 @@ void Check(bool value, string message) { if (!value) throw new Exception(message
 
 NativeDepartureTests.Run(Check);
 CampWatchTests.Run(Check);
+VoronLootTests.Run(Check);
 
 var solo = new Scenario();
 var departing = solo.Add(true);

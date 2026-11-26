@@ -2266,8 +2266,12 @@ public partial class WaypointSystem
         var corners = path.corners;
         reachable = reachable && corners.Length > 0
                     && (corners[corners.Length - 1] - loc.Position).sqrMagnitude <= 1f;
+        // A partial approach from the power station facade stops too far from the lock
+        // for the generic endpoint test. Only actual loot inside Voron's room gets this door.
+        loc.VoronLootDoor = VoronLootApproach.RoomDoor(loc, _voronLootDoor);
         if (reachable)
         {
+            VoronLootApproach.IncludeLock(ref loc.LockedDoorsOnPath, loc.VoronLootDoor);
             if (CategoryAllowsLockedDoorBypass(loc.Category))
             {
                 var nearby = CollectNearbyLockedDoors(loc.Position, LockedDoorDetectionRadius);
@@ -2297,11 +2301,12 @@ public partial class WaypointSystem
             // from its entrance. Keep only doors actually reached by this blocked route.
             var blockedEnd = corners.Length > 0 ? corners[corners.Length - 1] : origin;
             nearbyLocked = nearbyLocked?.FindAll(door => LockedDoorPath.NearBlockedEnd(door, blockedEnd));
-            if (nearbyLocked != null && nearbyLocked.Count > 0)
+            VoronLootApproach.IncludeLock(ref nearbyLocked, loc.VoronLootDoor);
+            if (loc.VoronLootDoor != null || nearbyLocked is { Count: > 0 })
             {
                 loc.LockedDoorsOnPath = nearbyLocked;
                 _pathReachable.Add(loc.Id);
-                Log.Debug($"{loc.Category} {loc} unreachable by direct path (status={path.status}) but {nearbyLocked.Count} Locked door(s) nearby; keeping as PMC force-unlock candidate (origin={origin}, member={memberOrigin.HasValue}, squad={squadId}, endpoint={(corners.Length > 0 ? corners[corners.Length - 1].ToString() : "none")})");
+                Log.Debug($"{loc.Category} {loc} unreachable by direct path (status={path.status}) but {nearbyLocked?.Count ?? 0} locked door(s), Voron entrance={loc.VoronLootDoor != null}; keeping as PMC force-unlock candidate (origin={origin}, member={memberOrigin.HasValue}, squad={squadId}, endpoint={(corners.Length > 0 ? corners[corners.Length - 1].ToString() : "none")})");
                 return true;
             }
         }

@@ -39,7 +39,8 @@ internal static class WallLootApproach
         {
             var head = !agent.IsDormant && agent.Bot?.LookSensor != null
                 ? agent.Bot.LookSensor.HeadPoint : agent.Position + Vector3.up;
-            if (InReach(target, agent.Position, centre, state.NextSample)
+            if ((state.AllowedStand == null || state.AllowedStand(agent.Position))
+                && InReach(target, agent.Position, centre, state.NextSample)
                 && waypoints.HasReachedObjectiveFloor(agent, state.Location, agent.Position)
                 && LootVisibility.Check(head, target, out _)) return Result.Arrived;
         }
@@ -59,6 +60,7 @@ internal static class WallLootApproach
             index == 0 || target is Corpse ? centre.y : state.Location.Position.y,
             centre.z + (float)System.Math.Sin(angle) * radius);
         if (NavMesh.SamplePosition(seed, out var hit, 1.5f, NavMesh.AllAreas)
+            && (state.AllowedStand == null || state.AllowedStand(hit.position))
             && (hit.position - agent.Position).sqrMagnitude >= .04f
             && (!state.RejectedStand.HasValue || (hit.position - state.RejectedStand.Value).sqrMagnitude >= .04f)
             && InReach(target, hit.position, centre, state.NextSample)

@@ -28,6 +28,17 @@ namespace Orbit.Systems
     public partial class MovementSystem { public static bool IsTravelPaused(Agent a) => false; }
     public partial class WaypointSystem { public bool HasReachedObjectiveFloor(Agent a, Waypoint p, Vector3 feet) => FloorReached; }
 #if !EXTRACTION_HARNESS
+    // The extraction harness drives the full Voron detour with scene and movement ports.
+    internal static class VoronEntranceRoute { internal static bool InLootRoom(Vector3 feet) => false; }
+    internal sealed class VoronLootApproach
+    {
+        internal VoronLootApproach(Agent a, MovementSystem m, WaypointSystem w) { }
+        internal enum Result { Working, Inside, Failed, Unavailable }
+        internal Result Tick() => Result.Failed;
+        internal bool Owns(Waypoint point) => false;
+        internal static bool Allowed(Agent agent, EFT.Interactive.Door door) => false;
+        internal void Cancel() { }
+    }
     public partial class MovementSystem
     {
         internal static void StopAtCorpse(Agent a)

@@ -43,7 +43,7 @@ namespace Orbit.Entities
 {
     public partial class Agent { public bool? SoloWoodsBunkerChoice; internal GrenadeMemory GrenadeInterruptions; }
     internal sealed class GrenadeMemory { internal bool Armed(float now) => true; }
-    public partial class Squad { public bool? WoodsBunkerChoice; }
+    public partial class Squad { public bool? WoodsBunkerChoice; public readonly HashSet<int> ForceUnlockDoorIds = new(); }
     public partial class Personality { public float LockedDoorUnlockProba = .3f; }
     public partial class Profile { public string Id = "pmc", Nickname = "Test PMC"; }
     public partial class Movement
@@ -91,6 +91,13 @@ namespace Orbit.Systems
             !ExfilArrival.IsUnavailable((ExfiltrationPoint)exit.Target)
                 && (!WoodsBunkerAccess.Applies(exit) || WoodsBunkerAccess.Available(exit)
                     && WoodsBunkerAccess.Accepted(agent.Squad, agent.SoloExtractRequested ? agent : null));
+        internal readonly Dictionary<string, Door> Doors = new();
+        internal Door RushDoor(string id) => Doors.GetValueOrDefault(id);
+        internal Func<Agent, Door, bool> OpenRushDoor;
+        internal Func<Agent, Door, Vector3, bool> CrossVoronEntrance;
+        internal bool ClaimedByOther;
+        internal bool IsClaimedByOther(int id, int agent) => ClaimedByOther;
+        internal bool IsUnavailableLooseLoot(Waypoint point) => point.Target == null;
         internal bool WorkAvailable = true;
         internal bool TryOperationWork(IObjectiveWork work) => WorkAvailable;
         internal void ContinueOperationWork(IObjectiveWork work) { }

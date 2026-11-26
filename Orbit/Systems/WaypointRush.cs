@@ -22,6 +22,8 @@ public partial class WaypointSystem
     private readonly Dictionary<Waypoint, string> _rushCorpses = new();
     internal static float RushRaidSeconds => (float)(Singleton<AbstractGame>.Instance?.GameTimer?.PastTime.TotalSeconds ?? double.PositiveInfinity);
 
+    private Door _voronLootDoor;
+
     private void InitializeRush()
     {
         _rushPoints = ServerConfig.Rush.Points(_zoneKey);
@@ -33,6 +35,8 @@ public partial class WaypointSystem
             if (!string.IsNullOrEmpty(door.Id)) _rushDoors[door.Id] = door;
             if (door.DoorState == EDoorState.Locked) _rawLockedDoors.Add(door);
         }
+        if (string.Equals(RecordedMap, "Shoreline", System.StringComparison.OrdinalIgnoreCase))
+            _rushDoors.TryGetValue(VoronEntranceRoute.MarkedDoorId, out _voronLootDoor);
         foreach (var portal in Object.FindObjectsOfType<Audio.SpatialSystem.SpatialAudioPortal>(true))
             if (!string.IsNullOrEmpty(portal.DoorID) && _rushDoors.TryGetValue(portal.DoorID, out var door)
                 && (portal.transform.position - door.transform.position).sqrMagnitude < 225f)

@@ -52,6 +52,7 @@ public class Waypoint(
     /// </summary>
     public readonly MonoBehaviour Target = target;
     internal bool IsAirdrop;
+    internal Door VoronLootDoor;
 
     /// <summary>
     /// Doors associated with access to this POI during shared or member route checks, including
