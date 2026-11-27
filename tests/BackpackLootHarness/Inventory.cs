@@ -18,6 +18,20 @@ namespace Diz.LanguageExtensions
         public static OperationResult<U> Cast<T,U>(this OperationResult<T> value) where T : U => value.Succeeded ? value.Value : default(OperationResult<U>);
     }
 }
+namespace UnityEngine
+{
+    internal static class Random
+    {
+        internal static readonly List<int> Delays = new();
+        public static int Range(int min, int max)
+        {
+            if (min != 250 || max != 451) throw new ArgumentOutOfRangeException(nameof(min));
+            int delay = Delays.Count % 2 == 0 ? min : max - 1;
+            Delays.Add(delay);
+            return delay;
+        }
+    }
+}
 namespace EFT { }
 namespace EFT.Interactive { public class LootItem { public Item Item; } }
 namespace EFT.InventoryLogic
@@ -116,13 +130,24 @@ namespace EFT.InventoryLogic
         public List<Item> Dropped = new();
         public Item Reject, ForbiddenDrop;
         public Action AfterThrow;
+        public Action<Action<bool>> SubmitThrow;
         public Func<SortResult> Sort;
         public bool CanThrow(Item item) => true;
         public IEnumerable<Item> GetItemsOverDiscardLimit(Item item) => item == ForbiddenDrop ? [item] : [];
         public void ThrowItem(Item item,bool downDirection,Action<Reply> callback)
         {
-            ((Grid)item.CurrentAddress.Container).Remove(item,false);
-            Dropped.Add(item); AfterThrow?.Invoke(); callback(new(true));
+            void Complete(bool accepted)
+            {
+                if (accepted)
+                {
+                    ((Grid)item.CurrentAddress.Container).Remove(item,false);
+                    Dropped.Add(item);
+                    AfterThrow?.Invoke();
+                }
+                callback(new(accepted));
+            }
+            if (SubmitThrow == null) Complete(true);
+            else SubmitThrow(Complete);
         }
         public Task<Reply> TryRunNetworkTransaction<T>(OperationResult<T> op, object callback)
         {
@@ -160,7 +185,12 @@ namespace Orbit.Looting
     internal static class PackNStrapCompat { public static bool IsProtected(Item i) => i.Protected; }
     internal static class LootWorkBudget { public static Task Checkpoint(CancellationToken ct) { ct.ThrowIfCancellationRequested(); return Task.CompletedTask; } }
     internal static class LootActorGuard {
-        public static Task<T> TrackTransaction<T>(object bot,Task<T> work) => work;
+        public static Task LastTransaction;
+        public static Task<T> TrackTransaction<T>(object bot,Task<T> work)
+        {
+            LastTransaction = work;
+            return work;
+        }
         public static Task<T> AwaitTransaction<T>(Task<T> work,CancellationToken ct) => work.WaitAsync(ct);
     }
     internal class LootInventoryBusyException : Exception {}
@@ -171,7 +201,12 @@ namespace Orbit.Looting
         internal object CurrentTarget;
         internal Item _currentSourceRoot;
         internal bool DormantMode, NeedsAwakeInventory;
-        readonly object _bot=new();
+        internal class BotDouble { internal readonly MemoryDouble Memory = new(); }
+        internal class MemoryDouble { internal bool HaveEnemy, IsUnderFire; }
+        internal class PlayerDouble { internal InventoryController InventoryController; }
+        internal readonly BotDouble _bot = new();
+        internal readonly PlayerDouble _player = new();
+        internal bool HasLiveOwner = true;
         readonly BodyGate _bodyGate=new();
         const string Nick="test";
         internal readonly StatsModel Stats=new();

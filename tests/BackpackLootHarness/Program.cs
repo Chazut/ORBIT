@@ -26,6 +26,7 @@ static (InventoryController IC, Grid Bag, Grid Pouch, Item Source, Grid World, O
     var world = new Grid {ParentItem=new CompoundItem(),GridWidth=4,GridHeight=4};
     world.Put(painting,new(0,0,ItemRotation.Horizontal));
     var bot = new OrbitLootHandler {CurrentTargetKind=LootKind.Item,CurrentTarget=new LootItem {Item=painting}};
+    bot._player.InventoryController = ic;
     return (ic,bag,pouch,painting,world,bot);
 }
 static Item Put(Grid bag,int x,int y,float value=1000)
@@ -56,7 +57,16 @@ var full = SetUp(4,4);
 for(int y=0;y<4;y++) for(int x=0;x<4;x++) Put(full.Bag,x,y,x==0?2_000_000:1000);
 full.Bot.CurrentTargetKind=LootKind.Container;
 full.Bot._currentSourceRoot=full.World.ParentItem;
-var exchange = await full.Bot.Prepare(full.Source,full.IC);
+var clock = System.Diagnostics.Stopwatch.StartNew();
+var dropTimes = new List<long>();
+full.IC.AfterThrow = () => dropTimes.Add(clock.ElapsedMilliseconds);
+var replacement = full.Bot.Prepare(full.Source,full.IC);
+Check(dropTimes.Count == 1 && !replacement.IsCompleted, "first drop is immediate and the next drop yields");
+var exchange = await replacement;
+var delays = UnityEngine.Random.Delays;
+Check(delays.Count == dropTimes.Count - 1 && delays.Distinct().Count() == 2
+    && delays.Select((ms, i) => dropTimes[i + 1] - dropTimes[i] >= ms - 20).All(ok => ok),
+    "twelve confirmed drops have eleven variable gaps and no wait after the last");
 Check(exchange.Succeeded && full.IC.Dropped.Count == 12 && full.IC.Dropped.Sum(i=>i.Price)==12000 && full.Bag.Items.Count == 4, "full container pickup displaces cheapest profitable rectangle only");
 Check(full.Bot.Stats.TotalGained == -12000 && full.IC.Dropped.TrueForAll(i=>i.CurrentAddress==null), "drops confirmed, deducted, and available outside the bag");
 var expensive = SetUp(3,4);
@@ -116,3 +126,69 @@ canceled.IC.AfterThrow=()=>cancel.Cancel();
 try { await canceled.Bot.Prepare(canceled.Source,canceled.IC,cancel.Token); throw new Exception("expected cancellation"); }
 catch(OperationCanceledException){}
 Check(canceled.IC.Dropped.Count==1 && canceled.Pouch.Items.Count==0,"cancelled loot session stops after the in-flight drop");
+
+static async Task ExpectCancelled(Task sorting)
+{
+    try { await sorting; }
+    catch (OperationCanceledException) { return; }
+    throw new Exception("expected interrupted sort");
+}
+
+foreach (bool underFire in new[] { false, true })
+{
+    var contact = SetUp(3,4);
+    Put(contact.Bag,0,0); Put(contact.Bag,1,0);
+    var sorting = contact.Bot.Prepare(contact.Source,contact.IC);
+    // Threat arrives in the gap, before the action layer has cancelled the token.
+    contact.Bot._bot.Memory.HaveEnemy = !underFire;
+    contact.Bot._bot.Memory.IsUnderFire = underFire;
+    await ExpectCancelled(sorting);
+    Check(contact.IC.Dropped.Count == 1 && contact.Bot.Stats.TotalGained == -1000
+        && contact.Bag.Items.Count == 1 && contact.World.Items.Contains(contact.Source),
+        "enemy or incoming fire during the pause preserves remaining cargo and leaves the target at source");
+    contact.Bot._bot.Memory.HaveEnemy = contact.Bot._bot.Memory.IsUnderFire = false;
+    Check((await contact.Bot.Prepare(contact.Source,contact.IC)).Succeeded && contact.IC.Dropped.Count == 2,
+        "a fresh session after combat replans from the actual inventory");
+}
+
+var blocked = SetUp(3,4);
+Put(blocked.Bag,0,0);
+blocked.Bot._bot.Memory.IsUnderFire = true;
+await ExpectCancelled(blocked.Bot.Prepare(blocked.Source,blocked.IC));
+Check(blocked.IC.Dropped.Count == 0, "combat before the first drop keeps the whole bag");
+
+var gap = SetUp(3,4);
+Put(gap.Bag,0,0); Put(gap.Bag,1,0);
+using var gapCancel = new CancellationTokenSource();
+var waiting = gap.Bot.Prepare(gap.Source,gap.IC,gapCancel.Token);
+gapCancel.Cancel();
+await ExpectCancelled(waiting);
+Check(gap.IC.Dropped.Count == 1 && gap.World.Items.Contains(gap.Source), "action handoff cancels a pending gap");
+
+foreach (var late in new[] { "accepted", "refused", "retired" })
+{
+    var inFlight = SetUp(3,4);
+    Put(inFlight.Bag,0,0); Put(inFlight.Bag,1,0);
+    Action<bool> reply = null;
+    inFlight.IC.SubmitThrow = callback => reply = callback;
+    using var handoff = new CancellationTokenSource();
+    var sorting = inFlight.Bot.Prepare(inFlight.Source,inFlight.IC,handoff.Token);
+    var transaction = LootActorGuard.LastTransaction;
+    handoff.Cancel();
+    await ExpectCancelled(sorting);
+    Check(reply != null && !transaction.IsCompleted && inFlight.Bot.Stats.TotalGained == 0,
+        "combat hands back control before the pending throw is acknowledged");
+    inFlight.Bot.HasLiveOwner = late != "retired";
+    reply(late != "refused");
+    await transaction;
+    Check(inFlight.IC.Dropped.Count == (late == "refused" ? 0 : 1)
+        && inFlight.Bot.Stats.TotalGained == (late == "accepted" ? -1000 : 0)
+        && inFlight.World.Items.Contains(inFlight.Source), "late " + late + " reply cannot resume sorting");
+}
+
+var freed = SetUp(3,4);
+Put(freed.Bag,0,0); Put(freed.Bag,1,0);
+var recheck = freed.Bot.Prepare(freed.Source,freed.IC);
+var extraGrid = new Grid { ParentItem=freed.Bag.ParentItem, Owner=freed.IC, GridWidth=3, GridHeight=4 };
+((CompoundItem)freed.Bag.ParentItem).Grids = [freed.Bag, extraGrid];
+Check((await recheck).Succeeded && freed.IC.Dropped.Count == 1, "new space during the pause avoids another drop");

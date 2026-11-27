@@ -935,9 +935,11 @@ internal class BotLootState
     public void Tick()
     {
         if (IsDone) return;
+        var mem = _agent.Bot?.Memory;
+        bool inCombat = mem != null && (mem.HaveEnemy || mem.IsUnderFire);
         if (_inventoryRetryAt > 0f)
         {
-            if (_agent.Bot?.Memory?.HaveEnemy == true || _agent.Bot?.Memory?.IsUnderFire == true)
+            if (inCombat)
             { Cancel(); return; }
             if (Time.time < _inventoryRetryAt) return;
             _inventoryRetryAt = 0f;
@@ -957,6 +959,8 @@ internal class BotLootState
                             || (_location.Target is LootItem item && item.Item == null);
         if (!_brain.LootTaskRunning)
         {
+            // The backpack continuation can notice combat before this tick. Release the container and pose as usual.
+            if (_brain.LastSessionCancelled && inCombat) { Cancel(); return; }
             ItemsTaken = ItemsTaken || _brain.Stats?.LastItemsTaken == true || lootedNow > _lootedAtStart;
             if (_brain.LastSessionRetryable && !_brain.LastSessionCancelled && !targetMissing && _inventoryRetries < 3)
             {
@@ -1000,8 +1004,7 @@ internal class BotLootState
         // route through Deactivate → Cancel anyway, but the layer-change path takes 1-2 frames during which
         // the loot animation keeps the bot pinned in the open. Cancelling here closes the container right
         // away so SAIN takes over a free agent, not a kneeling target.
-        var mem = _agent.Bot?.Memory;
-        if (mem != null && (mem.HaveEnemy || mem.IsUnderFire))
+        if (inCombat)
         {
             Log.Info($"{_agent} BotLootState: combat interrupt mid-loot (HaveEnemy={mem.HaveEnemy}, IsUnderFire={mem.IsUnderFire}) — cancelling");
             Cancel();

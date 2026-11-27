@@ -39,6 +39,26 @@ public partial class OrbitLootHandler
     private static bool CanDropWhole(Item item, InventoryController ic) =>
         ic.CanThrow(item) && !(ic is IAntiRMTItemController limits && limits.GetItemsOverDiscardLimit(item).Any());
 
+    private void CheckBackpackCombat(CancellationToken ct)
+    {
+        var memory = _bot.Memory;
+        if (memory != null && (memory.HaveEnemy || memory.IsUnderFire))
+            throw new OperationCanceledException(ct);
+    }
+
+    // The native throw can finish after combat cancels the sort. Account for a confirmed
+    // drop on its original inventory even when the looting task has already returned.
+    private async Task<bool> DropBackpackItemAsync(InventoryController ic, Item item, float worth)
+    {
+        var done = new TaskCompletionSource<bool>();
+        ic.ThrowItem(item, downDirection: true, callback: r => done.TrySetResult(r.Succeed));
+        if (!await done.Task || !HasLiveOwner || !ReferenceEquals(_player.InventoryController, ic) || item.Owner == ic)
+            return false;
+        Stats.InventoryValue -= worth;
+        Stats.TotalGained = Stats.InventoryValue - Stats.SpawnValue;
+        return true;
+    }
+
     private async Task<OperationResult<IItemOperationResult>> FindCargoPlaceAsync(Item incoming, InventoryController ic, CancellationToken ct)
     {
         // A player can take a loose item during the kneel or move an item while a crate is searched.
@@ -98,6 +118,7 @@ public partial class OrbitLootHandler
             }
         }
         CheckSession(ct);
+        CheckBackpackCombat(ct);
         if (!StillAvailable()) return direct;
         direct = RaidLootPlacement.Find(incoming, ic);
         if (direct.Succeeded) return direct;
@@ -118,6 +139,7 @@ public partial class OrbitLootHandler
                     var transaction = LootActorGuard.TrackTransaction(_bot, ic.TryRunNetworkTransaction(sorted, null));
                     if (!(await LootActorGuard.AwaitTransaction(transaction, ct)).Succeed) return direct;
                     CheckSession(ct);
+                    CheckBackpackCombat(ct);
                     Log.Debug($"Backpack({Nick}): sorted {bag.LocalizedName()} for {incoming.LocalizedName()}");
                     return StillAvailable() ? RaidLootPlacement.Find(incoming, ic) : direct;
                 }
@@ -144,6 +166,7 @@ public partial class OrbitLootHandler
             var transaction = LootActorGuard.TrackTransaction(_bot, ic.TryRunNetworkTransaction(op, null));
             if (!(await LootActorGuard.AwaitTransaction(transaction, ct)).Succeed) return direct;
             CheckSession(ct);
+            CheckBackpackCombat(ct);
             ReportInventoryProgress(ct);
         }
         var destination = CargoAddress(grids, best.Target);
@@ -181,19 +204,25 @@ public partial class OrbitLootHandler
         double spent = 0;
         for (int n = 0; n < best.Drops.Count; n++)
         {
+            if (n > 0)
+                await Task.Delay(UnityEngine.Random.Range(250, 451), ct);
             EnsureInventoryAvailable(ct);
-            if (!StillAvailable() || !CanFinishAfterDrops(n, spent)) return direct;
+            CheckBackpackCombat(ct);
+            if (!StillAvailable()) return direct;
+            if (n > 0)
+            {
+                var available = RaidLootPlacement.Find(incoming, ic);
+                if (available.Succeeded) return available;
+            }
+            if (!CanFinishAfterDrops(n, spent)) return direct;
             var dropped = items[best.Drops[n]];
             double cost = CargoValue(dropped, true);
             float recordedWorth = dropped.GetAllItems().Sum(ItemPriceLookup.GetPrice);
-            var done = new TaskCompletionSource<bool>();
-            ic.ThrowItem(dropped, downDirection: true, callback: r => done.TrySetResult(r.Succeed));
-            if (!await LootActorGuard.AwaitTransaction(LootActorGuard.TrackTransaction(_bot, done.Task), ct)) return direct;
-            if (dropped.Owner == ic) return direct;
+            var transaction = LootActorGuard.TrackTransaction(_bot, DropBackpackItemAsync(ic, dropped, recordedWorth));
+            if (!await LootActorGuard.AwaitTransaction(transaction, ct)) return direct;
             spent += cost;
-            Stats.InventoryValue -= recordedWorth;
-            Stats.TotalGained = Stats.InventoryValue - Stats.SpawnValue;
             CheckSession(ct);
+            CheckBackpackCombat(ct);
             ReportInventoryProgress(ct);
             Log.Debug($"Backpack({Nick}): dropped {dropped.LocalizedName()} for {incoming.LocalizedName()}");
         }
