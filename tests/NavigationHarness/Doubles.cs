@@ -126,6 +126,10 @@ namespace UnityEngine.AI {
     public static partial class NavMesh {
         public const int AllAreas=-1; public static int Queries;
         public static Func<Vector3,float,Vector3?> Sampler;
+#if !EXTRACTION_HARNESS
+        public static bool Raycast(Vector3 a, Vector3 b, out NavMeshHit hit, int mask)
+        { hit = default; return false; }
+#endif
         public static bool SamplePosition(Vector3 p,out NavMeshHit hit,float radius,int areas) {
             Queries++;var result=Sampler?.Invoke(p,radius);hit=new(){position=result??default};return result.HasValue;
         }
@@ -146,7 +150,7 @@ namespace Unity.Collections
 namespace Unity.Jobs { public struct JobHandle { public bool IsCompleted => true; public void Complete() { } } }
 public enum CoverLevel { Stay, Sit }
 public enum CoverType { Wall, Foliage, Other }
-public static class LayersMaskController { public const int HighPolyWithTerrainMask = 1; }
+public static class LayersMaskController { public const int HighPolyWithTerrainMask = 1, LowPolyColliderLayerMask = 2, DoorLayer = 3; }
 public static class LocationScene { public static T[] GetAllObjects<T>() => Array.Empty<T>(); }
 namespace EFT.Ballistics { public static class BallisticsCalculatorConstants { public const int HitMask=1; } }
 namespace EFT.Interactive

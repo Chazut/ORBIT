@@ -2,6 +2,7 @@ using System.Runtime.CompilerServices;
 using System.Text.RegularExpressions;
 using EFT.Interactive;
 using UnityEngine;
+using UnityEngine.AI;
 
 namespace Orbit.Navigation;
 
@@ -62,24 +63,27 @@ internal static class LootVisibility
         var distance = direction.magnitude;
         if (distance < .01f) return true;
         direction /= distance;
-        if (FindWall(head, direction, distance, target.transform, out hit)) return false;
+        var container = target as LootableContainer;
+        var root = container == null ? target.transform : AirdropVisibility.InteractionRoot(container);
+        var ownCollider = container == null ? null : container.Collider;
+        if (FindWall(head, direction, distance, root, ownCollider, out hit)) return false;
 
         // Some map meshes have one-sided faces. Use the same segment from the other side.
-        if (!FindWall(end, -direction, distance, target.transform, out hit)) return true;
+        if (!FindWall(end, -direction, distance, root, ownCollider, out hit)) return true;
         hit.distance = distance - hit.distance;
         return false;
     }
 
-    private static bool FindWall(Vector3 origin, Vector3 direction, float distance, Transform target, out RaycastHit wallHit)
+    private static bool FindWall(Vector3 origin, Vector3 direction, float distance, Transform target, Collider ownCollider, out RaycastHit wallHit)
     {
         var hits = scratch;
         var count = Physics.RaycastNonAlloc(origin, direction, hits, distance,
-            LayersMaskController.HighPolyWithTerrainMask, QueryTriggerInteraction.Ignore);
+            BarrierMask, QueryTriggerInteraction.Ignore);
         // NonAlloc does not guarantee the nearest hits when the buffer fills.
         if (count == hits.Length)
         {
             hits = Physics.RaycastAll(origin, direction, distance,
-                LayersMaskController.HighPolyWithTerrainMask, QueryTriggerInteraction.Ignore);
+                BarrierMask, QueryTriggerInteraction.Ignore);
             count = hits.Length;
         }
         wallHit = default;
@@ -89,24 +93,103 @@ internal static class LootVisibility
             var contact = hits[i];
             var collider = contact.collider;
             if (collider == null || contact.distance <= 0f || contact.distance >= distance || contact.distance >= nearest) continue;
+            if (collider == ownCollider || collider.transform.IsChildOf(target)) continue;
             var surface = surfaces.GetValue(collider, classify).Value;
-            if (surface != Surface.Wall && (surface != Surface.Building || !IsPartitionFace(collider, contact))) continue;
-            if (collider.transform.IsChildOf(target)) continue;
+            if (surface != Surface.Wall && !FindPartitionFace(collider, ref contact, target, ownCollider,
+                    surface, origin, direction, distance)) continue;
+            if (contact.distance >= nearest) continue;
             nearest = contact.distance;
             wallHit = contact;
         }
         return nearest < float.PositiveInfinity;
     }
 
-    // Maps also batch a room's walls, floor and trim into one ballistic mesh. Only a vertical
-    // face that continues overhead on the very same plane is evidence of a partition there.
-    private static bool IsPartitionFace(Collider collider, RaycastHit hit)
+    private static bool FindPartitionFace(Collider collider, ref RaycastHit contact, Transform target,
+        Collider ownCollider, Surface surface, Vector3 origin, Vector3 direction, float distance)
     {
-        if (Mathf.Abs(hit.normal.y) > .25f) return false;
-        var probe = new Ray(hit.point + Vector3.up * 1.5f + hit.normal * .1f, -hit.normal);
-        return collider.Raycast(probe, out var upper, .2f)
-            && Mathf.Abs(upper.distance - .1f) <= .04f && Vector3.Dot(upper.normal, hit.normal) > .95f;
+        var end = origin + direction * distance;
+        // Unity returns one scene hit per collider. Trim or a prop baked into a combined mesh
+        // can hide another face on the very same collider, even when casting from both ends.
+        for (int face = 0; face < 8; face++)
+        {
+            if (IsPartitionFace(collider, contact, target, ownCollider, surface, origin, end)) return true;
+            if (!(collider is MeshCollider) || face == 7) break;
+            float offset = contact.distance + .005f;
+            if (offset >= distance || !collider.Raycast(new Ray(origin + direction * offset, direction),
+                    out var next, distance - offset) || next.distance <= 0f || next.distance >= distance - offset) break;
+            next.distance += offset;
+            contact = next;
+        }
+        return false;
     }
+
+    private static int BarrierMask => LayersMaskController.HighPolyWithTerrainMask
+        | LayersMaskController.LowPolyColliderLayerMask | (1 << LayersMaskController.DoorLayer);
+
+    // Test the extent of the face we actually crossed, not the bounds or name of a whole building.
+    // Samples lie in its tangent plane, including for sloping tent panels.
+    private static bool IsPartitionFace(Collider collider, RaycastHit hit, Transform target, Collider ownCollider, Surface surface,
+        Vector3 start, Vector3 end)
+    {
+        var n = hit.normal;
+        if (n.sqrMagnitude < .9f) return false;
+        float vertical = Mathf.Abs(n.y);
+        var across = new Vector3(n.z, 0f, -n.x);
+        if (across.sqrMagnitude < .0001f) across = new Vector3(1f, 0f, 0f);
+        else across /= across.magnitude;
+        var along = new Vector3(n.y * across.z - n.z * across.y, n.z * across.x - n.x * across.z,
+            n.x * across.y - n.y * across.x);
+
+        bool At(Vector3 offset)
+        {
+            var origin = hit.point + offset + n * .1f;
+            if (collider.Raycast(new Ray(origin, -n), out var sample, .2f) && Coplanar(sample, n)) return true;
+            // Adjacent mesh tiles may contain the next part of the same physical panel.
+            return Physics.Raycast(origin, -n, out sample, .2f, BarrierMask, QueryTriggerInteraction.Ignore)
+                && sample.collider != null && sample.collider != ownCollider && !sample.collider.transform.IsChildOf(target)
+                && Coplanar(sample, n);
+        }
+        bool Either(Vector3 offset) => At(offset) || At(-offset);
+
+        if (vertical < .85f)
+        {
+            if (Either(along * 1.5f) && (surface == Surface.Building || Either(across * .4f))) return true;
+            // Low partitions can be broad enough to divide a space without reaching eye height.
+            if (Either(along * .55f) && Either(across * 2.2f)) return true;
+            // Short and irregular partitions can still split the walkable floor at this hit.
+            return DividesWalkableSpace(start, end, hit);
+        }
+        // A broad floor or roof separates levels. A bed, tabletop or the lid of a crate
+        // should not prevent reaching a loose item underneath it from the same room.
+        return Either(across * 2.2f) && Either(along * 2.2f);
+    }
+
+    private static bool DividesWalkableSpace(Vector3 start, Vector3 end, RaycastHit contact)
+    {
+        float height = Mathf.Min(start.y, end.y);
+        var a = new Vector3(start.x, height, start.z);
+        var b = new Vector3(end.x, height, end.z);
+        if (!NavMesh.SamplePosition(a, out var near, 1.6f, NavMesh.AllAreas)
+            || !NavMesh.SamplePosition(b, out var far, 1.6f, NavMesh.AllAreas)) return false;
+        // A drawer or a key under furniture may project across the wall or onto another floor.
+        // Only use the navigation evidence when both projections still represent the endpoints.
+        var axis = new Vector3(contact.normal.x, 0f, contact.normal.z);
+        if (HorizontalDistanceSqr(near.position, a) > .3f * .3f || HorizontalDistanceSqr(far.position, b) > .3f * .3f
+            || Mathf.Abs(near.position.y - far.position.y) > .65f
+            || Vector3.Dot(near.position - contact.point, axis) * Vector3.Dot(far.position - contact.point, axis) >= 0f)
+            return false;
+        return NavMesh.Raycast(near.position, far.position, out var edge, NavMesh.AllAreas)
+            && HorizontalDistanceSqr(edge.position, contact.point) <= .75f * .75f;
+    }
+
+    private static float HorizontalDistanceSqr(Vector3 a, Vector3 b)
+    {
+        float x = a.x - b.x, z = a.z - b.z;
+        return x * x + z * z;
+    }
+
+    private static bool Coplanar(RaycastHit sample, Vector3 normal)
+        => Mathf.Abs(sample.distance - .1f) <= .04f && Vector3.Dot(sample.normal, normal) > .95f;
 
     private static SurfaceInfo Classify(Collider collider)
     {

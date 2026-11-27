@@ -79,6 +79,7 @@ surfaces.Clear();
 surfaces.Add((new Collider { name = "Wall_panel", transform = new Transform { parent = loot.transform } }, 1.9f));
 Check(LootVisibility.Check(head, loot, out _), "a wall-mounted target cannot be its own separating wall");
 
+PartitionShapeTests.Run(Check);
 CustomsOfficeTests.Run(Check);
 var warehouse = new Transform { name = "sklad_concrete" };
 var warehouseFace = new MeshCollider { name = "concrete 1", sharedMesh = new Mesh { name = "concrete" },

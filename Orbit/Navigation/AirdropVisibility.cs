@@ -16,6 +16,9 @@ internal static class AirdropVisibility
         Crates.Add(container, crateRoot);
     }
 
+    internal static Transform InteractionRoot(LootableContainer container)
+        => Crates.TryGetValue(container, out var root) && root != null ? root : container.transform;
+
     internal static Vector3 Target(LootableContainer container) => container.transform.position + Vector3.up;
 
     internal static bool Check(Vector3 head, LootableContainer container, out RaycastHit hit)
@@ -30,7 +33,6 @@ internal static class AirdropVisibility
 
         // The interaction box and the wooden shell are siblings under the landing object.
         var obstacle = hit.collider != null ? hit.collider.transform : null;
-        return obstacle != null && (obstacle.IsChildOf(container.transform)
-            || Crates.TryGetValue(container, out var root) && root != null && obstacle.IsChildOf(root));
+        return obstacle != null && obstacle.IsChildOf(InteractionRoot(container));
     }
 }

@@ -51,6 +51,13 @@ namespace UnityEngine.AI
     public static class NavMesh
     {
         public const int AllAreas = -1;
+        public static Func<Vector3,Vector3,Vector3?> Boundary;
+        public static bool Raycast(Vector3 a, Vector3 b, out NavMeshHit hit, int mask)
+        {
+            var edge = Boundary?.Invoke(a, b);
+            hit = new() { position = edge.GetValueOrDefault() };
+            return edge.HasValue;
+        }
         public static bool SamplePosition(Vector3 seed, out NavMeshHit hit, float range, int areas)
         { hit = new() { position = seed }; return true; }
     }

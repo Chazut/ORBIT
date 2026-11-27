@@ -60,11 +60,12 @@ namespace UnityEngine
     {
         public static Collider FirstHit;
         public static Vector3 End;
-        public static int Queries, Overflows;
+        public static int Queries, Overflows, LastMask;
+        public static Func<Ray,float,RaycastHit?> Probe;
         public static Func<Vector3, Vector3, float, RaycastHit[]> Intersections;
         public static int RaycastNonAlloc(Vector3 start, Vector3 direction, RaycastHit[] buffer, float length, int mask, QueryTriggerInteraction triggers)
         {
-            Queries++;
+            Queries++; LastMask = mask;
             var hits = Intersections(start, direction, length);
             int count = Math.Min(hits.Length, buffer.Length);
             Array.Copy(hits, buffer, count);
@@ -77,6 +78,12 @@ namespace UnityEngine
         }
         public static bool Raycast(Vector3 start, Vector3 direction, out RaycastHit hit, float length, int mask, QueryTriggerInteraction triggers)
         {
+            if (Probe != null)
+            {
+                var result = Probe(new Ray(start, direction), length);
+                hit = result.GetValueOrDefault();
+                return result.HasValue;
+            }
             End = start + direction * length;
             hit = new() { collider = FirstHit };
             return FirstHit != null;
@@ -84,7 +91,7 @@ namespace UnityEngine
     }
     public static class Time { public static float time; public static int frameCount; }
 }
-public static class LayersMaskController { public const int HighPolyWithTerrainMask = 1; }
+public static class LayersMaskController { public const int HighPolyWithTerrainMask = 1, LowPolyColliderLayerMask = 2, DoorLayer = 3; }
 namespace EFT.Interactive
 {
     public class InteractableObject { public Transform transform = new(); public Transform TrackableTransform => transform; }
