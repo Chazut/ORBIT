@@ -82,7 +82,7 @@ public partial class WaypointSystem
         var hash = 17;
         if (squad?.MainObjectives != null)
             foreach (var main in squad.MainObjectives)
-                hash = unchecked(hash * 31 + (main.Completed ? 1 : 0));
+                hash = unchecked(hash * 31 + (main.Completed ? 2 : main.AreaStartedAt > 0f && !main.AreaReturnDeferred ? 1 : 0));
         return hash;
     }
 

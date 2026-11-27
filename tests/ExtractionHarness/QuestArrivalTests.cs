@@ -15,6 +15,23 @@ static class QuestArrivalTests
     {
         Waypoint Quest(int id=1001,string name="quest_city_trotil1") => new(id,WaypointCategory.Quest,name,new(0,2.404079f,0),1,new(),new(),null);
         MainObjective Main(string name="quest_city_trotil1") => new(){Type=MainObjectiveType.Quest,QuestTriggerId=name};
+        // yo-gangy, Woods: a pending quest pulled a solo PMC out of its entered loot area eight times.
+        foreach (var kind in new[] { MainObjectiveType.LootValue, MainObjectiveType.Kills })
+        {
+            var quest = Main("kill_in_forest_woods");
+            var area = new MainObjective { Type = kind, LootValueEnteredAt = 106, KillsRoamStartedAt = 106 };
+            var mains = new List<MainObjective> { quest, area };
+            for (int attempt = 0; attempt < 8; attempt++)
+            {
+                area.LootValueInterrupted = attempt % 2 == 1;
+                check(!quest.CanPursue(mains) && area.CanPursue(mains), "entered area owns dispatch until completion");
+            }
+            area.AreaReturnDeferred = true;
+            check(quest.CanPursue(mains), "unreachable return can yield to a different main");
+            area.AreaReturnDeferred = false;
+            area.Completed = true;
+            check(quest.CanPursue(mains), "quest can start after local work finishes");
+        }
         foreach(bool ghost in new[]{false,true})
         foreach(float distance in new[]{.1f,.7f,2f})
         {

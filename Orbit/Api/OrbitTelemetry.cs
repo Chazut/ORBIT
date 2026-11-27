@@ -310,6 +310,11 @@ public static class OrbitTelemetry
                     CampHolding = squad.Camp.Main == m && squad.Camp.Holding || m.Rush?.Kind == "Sniper" && m.Rush.Status == "holding",
                     KillsRoamStartedAt = m.KillsRoamStartedAt,
                     KillsRoamTargetDuration = m.KillsRoamTargetDuration,
+                    KillsRoamRemainingSeconds = m.Type == MainObjectiveType.Kills && !m.KillAmbush && m.KillsRoamStartedAt > 0f
+                        ? System.Math.Max(0f, m.KillsRoamTargetDuration - (string.IsNullOrEmpty(m.ZoneFloorId)
+                            ? UnityEngine.Time.time - m.KillsRoamStartedAt : m.KillsFloorElapsed)) : null,
+                    KillsRoamTimerRunning = !m.Completed && m.KillsRoamStartedAt > 0f
+                        && (string.IsNullOrEmpty(m.ZoneFloorId) || m.KillsFloorLastTick > 0f),
                     LootValueEnteredAt = m.LootValueEnteredAt,
                     LootValueTotal = m.LootValueTotal,
                     LootValueInterrupted = m.LootValueInterrupted,
@@ -412,6 +417,8 @@ public class OrbitMainObjective
     public float CampSearchRadius;
     public float KillsRoamStartedAt;
     public float KillsRoamTargetDuration;
+    public float? KillsRoamRemainingSeconds;
+    public bool KillsRoamTimerRunning;
     public float LootValueEnteredAt;
     public float LootValueTotal;
     public bool LootValueInterrupted;

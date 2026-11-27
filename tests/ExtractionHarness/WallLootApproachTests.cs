@@ -15,6 +15,23 @@ internal static class WallLootApproachTests
     private static readonly Vector3 stand = new(418.8529f, 1.4f, -87.8008f);
     internal static void Run(Action<bool,string> check)
     {
+        var propTarget = new LootableContainer { Collider = new Collider() };
+        foreach (var prop in new[] { "lamp_custom_Trailer", "tent_bed", "small_loot_container", "trailer_park", "boat_trailer", "tent_rope" })
+        {
+            var collider = new Collider { name = prop };
+            Physics.SegmentHit = (a,b) => new RaycastHit { collider = collider, normal = new Vector3(1,0,0), distance = .5f };
+            try { check(LootVisibility.Check(new Vector3(2,0,0), propTarget, out _), "loot remains accessible past " + prop); }
+            finally { Physics.SegmentHit = null; }
+        }
+        var fabric = new Collider { name = "Military_tent_02_BALLISTIC_fabric" };
+        foreach (var normal in new[] { Vector3.up, new Vector3(.6f,.8f,0) })
+        {
+            Physics.SegmentHit = (a,b) => new RaycastHit { collider = fabric, normal = normal, distance = .5f };
+            try { check(!LootVisibility.Check(new Vector3(2,0,0), propTarget, out _), "fabric roof or sloping side blocks the segment"); }
+            finally { Physics.SegmentHit = null; }
+        }
+        check(LootVisibility.Check(new Vector3(2,0,0), propTarget, out _), "open flap or open cargo door needs no detour");
+        foreach (var shell in new[] { "sklad_concrete", "camo_tent_01_BALLISTIC_fabric", "container_12m_red_new", "Trailer_01_door_left", "prizep_krone_box_liner_update" })
         foreach (var arrival in new[] { "waypoint", "nav-snap", "blocked-session" })
         foreach (bool connected in new[] { true, false })
         foreach (bool dormant in new[] { false, true })
@@ -28,7 +45,7 @@ internal static class WallLootApproachTests
             var bot = scene.Add(false, feet, ObjectiveStatus.None, location: loc);
             bot.IsDormant = dormant;
             var partition = new Collider { name = "concrete 1", transform = new Transform {
-                parent = new Transform { name = "sklad_concrete" } },
+                parent = new Transform { name = shell } },
                 SurfaceProbe = ray => new RaycastHit { distance = .1f, normal = -ray.direction } };
             Physics.SegmentHit = (a,b) =>
             {

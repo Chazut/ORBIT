@@ -20,12 +20,20 @@ internal static class LootVisibility
     private const string WallPart = @"(?i:tile|panel|brick|concrete|wood|metal|plaster|glass|ext|int|block|ballistic|collider|collision|lod)";
     private static readonly Regex wall = new(Start + @"(?i:walls?|partitions?|stena)(?:[_ .-]*"
         + WallPart + End + @"|(?=$|[_ .()-]*[0-9]|[ ()]*$))");
+    // Prefabs and collision meshes on Woods and Customs. Restrict suffixes to the shell:
+    // a tent lamp, wheel, frame or loose container must never turn into a structural wall.
+    private static readonly Regex enclosure = new(
+        @"^(?:(?:(?:[a-z0-9]+_)*(?:tents?|palatka)[0-9]*|(?:old_|custom_)?trailer|container_(?:6m|12m|20ft|40ft|refrigerator)|custom_container_[0-9]+|prizep_krone_box_liner|pricep_t83090)"
+        + @"(?:[_ .-]+(?:[0-9]+|mchs|fabric|wall|panel|side|canvas|metal(?:thin|thick)?|plastic|glass|ball?istic|collider|collision|lod[0-9]+|open|clos(?:e|ed)|door|backdoor|left|right|[lr]|cap|back|front|center|new|update|fixed|prizep|damage|red|blue|green|orange|yellow|white|black|on|adapt|simple|tarcola|uniq|scale|no|only|roof))*"
+        + @"[_ ]*(?:\([0-9]+\))?)$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    private static readonly Regex accessory = new(@"(?:^|[_ .-])(?:lamp|light|wire[s]?|rope|pole|wheel[s]?|frame|bed|trunk|soil|rubble|decal[s]?|trigger|portal|floor)(?:$|[_ .-])",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
     private static readonly Regex building = new(Start + @"(?i:room|hallway|corridor|building|factory|hostel)" + End);
     // The Customs warehouse uses generic concrete meshes under this structural prefab.
     // Its combined mesh also includes floor and trim, so still require a partition face.
     private static readonly Regex customsWarehouse = new(@"^sklad_concrete(?: \([0-9]+\))?$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
     private static readonly Regex collisionNode = new(
-        @"^(?:ballistic|colliders?|collision|coll|lod[0-9]*|mesh|concrete|stone|metal(?:thin|thick)?|wood(?:thin|thick)?)(?:$|[_ .(0-9-])",
+        @"^(?:ballistic|colliders?|collision|coll|lod[0-9]*|mesh|fabric|plastic|concrete|stone|metal(?:thin|thick)?|wood(?:thin|thick)?)(?:$|[_ .(0-9-])",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
     internal static Vector3 Target(InteractableObject target)
@@ -109,7 +117,7 @@ internal static class LootVisibility
         // A generic collision node can belong to a named structural prefab. Stop at the
         // first actual asset so a prop does not inherit the identity of an entire building.
         for (var parent = collider.transform.parent; surface == Surface.Other && parent != null
-                && collisionNode.IsMatch(name); parent = parent.parent)
+                && collisionNode.IsMatch(name) && !accessory.IsMatch(name); parent = parent.parent)
         {
             name = parent.name;
             surface = AssetSurface(name);
@@ -120,6 +128,7 @@ internal static class LootVisibility
     private static Surface AssetSurface(string name)
     {
         if (wall.IsMatch(name)) return Surface.Wall;
+        if (enclosure.IsMatch(name) && !accessory.IsMatch(name)) return Surface.Wall;
         return building.IsMatch(name) || customsWarehouse.IsMatch(name) ? Surface.Building : Surface.Other;
     }
 }

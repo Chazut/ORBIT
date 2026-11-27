@@ -785,13 +785,8 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
         // active phases, but disabled when a combat caller is set (everyone converges on the caller instead),
         // AND disabled once the squad has decided to extract — letting members pick splinter loot on the way
         // to the exfil delays the whole extract chain indefinitely.
-        var useRoam = ShouldUseIndependentDispatch(squad)
-                      && squad.CombatCallerMemberIdx < 0
-                      && !squad.ExtractRequested;
-        // Anchor for the roam splinter search: the active main's Position (Kills zone centre / LootValue cell
-        // centre). Without this, the splinter radius would be centred on each bot's drifting current position
-        // and they'd wander out of the zone over a few re-picks.
-        var activeMain = useRoam ? ActiveIndependentMain(squad) : null;
+        var activeMain = squad.CombatCallerMemberIdx < 0 && !squad.ExtractRequested ? ActiveIndependentMain(squad) : null;
+        var useRoam = activeMain != null;
         var activeType = activeMain?.Type;
         // Per-type category mask. Kills roam = wide net (loot + corpse + synthetic) so members "look for
         // action"; LootValue = loot + corpse only.
@@ -1391,6 +1386,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                             && waypointSystem.MatchesZoneFloorAtTarget(main.ZoneFloorId, main.Position, squad.Members[i].Position))
                         {
                             main.KillsRoamStartedAt = now;
+                            Orbit.Api.OrbitTelemetry.MainObjectivesRevision++;
                             Log.Info($"{squad} Kills main at {main.CellCoords} entered roam phase (member {i} in cell, {main.KillsRoamTargetDuration:F0}s)");
                             break;
                         }
@@ -1405,10 +1401,13 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                         if (!squad.Members[i].Bot.IsDead
                             && waypointSystem.MatchesZoneFloorAtTarget(main.ZoneFloorId, main.Position, squad.Members[i].Position))
                             onFloor = true;
-                    if (main.KillsRoamStartedAt > 0f && onFloor)
+                    var running = main.KillsRoamStartedAt > 0f && onFloor;
+                    if (running != (main.KillsFloorLastTick > 0f)) Orbit.Api.OrbitTelemetry.MainObjectivesRevision++;
+                    if (running)
                     {
                         if (main.KillsFloorLastTick > 0f) main.KillsFloorElapsed += now - main.KillsFloorLastTick;
                         main.KillsFloorLastTick = now;
+                        main.AreaReturnDeferred = false;
                     }
                     else main.KillsFloorLastTick = 0f;
                     elapsed = main.KillsFloorElapsed;
@@ -1436,6 +1435,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                         {
                             main.LootValueStartedAt = now;
                             main.LootValueEnteredAt = now;
+                            Orbit.Api.OrbitTelemetry.MainObjectivesRevision++;
                             Log.Info($"{squad} LootValue main at {main.CellCoords} cell entered (member {i}) — {ServerConfig.MainObjectives.LootValueTimeoutSeconds:F0}s timeout armed, cleanup engaged");
                             // Apply the per-POI coverage roll exactly once, on cell entry.
                             waypointSystem.ApplyLootCoverageRollForCell(squad, main.CellCoords);
@@ -1466,9 +1466,11 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                         if (main.LootValueLastEngagedAt > 0f)
                             main.LootValueElapsedEngaged += now - main.LootValueLastEngagedAt;
                         main.LootValueLastEngagedAt = now;
+                        main.AreaReturnDeferred = false;
                         if (main.LootValueInterrupted)
                         {
                             main.LootValueInterrupted = false;
+                            Orbit.Api.OrbitTelemetry.MainObjectivesRevision++;
                             Log.Info($"{squad} LootValue main at {main.CellCoords} resumed (engaged-time so far {main.LootValueElapsedEngaged:F0}s / {ServerConfig.MainObjectives.LootValueTimeoutSeconds:F0}s)");
                         }
                     }
@@ -1478,6 +1480,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
                         if (!main.LootValueInterrupted && main.LootValueEnteredAt > 0f)
                         {
                             main.LootValueInterrupted = true;
+                            Orbit.Api.OrbitTelemetry.MainObjectivesRevision++;
                             var cause = !anyMemberInCell ? "out of cell" : "in combat (SAIN took over)";
                             Log.Info($"{squad} LootValue main at {main.CellCoords} interrupted — {cause} (engaged-time so far {main.LootValueElapsedEngaged:F0}s)");
                         }
@@ -1573,54 +1576,17 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
         squad.LastKnownCell = currentCell;
     }
 
-    private bool ShouldUseIndependentDispatch(Squad squad)
-    {
-        if (squad?.MainObjectives == null) return false;
-        var leader = squad.Leader?.Bot;
-        if (leader == null) return false;
-        for (var i = 0; i < squad.MainObjectives.Count; i++)
-        {
-            var main = squad.MainObjectives[i];
-            if (main.Completed) continue;
-            if (main.Type == MainObjectiveType.Kills && !main.KillAmbush && main.KillsRoamStartedAt > 0f) return true;
-            if (main.Type == MainObjectiveType.LootValue)
-            {
-                for (var k = 0; k < squad.Size; k++)
-                {
-                    var mCell = waypointSystem.WorldToCell(squad.Members[k].Position);
-                    if (mCell == main.CellCoords) return true;
-                }
-            }
-        }
-        return false;
-    }
-
-    /// <summary>
-    /// The squad's currently "active" main objective in the independent- dispatch sense — Kills main in roam
-    /// phase OR LootValue main with at least one member in the cell. Kills wins if both are active. Used as
-    /// the ANCHOR for roam splinter searches so the bot oscillates around the main's anchor position, not
-    /// around its own drifting current position.
-    /// </summary>
     private MainObjective ActiveIndependentMain(Squad squad)
     {
         if (squad?.MainObjectives == null) return null;
-        MainObjective lootValueActive = null;
-        for (var i = 0; i < squad.MainObjectives.Count; i++)
+        foreach (var main in squad.MainObjectives)
         {
-            var main = squad.MainObjectives[i];
-            if (main.Completed) continue;
-            if (main.Type == MainObjectiveType.Kills && !main.KillAmbush && main.KillsRoamStartedAt > 0f)
-                return main;
-            if (main.Type == MainObjectiveType.LootValue && lootValueActive == null)
-            {
-                for (var k = 0; k < squad.Size; k++)
-                {
-                    var mCell = waypointSystem.WorldToCell(squad.Members[k].Position);
-                    if (mCell == main.CellCoords) { lootValueActive = main; break; }
-                }
-            }
+            if (main.AreaStartedAt <= 0f || !main.CanPursue(squad.MainObjectives)) continue;
+            if (main.Type == MainObjectiveType.Kills && !main.KillAmbush &&
+                (string.IsNullOrEmpty(main.ZoneFloorId) || main.KillsFloorLastTick > 0f)) return main;
+            if (main.Type == MainObjectiveType.LootValue && !main.LootValueInterrupted) return main;
         }
-        return lootValueActive;
+        return null;
     }
 
     private void DetectAndUpdateCombatCaller(Squad squad)
@@ -1726,7 +1692,7 @@ public class GotoObjectiveStrategy(SquadData squadData, WaypointSystem waypointS
         for (var i = 0; i < squad.MainObjectives.Count; i++)
         {
             var m = squad.MainObjectives[i];
-            if (m.Completed) continue;
+            if (m.AreaReturnDeferred || !m.CanPursue(squad.MainObjectives)) continue;
             if (m.Type == MainObjectiveType.LootValue && m.LootValueEnteredAt > 0f) return m.Position;
             if (m.Type == MainObjectiveType.Kills && !m.KillAmbush && m.KillsRoamStartedAt > 0f) return m.Position;
         }

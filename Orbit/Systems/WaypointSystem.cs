@@ -817,7 +817,7 @@ public partial class WaypointSystem
         {
             var main = squad.MainObjectives[i];
             if (main.Type != MainObjectiveType.Quest) continue;
-            if (main.QuestTriggerId == loc.Name) return true;
+            if (main.QuestTriggerId == loc.Name && main.CanPursue(squad.MainObjectives)) return true;
         }
         return false;
     }

@@ -75,10 +75,27 @@ public class MainObjective
     internal Orbit.Systems.ExtractCampApproach CampApproach;
     public bool IsCampMain => Type == MainObjectiveType.ExtractCamp || Type == MainObjectiveType.Kills && KillAmbush;
 
+    // Keep the first area the squad actually entered until its work is complete.
+    // A proven failed return route can release the area without marking it complete.
+    internal bool AreaReturnDeferred;
+    internal float AreaStartedAt => Type == MainObjectiveType.LootValue ? LootValueEnteredAt
+        : IsCampMain ? CampStartedAt : Type == MainObjectiveType.Kills ? KillsRoamStartedAt : 0f;
+
     public bool CanPursue(IReadOnlyList<MainObjective> mains)
     {
         if (Completed) return false;
-        if (Type != MainObjectiveType.Rush && HasPendingRush(mains)) return false;
+        if (Type == MainObjectiveType.Rush) return true;
+        MainObjective entered = null;
+        if (mains != null)
+            for (int i = 0; i < mains.Count; i++)
+            {
+                var other = mains[i];
+                if (other.Completed) continue;
+                if (other.Type == MainObjectiveType.Rush) return false;
+                if (!other.AreaReturnDeferred && other.AreaStartedAt > 0f
+                    && (entered == null || other.AreaStartedAt < entered.AreaStartedAt)) entered = other;
+            }
+        if (entered != null) return this == entered;
         if (Type != MainObjectiveType.ExtractCamp) return true;
         if (mains != null)
             for (var i = 0; i < mains.Count; i++)

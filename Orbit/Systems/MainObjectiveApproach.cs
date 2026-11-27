@@ -62,8 +62,9 @@ internal sealed class MainObjectiveApproach : IObjectiveWork
             _progress.Reset(); _elapsed = _lastProgress = 0;
         }
         if (_target == null || _target.Type is MainObjectiveType.Rush or MainObjectiveType.ExtractCamp
-            || _target.Type == MainObjectiveType.Kills && (_target.KillAmbush || _target.KillsRoamStartedAt > 0)
-            || _target.Type == MainObjectiveType.LootValue && _target.LootValueEnteredAt > 0)
+            || _target.Type == MainObjectiveType.Kills && (_target.KillAmbush || _target.KillsRoamStartedAt > 0
+                && (string.IsNullOrEmpty(_target.ZoneFloorId) || _target.KillsFloorLastTick > 0f))
+            || _target.Type == MainObjectiveType.LootValue && _target.LootValueEnteredAt > 0 && !_target.LootValueInterrupted)
         { End(squad, waypoints); return false; }
         if (combat || !leader.IsActive || now < squad.GhostFightUntil || squad.Operation != null
             || squad.Camp.Active || squad.Camp.PendingAirdrop != null || squad.Camp.RetryMain != null
@@ -145,6 +146,7 @@ internal sealed class MainObjectiveApproach : IObjectiveWork
         Report(squad, "deferred", reason);
         // Keep the objective pending. Another main may have a usable route from this side of the map.
         _deferred[_target] = Time.time + 60f;
+        if (_target.AreaStartedAt > 0f) _target.AreaReturnDeferred = true;
         End(squad, waypoints);
         return false;
     }
