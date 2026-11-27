@@ -21,13 +21,14 @@ internal static class PerformanceJournal
     {
         internal int Frame = -1;
         internal float RecordedAt;
-        internal double UpdateMs, ExternalMs, BookkeepingMs;
+        internal double UpdateMs, ExternalMs, BeginMs, CaptureMs, JournalTickMs;
+        internal double BookkeepingMs => BeginMs + CaptureMs + JournalTickMs;
         internal bool HasUpdate;
         internal readonly Timing[] Phases = new Timing[(int)TransitionPhase.Count];
         internal void Reset(int frame)
         {
             Frame = frame; RecordedAt = Time.realtimeSinceStartup;
-            UpdateMs = ExternalMs = BookkeepingMs = 0; HasUpdate = false;
+            UpdateMs = ExternalMs = BeginMs = CaptureMs = JournalTickMs = 0; HasUpdate = false;
             Array.Clear(Phases, 0, Phases.Length);
         }
     }
@@ -39,6 +40,10 @@ internal static class PerformanceJournal
         public float? RaidSeconds;
         public bool UpdateMatched;
         public double? OrbitUpdateMs, ExternalActivationMs, DiagnosticBookkeepingMs, UnattributedMs;
+        // Only attach the breakdown when diagnostics themselves exceed the frame budget.
+        [JsonProperty(NullValueHandling = NullValueHandling.Ignore)] public double? DiagnosticBeginMs;
+        [JsonProperty(NullValueHandling = NullValueHandling.Ignore)] public double? DiagnosticCaptureMs;
+        [JsonProperty(NullValueHandling = NullValueHandling.Ignore)] public double? DiagnosticJournalTickMs;
         // Reuse raw counters on the game thread; JSON expansion happens only in the writer.
         [JsonProperty("Phases"), JsonConverter(typeof(PhaseTimingsConverter))]
         internal readonly Timing[] Timings = new Timing[(int)TransitionPhase.Count];
@@ -113,7 +118,7 @@ internal static class PerformanceJournal
         Hitches.Clear(); Events.Clear();
         foreach (var frame in Frames) frame.Reset(-1);
         _gc0 = GC.CollectionCount(0); _gc1 = GC.CollectionCount(1); _gc2 = GC.CollectionCount(2);
-        if (Enabled) Log.Always("PERF SESSION: map=" + map);
+        if (Enabled) Log.Performance("PERF SESSION: map=" + map);
     }
 
     internal static void RaidStarted()
@@ -178,6 +183,10 @@ internal static class PerformanceJournal
                 item.UpdateMatched = matched; item.OrbitUpdateMs = matched ? work.UpdateMs : null;
                 item.ExternalActivationMs = matched ? work.ExternalMs : null;
                 item.DiagnosticBookkeepingMs = matched ? work.BookkeepingMs : null;
+                bool slowDiagnostics = matched && work.BookkeepingMs > FrameBudgetSeconds * 1000d;
+                item.DiagnosticBeginMs = slowDiagnostics ? work.BeginMs : null;
+                item.DiagnosticCaptureMs = slowDiagnostics ? work.CaptureMs : null;
+                item.DiagnosticJournalTickMs = slowDiagnostics ? work.JournalTickMs : null;
                 item.UnattributedMs = matched ? Math.Max(0, ms - work.UpdateMs - work.ExternalMs - work.BookkeepingMs) : null;
                 if (work.Frame == frame) Array.Copy(work.Phases, item.Timings, item.Timings.Length);
                 else Array.Clear(item.Timings, 0, item.Timings.Length);
@@ -201,9 +210,16 @@ internal static class PerformanceJournal
         timing.Calls++; timing.Ticks += ticks;
         if (external && !_inUpdate) work.ExternalMs += Milliseconds(ticks);
     }
-    internal static void Bookkeeping(long ticks)
+    internal static void BeginBookkeeping(long ticks)
     {
-        if (Enabled) Work(Time.frameCount).BookkeepingMs += Milliseconds(ticks);
+        if (Enabled) Work(Time.frameCount).BeginMs += Milliseconds(ticks);
+    }
+    internal static void EndBookkeeping(long captureTicks, long journalTicks)
+    {
+        if (!Enabled) return;
+        var work = Work(Time.frameCount);
+        work.CaptureMs += Milliseconds(captureTicks);
+        work.JournalTickMs += Milliseconds(journalTicks);
     }
     private static double Milliseconds(long ticks) => ticks * 1000d / Stopwatch.Frequency;
 
@@ -290,7 +306,7 @@ internal static class PerformanceJournal
     internal static void RefreshWriter()
     {
         if (_writer?.IsCompleted != true) return;
-        Log.Always(_writer.GetAwaiter().GetResult());
+        Log.Performance(_writer.GetAwaiter().GetResult());
         _writer = null;
         _spareBuffer = _writingBuffer; _writingBuffer = null;
     }
@@ -300,9 +316,12 @@ internal static class PerformanceJournal
         RefreshWriter();
         if (!final && !force && _writer != null) return;
         if (!final && !force && Hitches.Count == 0 && Events.Count == 0) { _nextFlush = Time.realtimeSinceStartup + FlushSeconds; return; }
-        _path ??= Path.Combine(BepInEx.Paths.BepInExRootPath, "ORBIT", "diagnostics",
-            "performance-" + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss") + "-" + Guid.NewGuid().ToString("N") + ".jsonl");
-        DebugExport.RegisterDiagnostic(_path);
+        if (_path == null)
+        {
+            _path = Path.Combine(BepInEx.Paths.BepInExRootPath, "ORBIT", "diagnostics",
+                "performance-" + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss") + "-" + Guid.NewGuid().ToString("N") + ".jsonl");
+            DebugExport.RegisterDiagnostic(_path);
+        }
         var frame = Work(Time.frameCount);
         var packet = new
         {
@@ -339,7 +358,7 @@ internal static class PerformanceJournal
             }
             catch (Exception e) { return "PERF JOURNAL failed: " + path + " batch=" + packet.Batch + " " + e.Message; }
         });
-        Log.Always(FormattableString.Invariant($"PERF JOURNAL: batch={_batch} final={final} hitches={packet.Hitches.Length} total={_totalHitches} droppedHitches={_droppedHitches} droppedEvents={_droppedEvents} path={path}"));
+        Log.Performance(FormattableString.Invariant($"PERF JOURNAL: batch={_batch} final={final} hitches={packet.Hitches.Length} total={_totalHitches} droppedHitches={_droppedHitches} droppedEvents={_droppedEvents} path={path}"));
     }
     internal static void Finish()
     {

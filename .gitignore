@@ -31,6 +31,7 @@ tests/
 !/tests/CustomsBackportRegression/
 !/tests/WoodsInteractionRegression/
 !/tests/QuestScavAttractionRegression/
+!/tests/LoggingSettingsHarness/
 !/tests/ExtractionHarness/
 /tests/ExtractionHarness/*.Generated.cs
 /tests/ExtractionHarness/check_dashboard.py

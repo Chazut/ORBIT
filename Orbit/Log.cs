@@ -100,6 +100,10 @@ public static class Log
         else writer.Enqueue(stamped);
     }
 
+    // The performance switch controls these messages independently of verbose levels.
+    // Stamp on the producing frame, then dispatch to BepInEx on the existing log writer.
+    internal static void Performance(string message) => WriteVerbose(message);
+
     // Quiet logging wins: a one-click "only warnings + errors". Otherwise the per-level flags apply. Before the
     // config is bound (very early boot) default to everything except Debug.
     private static OrbitLogLevel Effective()

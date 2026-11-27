@@ -67,7 +67,7 @@ internal static class DiagnosticCapture
         WakeActivations.Enqueue(new WakeActivationSample { ProfileId = profileId, State = state, Calls = calls,
             TotalMs = totalMs, MaxMs = maxMs, PeakFrame = peakFrame, LatencyMs = latencyMs,
             RecordedAt = Time.realtimeSinceStartup, CompletedFrame = Time.frameCount });
-        Log.Always(FormattableString.Invariant($"PERF WAKE READY: member={profileId} state={state} calls={calls} totalMs={totalMs:F3} maxMs={maxMs:F3} peakFrame={peakFrame} latencyMs={latencyMs:F1}"));
+        Log.Performance(FormattableString.Invariant($"PERF WAKE READY: member={profileId} state={state} calls={calls} totalMs={totalMs:F3} maxMs={maxMs:F3} peakFrame={peakFrame} latencyMs={latencyMs:F1}"));
     }
 
     internal static void WakeDecision(string mode, string cause, string detail, string profileId, int pendingGroups, float waitedMs)
@@ -78,7 +78,7 @@ internal static class DiagnosticCapture
             PendingGroups = pendingGroups, WaitedMs = waitedMs };
         if (WakeDecisions.Count >= 512) WakeDecisions.Dequeue();
         WakeDecisions.Enqueue(sample);
-        Log.Always(FormattableString.Invariant($"PERF WAKE: mode={mode} cause={cause} detail={detail} member={profileId} pending={pendingGroups} waitedMs={waitedMs:F1}"));
+        Log.Performance(FormattableString.Invariant($"PERF WAKE: mode={mode} cause={cause} detail={detail} member={profileId} pending={pendingGroups} waitedMs={waitedMs:F1}"));
     }
 
     internal static void Reset(string map)
@@ -118,7 +118,7 @@ internal static class DiagnosticCapture
         }
         if (!enabled) return 0;
         TransitionPerformance.BeginCaptureFrame();
-        PerformanceJournal.Bookkeeping(Stopwatch.GetTimestamp() - bookkeeping);
+        PerformanceJournal.BeginBookkeeping(Stopwatch.GetTimestamp() - bookkeeping);
         return Stopwatch.GetTimestamp();
     }
 
@@ -127,7 +127,7 @@ internal static class DiagnosticCapture
         if (_writer?.IsCompleted == true)
         {
             Status = _writer.Result;
-            Log.Always(Status);
+            Log.Performance(Status);
             _writer = null;
         }
     }
@@ -197,8 +197,9 @@ internal static class DiagnosticCapture
         }
         finally
         {
+            var tickStart = Stopwatch.GetTimestamp();
             PerformanceJournal.Tick();
-            PerformanceJournal.Bookkeeping(Stopwatch.GetTimestamp() - bookkeeping);
+            PerformanceJournal.EndBookkeeping(tickStart - bookkeeping, Stopwatch.GetTimestamp() - tickStart);
         }
     }
 
@@ -252,7 +253,7 @@ internal static class DiagnosticCapture
         _pending = false;
         _nextCaptureAt = Time.realtimeSinceStartup + CooldownSeconds;
         Status = "Saving diagnostic capture...";
-        Log.Always("ORBIT diagnostics queued: " + path);
+        Log.Performance("ORBIT diagnostics queued: " + path);
         // Snapshot contains only detached values. Never read Unity objects from the writer thread.
         _writer = Task.Run(() =>
         {
