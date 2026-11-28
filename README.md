@@ -27,7 +27,7 @@ Bots pursue objectives, loot, upgrade their gear and extract. Ghost Mode keeps d
 
 ---
 
-**ORBIT 3.3.0** · [Downloads](https://github.com/Chazut/ORBIT/releases) · [Full changelog](CHANGELOG.md)
+**ORBIT 3.4.0** · [Downloads](https://github.com/Chazut/ORBIT/releases) · [Full changelog](CHANGELOG.md)
 
 ## Features
 

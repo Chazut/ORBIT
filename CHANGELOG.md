@@ -1,7 +1,26 @@
-# Unreleased
+# ORBIT 3.4.0 | Smarter scavenging and smoother extractions
 
-- **Pack 'n' Strap.** Enable "Loot player belt contents" under Looting to let bots take items from your belt after you die. The option is off by default.
-- **Woods bunker extraction.** PMCs roll once when considering ZB-014. Those who choose it go to the locked gate, unlock and open it, then walk into the extraction room. Squadmates share the decision.
+## Features
+
+- **Make room for the good stuff.** A bot with a full backpack can rearrange its gear or drop cheaper items to fit a more valuable find. It drops items one at a time and stops sorting if a fight breaks out. Raid loot stays out of secure containers.
+- **Scavs near quest areas.** Nearby scav patrols can drift toward unfinished kill objectives for Rite of Passage, Long Road and Safe Corridor. This is on by default and can be switched off.
+- **Looting bodies up close.** PMCs and AI player scavs try to go prone beside a body. Other bots crouch. Looters hold still while searching and only use the three-metre fallback if they cannot get closer.
+- **Pack 'n' Strap belts.** You can now allow bots to take the contents of your belt after you die. "Loot player belt contents" is off by default.
+
+## Changes
+
+- **Smoother trips to extract.** On a long route, bots can prepare the next stretch before reaching the current waypoint, cutting down on stop-start movement.
+- **Extraction ambushes.** Campers crouch when they wake and watch a visible approach. A bot facing a blank wall can look for a better post.
+
+## Fixes
+
+- **Loot on the other side of a wall.** Bots look for a reachable spot on the item's side of the barrier. This also covers Factory office drawers, tent walls and freight containers.
+- **Locked rooms.** Bots search the Tarcone offices after unlocking them. At Voron's hideout, they can enter the power station and reach the marked door from inside, including when they came for ordinary loot.
+- **Distant rush points.** Bots can work toward a custom rush point in stages when they cannot find a complete route from the start.
+- **Competing objectives.** A squad already working inside its objective area can finish before another quest pulls it away.
+- **Reserve extractions.** Survivors resume the same D2 step after combat. At Bunker Hermetic Door, taking a detour no longer resets progress toward using the lever.
+- **Fika hosts.** Fixed the packet cleanup error that could appear after extracting.
+- **Diagnostic stutters.** Performance logging now runs off the game thread.
 
 # ORBIT 3.3.0
 
@@ -17,7 +36,7 @@
 ## Fixes
 
 - **Airdrops.** Bots can now loot a crate even when its outer shell gets in the way. One bot loots at a time, and the next can take over when it leaves.
-- **Woods bunker extraction.** Bots using ZB-014 need the exit to be active and the key door open. They must enter the extraction zone before they can leave the raid.
+- **Woods bunker extraction.** PMCs who choose ZB-014 unlock the gate, open it and enter the active extraction room. Squadmates share the decision.
 - **Grenade avoidance.** Bots repeatedly interrupted by the same danger can take a detour and continue toward their objective.
 - **Player belts.** Bots looting your body leave your equipped Pack 'n' Strap belt and everything inside it alone.
 
