@@ -118,7 +118,9 @@ internal sealed class OperationPlan : IObjectiveWork
             waypoints.CancelOperationWork(this);
             if (_regroupAt >= 0) _regroupAt += delta;
             if (!_paused) { ReleaseOrders(squad, waypoints); _paused = true; Status = "paused"; LogStep(squad); }
-            return false;
+            // SAIN owns the fight. Keep the committed exit so squad dispatch cannot replace it
+            // or search for an ordinary exit on every update while this operation is paused.
+            return Definition.Extraction && squad.ExtractRequested;
         }
         if (_paused)
         { _paused = false; _actor = null; _route.Reset(); _recorded.ResetSearch(); _searchingRecorded = false; Status = "approach"; LogStep(squad); }
