@@ -395,9 +395,9 @@ internal sealed class OperationPlan : IObjectiveWork
         {
             if (Index != 0 || Current.Kind != OperationStepKind.Switch || Current.Object is not Switch
                 || !_hermeticRecovery.Ready(_actor, Definition.Id, Current.Object.Id, _actor.Position,
-                    Current.Position, Current.SwitchApproach, _stepActiveElapsed)) return false;
+                    Current.Position, Current.SwitchApproach, _stepActiveElapsed, _recorded.Active)) return false;
             _hermeticRecovery.Reset();
-            reason = "hermetic proximity fallback after 20s without local progress";
+            reason = _recorded.Active ? "hermetic recorded route within reach" : "hermetic proximity fallback after 20s without local progress";
             Log.Info($"MULTISTEP LOCAL RECOVERY: {squad} operation={Definition.Id} step={Current.Label} range=5m same-floor=True");
         }
         else _hermeticRecovery.Reset();

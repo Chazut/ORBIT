@@ -14,6 +14,7 @@ using UnityEngine;
 int checks = 0;
 void Check(bool value, string message) { if (!value) throw new Exception(message); checks++; }
 
+HermeticLeverTests.Run(Check);
 NativeDepartureTests.Run(Check);
 CampWatchTests.Run(Check);
 VoronLootTests.Run(Check);

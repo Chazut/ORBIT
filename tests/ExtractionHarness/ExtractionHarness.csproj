@@ -17,6 +17,7 @@
     <Compile Include="../NavigationHarness/ArrivalPorts.cs" Link="ArrivalPorts.cs" />
     <Compile Include="../../Orbit/Api/OrbitExtractionEvents.cs" />
     <Compile Include="../../Orbit/Api/OrbitDoorEvents.cs" />
+    <Compile Include="../../Orbit/Navigation/HermeticSwitchRecovery.cs" />
     <Compile Include="../../Orbit/Navigation/WoodsBunkerAccess.cs" />
     <Compile Include="../../Orbit/Navigation/OperationProgress.cs" />
     <Compile Include="../../Orbit/Navigation/OperationRoutePolicy.cs" />
